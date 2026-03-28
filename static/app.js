@@ -867,7 +867,6 @@ async function startPsychConversation() {
   const el = document.getElementById('baseline-overlay');
   el.innerHTML = `<div class="baseline-overlay">
     <div class="baseline-card psych-intake-card">
-      <h2 style="margin-bottom:0.75rem;font-size:1.1rem;color:var(--muted)">Erik</h2>
       <div class="psych-chat-messages" id="psych-chat-messages"></div>
       <div class="psych-input-bar" id="psych-input-bar">
         <input type="text" id="psych-input" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendPsychMessage()">

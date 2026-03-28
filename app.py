@@ -687,17 +687,18 @@ def api_psych_intake_message():
             "locked_until": intake.locked_until.isoformat(),
         })
 
-    # If this is the first message (starting the intake), send an empty
-    # "start" to get the coach's opening question
-    if not intake.conversation and not user_msg:
-        user_msg = "I'm ready to start the intake."
+    # First message trigger - get Erik's opening without a fake user message
+    is_first = not intake.conversation and not user_msg
+    if is_first:
+        user_msg = "[START]"
 
     if not user_msg:
         return jsonify({"error": "Message required"}), 400
 
-    # Add user message to conversation
+    # Add user message to conversation (skip the [START] trigger)
     convo = list(intake.conversation or [])
-    convo.append({"role": "user", "content": user_msg})
+    if not is_first:
+        convo.append({"role": "user", "content": user_msg})
 
     # Get AI response
     response_text, is_complete = get_intake_response(user_msg, convo[:-1])

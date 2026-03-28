@@ -44,6 +44,8 @@ HANDLING PUSHBACK:
 
 OPENING SEQUENCE (EXACT order, one per message):
 
+When the first message is "[START]", begin with question 1. Do NOT acknowledge or respond to "[START]". Just ask question 1.
+
 1. "Why are you here?"
 2. "Male or female?"
 3. "Age?"
