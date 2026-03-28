@@ -10,6 +10,205 @@ let coachHistory = []; // session-only chat history
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
+// ─── MEAL TRACKING ─────────────────────────────────────────────────────────
+function getMealDateKey() {
+  // Use current date as key for meal tracking
+  return '12w_meals_' + new Date().toISOString().slice(0, 10);
+}
+
+function loadMealData() {
+  try {
+    return JSON.parse(localStorage.getItem(getMealDateKey()) || '{}');
+  } catch(e) { return {}; }
+}
+
+function saveMealData(data) {
+  localStorage.setItem(getMealDateKey(), JSON.stringify(data));
+}
+
+function isMealEaten(mealIdx) {
+  const data = loadMealData();
+  return (data.eaten || []).includes(mealIdx);
+}
+
+function toggleMealEaten(mealIdx) {
+  const data = loadMealData();
+  if (!data.eaten) data.eaten = [];
+  const idx = data.eaten.indexOf(mealIdx);
+  if (idx >= 0) {
+    data.eaten.splice(idx, 1);
+  } else {
+    data.eaten.push(mealIdx);
+  }
+  saveMealData(data);
+  renderDetail();
+}
+
+function getMealMultiplier(mealIdx) {
+  const data = loadMealData();
+  if (data.adjustments && data.adjustments[String(mealIdx)]) {
+    return data.adjustments[String(mealIdx)].multiplier || 1;
+  }
+  return 1;
+}
+
+function adjustMealPortion(mealIdx, delta) {
+  const data = loadMealData();
+  if (!data.adjustments) data.adjustments = {};
+  const key = String(mealIdx);
+  if (!data.adjustments[key]) data.adjustments[key] = { multiplier: 1 };
+  let m = data.adjustments[key].multiplier + delta;
+  if (m < 0.25) m = 0.25;
+  if (m > 3) m = 3;
+  data.adjustments[key].multiplier = Math.round(m * 100) / 100;
+  saveMealData(data);
+  renderDetail();
+}
+
+function isFastingToday() {
+  const data = loadMealData();
+  return data.fasting === true;
+}
+
+function toggleFasting(fasting) {
+  const data = loadMealData();
+  data.fasting = fasting;
+  saveMealData(data);
+  renderDetail();
+}
+
+function calcMealMacros(foods, multiplier) {
+  let cal = 0, protein = 0, carbs = 0, fat = 0;
+  for (const f of foods) {
+    cal += (f.cal || 0) * multiplier;
+    protein += (f.protein || 0) * multiplier;
+    carbs += (f.carbs || 0) * multiplier;
+    fat += (f.fat || 0) * multiplier;
+  }
+  return {
+    cal: Math.round(cal),
+    protein: Math.round(protein),
+    carbs: Math.round(carbs),
+    fat: Math.round(fat),
+  };
+}
+
+function renderMealSection(dayData) {
+  const plan = dayData.mealPlan;
+  if (!plan) return '';
+
+  const isRestDay = dayData.day === 'Sun' || (dayData.isRest && dayData.mealType === 'rest');
+  const fasting = isFastingToday();
+
+  // Fast toggle for rest days
+  let fastToggleHtml = '';
+  if (isRestDay) {
+    fastToggleHtml = `<div class="fast-toggle">
+      <button class="${!fasting ? 'active' : ''}" onclick="toggleFasting(false)">16:8 Eating</button>
+      <button class="${fasting ? 'active' : ''}" onclick="toggleFasting(true)">24h Fast</button>
+    </div>`;
+  }
+
+  // If fasting, show fast day plan
+  const activePlan = (isRestDay && fasting) ? (window._mealPlansCache || {}).fast_day || plan : plan;
+
+  // Build meal timeline
+  let totalEaten = { cal: 0, protein: 0, carbs: 0, fat: 0 };
+  let mealsHtml = '';
+
+  const meals = activePlan.meals || [];
+  meals.forEach((meal, idx) => {
+    const eaten = isMealEaten(idx);
+    const multiplier = getMealMultiplier(idx);
+    const macros = calcMealMacros(meal.foods, multiplier);
+
+    if (eaten) {
+      totalEaten.cal += macros.cal;
+      totalEaten.protein += macros.protein;
+      totalEaten.carbs += macros.carbs;
+      totalEaten.fat += macros.fat;
+    }
+
+    const foodRows = meal.foods.map(f => {
+      const adjCal = Math.round((f.cal || 0) * multiplier);
+      return `<div class="meal-food-row">
+        <span class="meal-food-name">${f.item}</span>
+        <span class="meal-food-portion">${f.portion}${multiplier !== 1 ? '<span class="meal-multiplier">x' + multiplier.toFixed(2).replace(/\.?0+$/, '') + '</span>' : ''}</span>
+        <span class="meal-food-portion">${adjCal}cal</span>
+      </div>`;
+    }).join('');
+
+    const adjustBtns = (isRestDay && fasting) ? '' : `<div class="meal-food-adjust">
+      <button onclick="adjustMealPortion(${idx}, -0.25)" title="Less">-</button>
+      <button onclick="adjustMealPortion(${idx}, 0.25)" title="More">+</button>
+    </div>`;
+
+    mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
+      <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx})">
+        ${eaten ? '&#10003;' : ''}
+      </button>
+      <div class="meal-time">${meal.time}</div>
+      <div class="meal-content">
+        <div class="meal-name">${meal.name} ${adjustBtns}</div>
+        <div class="meal-foods">${foodRows}</div>
+        <div class="meal-macros">
+          <span class="mm-cal">${macros.cal} cal</span>
+          <span class="mm-p">${macros.protein}P</span>
+          <span class="mm-c">${macros.carbs}C</span>
+          <span class="mm-f">${macros.fat}F</span>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  // Totals bar
+  const target = {
+    cal: activePlan.targetCal || 0,
+    protein: activePlan.targetProtein || 0,
+    carbs: activePlan.targetCarbs || 0,
+    fat: activePlan.targetFat || 0,
+  };
+
+  const pctCal = target.cal > 0 ? Math.min(100, Math.round(totalEaten.cal / target.cal * 100)) : 0;
+  const pctP = target.protein > 0 ? Math.min(100, Math.round(totalEaten.protein / target.protein * 100)) : 0;
+  const pctC = target.carbs > 0 ? Math.min(100, Math.round(totalEaten.carbs / target.carbs * 100)) : 0;
+  const pctF = target.fat > 0 ? Math.min(100, Math.round(totalEaten.fat / target.fat * 100)) : 0;
+
+  const totalsHtml = `<div class="meal-totals">
+    <div class="meal-totals-title">Daily Totals${fasting && isRestDay ? ' (Fasting)' : ''}</div>
+    <div class="macro-bar-row">
+      <span class="macro-bar-label mbl-cal">Cal</span>
+      <div class="macro-bar"><div class="macro-bar-fill mbf-cal" style="width:${pctCal}%"></div></div>
+      <span class="macro-bar-nums">${totalEaten.cal} / ${target.cal}</span>
+    </div>
+    <div class="macro-bar-row">
+      <span class="macro-bar-label mbl-p">P</span>
+      <div class="macro-bar"><div class="macro-bar-fill mbf-p" style="width:${pctP}%"></div></div>
+      <span class="macro-bar-nums">${totalEaten.protein}g / ${target.protein}g</span>
+    </div>
+    <div class="macro-bar-row">
+      <span class="macro-bar-label mbl-c">C</span>
+      <div class="macro-bar"><div class="macro-bar-fill mbf-c" style="width:${pctC}%"></div></div>
+      <span class="macro-bar-nums">${totalEaten.carbs}g / ${target.carbs}g</span>
+    </div>
+    <div class="macro-bar-row">
+      <span class="macro-bar-label mbl-f">F</span>
+      <div class="macro-bar"><div class="macro-bar-fill mbf-f" style="width:${pctF}%"></div></div>
+      <span class="macro-bar-nums">${totalEaten.fat}g / ${target.fat}g</span>
+    </div>
+  </div>`;
+
+  return `<div class="detail-section">
+    <h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
+    ${fastToggleHtml}
+    ${activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
+    <div class="meal-timeline">
+      ${mealsHtml}
+    </div>
+    ${totalsHtml}
+  </div>`;
+}
+
 // ─── BASELINE CONFIG ────────────────────────────────────────────────────────
 const BASELINE_LIFTS = [
   { name: 'Barbell Bench Press', suggested: 95 },
@@ -362,6 +561,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const res = await fetch('/api/workouts');
     workoutData = await res.json();
+    // Cache the fast_day meal plan from any rest day for the fasting toggle
+    for (const wk of Object.values(workoutData)) {
+      for (const d of (wk.days || [])) {
+        if (d.mealType === 'rest' && d.mealPlan) {
+          window._mealPlansCache = window._mealPlansCache || {};
+          window._mealPlansCache.rest = d.mealPlan;
+        }
+      }
+    }
+    // Build fast_day plan from first available data (served from backend)
+    // We'll also fetch it from any Sunday's data or construct locally
+    if (!window._mealPlansCache) window._mealPlansCache = {};
+    if (!window._mealPlansCache.fast_day) {
+      window._mealPlansCache.fast_day = {
+        label: '24h Fast Day',
+        targetCal: 0, targetProtein: 0, targetCarbs: 0, targetFat: 0,
+        note: 'Full 24h fast. Water, black coffee, electrolytes only. Break fast Monday at 11am. Max 1x/week. Only do this if training readiness is good and sleep has been solid.',
+        meals: [{
+          time: 'All Day', name: 'Fast - Liquids Only', optional: false,
+          foods: [
+            { item: 'Water', portion: 'Unlimited', cal: 0, protein: 0, carbs: 0, fat: 0 },
+            { item: 'Black coffee', portion: 'As needed', cal: 5, protein: 0, carbs: 0, fat: 0 },
+            { item: 'Electrolytes (salt, potassium)', portion: 'As needed', cal: 0, protein: 0, carbs: 0, fat: 0 },
+          ]
+        }]
+      };
+    }
   } catch(e) {
     console.error('Failed to load workouts', e);
   }
@@ -926,6 +1152,7 @@ function renderDetail() {
         <div class="rdd" style="margin-top:8px">${d.run.detail}</div>
       </div>
     </div>
+    ${renderMealSection(d)}
     <div class="detail-section">
       <h3>Session Timing</h3>
       ${timingRows.join('')}

@@ -1,5 +1,322 @@
 """All 12 weeks of workout data."""
 
+# ─── MEAL PLANS ─────────────────────────────────────────────────────────────
+# Day types: heavy_lift, long_run, moderate, rest, deload, fast_day
+# Default timing: 16:8 intermittent fasting, eating window 11am-7pm
+# Fasted training at 5:30am with black coffee
+
+MEAL_PLANS = {
+    "heavy_lift": {
+        "label": "Heavy Lift Day",
+        "targetCal": 1800,
+        "targetProtein": 155,
+        "targetCarbs": 100,
+        "targetFat": 80,
+        "note": "High protein, moderate carbs. Fuel the recovery from heavy lifting + intense run.",
+        "meals": [
+            {
+                "time": "5:30am",
+                "name": "Pre-Workout",
+                "optional": False,
+                "foods": [
+                    {"item": "Black coffee", "portion": "12 oz", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+            {
+                "time": "9:00am",
+                "name": "Post-Workout Shake",
+                "optional": True,
+                "foods": [
+                    {"item": "Whey protein shake", "portion": "1 scoop + water", "cal": 130, "protein": 25, "carbs": 3, "fat": 2},
+                ],
+            },
+            {
+                "time": "11:00am",
+                "name": "Break Fast - Chicken Salad",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "Mixed greens", "portion": "2 cups", "cal": 15, "protein": 2, "carbs": 2, "fat": 0},
+                    {"item": "Avocado", "portion": "1/2", "cal": 120, "protein": 1, "carbs": 6, "fat": 11},
+                    {"item": "Olive oil + lemon dressing", "portion": "1 tbsp", "cal": 120, "protein": 0, "carbs": 0, "fat": 14},
+                    {"item": "Cherry tomatoes", "portion": "1/2 cup", "cal": 15, "protein": 0, "carbs": 3, "fat": 0},
+                ],
+            },
+            {
+                "time": "2:30pm",
+                "name": "Eggs + Greens",
+                "optional": False,
+                "foods": [
+                    {"item": "Eggs, scrambled", "portion": "4 large", "cal": 280, "protein": 24, "carbs": 2, "fat": 20},
+                    {"item": "Spinach", "portion": "1 cup", "cal": 7, "protein": 1, "carbs": 1, "fat": 0},
+                    {"item": "Salsa", "portion": "2 tbsp", "cal": 10, "protein": 0, "carbs": 2, "fat": 0},
+                    {"item": "Almonds", "portion": "1 oz (23 nuts)", "cal": 164, "protein": 6, "carbs": 6, "fat": 14},
+                ],
+            },
+            {
+                "time": "6:30pm",
+                "name": "Dinner - Chicken + Rice",
+                "optional": False,
+                "foods": [
+                    {"item": "Baked chicken breast", "portion": "8 oz", "cal": 370, "protein": 70, "carbs": 0, "fat": 8},
+                    {"item": "White rice", "portion": "1 cup cooked", "cal": 205, "protein": 4, "carbs": 45, "fat": 0},
+                    {"item": "Steamed broccoli", "portion": "1 cup", "cal": 55, "protein": 4, "carbs": 11, "fat": 0},
+                ],
+            },
+        ],
+    },
+    "long_run": {
+        "label": "Long Run Day",
+        "targetCal": 2050,
+        "targetProtein": 160,
+        "targetCarbs": 130,
+        "targetFat": 75,
+        "note": "Slightly more carbs to fuel the long run and recovery. Break fast earlier if needed.",
+        "meals": [
+            {
+                "time": "5:30am",
+                "name": "Pre-Workout",
+                "optional": False,
+                "foods": [
+                    {"item": "Black coffee", "portion": "12 oz", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+            {
+                "time": "9:00am",
+                "name": "Post-Workout Shake + Banana",
+                "optional": True,
+                "foods": [
+                    {"item": "Whey protein shake", "portion": "1 scoop + water", "cal": 130, "protein": 25, "carbs": 3, "fat": 2},
+                    {"item": "Banana", "portion": "1 medium", "cal": 105, "protein": 1, "carbs": 27, "fat": 0},
+                ],
+            },
+            {
+                "time": "11:00am",
+                "name": "Break Fast - Omelette + Salad",
+                "optional": False,
+                "foods": [
+                    {"item": "Eggs, omelette", "portion": "4 large", "cal": 280, "protein": 24, "carbs": 2, "fat": 20},
+                    {"item": "Spinach (in omelette)", "portion": "1 cup", "cal": 7, "protein": 1, "carbs": 1, "fat": 0},
+                    {"item": "Cheddar cheese", "portion": "1 oz", "cal": 113, "protein": 7, "carbs": 0, "fat": 9},
+                    {"item": "Side salad (mixed greens)", "portion": "1 cup", "cal": 10, "protein": 1, "carbs": 1, "fat": 0},
+                    {"item": "Olive oil dressing", "portion": "1 tbsp", "cal": 120, "protein": 0, "carbs": 0, "fat": 14},
+                ],
+            },
+            {
+                "time": "2:30pm",
+                "name": "Chicken + Sweet Potato",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "8 oz", "cal": 370, "protein": 70, "carbs": 0, "fat": 8},
+                    {"item": "Sweet potato", "portion": "1 medium", "cal": 103, "protein": 2, "carbs": 24, "fat": 0},
+                    {"item": "Mixed greens", "portion": "1 cup", "cal": 10, "protein": 1, "carbs": 1, "fat": 0},
+                ],
+            },
+            {
+                "time": "6:30pm",
+                "name": "Dinner - Chicken Salad Bowl",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "Quinoa", "portion": "1/2 cup cooked", "cal": 111, "protein": 4, "carbs": 20, "fat": 2},
+                    {"item": "Mixed greens", "portion": "2 cups", "cal": 15, "protein": 2, "carbs": 2, "fat": 0},
+                    {"item": "Avocado", "portion": "1/2", "cal": 120, "protein": 1, "carbs": 6, "fat": 11},
+                    {"item": "Olive oil dressing", "portion": "1/2 tbsp", "cal": 60, "protein": 0, "carbs": 0, "fat": 7},
+                ],
+            },
+        ],
+    },
+    "moderate": {
+        "label": "Moderate Day",
+        "targetCal": 1700,
+        "targetProtein": 145,
+        "targetCarbs": 90,
+        "targetFat": 75,
+        "note": "Moderate intensity day. Standard portions, lean protein focus.",
+        "meals": [
+            {
+                "time": "5:30am",
+                "name": "Pre-Workout",
+                "optional": False,
+                "foods": [
+                    {"item": "Black coffee", "portion": "12 oz", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+            {
+                "time": "11:00am",
+                "name": "Break Fast - Eggs + Greens",
+                "optional": False,
+                "foods": [
+                    {"item": "Eggs, scrambled", "portion": "3 large", "cal": 210, "protein": 18, "carbs": 1, "fat": 15},
+                    {"item": "Spinach", "portion": "2 cups", "cal": 14, "protein": 2, "carbs": 2, "fat": 0},
+                    {"item": "Avocado", "portion": "1/3", "cal": 80, "protein": 1, "carbs": 4, "fat": 7},
+                    {"item": "Salsa", "portion": "2 tbsp", "cal": 10, "protein": 0, "carbs": 2, "fat": 0},
+                ],
+            },
+            {
+                "time": "2:30pm",
+                "name": "Chicken + Greens",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "Mixed greens", "portion": "2 cups", "cal": 15, "protein": 2, "carbs": 2, "fat": 0},
+                    {"item": "Olive oil dressing", "portion": "1 tbsp", "cal": 120, "protein": 0, "carbs": 0, "fat": 14},
+                    {"item": "Hard boiled egg", "portion": "1 large", "cal": 70, "protein": 6, "carbs": 0, "fat": 5},
+                ],
+            },
+            {
+                "time": "6:30pm",
+                "name": "Dinner - Chicken + Veggies",
+                "optional": False,
+                "foods": [
+                    {"item": "Baked chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "White rice", "portion": "3/4 cup cooked", "cal": 154, "protein": 3, "carbs": 34, "fat": 0},
+                    {"item": "Steamed asparagus", "portion": "1 cup", "cal": 27, "protein": 3, "carbs": 5, "fat": 0},
+                    {"item": "Greek yogurt", "portion": "1/2 cup (plain)", "cal": 65, "protein": 9, "carbs": 4, "fat": 2},
+                ],
+            },
+        ],
+    },
+    "rest": {
+        "label": "Rest Day (16:8)",
+        "targetCal": 1500,
+        "targetProtein": 130,
+        "targetCarbs": 70,
+        "targetFat": 70,
+        "note": "Rest day. Lower calories, maintain protein. Option to do a 24h fast instead (toggle below).",
+        "meals": [
+            {
+                "time": "Morning",
+                "name": "Hydration",
+                "optional": False,
+                "foods": [
+                    {"item": "Black coffee", "portion": "12 oz", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                    {"item": "Water", "portion": "16 oz", "cal": 0, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+            {
+                "time": "11:00am",
+                "name": "Break Fast - Light Chicken Salad",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "5 oz", "cal": 233, "protein": 43, "carbs": 0, "fat": 5},
+                    {"item": "Mixed greens", "portion": "2 cups", "cal": 15, "protein": 2, "carbs": 2, "fat": 0},
+                    {"item": "Avocado", "portion": "1/3", "cal": 80, "protein": 1, "carbs": 4, "fat": 7},
+                    {"item": "Olive oil dressing", "portion": "1/2 tbsp", "cal": 60, "protein": 0, "carbs": 0, "fat": 7},
+                ],
+            },
+            {
+                "time": "2:30pm",
+                "name": "Eggs + Almonds",
+                "optional": False,
+                "foods": [
+                    {"item": "Hard boiled eggs", "portion": "3 large", "cal": 210, "protein": 18, "carbs": 1, "fat": 15},
+                    {"item": "Almonds", "portion": "1 oz", "cal": 164, "protein": 6, "carbs": 6, "fat": 14},
+                ],
+            },
+            {
+                "time": "6:30pm",
+                "name": "Dinner - Chicken + Greens",
+                "optional": False,
+                "foods": [
+                    {"item": "Baked chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "Steamed broccoli", "portion": "1 cup", "cal": 55, "protein": 4, "carbs": 11, "fat": 0},
+                    {"item": "Spinach side salad", "portion": "1 cup", "cal": 7, "protein": 1, "carbs": 1, "fat": 0},
+                    {"item": "Greek yogurt", "portion": "1/2 cup (plain)", "cal": 65, "protein": 9, "carbs": 4, "fat": 2},
+                ],
+            },
+        ],
+    },
+    "fast_day": {
+        "label": "24h Fast Day",
+        "targetCal": 0,
+        "targetProtein": 0,
+        "targetCarbs": 0,
+        "targetFat": 0,
+        "note": "Full 24h fast. Water, black coffee, electrolytes only. Break fast Monday at 11am. Max 1x/week. Only do this if training readiness is good and sleep has been solid.",
+        "meals": [
+            {
+                "time": "All Day",
+                "name": "Fast - Liquids Only",
+                "optional": False,
+                "foods": [
+                    {"item": "Water", "portion": "Unlimited", "cal": 0, "protein": 0, "carbs": 0, "fat": 0},
+                    {"item": "Black coffee", "portion": "As needed", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                    {"item": "Electrolytes (salt, potassium)", "portion": "As needed", "cal": 0, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+        ],
+    },
+    "deload": {
+        "label": "Deload Day",
+        "targetCal": 1800,
+        "targetProtein": 140,
+        "targetCarbs": 120,
+        "targetFat": 70,
+        "note": "Deload week. Slightly more carbs for recovery and adaptation. Eat closer to maintenance.",
+        "meals": [
+            {
+                "time": "5:30am",
+                "name": "Pre-Workout",
+                "optional": False,
+                "foods": [
+                    {"item": "Black coffee", "portion": "12 oz", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
+                ],
+            },
+            {
+                "time": "11:00am",
+                "name": "Break Fast - Omelette + Toast",
+                "optional": False,
+                "foods": [
+                    {"item": "Eggs, omelette", "portion": "3 large", "cal": 210, "protein": 18, "carbs": 1, "fat": 15},
+                    {"item": "Spinach (in omelette)", "portion": "1 cup", "cal": 7, "protein": 1, "carbs": 1, "fat": 0},
+                    {"item": "Cheddar cheese", "portion": "1 oz", "cal": 113, "protein": 7, "carbs": 0, "fat": 9},
+                    {"item": "Whole wheat toast", "portion": "1 slice", "cal": 80, "protein": 4, "carbs": 14, "fat": 1},
+                    {"item": "Avocado", "portion": "1/3", "cal": 80, "protein": 1, "carbs": 4, "fat": 7},
+                ],
+            },
+            {
+                "time": "2:30pm",
+                "name": "Chicken + Sweet Potato",
+                "optional": False,
+                "foods": [
+                    {"item": "Grilled chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "Sweet potato", "portion": "1 medium", "cal": 103, "protein": 2, "carbs": 24, "fat": 0},
+                    {"item": "Mixed greens", "portion": "1 cup", "cal": 10, "protein": 1, "carbs": 1, "fat": 0},
+                ],
+            },
+            {
+                "time": "6:30pm",
+                "name": "Dinner - Chicken + Rice + Veggies",
+                "optional": False,
+                "foods": [
+                    {"item": "Baked chicken breast", "portion": "6 oz", "cal": 280, "protein": 52, "carbs": 0, "fat": 6},
+                    {"item": "White rice", "portion": "1 cup cooked", "cal": 205, "protein": 4, "carbs": 45, "fat": 0},
+                    {"item": "Steamed broccoli", "portion": "1 cup", "cal": 55, "protein": 4, "carbs": 11, "fat": 0},
+                    {"item": "Greek yogurt", "portion": "1/2 cup (plain)", "cal": 65, "protein": 9, "carbs": 4, "fat": 2},
+                ],
+            },
+        ],
+    },
+}
+
+# Day-of-week to meal type mapping
+DAY_MEAL_TYPES = {
+    "Mon": "heavy_lift",
+    "Tue": "long_run",
+    "Wed": "heavy_lift",
+    "Thu": "moderate",
+    "Fri": "heavy_lift",
+    "Sat": "moderate",
+    "Sun": "rest",
+}
+
+
+def get_meal_plan(meal_type):
+    """Return the full meal plan dict for a given meal type."""
+    return dict(MEAL_PLANS.get(meal_type, MEAL_PLANS["moderate"]))
+
+
 PHASES = {
     1: {
         "label": "Phase 1 - Wks 1-4",
@@ -146,16 +463,28 @@ def get_workouts(week):
     is_test = week == 12
 
     if is_test:
-        return _test_week()
-    if is_deload:
-        return _deload_week(week)
+        days = _test_week()
+    elif is_deload:
+        days = _deload_week(week)
+    else:
+        phase = get_phase(week)
+        if phase == 1:
+            days = _phase1_week(week)
+        elif phase == 2:
+            days = _phase2_week(week)
+        else:
+            days = _phase3_week(week)
 
-    phase = get_phase(week)
-    if phase == 1:
-        return _phase1_week(week)
-    if phase == 2:
-        return _phase2_week(week)
-    return _phase3_week(week)
+    # Inject meal plan data into each day
+    for d in days:
+        if is_deload:
+            meal_type = "deload"
+        else:
+            meal_type = DAY_MEAL_TYPES.get(d["day"], "moderate")
+        d["mealType"] = meal_type
+        d["mealPlan"] = get_meal_plan(meal_type)
+
+    return days
 
 
 def _run(key):
