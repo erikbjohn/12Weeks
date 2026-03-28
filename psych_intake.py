@@ -37,12 +37,15 @@ PHASE 1 - THE GOAL (spend 4-6 exchanges):
 - Are you trying to WIN at something or just show up and finish? Both are valid.
 - What would it mean to you personally to actually follow through on this?
 
-PHASE 2 - TRAINING HISTORY (3-4 exchanges):
+PHASE 2 - TRAINING HISTORY & EXPERIENCE (4-5 exchanges):
 - What's your history with fitness? Athlete? Couch to 5k? Former gym rat who fell off?
+- Experience level: Have you done barbell lifts before? Do you know what an RDL is? A power clean? Be honest about what's new.
 - Have you done structured programs before? What happened? What worked, what didn't?
 - What's your current fitness level honestly? How do you feel in your body right now?
 - Do you use exercise for mental health? Has that been conscious or unconscious?
 - What's the longest you've stuck with a program? What eventually broke the streak?
+- Is there anything specific you WANT to incorporate into your training? A trail run, a sport, a race, hiking, surfing, anything. This is YOUR program -- if there's something you love doing, we build around it.
+- Are there exercises you've never done or aren't sure about? We can find you video guides for anything unfamiliar.
 
 PHASE 3 - LIFE CONTEXT (3-4 exchanges):
 - What does your typical day look like? Work, family, obligations.

@@ -2705,7 +2705,7 @@ async function renderDetail() {
         ${done ? '&#10003;' : ''}
       </button>
       <div class="ex-info">
-        <div class="ex-name">${ex.name}</div>
+        <div class="ex-name">${ex.name}${ex.video ? ` <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(ex.video)}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>` : ''}</div>
         ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       </div>
       <div class="weight-input-wrap">

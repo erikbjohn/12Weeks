@@ -408,6 +408,22 @@ header .subtitle {
   color: var(--text);
 }
 
+.ex-video-link {
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: 4px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  vertical-align: middle;
+}
+
+.ex-video-link:hover,
+.ex-video-link:active {
+  opacity: 1;
+  color: #ff0000;
+}
+
 .ex-note {
   font-size: 13px;
   color: var(--muted);
