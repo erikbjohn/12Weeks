@@ -893,6 +893,18 @@ footer {
   margin-bottom: 1rem;
 }
 
+.baseline-card .baseline-test-weight {
+  font-family: 'DM Mono', monospace;
+  font-size: 1.2rem;
+  color: var(--text);
+  margin-bottom: 0.75rem;
+}
+
+.baseline-card .baseline-test-weight strong {
+  color: var(--accent);
+  font-size: 1.4rem;
+}
+
 .baseline-card .baseline-hint {
   font-size: 11px;
   color: var(--dim);
@@ -900,10 +912,35 @@ footer {
   margin-bottom: 1rem;
 }
 
+.baseline-card .baseline-calc {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.baseline-summary-row .bsr-detail {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.baseline-summary-row .bsr-result {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+
 .baseline-card .baseline-inputs {
   display: flex;
-  gap: 10px;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 1rem;
 }
 
@@ -917,7 +954,7 @@ footer {
 }
 
 .baseline-card .baseline-inputs input {
-  width: 90px;
+  width: 120px;
   background: var(--surface2);
   border: 1px solid var(--border2);
   color: var(--text);
@@ -965,14 +1002,27 @@ footer {
 
 .baseline-summary-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  padding: 6px 0;
+  align-items: baseline;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 12px;
+  gap: 2px 8px;
 }
 
-.baseline-summary-row .bsr-name { color: var(--text); }
-.baseline-summary-row .bsr-weight { color: var(--accent); font-family: 'DM Mono', monospace; }
+.baseline-summary-row .bsr-name {
+  color: var(--text);
+  font-weight: 500;
+  width: 100%;
+}
+
+.baseline-summary-row .bsr-weight {
+  color: var(--accent);
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 13px;
+}
 
 /* ─── WEIGHT INPUT (Exercise Rows) ─── */
 .weight-input-wrap {

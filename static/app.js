@@ -160,6 +160,18 @@ function showBaseline() {
   renderBaseline();
 }
 
+// Estimate 1RM from weight x reps (Epley formula)
+function estimate1RM(weight, reps) {
+  if (reps <= 0) return 0;
+  if (reps === 1) return weight;
+  return Math.round(weight * (1 + reps / 30));
+}
+
+// Get Phase 1 working weight (10-rep target) from 1RM (~75% of 1RM)
+function workingWeightFrom1RM(oneRM) {
+  return Math.round(oneRM * 0.75 / 5) * 5; // round to nearest 5
+}
+
 function renderBaseline() {
   const el = document.getElementById('baseline-overlay');
   if (baselineStep < 0) {
@@ -173,8 +185,9 @@ function renderBaseline() {
       <div class="baseline-card">
         <h2>Baseline Assessment</h2>
         <div class="baseline-desc">
-          Before we start, let's find your working weights.<br><br>
-          For each lift, pick a weight where you can do 10 reps but the last 2 feel hard (RPE 7-8).
+          Let's find your starting weights.<br><br>
+          For each lift, load the test weight shown and do <strong>as many reps as you can</strong> with good form. Stop when form breaks down.<br><br>
+          We'll calculate your working weights from there.
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="baselineStep=1;renderBaseline()">Let's Go</button>
       </div>
@@ -188,15 +201,22 @@ function renderBaseline() {
   if (liftIdx >= BASELINE_LIFTS.length) {
     let rows = '';
     for (const lift of BASELINE_LIFTS) {
-      const w = baselineWeights[lift.name] || { weight: 0, reps: 10 };
+      const w = baselineWeights[lift.name] || { reps: 0 };
+      const oneRM = estimate1RM(lift.suggested, w.reps);
+      const working = workingWeightFrom1RM(oneRM);
       rows += `<div class="baseline-summary-row">
         <span class="bsr-name">${lift.name}</span>
-        <span class="bsr-weight">${w.weight} lb x ${w.reps}</span>
+        <span class="bsr-detail">${lift.suggested} lb x ${w.reps} reps</span>
+        <span class="bsr-result">Est 1RM: ${oneRM} lb</span>
+        <span class="bsr-weight">Working: ${working} lb</span>
       </div>`;
     }
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card">
         <h2>Your Starting Weights</h2>
+        <div class="baseline-desc" style="margin-bottom:12px">
+          Working weights are set at ~75% of your estimated 1RM (the right range for 4x10 in Phase 1).
+        </div>
         <div class="baseline-summary">${rows}</div>
         <button class="btn btn-primary" style="width:100%" onclick="saveBaseline()">Start Program</button>
       </div>
@@ -219,32 +239,56 @@ function renderBaseline() {
       <div class="baseline-progress">${dots}</div>
       <div class="baseline-progress-text">${liftIdx + 1} / ${BASELINE_LIFTS.length}</div>
       <div class="baseline-exercise-name">${lift.name}</div>
-      <div class="baseline-hint">If brand new to this lift, try: ${lift.suggested} lb</div>
+      <div class="baseline-test-weight">Load <strong>${lift.suggested} lb</strong></div>
+      <div class="baseline-hint">Do as many reps as you can with good form. Stop when form breaks.</div>
       <div class="baseline-inputs">
-        <label>Weight (lb)
-          <input type="number" inputmode="decimal" id="bl-weight" value="${existing.weight || ''}" placeholder="${lift.suggested}">
-        </label>
-        <label>Reps
-          <input type="number" inputmode="decimal" id="bl-reps" value="${existing.reps || 10}" placeholder="10">
+        <label>How many reps did you get?
+          <input type="number" inputmode="numeric" id="bl-reps" value="${existing.reps || ''}" placeholder="e.g. 12" min="0" max="50">
         </label>
       </div>
+      ${existing.reps ? `<div class="baseline-calc">
+        Est 1RM: ${estimate1RM(lift.suggested, existing.reps)} lb &rarr; Working weight: ${workingWeightFrom1RM(estimate1RM(lift.suggested, existing.reps))} lb
+      </div>` : ''}
       <div style="display:flex;gap:8px">
         ${liftIdx > 0 ? '<button class="btn btn-secondary" onclick="baselineBack()">Back</button>' : ''}
-        <button class="btn btn-primary" style="flex:1" onclick="baselineNext()">Next</button>
+        <button class="btn btn-primary" style="flex:1" onclick="baselineNext()">${liftIdx === BASELINE_LIFTS.length - 1 ? 'Finish' : 'Next'}</button>
       </div>
     </div>
   </div>`;
 
-  // Focus weight input
-  setTimeout(() => { const inp = document.getElementById('bl-weight'); if (inp) inp.focus(); }, 100);
+  // Focus reps input
+  setTimeout(() => { const inp = document.getElementById('bl-reps'); if (inp) inp.focus(); }, 100);
+
+  // Live calculation as they type
+  const repsInput = document.getElementById('bl-reps');
+  if (repsInput) {
+    repsInput.addEventListener('input', () => {
+      const reps = parseInt(repsInput.value) || 0;
+      baselineWeights[lift.name] = { reps };
+      const calcEl = document.querySelector('.baseline-calc');
+      if (reps > 0) {
+        const oneRM = estimate1RM(lift.suggested, reps);
+        const working = workingWeightFrom1RM(oneRM);
+        if (calcEl) {
+          calcEl.innerHTML = `Est 1RM: ${oneRM} lb &rarr; Working weight: ${working} lb`;
+        } else {
+          // Insert calc div before buttons
+          const btns = document.querySelector('.baseline-card div:last-child');
+          const div = document.createElement('div');
+          div.className = 'baseline-calc';
+          div.innerHTML = `Est 1RM: ${oneRM} lb &rarr; Working weight: ${working} lb`;
+          btns.parentNode.insertBefore(div, btns);
+        }
+      }
+    });
+  }
 }
 
 function baselineNext() {
   const liftIdx = baselineStep - 1;
   const lift = BASELINE_LIFTS[liftIdx];
-  const weightVal = parseFloat(document.getElementById('bl-weight').value) || lift.suggested;
-  const repsVal = parseInt(document.getElementById('bl-reps').value) || 10;
-  baselineWeights[lift.name] = { weight: weightVal, reps: repsVal };
+  const repsVal = parseInt(document.getElementById('bl-reps').value) || 0;
+  baselineWeights[lift.name] = { reps: repsVal };
   baselineStep++;
   renderBaseline();
 }
@@ -257,16 +301,22 @@ function baselineBack() {
 function saveBaseline() {
   const weights = loadWeights();
   for (const lift of BASELINE_LIFTS) {
-    const bw = baselineWeights[lift.name] || { weight: lift.suggested, reps: 10 };
+    const bw = baselineWeights[lift.name] || { reps: 0 };
+    const reps = bw.reps || 10;
+    const oneRM = estimate1RM(lift.suggested, reps);
+    const working = workingWeightFrom1RM(oneRM);
     weights[lift.name] = {
-      current: bw.weight,
+      current: working,
       history: [{
-        weight: bw.weight,
-        reps: 'baseline x' + bw.reps,
+        weight: working,
+        reps: `baseline: ${lift.suggested}lb x ${reps}`,
         rpe: 'just_right',
         date: new Date().toISOString().slice(0, 10),
         week: 0,
         day: 0,
+        testWeight: lift.suggested,
+        testReps: reps,
+        estimated1RM: oneRM,
       }],
     };
   }
