@@ -47,10 +47,48 @@ function saveState() {
 
 // ─── GARMIN ─────────────────────────────────────────────────────────────────
 async function garminLogin() {
-  const email = document.getElementById('garmin-email').value;
-  const pw = document.getElementById('garmin-password').value;
   const errEl = document.getElementById('garmin-error');
   errEl.style.display = 'none';
+
+  // Check if this is an MFA submission
+  const mfaField = document.getElementById('garmin-mfa');
+  if (mfaField && mfaField.style.display !== 'none') {
+    const code = mfaField.value.trim();
+    if (!code) {
+      errEl.textContent = 'Enter your verification code';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('garmin-submit');
+    btn.textContent = 'Verifying...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/garmin/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mfa_code: code }),
+      });
+      const d = await res.json();
+      if (d.connected) {
+        garminConnected = true;
+        closeModal();
+        await refreshGarmin();
+        renderAll();
+      } else {
+        errEl.textContent = d.error || 'Verification failed';
+        errEl.style.display = 'block';
+      }
+    } catch(e) {
+      errEl.textContent = 'Connection error';
+      errEl.style.display = 'block';
+    }
+    btn.textContent = 'Verify';
+    btn.disabled = false;
+    return;
+  }
+
+  const email = document.getElementById('garmin-email').value;
+  const pw = document.getElementById('garmin-password').value;
 
   if (!email || !pw) {
     errEl.textContent = 'Email and password required';
@@ -74,6 +112,18 @@ async function garminLogin() {
       closeModal();
       await refreshGarmin();
       renderAll();
+    } else if (d.needs_mfa) {
+      // Show MFA input
+      document.getElementById('garmin-email').style.display = 'none';
+      document.getElementById('garmin-password').style.display = 'none';
+      document.getElementById('garmin-mfa').style.display = 'block';
+      document.getElementById('garmin-mfa').focus();
+      btn.textContent = 'Verify';
+      btn.disabled = false;
+      errEl.textContent = 'Enter the code from your authenticator app';
+      errEl.style.display = 'block';
+      errEl.style.color = 'var(--run-tempo)';
+      return;
     } else {
       errEl.textContent = d.error || 'Login failed';
       errEl.style.display = 'block';
@@ -117,7 +167,13 @@ function closeModal() {
   document.getElementById('garmin-modal').classList.remove('visible');
   document.getElementById('garmin-email').value = '';
   document.getElementById('garmin-password').value = '';
+  document.getElementById('garmin-email').style.display = 'block';
+  document.getElementById('garmin-password').style.display = 'block';
+  const mfa = document.getElementById('garmin-mfa');
+  mfa.value = '';
+  mfa.style.display = 'none';
   document.getElementById('garmin-error').style.display = 'none';
+  document.getElementById('garmin-error').style.color = '';
 }
 
 // ─── NAVIGATION ─────────────────────────────────────────────────────────────

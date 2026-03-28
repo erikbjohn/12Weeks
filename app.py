@@ -50,13 +50,25 @@ def api_week(week):
 @app.route("/api/garmin/login", methods=["POST"])
 def garmin_login():
     data = request.get_json()
+    mfa_code = data.get("mfa_code") if data else None
+
+    # MFA step - just need the code
+    if mfa_code:
+        success, error, needs_mfa = garmin.login(None, None, mfa_code=mfa_code)
+        if success:
+            session["garmin_connected"] = True
+            return jsonify({"connected": True})
+        return jsonify({"connected": False, "error": error}), 401
+
     if not data or not data.get("email") or not data.get("password"):
         return jsonify({"error": "Email and password required"}), 400
 
-    success, error = garmin.login(data["email"], data["password"])
+    success, error, needs_mfa = garmin.login(data["email"], data["password"])
     if success:
         session["garmin_connected"] = True
         return jsonify({"connected": True})
+    if needs_mfa:
+        return jsonify({"connected": False, "needs_mfa": True, "error": "Enter the verification code from your authenticator app"})
     return jsonify({"connected": False, "error": error}), 401
 
 

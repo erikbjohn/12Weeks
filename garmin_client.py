@@ -14,25 +14,43 @@ class GarminClient:
         self.api = None
         self._cache = {}
         self._connected = False
+        self._mfa_client_state = None
 
     @property
     def connected(self):
         return self._connected and self.api is not None
 
-    def login(self, email, password):
-        """Authenticate with Garmin Connect. Returns (success, error_msg)."""
+    def login(self, email, password, mfa_code=None):
+        """Authenticate with Garmin Connect. Returns (success, error_msg, needs_mfa)."""
         try:
             from garminconnect import Garmin
-            self.api = Garmin(email, password)
-            self.api.login()
+
+            # MFA step 2: complete verification
+            if mfa_code and self.api and self._mfa_client_state:
+                self.api.resume_login(self._mfa_client_state, mfa_code)
+                self._mfa_client_state = None
+                self._connected = True
+                self._cache = {}
+                return True, None, False
+
+            # Step 1: initial login with return_on_mfa
+            self.api = Garmin(email, password, is_cn=False, return_on_mfa=True)
+            result = self.api.login()
+
+            # When MFA is needed, garth returns ("needs_mfa", client_state_dict)
+            if isinstance(result, tuple) and len(result) == 2 and result[0] == "needs_mfa":
+                self._mfa_client_state = result[1]
+                return False, "MFA code required", True
+
             self._connected = True
             self._cache = {}
-            return True, None
+            return True, None, False
         except Exception as e:
             log.exception("Garmin login failed")
             self.api = None
             self._connected = False
-            return False, str(e)
+            self._mfa_client_state = None
+            return False, str(e), False
 
     def _cached(self, key, fetcher):
         """Return cached value or call fetcher."""
