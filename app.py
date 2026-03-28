@@ -1103,6 +1103,25 @@ def garmin_hrv_trend():
     return jsonify(garmin.get_weekly_hrv() or [])
 
 
+@app.route("/api/garmin/save-tokens", methods=["POST"])
+def garmin_save_tokens():
+    """Save Garmin tokens from an external login (e.g. local CLI)."""
+    data = request.get_json()
+    tokens = data.get("tokens")
+    if not tokens:
+        return jsonify({"error": "tokens required"}), 400
+    try:
+        from garminconnect import Garmin as G
+        garmin.api = G()
+        garmin.api.login(tokenstore=tokens)
+        garmin._connected = True
+        garmin._cache = {}
+        garmin._save_tokens()
+        return jsonify({"connected": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/garmin/logout", methods=["POST"])
 def garmin_logout():
     garmin.api = None
