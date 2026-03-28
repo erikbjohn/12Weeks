@@ -10,6 +10,292 @@ let coachHistory = []; // session-only chat history
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
+// ─── BASELINE CONFIG ────────────────────────────────────────────────────────
+const BASELINE_LIFTS = [
+  { name: 'Barbell Bench Press', suggested: 95 },
+  { name: 'Barbell Back Squat', suggested: 95 },
+  { name: 'Conventional Deadlift', suggested: 135 },
+  { name: 'DB Overhead Press', suggested: 30 },
+  { name: 'Barbell Bent-Over Row', suggested: 95 },
+  { name: 'Lat Pulldown', suggested: 80 },
+  { name: 'Barbell Hip Thrust', suggested: 95 },
+  { name: 'EZ-Bar Curl', suggested: 40 },
+  { name: 'Cable Tricep Pushdown', suggested: 30 },
+];
+
+// Categorize exercises for progression increments
+const SMALL_ISOLATION = ['ez-bar curl', 'cable tricep pushdown', 'lateral raise', 'face pull', 'rear delt fly', 'hammer curl', 'concentration curl'];
+const COMPOUND_BARBELL = ['barbell bench press', 'barbell back squat', 'conventional deadlift', 'db overhead press', 'barbell bent-over row', 'barbell hip thrust', 'cable row'];
+
+function getProgressionIncrement(exName) {
+  const lower = exName.toLowerCase();
+  for (const s of SMALL_ISOLATION) {
+    if (lower.includes(s)) return 2.5;
+  }
+  return 5;
+}
+
+function isDeloadWeek(week) {
+  return week === 4 || week === 8 || week === 12;
+}
+
+// ─── WEIGHT DATA HELPERS ────────────────────────────────────────────────────
+function loadWeights() {
+  try {
+    return JSON.parse(localStorage.getItem('12w_weights') || '{}');
+  } catch(e) { return {}; }
+}
+
+function saveWeights(data) {
+  localStorage.setItem('12w_weights', JSON.stringify(data));
+}
+
+function getExerciseData(exName) {
+  const weights = loadWeights();
+  return weights[exName] || null;
+}
+
+function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx) {
+  const weights = loadWeights();
+  if (!weights[exName]) {
+    weights[exName] = { current: weight, history: [] };
+  }
+  weights[exName].current = weight;
+  weights[exName].history.push({
+    weight: weight,
+    reps: setsLabel,
+    rpe: rpe,
+    date: new Date().toISOString().slice(0, 10),
+    week: week,
+    day: dayIdx,
+  });
+  saveWeights(weights);
+}
+
+function getLastRPEs(exName, count) {
+  const data = getExerciseData(exName);
+  if (!data || !data.history || data.history.length === 0) return [];
+  return data.history.slice(-count).map(h => h.rpe);
+}
+
+function getSuggestedWeight(exName, currentWeekNum) {
+  const data = getExerciseData(exName);
+  if (!data) return { weight: null, reason: '' };
+
+  const currentWt = data.current || 0;
+  const history = data.history || [];
+
+  // Deload week
+  if (isDeloadWeek(currentWeekNum)) {
+    return { weight: Math.round(currentWt * 0.6), reason: 'deload: 60%' };
+  }
+
+  // Phase transition detection
+  if (history.length > 0) {
+    const lastEntry = history[history.length - 1];
+    const lastWeek = lastEntry.week || 0;
+    const lastPhase = WEEK_TO_PHASE[lastWeek] || 1;
+    const curPhase = WEEK_TO_PHASE[currentWeekNum] || 1;
+    if (curPhase > lastPhase && !isDeloadWeek(lastWeek)) {
+      if (lastPhase === 1 && curPhase === 2) {
+        return { weight: Math.round(currentWt * 1.20), reason: 'phase 2: +20%' };
+      }
+      if (lastPhase === 2 && curPhase === 3) {
+        return { weight: Math.round(currentWt * 1.10), reason: 'phase 3: +10%' };
+      }
+    }
+  }
+
+  // RPE-based auto-progression
+  const lastTwo = getLastRPEs(exName, 2);
+  const inc = getProgressionIncrement(exName);
+
+  if (lastTwo.length >= 2 && lastTwo[lastTwo.length - 1] === 'too_easy' && lastTwo[lastTwo.length - 2] === 'too_easy') {
+    return { weight: currentWt + inc, reason: '\u2191' + inc + ' lb (easy x2)' };
+  }
+  if (lastTwo.length >= 2 && lastTwo[lastTwo.length - 1] === 'too_hard' && lastTwo[lastTwo.length - 2] === 'too_hard') {
+    return { weight: Math.max(0, currentWt - inc), reason: '\u2193' + inc + ' lb (hard x2)' };
+  }
+
+  return { weight: currentWt, reason: '' };
+}
+
+function getWeightForExercise(exName, weekNum) {
+  const suggestion = getSuggestedWeight(exName, weekNum);
+  if (suggestion.weight !== null) return suggestion;
+  // No history at all -- return empty
+  return { weight: null, reason: '' };
+}
+
+function getLastWeight(exName) {
+  const data = getExerciseData(exName);
+  if (!data || !data.history || data.history.length === 0) return null;
+  return data.history[data.history.length - 1].weight;
+}
+
+// Get trend for an exercise (compare last two distinct weeks)
+function getWeightTrend(exName) {
+  const data = getExerciseData(exName);
+  if (!data || !data.history || data.history.length < 2) return 'same';
+  const hist = data.history;
+  const last = hist[hist.length - 1].weight;
+  // Find previous entry from a different week
+  for (let i = hist.length - 2; i >= 0; i--) {
+    if (hist[i].week !== hist[hist.length - 1].week) {
+      if (last > hist[i].weight) return 'up';
+      if (last < hist[i].weight) return 'down';
+      return 'same';
+    }
+  }
+  return 'same';
+}
+
+// ─── BASELINE ASSESSMENT ────────────────────────────────────────────────────
+let baselineStep = 0;
+let baselineWeights = {};
+
+function showBaseline() {
+  baselineStep = 0;
+  baselineWeights = {};
+  renderBaseline();
+}
+
+function renderBaseline() {
+  const el = document.getElementById('baseline-overlay');
+  if (baselineStep < 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  // Intro screen
+  if (baselineStep === 0) {
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Baseline Assessment</h2>
+        <div class="baseline-desc">
+          Before we start, let's find your working weights.<br><br>
+          For each lift, pick a weight where you can do 10 reps but the last 2 feel hard (RPE 7-8).
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="baselineStep=1;renderBaseline()">Let's Go</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const liftIdx = baselineStep - 1;
+
+  // Summary screen
+  if (liftIdx >= BASELINE_LIFTS.length) {
+    let rows = '';
+    for (const lift of BASELINE_LIFTS) {
+      const w = baselineWeights[lift.name] || { weight: 0, reps: 10 };
+      rows += `<div class="baseline-summary-row">
+        <span class="bsr-name">${lift.name}</span>
+        <span class="bsr-weight">${w.weight} lb x ${w.reps}</span>
+      </div>`;
+    }
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Your Starting Weights</h2>
+        <div class="baseline-summary">${rows}</div>
+        <button class="btn btn-primary" style="width:100%" onclick="saveBaseline()">Start Program</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const lift = BASELINE_LIFTS[liftIdx];
+  const existing = baselineWeights[lift.name] || {};
+
+  // Progress dots
+  let dots = '';
+  for (let i = 0; i < BASELINE_LIFTS.length; i++) {
+    const cls = i < liftIdx ? 'done' : i === liftIdx ? 'active' : '';
+    dots += `<div class="bp-dot ${cls}"></div>`;
+  }
+
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card">
+      <div class="baseline-progress">${dots}</div>
+      <div class="baseline-progress-text">${liftIdx + 1} / ${BASELINE_LIFTS.length}</div>
+      <div class="baseline-exercise-name">${lift.name}</div>
+      <div class="baseline-hint">If brand new to this lift, try: ${lift.suggested} lb</div>
+      <div class="baseline-inputs">
+        <label>Weight (lb)
+          <input type="number" inputmode="decimal" id="bl-weight" value="${existing.weight || ''}" placeholder="${lift.suggested}">
+        </label>
+        <label>Reps
+          <input type="number" inputmode="decimal" id="bl-reps" value="${existing.reps || 10}" placeholder="10">
+        </label>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${liftIdx > 0 ? '<button class="btn btn-secondary" onclick="baselineBack()">Back</button>' : ''}
+        <button class="btn btn-primary" style="flex:1" onclick="baselineNext()">Next</button>
+      </div>
+    </div>
+  </div>`;
+
+  // Focus weight input
+  setTimeout(() => { const inp = document.getElementById('bl-weight'); if (inp) inp.focus(); }, 100);
+}
+
+function baselineNext() {
+  const liftIdx = baselineStep - 1;
+  const lift = BASELINE_LIFTS[liftIdx];
+  const weightVal = parseFloat(document.getElementById('bl-weight').value) || lift.suggested;
+  const repsVal = parseInt(document.getElementById('bl-reps').value) || 10;
+  baselineWeights[lift.name] = { weight: weightVal, reps: repsVal };
+  baselineStep++;
+  renderBaseline();
+}
+
+function baselineBack() {
+  baselineStep--;
+  renderBaseline();
+}
+
+function saveBaseline() {
+  const weights = loadWeights();
+  for (const lift of BASELINE_LIFTS) {
+    const bw = baselineWeights[lift.name] || { weight: lift.suggested, reps: 10 };
+    weights[lift.name] = {
+      current: bw.weight,
+      history: [{
+        weight: bw.weight,
+        reps: 'baseline x' + bw.reps,
+        rpe: 'just_right',
+        date: new Date().toISOString().slice(0, 10),
+        week: 0,
+        day: 0,
+      }],
+    };
+  }
+  saveWeights(weights);
+  localStorage.setItem('12w_baseline_done', '1');
+  baselineStep = -1;
+  renderBaseline();
+}
+
+function showSettingsMenu() {
+  if (confirm('Redo baseline assessment?\n\nThis will walk you through setting new working weights for all key lifts.')) {
+    localStorage.removeItem('12w_baseline_done');
+    showBaseline();
+  }
+}
+
+// ─── RPE FEEDBACK ───────────────────────────────────────────────────────────
+function submitRPE(week, dayIdx, exIdx, exName, rpe) {
+  const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
+  const weight = weightInput ? parseFloat(weightInput.value) || 0 : 0;
+
+  // Get sets label from workout data
+  const weekData = workoutData[String(week)];
+  const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
+
+  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx);
+  renderDetail();
+}
+
 // ─── INIT ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   // Load saved state
@@ -37,6 +323,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     garminConnected = d.connected;
     if (garminConnected) await refreshGarmin();
   } catch(e) {}
+
+  // Check if baseline is done
+  if (!localStorage.getItem('12w_baseline_done')) {
+    showBaseline();
+  }
 
   renderAll();
 });
@@ -218,6 +509,11 @@ function toggleEx(week, dayIdx, exIdx) {
     localStorage.removeItem(key);
   } else {
     localStorage.setItem(key, '1');
+    // Save weight on completion (RPE will be recorded separately)
+    const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
+    if (weightInput && weightInput.value) {
+      // Weight is saved but RPE prompt will appear on re-render
+    }
   }
   renderDetail();
 }
@@ -407,10 +703,38 @@ function renderDetail() {
   const d = weekData.days[currentDay];
   const runClass = `run-${d.run.type}`;
 
-  // Exercise rows
+  // Exercise rows with weight tracking and RPE
   const exRows = d.exercises.map((ex, i) => {
     const done = isExDone(currentWeek, currentDay, i);
-    return `<div class="exercise-row">
+    const suggestion = getWeightForExercise(ex.name, currentWeek);
+    const lastWt = getLastWeight(ex.name);
+    const weightVal = suggestion.weight != null ? suggestion.weight : '';
+
+    // Check if RPE already recorded for this session
+    const exData = getExerciseData(ex.name);
+    const hasRPE = exData && exData.history && exData.history.length > 0 &&
+      exData.history[exData.history.length - 1].week === currentWeek &&
+      exData.history[exData.history.length - 1].day === currentDay;
+    const lastRPE = hasRPE ? exData.history[exData.history.length - 1].rpe : null;
+
+    let rpeHtml = '';
+    if (done && !hasRPE) {
+      rpeHtml = `<div class="rpe-feedback">
+        <span class="rpe-label">How was it?</span>
+        <button class="rpe-btn rpe-easy" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','too_easy')">Too Easy</button>
+        <button class="rpe-btn rpe-right" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','just_right')">Just Right</button>
+        <button class="rpe-btn rpe-hard" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','too_hard')">Too Hard</button>
+      </div>`;
+    } else if (hasRPE) {
+      const rpeLabels = { too_easy: 'Too Easy', just_right: 'Just Right', too_hard: 'Too Hard' };
+      const rpeCls = { too_easy: 'rpe-easy', just_right: 'rpe-right', too_hard: 'rpe-hard' };
+      rpeHtml = `<div class="rpe-feedback">
+        <span class="rpe-label">Felt:</span>
+        <button class="rpe-btn ${rpeCls[lastRPE] || 'rpe-right'} selected" disabled>${rpeLabels[lastRPE] || lastRPE}</button>
+      </div>`;
+    }
+
+    return `<div class="exercise-row" style="flex-wrap:wrap">
       <button class="ex-check${done?' done':''}" onclick="toggleEx(${currentWeek},${currentDay},${i})">
         ${done ? '&#10003;' : ''}
       </button>
@@ -418,7 +742,13 @@ function renderDetail() {
         <div class="ex-name">${ex.name}</div>
         ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       </div>
+      <div class="weight-input-wrap">
+        <input class="weight-input" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}" value="${weightVal}" placeholder="lb">
+        ${lastWt != null ? `<div class="weight-last">Last: ${lastWt} lb</div>` : ''}
+        ${suggestion.reason ? `<div class="weight-suggestion">${suggestion.reason}</div>` : ''}
+      </div>
       <div class="ex-sets">${ex.sets}</div>
+      ${rpeHtml ? `<div style="width:100%;padding-left:36px">${rpeHtml}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -494,6 +824,31 @@ function renderDetail() {
     ).join('');
   }
 
+  // Weight summary dashboard
+  let weightSummaryHtml = '';
+  const summaryLifts = ['Barbell Bench Press', 'Barbell Back Squat', 'Conventional Deadlift', 'DB Overhead Press', 'Barbell Bent-Over Row', 'Barbell Hip Thrust'];
+  const weights = loadWeights();
+  const hasSomeWeights = summaryLifts.some(n => weights[n] && weights[n].current);
+  if (hasSomeWeights) {
+    let wsRows = '';
+    for (const name of summaryLifts) {
+      const d2 = weights[name];
+      if (!d2 || !d2.current) continue;
+      const trend = getWeightTrend(name);
+      const trendIcon = trend === 'up' ? '<span class="ws-trend-up">\u2191</span>' :
+                        trend === 'down' ? '<span class="ws-trend-down">\u2193</span>' :
+                        '<span class="ws-trend-same">\u2192</span>';
+      const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
+      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${d2.current} lb ${trendIcon}</span></div>`;
+    }
+    weightSummaryHtml = `<div class="weight-summary" id="weight-summary">
+      <button class="weight-summary-toggle" onclick="document.getElementById('weight-summary').classList.toggle('open')">
+        Working Weights <span class="ws-arrow">\u25BC</span>
+      </button>
+      <div class="weight-summary-body">${wsRows}</div>
+    </div>`;
+  }
+
   panel.innerHTML = `<div class="detail-inner">
     <div class="detail-header">
       <div class="detail-title">Week ${currentWeek} &middot; ${d.day} &mdash; ${d.liftName}</div>
@@ -503,6 +858,7 @@ function renderDetail() {
       </div>
     </div>
     <div class="detail-section">
+      ${weightSummaryHtml}
       <h3>Today's Status</h3>
       ${garminStatsHtml}
       ${dailyGoalsHtml}

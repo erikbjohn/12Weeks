@@ -12,9 +12,14 @@
 <body>
 
 <header>
-  <h1>12-Week Cut</h1>
+  <div class="header-row">
+    <h1>12-Week Cut</h1>
+    <button class="settings-btn" onclick="showSettingsMenu()" title="Settings">&#9881;</button>
+  </div>
   <div class="subtitle">Lift 6:00am &rarr; Run &rarr; Done by 9:00am &middot; Daily running streak</div>
 </header>
+
+<div id="baseline-overlay"></div>
 
 <div class="garmin-bar" id="garmin-bar"></div>
 <div class="readiness-alert" id="readiness-alert"></div>
