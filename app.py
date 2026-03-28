@@ -16,7 +16,7 @@ from models import (
     db, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
-    ProgressPhoto, PsychIntake,
+    ProgressPhoto, PsychIntake, GarminTokens,
 )
 
 app = Flask(__name__)
@@ -44,6 +44,10 @@ with app.app_context():
     db.create_all()
 
 garmin = GarminClient()
+
+# Try to restore Garmin session from saved tokens
+with app.app_context():
+    garmin.try_restore_tokens()
 
 
 # ─── PAGES ──────────────────────────────────────────────────────────────────

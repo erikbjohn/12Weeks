@@ -1,4 +1,4 @@
-"""Garmin Connect data wrapper with caching and graceful degradation."""
+"""Garmin Connect data wrapper with caching, token persistence, and graceful degradation."""
 
 import time
 import logging
@@ -15,15 +15,49 @@ class GarminClient:
         self._cache = {}
         self._connected = False
         self._mfa_client_state = None
-        self._rate_limited_until = 0  # timestamp
+        self._rate_limited_until = 0
 
     @property
     def connected(self):
         return self._connected and self.api is not None
 
+    def try_restore_tokens(self):
+        """Try to restore a session from saved tokens. Call on app startup."""
+        try:
+            from models import GarminTokens, db
+            from garminconnect import Garmin
+            tokens = GarminTokens.query.first()
+            if not tokens:
+                return False
+            self.api = Garmin()
+            self.api.login(tokenstore=tokens.token_data)
+            self._connected = True
+            self._cache = {}
+            log.info("Garmin session restored from saved tokens")
+            return True
+        except Exception as e:
+            log.warning("Failed to restore Garmin tokens: %s", e)
+            self.api = None
+            self._connected = False
+            return False
+
+    def _save_tokens(self):
+        """Save current tokens to DB for persistence across deploys."""
+        try:
+            from models import GarminTokens, db
+            token_data = self.api.garth.dumps()
+            existing = GarminTokens.query.first()
+            if existing:
+                existing.token_data = token_data
+            else:
+                db.session.add(GarminTokens(token_data=token_data))
+            db.session.commit()
+            log.info("Garmin tokens saved to DB")
+        except Exception as e:
+            log.warning("Failed to save Garmin tokens: %s", e)
+
     def login(self, email, password, mfa_code=None):
         """Authenticate with Garmin Connect. Returns (success, error_msg, needs_mfa)."""
-        # Check rate limit cooldown
         now = time.time()
         if now < self._rate_limited_until:
             wait = int(self._rate_limited_until - now)
@@ -32,37 +66,37 @@ class GarminClient:
         try:
             from garminconnect import Garmin
 
-            # MFA step 2: complete verification
+            # MFA step 2
             if mfa_code and self.api and self._mfa_client_state:
                 self.api.resume_login(self._mfa_client_state, mfa_code)
                 self._mfa_client_state = None
                 self._connected = True
                 self._cache = {}
+                self._save_tokens()
                 return True, None, False
 
-            # Step 1: initial login with return_on_mfa
+            # Step 1: initial login
             self.api = Garmin(email, password, is_cn=False, return_on_mfa=True)
             result = self.api.login()
 
-            # When MFA is needed, garth returns ("needs_mfa", client_state_dict)
             if isinstance(result, tuple) and len(result) == 2 and result[0] == "needs_mfa":
                 self._mfa_client_state = result[1]
                 return False, "MFA code required", True
 
             self._connected = True
             self._cache = {}
+            self._save_tokens()
             return True, None, False
         except Exception as e:
             err = str(e)
             log.exception("Garmin login failed")
-            # Detect rate limiting and set 15-minute cooldown
             if "429" in err or "Too Many Requests" in err:
-                self._rate_limited_until = time.time() + 900  # 15 minutes
+                self._rate_limited_until = time.time() + 900
                 return False, "Garmin rate limited. Wait 15 minutes before trying again.", False
             self.api = None
             self._connected = False
             self._mfa_client_state = None
-            return False, str(e), False
+            return False, err, False
 
     def _cached(self, key, fetcher):
         """Return cached value or call fetcher."""

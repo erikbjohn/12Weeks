@@ -142,6 +142,14 @@ class PsychIntake(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
+class GarminTokens(db.Model):
+    """Stored Garmin auth tokens to avoid re-login."""
+    __tablename__ = "garmin_tokens"
+    id = db.Column(db.Integer, primary_key=True)
+    token_data = db.Column(db.Text, nullable=False)  # garth token dump
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
 class ChatMessage(db.Model):
     """AI coach conversation history."""
     __tablename__ = "chat_message"
