@@ -15,6 +15,7 @@ class GarminClient:
         self._cache = {}
         self._connected = False
         self._mfa_client_state = None
+        self._rate_limited_until = 0  # timestamp
 
     @property
     def connected(self):
@@ -22,6 +23,12 @@ class GarminClient:
 
     def login(self, email, password, mfa_code=None):
         """Authenticate with Garmin Connect. Returns (success, error_msg, needs_mfa)."""
+        # Check rate limit cooldown
+        now = time.time()
+        if now < self._rate_limited_until:
+            wait = int(self._rate_limited_until - now)
+            return False, f"Garmin rate limited. Try again in {wait // 60} min {wait % 60} sec.", False
+
         try:
             from garminconnect import Garmin
 
@@ -46,7 +53,12 @@ class GarminClient:
             self._cache = {}
             return True, None, False
         except Exception as e:
+            err = str(e)
             log.exception("Garmin login failed")
+            # Detect rate limiting and set 15-minute cooldown
+            if "429" in err or "Too Many Requests" in err:
+                self._rate_limited_until = time.time() + 900  # 15 minutes
+                return False, "Garmin rate limited. Wait 15 minutes before trying again.", False
             self.api = None
             self._connected = False
             self._mfa_client_state = None
