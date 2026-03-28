@@ -819,16 +819,21 @@ def _build_coach_context():
     supps = SupplementLog.query.filter_by(log_date=date.today()).all()
     supps_taken = {s.supplement_name: s.taken for s in supps}
 
+    # Psych intake report (contains aspirational body type, goals, etc.)
+    intake = PsychIntake.query.first()
+    intake_report = intake.report if intake and intake.report else None
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
         "garmin": garmin_data,
         "readiness": readiness_data,
-        "bodyweight": bodyweight[-14:],  # last 2 weeks
+        "bodyweight": bodyweight[-14:],
         "workout_today": workout_today,
         "week": week,
         "phase": phase_info,
         "supplements_today": {"taken": supps_taken},
+        "intake_report": intake_report,
     }
 
 
@@ -919,17 +924,26 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
     bw = BodyWeight.query.order_by(BodyWeight.log_date.desc()).first()
     bw_note = f"Current body weight: {bw.weight_lbs} lb." if bw else ""
 
+    # Get aspirational body type from psych intake
+    aspiration_note = ""
+    intake = PsychIntake.query.first()
+    if intake and intake.conversation:
+        convo_text = " ".join(m.get("content", "") for m in intake.conversation)
+        # The aspirational reference is in the conversation - pass it to Claude to extract and use
+        aspiration_note = f"\n\nIMPORTANT CONTEXT: During their intake, this person discussed their aspirational physique/celebrity reference. Here is the full intake conversation for context (search for celebrity/athlete mentions): {convo_text[:2000]}\n\nUse their aspirational reference to tailor your analysis. Compare their current physique to where they want to be. Suggest specific areas to focus on to move toward that goal physique. Be specific about what muscle groups need more work to achieve their ideal look."
+
     content = []
     content.append({
         "type": "text",
-        "text": f"""Analyze this progress photo for a 12-week cutting program (currently week {current_week}).
-Pose: {pose} view. {bw_note} {comparison_note}
+        "text": f"""Analyze this progress photo for a 12-week program (currently week {current_week}).
+Pose: {pose} view. {bw_note} {comparison_note}{aspiration_note}
 
 Please provide:
 1. **Estimated body fat percentage** (give a range, e.g. 18-22%)
 2. **Visible muscle groups** - which muscles are showing definition? Rate development.
 3. **Areas of progress** - if a comparison photo is provided, what's changed?
-4. **Aesthetic score** (1-10) - based on overall physique balance, symmetry, and conditioning for someone on a cut
+4. **Goal physique gap** - based on their aspirational reference, what specific areas need the most work? What exercises should be emphasized?
+5. **Aesthetic score** (1-10) - based on overall physique balance, symmetry, and conditioning
 5. **Honest feedback** - what should they focus on? What's looking good?
 
 Be direct and honest. This person wants real feedback, not flattery. They're using exercise for both physical and mental health."""

@@ -130,6 +130,9 @@ CURRENT STATE:
 {checkin_summary}
 Supplements taken today: {', '.join(supp_taken) if supp_taken else 'None logged yet'}
 
+INTAKE PROFILE:
+{ctx.get('intake_report', 'No intake completed yet.') or 'No intake completed yet.'}
+
 YOUR ROLE:
 - Be direct, warm, and real. Not a corporate wellness bot. Talk like a knowledgeable friend who happens to know sports science and psychology.
 - Ask ONE question at a time. Never two questions in one response. Keep it conversational.
