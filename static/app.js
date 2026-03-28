@@ -5,6 +5,8 @@ let _mealsCache = {};
 let _stateCache = null;
 let _supplementsCache = null;
 let _bodyweightCache = null;
+let _morningCheckinCache = null;
+let _chatHistory = [];
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -14,8 +16,8 @@ let currentDay = null;
 let garminConnected = false;
 let garminData = null;
 let readinessData = null;
-let coachHistory = [];
 let warmupTimerInterval = null;
+let _chatOverlayOpen = false;
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
@@ -543,9 +545,11 @@ function showSettingsMenu() {
   const dd = document.createElement('div');
   dd.id = 'settings-dropdown';
   dd.className = 'settings-dropdown visible';
+  const travelOn = _stateCache && _stateCache.traveling;
   dd.innerHTML = `
     <button onclick="redoBaseline()">Redo Baseline</button>
     <button onclick="showStartDateSetting()">Set Start Date</button>
+    <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
@@ -722,7 +726,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       showBaseline();
     }
 
+    // Travel banner
+    renderTravelBanner();
+
     renderAll();
+
+    // Morning check-in (after baseline, before workout)
+    if (_stateCache.baseline_done) {
+      await checkMorningCheckin();
+    }
+
+    // Load chat history
+    await loadChatHistory();
   } catch(e) {
     console.error('Init failed', e);
     // Fallback: try to render with empty data
@@ -796,6 +811,368 @@ async function migrateLocalStorage() {
 function dismissMigration() {
   const banner = document.getElementById('migration-banner');
   if (banner) banner.classList.remove('visible');
+}
+
+// ─── TRAVEL MODE ───────────────────────────────────────────────────────────
+function toggleTravelMode() {
+  if (!_stateCache) _stateCache = {};
+  _stateCache.traveling = !_stateCache.traveling;
+  apiPost('/api/state', { traveling: _stateCache.traveling });
+  closeSettingsMenu();
+  renderTravelBanner();
+  renderAll();
+}
+
+function renderTravelBanner() {
+  let banner = document.getElementById('travel-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'travel-banner';
+    banner.className = 'travel-banner';
+    const header = document.querySelector('header');
+    header.parentNode.insertBefore(banner, header.nextSibling);
+  }
+  if (_stateCache && _stateCache.traveling) {
+    banner.textContent = '\uD83C\uDFD6\uFE0F Travel Mode \u2014 Bodyweight workouts';
+    banner.classList.add('visible');
+  } else {
+    banner.classList.remove('visible');
+  }
+}
+
+// ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
+async function checkMorningCheckin() {
+  const today = todayStr();
+  try {
+    const res = await fetch('/api/morning-checkin?date=' + today);
+    const data = await res.json();
+    if (data.exists) {
+      _morningCheckinCache = data.checkin || data;
+      renderCheckinSummaryBar();
+    } else {
+      showMorningCheckinOverlay();
+    }
+  } catch(e) {
+    console.error('Morning checkin check failed', e);
+  }
+}
+
+function showMorningCheckinOverlay() {
+  const el = document.getElementById('morning-checkin-overlay');
+  if (!el) return;
+
+  el.innerHTML = `<div class="morning-checkin-overlay">
+    <div class="morning-checkin-card">
+      <h2>Good Morning</h2>
+      <div class="mc-subtitle">Quick check-in before we start</div>
+
+      <div class="mc-slider-row">
+        <label>Sleep</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-sleep" min="1" max="10" value="5">
+          <div class="mc-range-labels"><span>Terrible</span><span>Amazing</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-sleep-val">5</span>
+      </div>
+
+      <div class="mc-slider-row">
+        <label>Stress</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-stress" min="1" max="10" value="5">
+          <div class="mc-range-labels"><span>Calm</span><span>Overwhelmed</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-stress-val">5</span>
+      </div>
+
+      <div class="mc-slider-row">
+        <label>Soreness</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-soreness" min="1" max="10" value="5">
+          <div class="mc-range-labels"><span>Fresh</span><span>Wrecked</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-soreness-val">5</span>
+      </div>
+
+      <div class="mc-slider-row">
+        <label>Mood</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-mood" min="0" max="10" value="5">
+          <div class="mc-range-labels"><span>Very Low</span><span>Very High</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-mood-val">5</span>
+      </div>
+
+      <div class="mc-slider-row">
+        <label>Motivation</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-motivation" min="1" max="10" value="5">
+          <div class="mc-range-labels"><span>Zero</span><span>On Fire</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-motivation-val">5</span>
+      </div>
+
+      <div class="mc-slider-row">
+        <label>Anxiety</label>
+        <div class="mc-range-wrap">
+          <input type="range" class="mc-slider" id="mc-anxiety" min="1" max="10" value="3">
+          <div class="mc-range-labels"><span>None</span><span>Severe</span></div>
+        </div>
+        <span class="mc-slider-val" id="mc-anxiety-val">3</span>
+      </div>
+
+      <div class="mc-textarea-label">Anything on your mind today?</div>
+      <textarea class="mc-textarea" id="mc-notes" placeholder="Optional \u2014 free text..."></textarea>
+
+      <button class="btn btn-primary" style="width:100%" onclick="submitMorningCheckin()">Submit Check-In</button>
+    </div>
+  </div>`;
+
+  // Wire up slider value displays
+  const sliders = ['sleep', 'stress', 'soreness', 'mood', 'motivation', 'anxiety'];
+  sliders.forEach(name => {
+    const slider = document.getElementById('mc-' + name);
+    const valEl = document.getElementById('mc-' + name + '-val');
+    if (slider && valEl) {
+      slider.addEventListener('input', () => { valEl.textContent = slider.value; });
+    }
+  });
+}
+
+function submitMorningCheckin() {
+  const data = {
+    date: todayStr(),
+    sleep: parseInt(document.getElementById('mc-sleep').value) || 5,
+    stress: parseInt(document.getElementById('mc-stress').value) || 5,
+    soreness: parseInt(document.getElementById('mc-soreness').value) || 5,
+    mood: parseInt(document.getElementById('mc-mood').value) || 5,
+    motivation: parseInt(document.getElementById('mc-motivation').value) || 5,
+    anxiety: parseInt(document.getElementById('mc-anxiety').value) || 3,
+    notes: (document.getElementById('mc-notes').value || '').trim(),
+  };
+
+  fetch('/api/morning-checkin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  }).catch(e => console.error('Morning checkin submit failed', e));
+
+  _morningCheckinCache = data;
+  document.getElementById('morning-checkin-overlay').innerHTML = '';
+  renderCheckinSummaryBar();
+}
+
+function renderCheckinSummaryBar() {
+  const el = document.getElementById('checkin-summary-bar');
+  if (!el || !_morningCheckinCache) {
+    if (el) el.classList.remove('visible');
+    return;
+  }
+  const c = _morningCheckinCache;
+
+  function scoreClass(val, reversed) {
+    if (reversed) {
+      if (val < 4) return 'score-good';
+      if (val <= 6) return 'score-mid';
+      return 'score-bad';
+    }
+    if (val > 6) return 'score-good';
+    if (val >= 4) return 'score-mid';
+    return 'score-bad';
+  }
+
+  const items = [
+    { label: 'Mood', val: c.mood, rev: false },
+    { label: 'Sleep', val: c.sleep, rev: false },
+    { label: 'Stress', val: c.stress, rev: true },
+    { label: 'Motivation', val: c.motivation, rev: false },
+    { label: 'Soreness', val: c.soreness, rev: true },
+    { label: 'Anxiety', val: c.anxiety, rev: true },
+  ];
+
+  const badges = items.map(i =>
+    `<span class="checkin-score ${scoreClass(i.val, i.rev)}">${i.label}: ${i.val}</span>`
+  ).join('');
+
+  el.innerHTML = `<div class="checkin-summary-inner">
+    <span class="checkin-summary-label">Today</span>
+    ${badges}
+  </div>`;
+  el.classList.add('visible');
+}
+
+// ─── AI COACH CHAT ─────────────────────────────────────────────────────────
+async function loadChatHistory() {
+  try {
+    const res = await fetch('/api/chat/history?days=7');
+    const data = await res.json();
+    _chatHistory = Array.isArray(data) ? data : (data.messages || []);
+  } catch(e) {
+    _chatHistory = [];
+  }
+  updateChatFabPulse();
+}
+
+function updateChatFabPulse() {
+  const fab = document.getElementById('chat-fab');
+  if (!fab) return;
+  const today = todayStr();
+  const todayMessages = _chatHistory.filter(m => m.time && m.time.startsWith(today));
+  if (todayMessages.length === 0) {
+    fab.classList.add('pulse');
+  } else {
+    fab.classList.remove('pulse');
+  }
+}
+
+function toggleChatOverlay() {
+  _chatOverlayOpen = !_chatOverlayOpen;
+  renderChatOverlay();
+}
+
+function closeChatOverlay() {
+  _chatOverlayOpen = false;
+  renderChatOverlay();
+}
+
+function renderChatOverlay() {
+  const el = document.getElementById('chat-overlay');
+  if (!el) return;
+  if (!_chatOverlayOpen) {
+    el.classList.remove('visible');
+    el.innerHTML = '';
+    return;
+  }
+
+  el.classList.add('visible');
+  el.innerHTML = `
+    <div class="chat-header">
+      <h2>Coach</h2>
+      <button class="chat-close" onclick="closeChatOverlay()">&times;</button>
+    </div>
+    <div class="chat-messages" id="chat-overlay-messages"></div>
+    <div class="chat-input-bar">
+      <input type="text" id="chat-overlay-input" placeholder="Talk to Coach..." onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
+      <button onclick="sendChatMessage('chat-overlay-input','chat-overlay-messages')">Send</button>
+    </div>
+  `;
+
+  renderChatMessages('chat-overlay-messages');
+  const input = document.getElementById('chat-overlay-input');
+  if (input) setTimeout(() => input.focus(), 100);
+}
+
+function renderChatMessages(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  let html = '';
+  for (const m of _chatHistory) {
+    const isUser = m.role === 'user';
+    const bubbleCls = isUser ? 'chat-bubble user' : 'chat-bubble coach';
+    const tsCls = isUser ? 'chat-timestamp ts-user' : 'chat-timestamp ts-coach';
+    html += `<div class="${bubbleCls}">${escapeHtml(m.text || m.content || '')}</div>`;
+    if (m.time) {
+      const timeStr = formatChatTime(m.time);
+      html += `<div class="${tsCls}">${timeStr}</div>`;
+    }
+  }
+  container.innerHTML = html;
+  container.scrollTop = container.scrollHeight;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function formatChatTime(timeStr) {
+  try {
+    const d = new Date(timeStr);
+    const today = todayStr();
+    const dateStr = d.toISOString().slice(0, 10);
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (dateStr === today) return time;
+    return dateStr.slice(5) + ' ' + time;
+  } catch(e) {
+    return timeStr;
+  }
+}
+
+async function sendChatMessage(inputId, containerId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  const now = new Date().toISOString();
+  _chatHistory.push({ role: 'user', text: text, time: now });
+  renderChatMessages(containerId);
+  // Also update the other container if it exists
+  syncChatContainers(containerId);
+
+  // Show typing indicator
+  const container = document.getElementById(containerId);
+  if (container) {
+    const typing = document.createElement('div');
+    typing.className = 'chat-typing';
+    typing.id = 'chat-typing-' + containerId;
+    typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    container.appendChild(typing);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+    const data = await res.json();
+
+    // Remove typing indicator
+    const typingEl = document.getElementById('chat-typing-' + containerId);
+    if (typingEl) typingEl.remove();
+
+    if (data.error && data.error.includes('API_KEY')) {
+      _chatHistory.push({ role: 'coach', text: 'Add your ANTHROPIC_API_KEY in Render settings to enable Coach', time: new Date().toISOString() });
+    } else {
+      _chatHistory.push({ role: 'coach', text: data.response || data.message || 'No response', time: data.time || new Date().toISOString() });
+    }
+  } catch(e) {
+    const typingEl = document.getElementById('chat-typing-' + containerId);
+    if (typingEl) typingEl.remove();
+    _chatHistory.push({ role: 'coach', text: 'Connection error. Try again.', time: new Date().toISOString() });
+  }
+
+  renderChatMessages(containerId);
+  syncChatContainers(containerId);
+  updateChatFabPulse();
+}
+
+function syncChatContainers(sourceId) {
+  // Keep both containers in sync
+  const ids = ['chat-overlay-messages', 'coach-messages'];
+  for (const id of ids) {
+    if (id !== sourceId) {
+      renderChatMessages(id);
+    }
+  }
+}
+
+function renderInlineChat() {
+  let chatMessagesHtml = '';
+  for (const m of _chatHistory) {
+    const isUser = m.role === 'user';
+    const bubbleCls = isUser ? 'chat-bubble user' : 'chat-bubble coach';
+    const tsCls = isUser ? 'chat-timestamp ts-user' : 'chat-timestamp ts-coach';
+    chatMessagesHtml += `<div class="${bubbleCls}">${escapeHtml(m.text || m.content || '')}</div>`;
+    if (m.time) {
+      chatMessagesHtml += `<div class="${tsCls}">${formatChatTime(m.time)}</div>`;
+    }
+  }
+  return chatMessagesHtml;
 }
 
 // ─── GARMIN ─────────────────────────────────────────────────────────────────
@@ -1465,9 +1842,11 @@ function drawLiftsChart(canvasId, liftsData) {
 // ─── RENDER ─────────────────────────────────────────────────────────────────
 function renderAll() {
   renderWeighInBar();
+  renderCheckinSummaryBar();
   renderGarminBar();
   renderSupplementBar();
   renderReadiness();
+  renderTravelBanner();
   renderPhaseNav();
   renderPhaseBanner();
   renderWeekTabs();
@@ -1615,7 +1994,7 @@ function renderDayGrid() {
   }).join('');
 }
 
-function renderDetail() {
+async function renderDetail() {
   const panel = document.getElementById('detail-panel');
   if (currentDay === null) {
     panel.classList.remove('visible');
@@ -1627,9 +2006,29 @@ function renderDetail() {
   const d = weekData.days[currentDay];
   if (!d) return;
   const runClass = `run-${d.run.type}`;
+  const isTraveling = _stateCache && _stateCache.traveling;
+
+  // If traveling, try to load travel workout
+  if (isTraveling && !d._travelLoaded) {
+    fetch('/api/travel/workout?day=' + encodeURIComponent(d.day))
+      .then(r => r.json())
+      .then(tw => {
+        d._travelWorkout = tw;
+        d._travelLoaded = true;
+        renderDetail();
+      })
+      .catch(() => { d._travelLoaded = true; renderDetail(); });
+    // Show loading placeholder
+    panel.innerHTML = `<div class="detail-inner"><div class="detail-header"><div class="detail-title">Loading travel workout...</div></div></div>`;
+    panel.classList.add('visible');
+    return;
+  }
+
+  const travelExercises = isTraveling && d._travelWorkout && d._travelWorkout.exercises ? d._travelWorkout.exercises : null;
+  const displayExercises = travelExercises || d.exercises;
 
   // Exercise rows with weight tracking and RPE
-  const exRows = d.exercises.map((ex, i) => {
+  const exRows = displayExercises.map((ex, i) => {
     const done = isExDone(currentWeek, currentDay, i);
     const suggestion = getWeightForExercise(ex.name, currentWeek);
     const lastWt = getLastWeight(ex.name);
@@ -1723,8 +2122,8 @@ function renderDetail() {
 
   // Daily Goals
   let goalsItems = '';
-  if (!d.isRest && d.exercises.length > 0) {
-    goalsItems += '<div class="dg-item">Complete all exercises. Rest times matter - don\'t rush heavy sets.</div>';
+  if (displayExercises.length > 0) {
+    goalsItems += `<div class="dg-item">${isTraveling ? 'Complete all bodyweight exercises.' : 'Complete all exercises. Rest times matter - don\'t rush heavy sets.'}</div>`;
   }
   goalsItems += `<div class="dg-item">Run: ${d.run.label} &middot; ${d.run.time}${d.run.detail ? ' &middot; ' + d.run.detail : ''}</div>`;
 
@@ -1742,13 +2141,8 @@ function renderDetail() {
     ${adjustmentHtml}
   </div>`;
 
-  // Coach chat history
-  let chatMessagesHtml = '';
-  if (coachHistory.length > 0) {
-    chatMessagesHtml = coachHistory.map(m =>
-      `<div class="${m.role === 'coach' ? 'coach-message' : 'user-message'}">${m.text}</div>`
-    ).join('');
-  }
+  // AI Coach chat
+  let chatMessagesHtml = renderInlineChat();
 
   // Weight summary dashboard
   let weightSummaryHtml = '';
@@ -1775,14 +2169,21 @@ function renderDetail() {
     </div>`;
   }
 
+  // Build Sunday section (async)
+  let sundaySectionHtml = '';
+  if (isSunday(d)) {
+    sundaySectionHtml = await renderSundaySection(d);
+  }
+
   panel.innerHTML = `<div class="detail-inner">
     <div class="detail-header">
       <div class="detail-title">Week ${currentWeek} &middot; ${d.day} &mdash; ${d.liftName}</div>
       <div class="detail-meta">
-        ${!d.isRest ? `<span class="meta-chip" style="background:var(--lift-bg);border-color:var(--lift-border);color:var(--lift)">Lift &middot; ${d.exercises.length} exercises</span>` : ''}
+        ${!d.isRest || travelExercises ? `<span class="meta-chip" style="background:var(--lift-bg);border-color:var(--lift-border);color:var(--lift)">${isTraveling ? 'Travel' : 'Lift'} &middot; ${displayExercises.length} exercises</span>` : ''}
         <span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
       </div>
     </div>
+    ${sundaySectionHtml}
     <div class="detail-section">
       ${weightSummaryHtml}
       <h3>Today's Status</h3>
@@ -1790,9 +2191,9 @@ function renderDetail() {
       ${dailyGoalsHtml}
     </div>
     ${renderWarmupSection(d)}
-    ${!d.isRest && d.exercises.length > 0 ? `
+    ${displayExercises.length > 0 ? `
     <div class="detail-section">
-      <h3>Exercises</h3>
+      <h3>${isTraveling ? 'Travel Workout' : 'Exercises'}</h3>
       ${exRows}
     </div>` : ''}
     <div class="detail-section">
@@ -1816,10 +2217,10 @@ function renderDetail() {
     <div class="detail-section">
       <h3>Coach</h3>
       <div class="coach-chat">
-        <div class="coach-chat-messages" id="coach-messages">${chatMessagesHtml}</div>
-        <div class="coach-input">
-          <input type="text" id="coach-input-field" placeholder="How are you feeling today? Any extra stress?" onkeydown="if(event.key==='Enter')sendCoachMessage()">
-          <button onclick="sendCoachMessage()">Send</button>
+        <div class="chat-messages" id="coach-messages" style="max-height:300px">${chatMessagesHtml}</div>
+        <div class="chat-input-bar" style="border-top:none;padding:8px 0 0 0;background:none">
+          <input type="text" id="coach-input-field" placeholder="Talk to Coach..." onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
+          <button onclick="sendChatMessage('coach-input-field','coach-messages')">Send</button>
         </div>
       </div>
     </div>
@@ -1834,215 +2235,326 @@ function renderDetail() {
   // Scroll chat to bottom
   const msgContainer = document.getElementById('coach-messages');
   if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+
+  // Load Sunday photo previews asynchronously
+  if (isSunday(d)) {
+    loadSundayPhotoPreviews();
+  }
 }
 
-// ─── COACHING CHAT ──────────────────────────────────────────────────────────
-function sendCoachMessage() {
-  const input = document.getElementById('coach-input-field');
-  const text = (input.value || '').trim();
-  if (!text) return;
+// ─── COACHING CHAT (old client-side logic removed — now uses /api/chat) ────
 
-  coachHistory.push({ role: 'user', text });
-  const response = generateCoachResponse(text);
-  coachHistory.push({ role: 'coach', text: response });
+// Old generateCoachResponse removed — AI chat now handled by /api/chat
 
-  input.value = '';
-  renderDetail();
+// ─── SUNDAY MEASUREMENT & PHOTOS ─────────────────────────────────────────────
+let _photosCache = null;
+let _photoImagesCache = {};
+let _sundayCompareOpen = false;
+
+function isSunday(dayData) {
+  return dayData && dayData.day === 'Sun';
 }
 
-function generateCoachResponse(userText) {
-  const t = userText.toLowerCase();
+function getTodayBodyweight() {
+  if (!Array.isArray(_bodyweightCache)) return '';
+  const today = todayStr();
+  const entry = _bodyweightCache.find(e => e.date === today);
+  return entry ? entry.weight : '';
+}
 
-  const weekData = workoutData[String(currentWeek)];
-  const d = weekData ? weekData.days[currentDay] : null;
-  const isLiftDay = d && !d.isRest && d.exercises.length > 0;
-  const runType = d ? d.run.type : '';
-  const isHiit = runType === 'hiit';
-  const isTempo = runType === 'tempo';
-  const isHighIntensity = isHiit || isTempo;
-  const hasReadiness = readinessData && readinessData.risk_level !== 'unknown';
-  const riskLevel = hasReadiness ? readinessData.risk_level : null;
-  const hrvStable = garminData && garminData.hrv && garminData.hrv.lastNight != null &&
-    garminData.hrv.weeklyAvg != null && garminData.hrv.lastNight >= garminData.hrv.weeklyAvg * 0.85;
-  const bbLow = garminData && garminData.bodyBattery && garminData.bodyBattery.current != null && garminData.bodyBattery.current < 30;
-
-  let readinessNote = '';
-  if (riskLevel === 'high') {
-    readinessNote = ' Your Garmin data is showing elevated risk today - take the adjustments seriously.';
-  } else if (riskLevel === 'moderate') {
-    readinessNote = ' Garmin shows moderate readiness - listen to your body but don\'t bail unless something is actually wrong.';
-  } else if (riskLevel === 'low') {
-    readinessNote = ' Garmin says you\'re good to go. Trust the data.';
+async function loadPhotos() {
+  if (_photosCache !== null) return _photosCache;
+  try {
+    const res = await fetch('/api/photos');
+    _photosCache = await res.json();
+  } catch (e) {
+    console.error('Failed to load photos:', e);
+    _photosCache = [];
   }
+  return _photosCache;
+}
 
-  const patterns = [
-    {
-      keys: ['injured', 'injury', 'sharp pain', 'pulled'],
-      resp: 'Stop. Sharp pain or a potential injury is not something to push through. If it\'s acute, skip the affected movement and substitute something that doesn\'t hurt. If it\'s been lingering more than 3 days, see a physio. Training around an injury is smart. Training through one is stupid.'
-    },
-    {
-      keys: ['pain', 'hurts', 'twinge'],
-      resp: 'Dull ache or DOMS? Push through the warmup and reassess after 2 sets. If it gets worse or changes your movement pattern, swap the exercise. Joint pain is different from muscle soreness - know the difference. Ice after if needed.'
-    },
-    {
-      keys: ['tired', 'exhausted', 'fatigued', 'drained'],
-      resp: function() {
-        let base = 'Tired is normal mid-cut. Your body is adapting.';
-        if (hrvStable) {
-          base += ' HRV is stable - push through, you\'ll feel better after the warmup.';
-        } else if (garminData && garminData.hrv) {
-          base += ' Your HRV is dipping below average. Respect that signal.';
+async function loadPhotoImage(photoId) {
+  if (_photoImagesCache[photoId]) return _photoImagesCache[photoId];
+  try {
+    const res = await fetch(`/api/photos/${photoId}/image`);
+    const data = await res.json();
+    _photoImagesCache[photoId] = data.photo_data;
+    return data.photo_data;
+  } catch (e) {
+    console.error('Failed to load photo image:', e);
+    return null;
+  }
+}
+
+function compressImage(file, maxWidth, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.createElement('canvas');
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round(h * maxWidth / w);
+          w = maxWidth;
         }
-        base += ' If you\'re dragging after the first 2 sets, drop weight 10% and finish the volume. Getting the reps in matters more than the load today.';
-        if (isHighIntensity) {
-          base += ' Consider dropping the ' + (isHiit ? 'HIIT to a steady Zone 2' : 'tempo to easy pace') + ' if you\'re still flat after lifting.';
-        }
-        return base + readinessNote;
-      }
-    },
-    {
-      keys: ['stressed', 'stress', 'anxious', 'anxiety', 'overwhelmed'],
-      resp: function() {
-        let base = 'External stress stacks with training stress. Your nervous system doesn\'t distinguish. Today, focus on form over load.';
-        if (isHighIntensity) {
-          base += ' You have ' + (isHiit ? 'HIIT' : 'tempo') + ' scheduled - consider swapping to Zone 2 instead. Hammering intervals on top of high life stress is counterproductive.';
-        }
-        base += ' Sleep is your #1 priority tonight. If you can, 10 min walk outside before bed.';
-        return base + readinessNote;
-      }
-    },
-    {
-      keys: ['sleep', 'slept bad', 'insomnia', 'didn\'t sleep', 'poor sleep'],
-      resp: function() {
-        let base = 'Bad sleep night. It happens. One night won\'t kill your gains.';
-        if (garminData && garminData.sleep && garminData.sleep.score != null && garminData.sleep.score < 50) {
-          base += ' Garmin confirms it - sleep score is rough.';
-        }
-        base += ' Caffeine is your friend today but cut it off by 1pm. During the session, keep rest periods slightly longer. You may surprise yourself - some of my best sessions have been on bad sleep.';
-        if (isHighIntensity) {
-          base += ' That said, the ' + (isHiit ? 'HIIT' : 'tempo') + ' might be worth dialing down to easy pace. Recovery debt is real.';
-        }
-        return base + readinessNote;
-      }
-    },
-    {
-      keys: ['sore', 'doms', 'stiff', 'tight'],
-      resp: function() {
-        let base = 'Soreness means you trained. That\'s the job. Warm up thoroughly - 5 min of light movement before you touch a bar. Foam roll the worst spots for 60 seconds each.';
-        if (isLiftDay) {
-          base += ' First working set should feel noticeably better than the warmup. If the affected muscles are today\'s target, start lighter and ramp up. Volume is more important than intensity when you\'re this sore.';
-        }
-        return base;
-      }
-    },
-    {
-      keys: ['great', 'amazing', 'fantastic', 'awesome', 'incredible', 'perfect'],
-      resp: function() {
-        let base = 'Let\'s go. Don\'t change anything - execute the plan as written. Save the PR attempts for test week.';
-        if (riskLevel === 'low') {
-          base += ' Data backs it up too. Clean session today.';
-        }
-        base += ' Use this energy to nail your form on every rep. Good days are for building technique, not ego lifting.';
-        return base;
-      }
-    },
-    {
-      keys: ['good', 'fine', 'decent', 'okay', 'alright', 'not bad'],
-      resp: function() {
-        return 'Good enough is good enough. Most sessions should feel like a 6 or 7 out of 10. That\'s the steady work that builds the foundation. Hit your numbers, stay tight on form, get out.' + readinessNote;
-      }
-    },
-    {
-      keys: ['bad', 'terrible', 'awful', 'horrible', 'rough', 'rough day'],
-      resp: function() {
-        let base = 'Bad day? Show up anyway. The workout doesn\'t have to be perfect. Rule of 10: do the first 10 minutes. If you still feel terrible after warming up, drop intensity 15-20% and finish the work.';
-        if (bbLow) {
-          base += ' Your body battery is tanked - this is a "just get it done" day, not a performance day.';
-        }
-        base += ' The fact that you\'re here when it\'s hard is what separates you from 95% of people. Consistency over intensity, always.';
-        return base + readinessNote;
-      }
-    },
-    {
-      keys: ['hungry', 'starving', 'appetite', 'cravings'],
-      resp: 'You\'re in a deficit. Hunger is expected and it\'s a sign the cut is working. Make sure you\'re hitting your protein target - it\'s the single best tool for managing hunger. If it\'s brutal, add more volume to your veggies and drink more water. Train fasted if you can handle it, otherwise a small protein shake pre-workout is fine. This is temporary.'
-    },
-    {
-      keys: ['motivation', 'unmotivated', 'don\'t want to', 'can\'t be bothered', 'lazy'],
-      resp: 'Motivation is unreliable. You don\'t need it. You need a system, and you have one - it\'s this program. Show up, start the warmup, and let momentum take over. Discipline is doing it when you don\'t feel like it. That\'s literally the entire game. 12 weeks is nothing. You\'ve already started.'
-    },
-    {
-      keys: ['weak', 'strength down', 'lost strength', 'weights feel heavy', 'can\'t lift'],
-      resp: function() {
-        let base = 'Strength dips during a cut are normal - you\'re in a caloric deficit. You\'re not getting weaker, you\'re running on less fuel. Maintain the load as long as form is clean. If you have to drop, keep it to 5-10%. The goal right now is muscle preservation, not PRs.';
-        if (currentWeek >= 9) {
-          base += ' You\'re in Phase 3 - this is where it gets hard. The body fights back. Trust the process.';
-        }
-        return base;
-      }
-    },
-    {
-      keys: ['skip', 'rest day', 'take a day off', 'skip today'],
-      resp: function() {
-        if (riskLevel === 'high') {
-          return 'Your readiness data actually supports backing off today. If you need to skip the lifting, at least do the run at easy pace. Keep the streak alive even if the session is minimal. One easy day won\'t wreck you but skipping entirely is a slippery slope.';
-        }
-        return 'Unless you\'re injured or genuinely sick, do the work. Modify if you need to - lighter weights, easier run - but show up. The hardest part is walking through the door. You can always do less once you\'re there, but you can\'t do anything from the couch.';
-      }
-    },
-    {
-      keys: ['deload', 'easy week', 'recovery week'],
-      resp: 'Deload weeks are programmed for a reason. Drop to 60% of working weight, keep the reps the same. Runs go to easy/Zone 2 only. Your body rebuilds during deloads - this is where the adaptation actually happens. Don\'t skip it and don\'t go harder because you "feel good." Respect the program.'
-    },
-    {
-      keys: ['run', 'running', 'cardio'],
-      resp: function() {
-        let base = `Today's run is ${d ? d.run.label : 'scheduled'}. `;
-        if (isHiit) {
-          base += 'HIIT day - go hard during intervals, actually recover during rest. Don\'t jog your rest periods. Full send, full rest.';
-        } else if (isTempo) {
-          base += 'Tempo pace should feel "comfortably hard." You can speak a few words but not hold a conversation. Stay disciplined on the pace - don\'t start too fast.';
-        } else if (runType === 'z2') {
-          base += 'Zone 2 means conversational pace. If you\'re breathing hard, you\'re going too fast. Slow down. This builds your aerobic base and aids recovery.';
-        } else if (runType === 'long') {
-          base += 'Long run - steady effort. Bring water if it\'s over 45 min. Keep it conversational. This is about time on feet, not pace.';
-        } else {
-          base += 'Easy pace today. Keep it honest - recovery runs should feel genuinely easy.';
-        }
-        return base + readinessNote;
-      }
-    },
-    {
-      keys: ['diet', 'food', 'eating', 'nutrition', 'macros', 'calories', 'protein'],
-      resp: 'Stick to the plan. Protein target is non-negotiable - hit it every day. If you\'re struggling with calories, front-load your protein earlier in the day. Meal prep is your weapon. If you\'re going off plan, ask yourself: is this worth adding a day to the cut? Sometimes it is. Usually it isn\'t.'
-    },
-    {
-      keys: ['progress', 'results', 'not seeing', 'plateau', 'stalled'],
-      resp: function() {
-        let base = 'Progress isn\'t linear, especially in a cut. You\'re losing fat and preserving muscle - the scale may not move but the mirror will. Take weekly photos and measurements.';
-        if (currentWeek <= 3) {
-          base += ' You\'re still early. Give it 4 weeks minimum before evaluating.';
-        } else if (currentWeek >= 8) {
-          base += ' At this stage, progress slows. That\'s biology, not failure. Stay the course.';
-        }
-        return base;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePhotoCapture(pose, inputEl) {
+  const file = inputEl.files[0];
+  if (!file) return;
+
+  const slotEl = document.getElementById(`photo-slot-${pose}`);
+  if (!slotEl) return;
+
+  // Show loading in the slot
+  slotEl.innerHTML = `<div class="photo-loading"><div class="spinner"></div><div>Compressing...</div></div>`;
+
+  try {
+    const base64 = await compressImage(file, 800, 0.7);
+
+    // Show preview immediately
+    slotEl.innerHTML = `
+      <div class="photo-preview">
+        <img src="${base64}" alt="${pose}">
+        <button class="photo-retake" onclick="retakePhoto('${pose}')">Retake</button>
+      </div>
+      <div class="photo-loading" id="photo-analysis-loading-${pose}">
+        <div class="spinner"></div>
+        <div>Your AI Coach is analyzing your photo...</div>
+      </div>`;
+
+    // Upload to server
+    const res = await fetch('/api/photos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo_data: base64, pose: pose })
+    });
+    const result = await res.json();
+
+    // Cache the result
+    _photosCache = null; // invalidate cache so next load is fresh
+    _photoImagesCache[result.id] = base64;
+
+    // Show analysis
+    const loadingEl = document.getElementById(`photo-analysis-loading-${pose}`);
+    if (loadingEl) {
+      if (result.analysis) {
+        loadingEl.outerHTML = `<div class="photo-analysis">
+          <div class="photo-analysis-label">AI Coach Analysis</div>
+          ${result.analysis}
+        </div>`;
+      } else {
+        loadingEl.remove();
       }
     }
-  ];
+  } catch (e) {
+    console.error('Photo upload failed:', e);
+    slotEl.innerHTML = `<div style="color:var(--run-hiit);font-size:14px;padding:10px">Upload failed. Tap to retry.</div>`;
+  }
+}
 
-  for (const p of patterns) {
-    for (const k of p.keys) {
-      if (t.includes(k)) {
-        return typeof p.resp === 'function' ? p.resp() : p.resp;
+function retakePhoto(pose) {
+  const slotEl = document.getElementById(`photo-slot-${pose}`);
+  if (!slotEl) return;
+  slotEl.innerHTML = renderPhotoUploadButton(pose);
+}
+
+function renderPhotoUploadButton(pose) {
+  return `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+    <div class="photo-icon">&#128247;</div>
+    <div>Tap to capture</div>
+    <input type="file" accept="image/*" capture="environment" onchange="handlePhotoCapture('${pose}', this)">
+  </div>`;
+}
+
+async function saveMeasurements() {
+  const weightEl = document.getElementById('sunday-weight');
+  const waistEl = document.getElementById('sunday-waist');
+  const notesEl = document.getElementById('sunday-measure-notes');
+  const btn = document.getElementById('btn-save-measurements');
+
+  const body = {
+    date: todayStr(),
+    weight: weightEl ? parseFloat(weightEl.value) || null : null,
+    waist: waistEl ? parseFloat(waistEl.value) || null : null,
+    notes: notesEl ? notesEl.value : ''
+  };
+
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+
+  try {
+    await fetch('/api/measurements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    btn.textContent = 'Saved!';
+    btn.classList.add('saved');
+    setTimeout(() => {
+      btn.textContent = 'Save Measurements';
+      btn.disabled = false;
+      btn.classList.remove('saved');
+    }, 2000);
+  } catch (e) {
+    console.error('Save measurements failed:', e);
+    btn.textContent = 'Failed - Retry';
+    btn.disabled = false;
+  }
+}
+
+function togglePhotoCompare() {
+  _sundayCompareOpen = !_sundayCompareOpen;
+  const btn = document.getElementById('photo-compare-toggle-btn');
+  const grid = document.getElementById('photo-compare-grid');
+  if (btn) btn.classList.toggle('active', _sundayCompareOpen);
+  if (grid) grid.classList.toggle('visible', _sundayCompareOpen);
+}
+
+async function renderSundaySection(dayData) {
+  if (!isSunday(dayData)) return '';
+
+  const bw = getTodayBodyweight();
+  const photos = await loadPhotos();
+  const currentWeekNum = currentWeek;
+
+  // Get this week's and last week's photos
+  const thisWeekPhotos = photos.filter(p => p.week === currentWeekNum);
+  const lastWeekPhotos = photos.filter(p => p.week === currentWeekNum - 1);
+
+  const poses = ['front', 'side', 'back'];
+
+  // Build photo slots
+  let photoSlotsHtml = '';
+  for (const pose of poses) {
+    const existing = thisWeekPhotos.find(p => p.pose === pose);
+    let slotContent;
+    if (existing && existing.has_photo) {
+      // We'll load the image async and fill it in
+      slotContent = `<div class="photo-loading"><div class="spinner"></div></div>`;
+    } else {
+      slotContent = renderPhotoUploadButton(pose);
+    }
+    let analysisHtml = '';
+    if (existing && existing.analysis) {
+      analysisHtml = `<div class="photo-analysis">
+        <div class="photo-analysis-label">AI Coach Analysis</div>
+        ${existing.analysis}
+      </div>`;
+    }
+    photoSlotsHtml += `<div class="photo-slot">
+      <div class="photo-slot-label">${pose}</div>
+      <div id="photo-slot-${pose}">${slotContent}</div>
+      ${analysisHtml}
+    </div>`;
+  }
+
+  // Build comparison section
+  let compareHtml = '';
+  if (lastWeekPhotos.length > 0) {
+    compareHtml = `<div class="photo-compare">
+      <button class="photo-compare-toggle${_sundayCompareOpen ? ' active' : ''}" id="photo-compare-toggle-btn" onclick="togglePhotoCompare()">
+        Compare with Last Week
+      </button>
+      <div class="photo-compare-grid${_sundayCompareOpen ? ' visible' : ''}" id="photo-compare-grid">
+      </div>
+    </div>`;
+  }
+
+  const html = `<div class="sunday-section">
+    <h3>Weekly Measurement &amp; Photos</h3>
+    <div class="sunday-subtitle">Sunday is reflection day. Track your progress and let your AI Coach assess your physique changes.</div>
+
+    <div class="measurement-form">
+      <label>
+        <span>Body Weight (lb)</span>
+        <input type="number" id="sunday-weight" inputmode="decimal" step="0.1" placeholder="e.g. 185.5" value="${bw}">
+      </label>
+      <label>
+        <span>Waist (inches)</span>
+        <input type="number" id="sunday-waist" inputmode="decimal" step="0.1" placeholder="e.g. 34.0">
+      </label>
+      <button class="btn-save-measurements" id="btn-save-measurements" onclick="saveMeasurements()">Save Measurements</button>
+    </div>
+
+    <h3 style="margin-top:20px">Progress Photos</h3>
+    <div class="photo-grid">
+      ${photoSlotsHtml}
+    </div>
+    ${compareHtml}
+  </div>`;
+
+  return html;
+}
+
+async function loadSundayPhotoPreviews() {
+  const photos = await loadPhotos();
+  const thisWeekPhotos = photos.filter(p => p.week === currentWeek);
+  const lastWeekPhotos = photos.filter(p => p.week === currentWeek - 1);
+  const poses = ['front', 'side', 'back'];
+
+  // Load this week's existing photos into their slots
+  for (const pose of poses) {
+    const existing = thisWeekPhotos.find(p => p.pose === pose);
+    if (existing && existing.has_photo) {
+      const imgData = await loadPhotoImage(existing.id);
+      const slotEl = document.getElementById(`photo-slot-${pose}`);
+      if (slotEl && imgData) {
+        slotEl.innerHTML = `<div class="photo-preview">
+          <img src="${imgData}" alt="${pose}">
+          <button class="photo-retake" onclick="retakePhoto('${pose}')">Retake</button>
+        </div>`;
       }
     }
   }
 
-  let fallback = 'Noted. Here\'s the deal: stick to today\'s plan. ';
-  if (isLiftDay) {
-    fallback += `You've got ${d.exercises.length} exercises to knock out. Focus on controlled reps and full range of motion. `;
+  // Load comparison images if compare grid exists
+  const compareGrid = document.getElementById('photo-compare-grid');
+  if (compareGrid && lastWeekPhotos.length > 0) {
+    let compareHtml = '';
+    for (const pose of poses) {
+      const lastPhoto = lastWeekPhotos.find(p => p.pose === pose);
+      const thisPhoto = thisWeekPhotos.find(p => p.pose === pose);
+      if (lastPhoto && lastPhoto.has_photo) {
+        const lastImg = await loadPhotoImage(lastPhoto.id);
+        let thisImg = null;
+        if (thisPhoto && thisPhoto.has_photo) {
+          thisImg = await loadPhotoImage(thisPhoto.id);
+        }
+        if (lastImg) {
+          compareHtml += `<div class="photo-compare-col">
+            <div class="compare-label">Wk ${currentWeek - 1} ${pose}</div>
+            <img src="${lastImg}" alt="Week ${currentWeek - 1} ${pose}">
+          </div>`;
+          if (thisImg) {
+            compareHtml += `<div class="photo-compare-col">
+              <div class="compare-label">Wk ${currentWeek} ${pose}</div>
+              <img src="${thisImg}" alt="Week ${currentWeek} ${pose}">
+            </div>`;
+          }
+        }
+      }
+    }
+    if (compareHtml) {
+      compareGrid.innerHTML = compareHtml;
+    } else {
+      compareGrid.innerHTML = '<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:10px">No comparison photos available yet.</div>';
+    }
   }
-  fallback += `Run is ${d ? d.run.label + ' for ' + d.run.time : 'on the schedule'}. `;
-  fallback += 'If something feels off, adjust intensity down 10-15% but finish the session. Showing up is 90% of the battle.';
-  return fallback + readinessNote;
 }

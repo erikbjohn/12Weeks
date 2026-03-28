@@ -387,6 +387,62 @@ SUPPLEMENTS = [
 ]
 
 
+# ─── TRAVEL BODYWEIGHT WORKOUTS ─────────────────────────────────────────────
+# When no gym is available, swap the day's workout for bodyweight equivalents
+
+TRAVEL_WORKOUTS = {
+    "upper": {
+        "liftName": "Travel - Upper Body (Bodyweight)",
+        "exercises": [
+            {"name": "Push-Ups", "sets": "4x15-20", "rest": "60s", "note": "Slow eccentric, full ROM"},
+            {"name": "Diamond Push-Ups", "sets": "3x10-12", "rest": "60s", "note": "Hands together, elbows tight"},
+            {"name": "Pike Push-Ups", "sets": "3x10", "rest": "60s", "note": "Hips high, shoulders are the prime mover"},
+            {"name": "Inverted Row (table/ledge)", "sets": "4x12", "rest": "60s", "note": "Find a sturdy table, bar, or ledge. Pull chest to it."},
+            {"name": "Band Pull-Aparts", "sets": "3x20", "rest": "45s", "note": "If you have a band. Skip if not."},
+            {"name": "Plank Shoulder Taps", "sets": "3x20", "rest": "45s", "note": "Controlled, don't rotate hips"},
+            {"name": "Tricep Dips (chair/bench)", "sets": "3x15", "rest": "45s", "note": "Feet extended, go deep"},
+            {"name": "Isometric Curl Hold", "sets": "3x30s", "rest": "45s", "note": "Towel over foot, curl and hold at 90 deg"},
+        ],
+        "notes": "No gym? No problem. Focus on tempo: 3 seconds down, 1 second up. The slow eccentric makes bodyweight work.",
+    },
+    "lower": {
+        "liftName": "Travel - Lower Body (Bodyweight)",
+        "exercises": [
+            {"name": "Pistol Squat (or assisted)", "sets": "4x6-8 each", "rest": "90s", "note": "Hold a doorframe or chair for balance if needed"},
+            {"name": "Bulgarian Split Squat", "sets": "4x12 each", "rest": "60s", "note": "Rear foot on bed/chair. Add backpack for weight."},
+            {"name": "Single-Leg Romanian Deadlift", "sets": "3x10 each", "rest": "60s", "note": "Slow, feel the hamstring stretch. Hold anything for weight."},
+            {"name": "Jump Squats", "sets": "3x15", "rest": "60s", "note": "Explosive up, soft landing. Power work."},
+            {"name": "Walking Lunges", "sets": "3x12 each", "rest": "60s", "note": "Long stride, upright torso"},
+            {"name": "Glute Bridge (single leg)", "sets": "3x15 each", "rest": "45s", "note": "Shoulders on bed/couch, squeeze hard at top"},
+            {"name": "Calf Raises (step)", "sets": "4x20", "rest": "45s", "note": "Find a step. Full stretch at bottom, squeeze at top."},
+            {"name": "Wall Sit", "sets": "3x45s", "rest": "60s", "note": "Thighs parallel to floor. Suffer."},
+        ],
+        "notes": "Go slow on single-leg work. The balance challenge IS the load. Add a backpack with books/water bottles for extra resistance.",
+    },
+    "full": {
+        "liftName": "Travel - Full Body (Bodyweight)",
+        "exercises": [
+            {"name": "Burpees", "sets": "4x10", "rest": "60s", "note": "Full push-up at bottom, jump at top"},
+            {"name": "Push-Ups", "sets": "3x15-20", "rest": "60s", "note": "Controlled tempo"},
+            {"name": "Jump Squats", "sets": "3x15", "rest": "60s", "note": "Explosive"},
+            {"name": "Inverted Row (table/ledge)", "sets": "3x12", "rest": "60s", "note": "Find something to pull on"},
+            {"name": "Walking Lunges", "sets": "3x12 each", "rest": "60s", "note": "Weighted if possible"},
+            {"name": "Pike Push-Ups", "sets": "3x10", "rest": "60s", "note": "Shoulder focus"},
+            {"name": "Single-Leg RDL", "sets": "3x10 each", "rest": "60s", "note": "Balance + hamstrings"},
+            {"name": "Plank", "sets": "3x60s", "rest": "45s", "note": "Brace hard, breathe"},
+        ],
+        "notes": "Full body travel circuit. Move with intent. Rest periods are short - keep your heart rate up. This doubles as cardio.",
+    },
+    "rest": None,
+}
+
+# Map day of week to travel workout type
+TRAVEL_DAY_MAP = {
+    "Mon": "upper", "Tue": "lower", "Wed": "full",
+    "Thu": "lower", "Fri": "upper", "Sat": "full", "Sun": "rest",
+}
+
+
 PHASES = {
     1: {
         "label": "Phase 1 - Wks 1-4",

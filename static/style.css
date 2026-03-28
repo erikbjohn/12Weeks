@@ -7,7 +7,7 @@
   --border: #2a2e2c;
   --border2: #353a38;
   --text: #e8ede9;
-  --muted: #7a8a7d;
+  --muted: #9aaa9d;
   --dim: #4a5549;
   --lift: #4ade80;
   --lift-bg: #0d2218;
@@ -42,8 +42,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.7;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
@@ -56,13 +56,13 @@ header {
 
 header h1 {
   font-family: 'Inter', sans-serif;
-  font-size: 1.4rem;
+  font-size: 1.6rem;
   font-weight: 800;
   letter-spacing: -0.01em;
 }
 
 header .subtitle {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   font-family: 'DM Mono', monospace;
   margin-top: 2px;
@@ -79,10 +79,10 @@ header .subtitle {
   background: var(--surface2);
   border: 1px solid var(--border2);
   color: var(--muted);
-  padding: 8px 16px;
+  padding: 10px 20px;
   border-radius: 8px;
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   width: 100%;
   transition: all .15s;
@@ -103,13 +103,13 @@ header .subtitle {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   text-align: center;
 }
 
 .garmin-metric .gm-label {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--muted);
@@ -123,8 +123,8 @@ header .subtitle {
 }
 
 .garmin-metric .gm-sub {
-  font-size: 9px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
 }
 
@@ -139,9 +139,9 @@ header .subtitle {
 
 .readiness-inner {
   border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.6;
+  padding: 12px 15px;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .readiness-alert.risk-low .readiness-inner {
@@ -171,17 +171,17 @@ header .subtitle {
 
 .readiness-flags {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: 13px;
   opacity: 0.85;
 }
 
 /* ─── PHASE BANNER ─── */
 .phase-banner {
-  padding: 8px 1rem;
+  padding: 10px 1rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   display: flex;
   gap: 12px;
@@ -204,10 +204,10 @@ header .subtitle {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--muted);
-  padding: 6px 14px;
+  padding: 8px 18px;
   border-radius: 6px;
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   transition: all .15s;
   white-space: nowrap;
@@ -231,9 +231,9 @@ header .subtitle {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted);
-  padding: 8px 12px;
+  padding: 10px 15px;
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   transition: all .15s;
   margin-bottom: -1px;
@@ -250,8 +250,8 @@ header .subtitle {
 .day-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
-  padding: 1rem;
+  gap: 10px;
+  padding: 1.25rem;
 }
 
 .day-card {
@@ -273,7 +273,7 @@ header .subtitle {
 .day-card.completed .day-check { color: var(--accent); }
 
 .day-card-left {
-  padding: 10px 12px;
+  padding: 12px 15px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -284,17 +284,17 @@ header .subtitle {
 
 .day-abbr {
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .day-card-center {
-  padding: 8px 12px;
+  padding: 10px 15px;
   min-width: 0;
 }
 
 .day-lift-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
@@ -310,10 +310,10 @@ header .subtitle {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 13px;
   font-family: 'DM Mono', monospace;
   border-radius: 4px;
-  padding: 2px 7px;
+  padding: 3px 9px;
 }
 
 .run-z2 { background: var(--run-z2-bg); color: var(--run-z2); border: 1px solid var(--run-z2-border); }
@@ -324,10 +324,10 @@ header .subtitle {
 .run-min { background: var(--run-min-bg); color: var(--run-min); border: 1px solid var(--run-min-border); }
 
 .day-card-right {
-  padding: 10px 12px;
+  padding: 12px 15px;
   display: flex;
   align-items: center;
-  color: var(--dim);
+  color: var(--muted);
   font-size: 18px;
 }
 
@@ -347,7 +347,7 @@ header .subtitle {
 }
 
 .detail-header {
-  padding: 1rem;
+  padding: 1.25rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -366,14 +366,14 @@ header .subtitle {
 
 .meta-chip {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  padding: 3px 9px;
+  font-size: 12px;
+  padding: 4px 11px;
   border-radius: 4px;
   border: 1px solid;
 }
 
 .detail-section {
-  padding: 1rem;
+  padding: 1.25rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -381,7 +381,7 @@ header .subtitle {
 
 .detail-section h3 {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .1em;
   color: var(--muted);
@@ -393,7 +393,7 @@ header .subtitle {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
   gap: 8px;
 }
@@ -403,20 +403,20 @@ header .subtitle {
 .ex-info { flex: 1; min-width: 0; }
 
 .ex-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text);
 }
 
 .ex-note {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   margin-top: 2px;
 }
 
 .ex-sets {
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--accent);
   white-space: nowrap;
   flex-shrink: 0;
@@ -453,21 +453,21 @@ header .subtitle {
 
 .run-detail-box .rdl {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
 }
 
 .run-detail-box .rdt {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   margin-bottom: 4px;
 }
 
 .run-detail-box .rdd {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 /* ─── TIMING ─── */
@@ -479,13 +479,13 @@ header .subtitle {
 
 .timing-time {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--accent);
   min-width: 52px;
 }
 
 .timing-desc {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -494,8 +494,8 @@ header .subtitle {
   background: var(--lift-bg);
   border: 1px solid var(--lift-border);
   border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 11px;
+  padding: 12px 15px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.7;
   margin-top: 10px;
@@ -538,9 +538,9 @@ header .subtitle {
   background: var(--surface2);
   border: 1px solid var(--border2);
   color: var(--text);
-  padding: 10px 12px;
+  padding: 12px 15px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   font-family: 'Inter', sans-serif;
   margin-bottom: 10px;
   outline: none;
@@ -555,11 +555,11 @@ header .subtitle {
 }
 
 .btn {
-  padding: 10px 20px;
+  padding: 12px 24px;
   border-radius: 8px;
   border: 1px solid;
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   transition: all .15s;
   flex: 1;
@@ -584,7 +584,7 @@ header .subtitle {
 
 .modal-error {
   color: var(--run-hiit);
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 8px;
   display: none;
 }
@@ -599,7 +599,7 @@ header .subtitle {
 
 .garmin-header .gh-label {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: .08em;
@@ -608,9 +608,9 @@ header .subtitle {
 .garmin-disconnect {
   background: none;
   border: none;
-  color: var(--dim);
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -618,11 +618,11 @@ header .subtitle {
 
 /* ─── FOOTER ─── */
 footer {
-  padding: 1.25rem 1rem;
+  padding: 1.5rem 1rem;
   border-top: 1px solid var(--border);
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  color: var(--dim);
+  font-size: 13px;
+  color: var(--muted);
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
@@ -639,19 +639,19 @@ footer {
 .sleep-item {
   background: var(--surface2);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   text-align: center;
 }
 
 .sleep-item .si-label {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
   text-transform: uppercase;
 }
 
 .sleep-item .si-value {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 
@@ -667,13 +667,13 @@ footer {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 6px;
+  padding: 10px 8px;
   text-align: center;
 }
 
 .garmin-day-stats .gds-label {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .06em;
   color: var(--muted);
@@ -687,14 +687,14 @@ footer {
 }
 
 .garmin-day-stats .gds-sub {
-  font-size: 9px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
 }
 
 .garmin-nudge {
-  font-size: 11px;
-  color: var(--dim);
+  font-size: 13px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
   padding: 8px 0;
   text-align: center;
@@ -705,12 +705,12 @@ footer {
   background: var(--surface2);
   border: 1px solid var(--border2);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 15px 18px;
 }
 
 .daily-goals .dg-title {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--accent);
@@ -718,7 +718,7 @@ footer {
 }
 
 .daily-goals .dg-item {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.7;
   padding-left: 12px;
@@ -736,9 +736,9 @@ footer {
 /* ─── ADJUSTMENT BANNER ─── */
 .adjustment-banner {
   border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 12px;
-  line-height: 1.6;
+  padding: 12px 18px;
+  font-size: 14px;
+  line-height: 1.7;
   margin-top: 10px;
 }
 
@@ -756,7 +756,7 @@ footer {
 
 .adjustment-banner .ab-label {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   margin-bottom: 4px;
@@ -781,10 +781,10 @@ footer {
 
 .coach-message,
 .user-message {
-  padding: 10px 14px;
+  padding: 12px 18px;
   border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.7;
   max-width: 90%;
 }
 
@@ -813,9 +813,9 @@ footer {
   background: var(--surface2);
   border: 1px solid var(--border2);
   color: var(--text);
-  padding: 10px 12px;
+  padding: 12px 15px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 15px;
   font-family: 'Inter', sans-serif;
   outline: none;
   transition: border-color .15s;
@@ -826,17 +826,17 @@ footer {
 }
 
 .coach-input input::placeholder {
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .coach-input button {
   background: var(--lift-bg);
   border: 1px solid var(--lift-border);
   color: var(--accent);
-  padding: 10px 16px;
+  padding: 12px 20px;
   border-radius: 8px;
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   transition: all .15s;
   white-space: nowrap;
@@ -879,7 +879,7 @@ footer {
 }
 
 .baseline-card .baseline-desc {
-  font-size: 12px;
+  font-size: 15px;
   color: var(--muted);
   line-height: 1.7;
   margin-bottom: 1.5rem;
@@ -906,15 +906,15 @@ footer {
 }
 
 .baseline-card .baseline-hint {
-  font-size: 11px;
-  color: var(--dim);
+  font-size: 13px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
   margin-bottom: 1rem;
 }
 
 .baseline-card .baseline-calc {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--accent);
   background: var(--lift-bg);
   border: 1px solid var(--lift-border);
@@ -926,13 +926,13 @@ footer {
 
 .baseline-summary-row .bsr-detail {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .baseline-summary-row .bsr-result {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -945,7 +945,7 @@ footer {
 }
 
 .baseline-card .baseline-inputs label {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   display: flex;
   flex-direction: column;
@@ -990,7 +990,7 @@ footer {
 
 .baseline-progress-text {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin-bottom: 0.75rem;
 }
@@ -1005,9 +1005,9 @@ footer {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
   gap: 2px 8px;
 }
 
@@ -1035,13 +1035,13 @@ footer {
 }
 
 .weight-input {
-  width: 62px;
+  width: 68px;
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 4px 6px;
+  padding: 5px 8px;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 14px;
   font-family: 'DM Mono', monospace;
   text-align: center;
   outline: none;
@@ -1057,14 +1057,14 @@ footer {
 .weight-input:focus { border-color: var(--accent); }
 
 .weight-last {
-  font-size: 9px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
   white-space: nowrap;
 }
 
 .weight-suggestion {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--run-tempo);
   font-family: 'DM Mono', monospace;
   white-space: nowrap;
@@ -1082,7 +1082,7 @@ footer {
 }
 
 .rpe-label {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   font-family: 'DM Mono', monospace;
   white-space: nowrap;
@@ -1090,9 +1090,9 @@ footer {
 }
 
 .rpe-btn {
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 13px;
   font-family: 'DM Mono', monospace;
   cursor: pointer;
   border: 1px solid;
@@ -1138,9 +1138,9 @@ footer {
   background: none;
   border: none;
   color: var(--muted);
-  padding: 8px 12px;
+  padding: 10px 15px;
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   cursor: pointer;
@@ -1170,8 +1170,8 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
-  font-size: 12px;
+  padding: 5px 0;
+  font-size: 14px;
 }
 
 .ws-row .ws-name { color: var(--muted); }
@@ -1183,15 +1183,15 @@ footer {
   gap: 4px;
 }
 
-.ws-trend-up { color: var(--lift); font-size: 11px; }
-.ws-trend-down { color: var(--run-hiit); font-size: 11px; }
-.ws-trend-same { color: var(--dim); font-size: 11px; }
+.ws-trend-up { color: var(--lift); font-size: 13px; }
+.ws-trend-down { color: var(--run-hiit); font-size: 13px; }
+.ws-trend-same { color: var(--muted); font-size: 13px; }
 
 /* ─── SETTINGS BUTTON ─── */
 .settings-btn {
   background: none;
   border: none;
-  color: var(--dim);
+  color: var(--muted);
   font-size: 18px;
   cursor: pointer;
   padding: 4px;
@@ -1226,8 +1226,8 @@ footer {
 .meal-item {
   position: relative;
   display: flex;
-  gap: 12px;
-  padding: 10px 0;
+  gap: 15px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
   align-items: flex-start;
 }
@@ -1238,7 +1238,7 @@ footer {
 .meal-item.optional .meal-name::after {
   content: 'OPTIONAL';
   font-family: 'DM Mono', monospace;
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: .06em;
   color: var(--run-tempo);
   border: 1px solid var(--run-tempo-border);
@@ -1275,7 +1275,7 @@ footer {
 
 .meal-time {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--accent);
   min-width: 52px;
   flex-shrink: 0;
@@ -1288,7 +1288,7 @@ footer {
 }
 
 .meal-name {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text);
   margin-bottom: 4px;
@@ -1304,7 +1304,7 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   gap: 8px;
 }
@@ -1319,8 +1319,8 @@ footer {
 
 .meal-food-portion {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  color: var(--dim);
+  font-size: 12px;
+  color: var(--muted);
   flex-shrink: 0;
 }
 
@@ -1357,7 +1357,7 @@ footer {
   gap: 8px;
   margin-top: 4px;
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .meal-macros span {
@@ -1382,7 +1382,7 @@ footer {
 
 .meal-totals-title {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--muted);
@@ -1400,7 +1400,7 @@ footer {
 
 .macro-bar-label {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   min-width: 32px;
   flex-shrink: 0;
 }
@@ -1431,7 +1431,7 @@ footer {
 
 .macro-bar-nums {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   min-width: 70px;
   text-align: right;
@@ -1449,12 +1449,12 @@ footer {
 
 .fast-toggle button {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 15px;
   border: none;
   background: var(--surface2);
   color: var(--muted);
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   transition: all .15s;
 }
@@ -1473,8 +1473,8 @@ footer {
 }
 
 .meal-plan-note {
-  font-size: 11px;
-  color: var(--dim);
+  font-size: 13px;
+  color: var(--muted);
   font-family: 'DM Mono', monospace;
   padding: 6px 0;
   line-height: 1.5;
@@ -1482,7 +1482,7 @@ footer {
 
 .meal-multiplier {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--run-tempo);
   margin-left: 4px;
 }
@@ -1544,7 +1544,7 @@ footer {
 
 .weighin-label {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--muted);
@@ -1580,8 +1580,8 @@ footer {
 .weighin-input:focus { border-color: var(--accent); }
 
 .weighin-log-btn {
-  padding: 6px 12px !important;
-  font-size: 11px !important;
+  padding: 8px 15px !important;
+  font-size: 13px !important;
 }
 
 .weighin-today-val {
@@ -1594,7 +1594,7 @@ footer {
 .weighin-edit-btn {
   background: none;
   border: none;
-  color: var(--dim);
+  color: var(--muted);
   font-size: 14px;
   cursor: pointer;
   padding: 2px 4px;
@@ -1611,13 +1611,13 @@ footer {
 
 .weighin-avg {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 
 .weighin-trend {
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -1652,7 +1652,7 @@ footer {
 
 .supplement-label {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--muted);
@@ -1661,10 +1661,10 @@ footer {
 }
 
 .supplement-pill {
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 12px;
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 13px;
   border: 1px solid var(--border2);
   background: var(--surface2);
   color: var(--muted);
@@ -1715,7 +1715,7 @@ footer {
 
 .warmup-toggle h3 {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .1em;
   color: inherit;
@@ -1753,14 +1753,14 @@ footer {
 }
 
 .warmup-step-name {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text);
   flex: 1;
 }
 
 .warmup-step-duration {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent);
   background: var(--lift-bg);
   border: 1px solid var(--lift-border);
@@ -1771,8 +1771,8 @@ footer {
 
 .warmup-step-note {
   width: 100%;
-  font-size: 10px;
-  color: var(--dim);
+  font-size: 13px;
+  color: var(--muted);
   padding-left: 0;
 }
 
@@ -1799,7 +1799,7 @@ footer {
 }
 
 .checkin-slider-row label {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   min-width: 80px;
   flex-shrink: 0;
@@ -1837,7 +1837,7 @@ footer {
 
 .checkin-val {
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text);
   min-width: 32px;
   text-align: right;
@@ -1848,9 +1848,9 @@ footer {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-family: 'DM Mono', monospace;
   text-align: center;
   outline: none;
@@ -1863,9 +1863,9 @@ footer {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-family: 'Inter', sans-serif;
   outline: none;
   resize: vertical;
@@ -1928,7 +1928,7 @@ footer {
 
 .progress-chart-section h3 {
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .1em;
   color: var(--muted);
@@ -1949,27 +1949,27 @@ footer {
   text-align: center;
   color: var(--muted);
   font-family: 'DM Mono', monospace;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .progress-checkin-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .progress-checkin-row .pc-week {
   font-family: 'DM Mono', monospace;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .progress-checkin-row .pc-score {
   font-family: 'DM Mono', monospace;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .progress-btn {
@@ -2005,9 +2005,9 @@ footer {
   background: none;
   border: none;
   color: var(--muted);
-  padding: 10px 16px;
+  padding: 12px 20px;
   font-family: 'DM Mono', monospace;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   text-align: left;
   border-radius: 6px;
@@ -2035,9 +2035,9 @@ footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 15px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--run-tempo);
 }
 
@@ -2047,8 +2047,408 @@ footer {
 }
 
 .migration-actions .btn {
-  padding: 6px 14px;
-  font-size: 10px;
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
+/* ─── MORNING CHECK-IN OVERLAY ─── */
+.morning-checkin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+  padding: 1rem;
+  animation: fadeIn .3s ease;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.morning-checkin-card {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 14px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.morning-checkin-card h2 {
+  font-family: 'Inter', sans-serif;
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin-bottom: 0.25rem;
+  text-align: center;
+}
+
+.morning-checkin-card .mc-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 1.25rem;
+  font-family: 'DM Mono', monospace;
+}
+
+.mc-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.mc-slider-row label {
+  font-size: 14px;
+  color: var(--muted);
+  min-width: 80px;
+  flex-shrink: 0;
+  font-family: 'DM Mono', monospace;
+}
+
+.mc-slider-row .mc-range-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mc-slider-row .mc-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+}
+
+.mc-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--border2);
+  border-radius: 3px;
+  outline: none;
+  accent-color: var(--accent);
+}
+
+.mc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 6px rgba(74,222,128,0.3);
+}
+
+.mc-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--surface);
+}
+
+.mc-slider-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.mc-textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 15px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+.mc-textarea:focus { border-color: var(--accent); }
+
+.mc-textarea-label {
+  font-size: 14px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  margin-bottom: 4px;
+}
+
+/* ─── CHECK-IN SUMMARY BAR ─── */
+.checkin-summary-bar {
+  padding: 8px 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: none;
+}
+
+.checkin-summary-bar.visible {
+  display: block;
+}
+
+.checkin-summary-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.checkin-summary-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.checkin-score {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.checkin-score.score-good {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--lift);
+}
+
+.checkin-score.score-mid {
+  background: var(--run-tempo-bg);
+  border: 1px solid var(--run-tempo-border);
+  color: var(--run-tempo);
+}
+
+.checkin-score.score-bad {
+  background: var(--run-hiit-bg);
+  border: 1px solid var(--run-hiit-border);
+  color: var(--run-hiit);
+}
+
+/* ─── CHAT FAB ─── */
+.chat-fab {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--lift-bg);
+  border: 2px solid var(--lift-border);
+  color: var(--accent);
+  font-size: 24px;
+  cursor: pointer;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  transition: all .2s;
+}
+
+.chat-fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+
+.chat-fab.pulse {
+  animation: fabPulse 2s ease-in-out infinite;
+}
+
+@keyframes fabPulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+  50% { box-shadow: 0 4px 16px rgba(74,222,128,0.4), 0 0 0 8px rgba(74,222,128,0.08); }
+}
+
+/* ─── CHAT OVERLAY ─── */
+.chat-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 160;
+  display: none;
+  flex-direction: column;
+}
+
+.chat-overlay.visible {
+  display: flex;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.chat-header h2 {
+  font-family: 'Inter', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.chat-header .chat-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+
+.chat-header .chat-close:hover { color: var(--text); }
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-bubble {
+  padding: 12px 18px;
+  border-radius: 14px;
+  font-size: 15px;
+  line-height: 1.7;
+  max-width: 85%;
+  word-wrap: break-word;
+}
+
+.chat-bubble.coach {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--text);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-bubble.user {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-timestamp {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.chat-timestamp.ts-coach { align-self: flex-start; }
+.chat-timestamp.ts-user { align-self: flex-end; }
+
+.chat-typing {
+  align-self: flex-start;
+  padding: 10px 18px;
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  border-radius: 14px;
+  border-bottom-left-radius: 4px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.chat-typing .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.chat-typing .dot:nth-child(2) { animation-delay: 0.2s; }
+.chat-typing .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.chat-input-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.chat-input-bar input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 12px 18px;
+  border-radius: 24px;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.chat-input-bar input:focus { border-color: var(--accent); }
+
+.chat-input-bar input::placeholder { color: var(--muted); }
+
+.chat-input-bar button {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--accent);
+  padding: 12px 22px;
+  border-radius: 24px;
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chat-input-bar button:hover { background: var(--lift-border); }
+
+/* ─── TRAVEL BANNER ─── */
+.travel-banner {
+  padding: 12px 1rem;
+  background: var(--run-tempo-bg);
+  border-bottom: 1px solid var(--run-tempo-border);
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  color: var(--run-tempo);
+  text-align: center;
+  display: none;
+}
+
+.travel-banner.visible {
+  display: block;
 }
 
 /* ─── RESPONSIVE ADDITIONS ─── */
@@ -2058,4 +2458,305 @@ footer {
   .progress-header { padding: 1.25rem 2rem; }
   .progress-content { padding: 1rem 2rem; }
   .migration-banner { padding: 10px 2rem; }
+  .checkin-summary-bar { padding: 8px 2rem; }
+  .travel-banner { padding: 10px 2rem; }
+  .chat-input-bar { padding: 10px 2rem; }
+}
+
+@media (min-width: 768px) {
+  .chat-overlay {
+    left: auto;
+    right: 0;
+    width: 420px;
+    border-left: 1px solid var(--border);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.3);
+  }
+}
+
+/* ─── SUNDAY MEASUREMENT & PHOTOS ─── */
+.sunday-section {
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(74,222,128,0.04) 0%, rgba(96,165,250,0.04) 100%);
+  border-left: 3px solid var(--accent);
+}
+
+.sunday-section h3 {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.sunday-section .sunday-subtitle {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.measurement-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.measurement-form label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.measurement-form label span {
+  font-size: 13px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+}
+
+.measurement-form input[type="number"] {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 16px;
+  font-family: 'Inter', sans-serif;
+  width: 100%;
+  -webkit-appearance: none;
+}
+
+.measurement-form input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.measurement-form .btn-save-measurements {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--lift);
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+  text-align: center;
+}
+
+.measurement-form .btn-save-measurements:hover {
+  background: var(--lift-border);
+}
+
+.measurement-form .btn-save-measurements.saved {
+  background: var(--lift-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.photo-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.photo-slot .photo-slot-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.photo-slot .photo-upload-btn {
+  width: 100%;
+  aspect-ratio: 3/4;
+  background: var(--surface2);
+  border: 2px dashed var(--border2);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .15s;
+  color: var(--muted);
+  font-size: 14px;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.photo-slot .photo-upload-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.photo-slot .photo-upload-btn .photo-icon {
+  font-size: 28px;
+}
+
+.photo-slot .photo-upload-btn input[type="file"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.photo-preview {
+  width: 100%;
+  aspect-ratio: 3/4;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border2);
+  position: relative;
+}
+
+.photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-preview .photo-retake {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0,0,0,0.7);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.photo-analysis {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.photo-analysis .photo-analysis-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.photo-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.photo-loading .spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.photo-compare {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.photo-compare h4 {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.photo-compare-toggle {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+  margin-bottom: 12px;
+}
+
+.photo-compare-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.photo-compare-toggle.active {
+  background: var(--lift-bg);
+  border-color: var(--lift-border);
+  color: var(--accent);
+}
+
+.photo-compare-grid {
+  display: none;
+  gap: 12px;
+}
+
+.photo-compare-grid.visible {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.photo-compare-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.photo-compare-col .compare-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.photo-compare-col img {
+  width: 100%;
+  aspect-ratio: 3/4;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border2);
 }

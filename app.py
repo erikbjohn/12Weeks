@@ -4,13 +4,18 @@ import os
 from datetime import date, timedelta, datetime
 from flask import Flask, render_template, jsonify, request, session
 
-from workout_data import get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS
+from workout_data import (
+    get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS,
+    TRAVEL_WORKOUTS, TRAVEL_DAY_MAP,
+)
 from garmin_client import GarminClient
 from overtraining import assess_readiness
+from coach import get_coach_response
 from models import (
     db, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
-    WeeklyCheckIn, SupplementLog,
+    WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
+    ProgressPhoto,
 )
 
 app = Flask(__name__)
@@ -87,6 +92,7 @@ def api_state():
         "current_week": s.current_week,
         "baseline_done": s.baseline_done,
         "start_date": s.start_date.isoformat() if s.start_date else None,
+        "traveling": s.traveling,
     })
 
 
@@ -100,6 +106,8 @@ def api_state_update():
         s.baseline_done = data["baseline_done"]
     if "start_date" in data:
         s.start_date = date.fromisoformat(data["start_date"]) if data["start_date"] else None
+    if "traveling" in data:
+        s.traveling = data["traveling"]
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -534,6 +542,357 @@ def api_progress():
         "measurements": measurements,
         "checkins": checkins,
     })
+
+
+# ─── TRAVEL MODE ────────────────────────────────────────────────────────────
+
+@app.route("/api/travel/workout")
+def api_travel_workout():
+    """Get bodyweight workout for a given day."""
+    day = request.args.get("day", "Mon")
+    workout_type = TRAVEL_DAY_MAP.get(day, "full")
+    if workout_type is None or workout_type not in TRAVEL_WORKOUTS:
+        return jsonify(None)
+    return jsonify(TRAVEL_WORKOUTS[workout_type])
+
+
+# ─── MORNING CHECK-IN ──────────────────────────────────────────────────────
+
+@app.route("/api/morning-checkin")
+def api_morning_checkin():
+    d = request.args.get("date", date.today().isoformat())
+    ci = MorningCheckIn.query.filter_by(log_date=date.fromisoformat(d)).first()
+    if not ci:
+        return jsonify({"exists": False})
+    return jsonify({
+        "exists": True,
+        "date": ci.log_date.isoformat(),
+        "sleep_quality": ci.sleep_quality,
+        "stress_level": ci.stress_level,
+        "soreness": ci.soreness,
+        "mood": ci.mood,
+        "motivation": ci.motivation,
+        "anxiety": ci.anxiety,
+        "notes": ci.notes,
+    })
+
+
+@app.route("/api/morning-checkin", methods=["POST"])
+def api_morning_checkin_save():
+    data = request.get_json()
+    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    ci = MorningCheckIn.query.filter_by(log_date=d).first()
+    if ci:
+        ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
+        ci.stress_level = data.get("stress_level", ci.stress_level)
+        ci.soreness = data.get("soreness", ci.soreness)
+        ci.mood = data.get("mood", ci.mood)
+        ci.motivation = data.get("motivation", ci.motivation)
+        ci.anxiety = data.get("anxiety", ci.anxiety)
+        ci.notes = data.get("notes", ci.notes)
+    else:
+        ci = MorningCheckIn(
+            log_date=d,
+            sleep_quality=data.get("sleep_quality"),
+            stress_level=data.get("stress_level"),
+            soreness=data.get("soreness"),
+            mood=data.get("mood"),
+            motivation=data.get("motivation"),
+            anxiety=data.get("anxiety"),
+            notes=data.get("notes"),
+        )
+        db.session.add(ci)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/morning-checkin/history")
+def api_morning_checkin_history():
+    days = request.args.get("days", 30, type=int)
+    since = date.today() - timedelta(days=days)
+    entries = MorningCheckIn.query.filter(
+        MorningCheckIn.log_date >= since
+    ).order_by(MorningCheckIn.log_date).all()
+    return jsonify([{
+        "date": e.log_date.isoformat(),
+        "sleep_quality": e.sleep_quality,
+        "stress_level": e.stress_level,
+        "soreness": e.soreness,
+        "mood": e.mood,
+        "motivation": e.motivation,
+        "anxiety": e.anxiety,
+        "notes": e.notes,
+    } for e in entries])
+
+
+# ─── AI COACH CHAT ──────────────────────────────────────────────────────────
+
+@app.route("/api/chat/history")
+def api_chat_history():
+    days = request.args.get("days", 7, type=int)
+    since = date.today() - timedelta(days=days)
+    messages = ChatMessage.query.filter(
+        ChatMessage.log_date >= since
+    ).order_by(ChatMessage.created_at).all()
+    return jsonify([{
+        "role": m.role,
+        "content": m.content,
+        "date": m.log_date.isoformat(),
+        "time": m.created_at.strftime("%I:%M %p") if m.created_at else None,
+    } for m in messages])
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    data = request.get_json()
+    user_msg = data.get("message", "").strip()
+    if not user_msg:
+        return jsonify({"error": "Message required"}), 400
+
+    # Save user message
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today())
+    db.session.add(user_chat)
+    db.session.commit()
+
+    # Build context for the AI coach
+    context = _build_coach_context()
+
+    # Get AI response
+    response_text = get_coach_response(user_msg, context)
+
+    # Save assistant message
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today())
+    db.session.add(asst_chat)
+    db.session.commit()
+
+    return jsonify({
+        "response": response_text,
+        "time": asst_chat.created_at.strftime("%I:%M %p") if asst_chat.created_at else None,
+    })
+
+
+def _build_coach_context():
+    """Gather all relevant data for the AI coach."""
+    # Recent morning check-ins
+    since = date.today() - timedelta(days=14)
+    checkins = [{
+        "date": e.log_date.isoformat(),
+        "sleep_quality": e.sleep_quality,
+        "stress_level": e.stress_level,
+        "soreness": e.soreness,
+        "mood": e.mood,
+        "motivation": e.motivation,
+        "anxiety": e.anxiety,
+        "notes": e.notes,
+    } for e in MorningCheckIn.query.filter(
+        MorningCheckIn.log_date >= since
+    ).order_by(MorningCheckIn.log_date).all()]
+
+    # Chat history
+    chat_history = [{
+        "role": m.role,
+        "content": m.content,
+    } for m in ChatMessage.query.filter(
+        ChatMessage.log_date >= since
+    ).order_by(ChatMessage.created_at).all()]
+
+    # Body weight
+    bw_entries = BodyWeight.query.order_by(BodyWeight.log_date).all()
+    bodyweight = []
+    for i, e in enumerate(bw_entries):
+        window = bw_entries[max(0, i - 6):i + 1]
+        avg = sum(w.weight_lbs for w in window) / len(window)
+        bodyweight.append({
+            "date": e.log_date.isoformat(),
+            "weight": e.weight_lbs,
+            "rolling_avg": round(avg, 1),
+        })
+
+    # Garmin data
+    garmin_data = None
+    readiness_data = None
+    if garmin.connected:
+        garmin_data = garmin.get_today_summary()
+        readiness_data = assess_readiness(garmin_data)
+
+    # Current state
+    s = _get_state()
+    week = s.current_week
+    phase = get_phase(week)
+    phase_info = PHASES[phase]
+
+    # Today's workout
+    workouts = get_workouts(week)
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    today_idx = date.today().weekday()  # 0=Mon
+    workout_today = workouts[today_idx] if today_idx < len(workouts) else None
+
+    # Supplements today
+    supps = SupplementLog.query.filter_by(log_date=date.today()).all()
+    supps_taken = {s.supplement_name: s.taken for s in supps}
+
+    return {
+        "checkins": checkins,
+        "chat_history": chat_history,
+        "garmin": garmin_data,
+        "readiness": readiness_data,
+        "bodyweight": bodyweight[-14:],  # last 2 weeks
+        "workout_today": workout_today,
+        "week": week,
+        "phase": phase_info,
+        "supplements_today": {"taken": supps_taken},
+    }
+
+
+# ─── PROGRESS PHOTOS ────────────────────────────────────────────────────────
+
+@app.route("/api/photos")
+def api_photos():
+    """Get all progress photos (metadata only, no image data)."""
+    photos = ProgressPhoto.query.order_by(ProgressPhoto.log_date).all()
+    return jsonify([{
+        "id": p.id,
+        "date": p.log_date.isoformat(),
+        "pose": p.pose,
+        "week": p.week,
+        "analysis": p.analysis,
+        "has_photo": True,
+    } for p in photos])
+
+
+@app.route("/api/photos/<int:photo_id>/image")
+def api_photo_image(photo_id):
+    """Get a specific photo's image data."""
+    p = ProgressPhoto.query.get_or_404(photo_id)
+    return jsonify({"photo_data": p.photo_data})
+
+
+@app.route("/api/photos", methods=["POST"])
+def api_photo_upload():
+    """Upload a progress photo and get AI analysis."""
+    data = request.get_json()
+    photo_b64 = data.get("photo_data")
+    pose = data.get("pose", "front")
+    if not photo_b64:
+        return jsonify({"error": "Photo data required"}), 400
+
+    s = _get_state()
+    week = s.current_week
+
+    # Save photo
+    photo = ProgressPhoto(
+        log_date=date.today(),
+        photo_data=photo_b64,
+        pose=pose,
+        week=week,
+    )
+    db.session.add(photo)
+    db.session.commit()
+
+    # Run AI analysis
+    analysis = _analyze_progress_photo(photo_b64, pose, week)
+    photo.analysis = analysis
+    db.session.commit()
+
+    return jsonify({
+        "id": photo.id,
+        "analysis": analysis,
+        "week": week,
+        "pose": pose,
+    })
+
+
+def _analyze_progress_photo(photo_b64, pose, current_week):
+    """Use Claude vision to analyze a progress photo."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "Photo saved. Add ANTHROPIC_API_KEY to enable AI analysis."
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+    except Exception:
+        return "Photo saved. AI analysis unavailable."
+
+    # Get previous photos for comparison
+    prev_photos = ProgressPhoto.query.filter(
+        ProgressPhoto.pose == pose,
+        ProgressPhoto.log_date < date.today(),
+    ).order_by(ProgressPhoto.log_date.desc()).limit(1).all()
+
+    comparison_note = ""
+    comparison_image = None
+    if prev_photos:
+        p = prev_photos[0]
+        comparison_note = f"A previous {pose} photo from week {p.week} ({p.log_date.isoformat()}) is also provided for comparison."
+        comparison_image = p.photo_data
+
+    # Get body weight context
+    bw = BodyWeight.query.order_by(BodyWeight.log_date.desc()).first()
+    bw_note = f"Current body weight: {bw.weight_lbs} lb." if bw else ""
+
+    content = []
+    content.append({
+        "type": "text",
+        "text": f"""Analyze this progress photo for a 12-week cutting program (currently week {current_week}).
+Pose: {pose} view. {bw_note} {comparison_note}
+
+Please provide:
+1. **Estimated body fat percentage** (give a range, e.g. 18-22%)
+2. **Visible muscle groups** - which muscles are showing definition? Rate development.
+3. **Areas of progress** - if a comparison photo is provided, what's changed?
+4. **Aesthetic score** (1-10) - based on overall physique balance, symmetry, and conditioning for someone on a cut
+5. **Honest feedback** - what should they focus on? What's looking good?
+
+Be direct and honest. This person wants real feedback, not flattery. They're using exercise for both physical and mental health."""
+    })
+
+    # Current photo
+    media_type = "image/jpeg"
+    if photo_b64.startswith("data:"):
+        # Extract media type and clean base64
+        parts = photo_b64.split(",", 1)
+        if len(parts) == 2:
+            media_type = parts[0].split(":")[1].split(";")[0]
+            photo_b64_clean = parts[1]
+        else:
+            photo_b64_clean = photo_b64
+    else:
+        photo_b64_clean = photo_b64
+
+    content.append({
+        "type": "image",
+        "source": {"type": "base64", "media_type": media_type, "data": photo_b64_clean},
+    })
+
+    # Comparison photo if available
+    if comparison_image:
+        comp_clean = comparison_image
+        comp_media = "image/jpeg"
+        if comparison_image.startswith("data:"):
+            parts = comparison_image.split(",", 1)
+            if len(parts) == 2:
+                comp_media = parts[0].split(":")[1].split(";")[0]
+                comp_clean = parts[1]
+
+        content.append({
+            "type": "text",
+            "text": f"Previous photo (week {prev_photos[0].week}) for comparison:",
+        })
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": comp_media, "data": comp_clean},
+        })
+
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": content}],
+        )
+        return response.content[0].text
+    except Exception as e:
+        return f"Photo saved. Analysis failed: {str(e)[:100]}"
 
 
 # ─── GARMIN ─────────────────────────────────────────────────────────────────

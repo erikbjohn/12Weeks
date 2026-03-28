@@ -13,6 +13,8 @@ services:
         fromDatabase:
           name: 12weeks-db
           property: connectionURI
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
 databases:
   - name: 12weeks-db
