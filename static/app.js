@@ -1,3 +1,11 @@
+// ─── DATA CACHES ────────────────────────────────────────────────────────────
+let _weightsCache = null;
+let _completionsCache = null;
+let _mealsCache = {};
+let _stateCache = null;
+let _supplementsCache = null;
+let _bodyweightCache = null;
+
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
 let currentPhase = 1;
@@ -6,24 +14,39 @@ let currentDay = null;
 let garminConnected = false;
 let garminData = null;
 let readinessData = null;
-let coachHistory = []; // session-only chat history
+let coachHistory = [];
+let warmupTimerInterval = null;
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
+// ─── API HELPERS ────────────────────────────────────────────────────────────
+function apiPost(url, body) {
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  }).catch(e => console.error('POST failed:', url, e));
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // ─── MEAL TRACKING ─────────────────────────────────────────────────────────
 function getMealDateKey() {
-  // Use current date as key for meal tracking
-  return '12w_meals_' + new Date().toISOString().slice(0, 10);
+  return todayStr();
 }
 
 function loadMealData() {
-  try {
-    return JSON.parse(localStorage.getItem(getMealDateKey()) || '{}');
-  } catch(e) { return {}; }
+  const key = getMealDateKey();
+  if (_mealsCache[key]) return _mealsCache[key];
+  return {};
 }
 
 function saveMealData(data) {
-  localStorage.setItem(getMealDateKey(), JSON.stringify(data));
+  const key = getMealDateKey();
+  _mealsCache[key] = data;
+  apiPost('/api/meals', { date: key, eaten: data.eaten || [], adjustments: data.adjustments || {}, fasting: data.fasting || false });
 }
 
 function isMealEaten(mealIdx) {
@@ -100,7 +123,6 @@ function renderMealSection(dayData) {
   const isRestDay = dayData.day === 'Sun' || (dayData.isRest && dayData.mealType === 'rest');
   const fasting = isFastingToday();
 
-  // Fast toggle for rest days
   let fastToggleHtml = '';
   if (isRestDay) {
     fastToggleHtml = `<div class="fast-toggle">
@@ -109,10 +131,8 @@ function renderMealSection(dayData) {
     </div>`;
   }
 
-  // If fasting, show fast day plan
   const activePlan = (isRestDay && fasting) ? (window._mealPlansCache || {}).fast_day || plan : plan;
 
-  // Build meal timeline
   let totalEaten = { cal: 0, protein: 0, carbs: 0, fat: 0 };
   let mealsHtml = '';
 
@@ -161,7 +181,6 @@ function renderMealSection(dayData) {
     </div>`;
   });
 
-  // Totals bar
   const target = {
     cal: activePlan.targetCal || 0,
     protein: activePlan.targetProtein || 0,
@@ -222,7 +241,6 @@ const BASELINE_LIFTS = [
   { name: 'Cable Tricep Pushdown', suggested: 30 },
 ];
 
-// Categorize exercises for progression increments
 const SMALL_ISOLATION = ['ez-bar curl', 'cable tricep pushdown', 'lateral raise', 'face pull', 'rear delt fly', 'hammer curl', 'concentration curl'];
 const COMPOUND_BARBELL = ['barbell bench press', 'barbell back squat', 'conventional deadlift', 'db overhead press', 'barbell bent-over row', 'barbell hip thrust', 'cable row'];
 
@@ -238,15 +256,9 @@ function isDeloadWeek(week) {
   return week === 4 || week === 8 || week === 12;
 }
 
-// ─── WEIGHT DATA HELPERS ────────────────────────────────────────────────────
+// ─── WEIGHT DATA HELPERS (cache-based) ─────────────────────────────────────
 function loadWeights() {
-  try {
-    return JSON.parse(localStorage.getItem('12w_weights') || '{}');
-  } catch(e) { return {}; }
-}
-
-function saveWeights(data) {
-  localStorage.setItem('12w_weights', JSON.stringify(data));
+  return _weightsCache || {};
 }
 
 function getExerciseData(exName) {
@@ -255,20 +267,20 @@ function getExerciseData(exName) {
 }
 
 function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx) {
-  const weights = loadWeights();
-  if (!weights[exName]) {
-    weights[exName] = { current: weight, history: [] };
+  if (!_weightsCache) _weightsCache = {};
+  if (!_weightsCache[exName]) {
+    _weightsCache[exName] = { current: weight, history: [] };
   }
-  weights[exName].current = weight;
-  weights[exName].history.push({
+  _weightsCache[exName].current = weight;
+  _weightsCache[exName].history.push({
     weight: weight,
     reps: setsLabel,
     rpe: rpe,
-    date: new Date().toISOString().slice(0, 10),
+    date: todayStr(),
     week: week,
     day: dayIdx,
   });
-  saveWeights(weights);
+  apiPost('/api/weights', { exercise: exName, weight, sets_label: setsLabel, rpe, week, day_idx: dayIdx });
 }
 
 function getLastRPEs(exName, count) {
@@ -284,12 +296,10 @@ function getSuggestedWeight(exName, currentWeekNum) {
   const currentWt = data.current || 0;
   const history = data.history || [];
 
-  // Deload week
   if (isDeloadWeek(currentWeekNum)) {
     return { weight: Math.round(currentWt * 0.6), reason: 'deload: 60%' };
   }
 
-  // Phase transition detection
   if (history.length > 0) {
     const lastEntry = history[history.length - 1];
     const lastWeek = lastEntry.week || 0;
@@ -305,7 +315,6 @@ function getSuggestedWeight(exName, currentWeekNum) {
     }
   }
 
-  // RPE-based auto-progression
   const lastTwo = getLastRPEs(exName, 2);
   const inc = getProgressionIncrement(exName);
 
@@ -322,7 +331,6 @@ function getSuggestedWeight(exName, currentWeekNum) {
 function getWeightForExercise(exName, weekNum) {
   const suggestion = getSuggestedWeight(exName, weekNum);
   if (suggestion.weight !== null) return suggestion;
-  // No history at all -- return empty
   return { weight: null, reason: '' };
 }
 
@@ -332,13 +340,11 @@ function getLastWeight(exName) {
   return data.history[data.history.length - 1].weight;
 }
 
-// Get trend for an exercise (compare last two distinct weeks)
 function getWeightTrend(exName) {
   const data = getExerciseData(exName);
   if (!data || !data.history || data.history.length < 2) return 'same';
   const hist = data.history;
   const last = hist[hist.length - 1].weight;
-  // Find previous entry from a different week
   for (let i = hist.length - 2; i >= 0; i--) {
     if (hist[i].week !== hist[hist.length - 1].week) {
       if (last > hist[i].weight) return 'up';
@@ -359,16 +365,14 @@ function showBaseline() {
   renderBaseline();
 }
 
-// Estimate 1RM from weight x reps (Epley formula)
 function estimate1RM(weight, reps) {
   if (reps <= 0) return 0;
   if (reps === 1) return weight;
   return Math.round(weight * (1 + reps / 30));
 }
 
-// Get Phase 1 working weight (10-rep target) from 1RM (~75% of 1RM)
 function workingWeightFrom1RM(oneRM) {
-  return Math.round(oneRM * 0.75 / 5) * 5; // round to nearest 5
+  return Math.round(oneRM * 0.75 / 5) * 5;
 }
 
 function renderBaseline() {
@@ -378,7 +382,6 @@ function renderBaseline() {
     return;
   }
 
-  // Intro screen
   if (baselineStep === 0) {
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card">
@@ -396,7 +399,6 @@ function renderBaseline() {
 
   const liftIdx = baselineStep - 1;
 
-  // Summary screen
   if (liftIdx >= BASELINE_LIFTS.length) {
     let rows = '';
     for (const lift of BASELINE_LIFTS) {
@@ -426,7 +428,6 @@ function renderBaseline() {
   const lift = BASELINE_LIFTS[liftIdx];
   const existing = baselineWeights[lift.name] || {};
 
-  // Progress dots
   let dots = '';
   for (let i = 0; i < BASELINE_LIFTS.length; i++) {
     const cls = i < liftIdx ? 'done' : i === liftIdx ? 'active' : '';
@@ -455,10 +456,8 @@ function renderBaseline() {
     </div>
   </div>`;
 
-  // Focus reps input
   setTimeout(() => { const inp = document.getElementById('bl-reps'); if (inp) inp.focus(); }, 100);
 
-  // Live calculation as they type
   const repsInput = document.getElementById('bl-reps');
   if (repsInput) {
     repsInput.addEventListener('input', () => {
@@ -471,7 +470,6 @@ function renderBaseline() {
         if (calcEl) {
           calcEl.innerHTML = `Est 1RM: ${oneRM} lb &rarr; Working weight: ${working} lb`;
         } else {
-          // Insert calc div before buttons
           const btns = document.querySelector('.baseline-card div:last-child');
           const div = document.createElement('div');
           div.className = 'baseline-calc';
@@ -498,19 +496,20 @@ function baselineBack() {
 }
 
 function saveBaseline() {
-  const weights = loadWeights();
+  const exercises = [];
+  if (!_weightsCache) _weightsCache = {};
   for (const lift of BASELINE_LIFTS) {
     const bw = baselineWeights[lift.name] || { reps: 0 };
     const reps = bw.reps || 10;
     const oneRM = estimate1RM(lift.suggested, reps);
     const working = workingWeightFrom1RM(oneRM);
-    weights[lift.name] = {
+    _weightsCache[lift.name] = {
       current: working,
       history: [{
         weight: working,
         reps: `baseline: ${lift.suggested}lb x ${reps}`,
         rpe: 'just_right',
-        date: new Date().toISOString().slice(0, 10),
+        date: todayStr(),
         week: 0,
         day: 0,
         testWeight: lift.suggested,
@@ -518,50 +517,179 @@ function saveBaseline() {
         estimated1RM: oneRM,
       }],
     };
+    exercises.push({
+      name: lift.name,
+      working_weight: working,
+      test_weight: lift.suggested,
+      test_reps: reps,
+      estimated_1rm: oneRM,
+    });
   }
-  saveWeights(weights);
-  localStorage.setItem('12w_baseline_done', '1');
+  apiPost('/api/weights/baseline', { exercises });
+  _stateCache.baseline_done = true;
+  apiPost('/api/state', { baseline_done: true });
   baselineStep = -1;
   renderBaseline();
 }
 
 function showSettingsMenu() {
-  if (confirm('Redo baseline assessment?\n\nThis will walk you through setting new working weights for all key lifts.')) {
-    localStorage.removeItem('12w_baseline_done');
-    showBaseline();
+  const el = document.getElementById('settings-dropdown');
+  if (el) {
+    el.classList.toggle('visible');
+    return;
   }
+  // Build settings dropdown
+  const header = document.querySelector('.header-row');
+  const dd = document.createElement('div');
+  dd.id = 'settings-dropdown';
+  dd.className = 'settings-dropdown visible';
+  dd.innerHTML = `
+    <button onclick="redoBaseline()">Redo Baseline</button>
+    <button onclick="showStartDateSetting()">Set Start Date</button>
+    <button onclick="exportData()">Export Data</button>
+    <button onclick="importData()">Import Data</button>
+    <button onclick="closeSettingsMenu()">Cancel</button>
+  `;
+  header.parentNode.appendChild(dd);
+}
+
+function closeSettingsMenu() {
+  const el = document.getElementById('settings-dropdown');
+  if (el) el.remove();
+}
+
+function redoBaseline() {
+  closeSettingsMenu();
+  _stateCache.baseline_done = false;
+  apiPost('/api/state', { baseline_done: false });
+  showBaseline();
+}
+
+function showStartDateSetting() {
+  closeSettingsMenu();
+  const current = _stateCache.start_date || '';
+  const date = prompt('Enter program start date (YYYY-MM-DD):', current);
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    _stateCache.start_date = date;
+    apiPost('/api/state', { start_date: date });
+    // Recalculate current week
+    const start = new Date(date);
+    const now = new Date();
+    const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+    const week = Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+    currentWeek = week;
+    currentPhase = WEEK_TO_PHASE[week];
+    renderAll();
+  }
+}
+
+async function exportData() {
+  closeSettingsMenu();
+  try {
+    const res = await fetch('/api/export');
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '12week_backup_' + todayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    alert('Export failed: ' + e.message);
+  }
+}
+
+function importData() {
+  closeSettingsMenu();
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const res = await fetch('/api/import', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        alert('Import successful. Reloading...');
+        location.reload();
+      } else {
+        alert('Import failed.');
+      }
+    } catch(err) {
+      alert('Import error: ' + err.message);
+    }
+  };
+  input.click();
 }
 
 // ─── RPE FEEDBACK ───────────────────────────────────────────────────────────
 function submitRPE(week, dayIdx, exIdx, exName, rpe) {
   const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
   const weight = weightInput ? parseFloat(weightInput.value) || 0 : 0;
-
-  // Get sets label from workout data
   const weekData = workoutData[String(week)];
   const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
-
   recordWeight(exName, weight, setsLabel, rpe, week, dayIdx);
   renderDetail();
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  // Load saved state
-  const saved = localStorage.getItem('12w_state');
-  if (saved) {
-    try {
-      const s = JSON.parse(saved);
-      currentWeek = s.week || 1;
-      currentPhase = WEEK_TO_PHASE[currentWeek];
-    } catch(e) {}
-  }
-
-  // Fetch workout data
+  // Fetch all data in parallel
   try {
-    const res = await fetch('/api/workouts');
-    workoutData = await res.json();
-    // Cache the fast_day meal plan from any rest day for the fasting toggle
+    const [stateRes, weightsRes, compRes, suppRes, bwRes, garminRes, workoutRes, mealsRes] = await Promise.all([
+      fetch('/api/state'),
+      fetch('/api/weights'),
+      fetch('/api/completions'),
+      fetch('/api/supplements?date=' + todayStr()),
+      fetch('/api/bodyweight'),
+      fetch('/api/garmin/status'),
+      fetch('/api/workouts'),
+      fetch('/api/meals?date=' + todayStr()),
+    ]);
+
+    _stateCache = await stateRes.json();
+    _weightsCache = await weightsRes.json();
+    _completionsCache = await compRes.json();
+    _supplementsCache = await suppRes.json();
+    _bodyweightCache = await bwRes.json();
+    workoutData = await workoutRes.json();
+
+    try {
+      const mealsData = await mealsRes.json();
+      _mealsCache[todayStr()] = mealsData;
+    } catch(e) {}
+
+    // Garmin
+    try {
+      const garminStatus = await garminRes.json();
+      garminConnected = garminStatus.connected;
+      if (garminConnected) await refreshGarmin();
+    } catch(e) {}
+
+    // Set state from cache
+    currentWeek = _stateCache.current_week || 1;
+    currentPhase = WEEK_TO_PHASE[currentWeek];
+
+    // Auto-calculate week from start date if set
+    if (_stateCache.start_date) {
+      const start = new Date(_stateCache.start_date);
+      const now = new Date();
+      const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+      const week = Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+      currentWeek = week;
+      currentPhase = WEEK_TO_PHASE[week];
+    }
+
+    // Cache meal plans for fasting toggle
     for (const wk of Object.values(workoutData)) {
       for (const d of (wk.days || [])) {
         if (d.mealType === 'rest' && d.mealPlan) {
@@ -570,14 +698,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     }
-    // Build fast_day plan from first available data (served from backend)
-    // We'll also fetch it from any Sunday's data or construct locally
     if (!window._mealPlansCache) window._mealPlansCache = {};
     if (!window._mealPlansCache.fast_day) {
       window._mealPlansCache.fast_day = {
         label: '24h Fast Day',
         targetCal: 0, targetProtein: 0, targetCarbs: 0, targetFat: 0,
-        note: 'Full 24h fast. Water, black coffee, electrolytes only. Break fast Monday at 11am. Max 1x/week. Only do this if training readiness is good and sleep has been solid.',
+        note: 'Full 24h fast. Water, black coffee, electrolytes only.',
         meals: [{
           time: 'All Day', name: 'Fast - Liquids Only', optional: false,
           foods: [
@@ -588,28 +714,88 @@ document.addEventListener('DOMContentLoaded', async () => {
         }]
       };
     }
+
+    // Check for localStorage migration
+    checkLocalStorageMigration();
+
+    if (!_stateCache.baseline_done) {
+      showBaseline();
+    }
+
+    renderAll();
   } catch(e) {
-    console.error('Failed to load workouts', e);
+    console.error('Init failed', e);
+    // Fallback: try to render with empty data
+    _stateCache = _stateCache || { current_week: 1, baseline_done: false };
+    _weightsCache = _weightsCache || {};
+    _completionsCache = _completionsCache || { exercises: {}, days: {} };
+    _supplementsCache = _supplementsCache || { taken: {}, list: [] };
+    _bodyweightCache = _bodyweightCache || [];
+    renderAll();
   }
-
-  // Check Garmin status
-  try {
-    const res = await fetch('/api/garmin/status');
-    const d = await res.json();
-    garminConnected = d.connected;
-    if (garminConnected) await refreshGarmin();
-  } catch(e) {}
-
-  // Check if baseline is done
-  if (!localStorage.getItem('12w_baseline_done')) {
-    showBaseline();
-  }
-
-  renderAll();
 });
 
 function saveState() {
-  localStorage.setItem('12w_state', JSON.stringify({ week: currentWeek }));
+  _stateCache.current_week = currentWeek;
+  apiPost('/api/state', { current_week: currentWeek });
+}
+
+// ─── LOCALSTORAGE MIGRATION ────────────────────────────────────────────────
+function checkLocalStorageMigration() {
+  const hasLocalData = localStorage.getItem('12w_weights') || localStorage.getItem('12w_baseline_done');
+  const dbEmpty = !_stateCache.baseline_done && (!_weightsCache || Object.keys(_weightsCache).length === 0);
+  if (hasLocalData && dbEmpty) {
+    renderMigrationBanner();
+  }
+}
+
+function renderMigrationBanner() {
+  const banner = document.getElementById('migration-banner');
+  if (!banner) return;
+  banner.innerHTML = `
+    <div class="migration-inner">
+      <span>Local data found. Migrate to cloud storage?</span>
+      <div class="migration-actions">
+        <button class="btn btn-primary" onclick="migrateLocalStorage()">Migrate</button>
+        <button class="btn btn-secondary" onclick="dismissMigration()">Dismiss</button>
+      </div>
+    </div>
+  `;
+  banner.classList.add('visible');
+}
+
+async function migrateLocalStorage() {
+  const data = {};
+  // Gather all localStorage keys
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('12w_')) {
+      try {
+        data[key] = JSON.parse(localStorage.getItem(key));
+      } catch(e) {
+        data[key] = localStorage.getItem(key);
+      }
+    }
+  }
+  try {
+    const res = await fetch('/api/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ localStorage: data }),
+    });
+    if (res.ok) {
+      document.getElementById('migration-banner').classList.remove('visible');
+      alert('Migration successful. Reloading...');
+      location.reload();
+    }
+  } catch(e) {
+    alert('Migration failed: ' + e.message);
+  }
+}
+
+function dismissMigration() {
+  const banner = document.getElementById('migration-banner');
+  if (banner) banner.classList.remove('visible');
 }
 
 // ─── GARMIN ─────────────────────────────────────────────────────────────────
@@ -617,7 +803,6 @@ async function garminLogin() {
   const errEl = document.getElementById('garmin-error');
   errEl.style.display = 'none';
 
-  // Check if this is an MFA submission
   const mfaField = document.getElementById('garmin-mfa');
   if (mfaField && mfaField.style.display !== 'none') {
     const code = mfaField.value.trim();
@@ -680,7 +865,6 @@ async function garminLogin() {
       await refreshGarmin();
       renderAll();
     } else if (d.needs_mfa) {
-      // Show MFA input
       document.getElementById('garmin-email').style.display = 'none';
       document.getElementById('garmin-password').style.display = 'none';
       document.getElementById('garmin-mfa').style.display = 'block';
@@ -766,52 +950,523 @@ function setDay(d) {
   renderDetail();
 }
 
-// ─── COMPLETION TRACKING ────────────────────────────────────────────────────
-function getCompletionKey(week, dayIdx, exIdx) {
-  return `12w_done_${week}_${dayIdx}_${exIdx}`;
-}
-
-function getDayCompletionKey(week, dayIdx) {
-  return `12w_daydone_${week}_${dayIdx}`;
-}
-
+// ─── COMPLETION TRACKING (cache-based) ─────────────────────────────────────
 function isExDone(week, dayIdx, exIdx) {
-  return localStorage.getItem(getCompletionKey(week, dayIdx, exIdx)) === '1';
+  if (!_completionsCache || !_completionsCache.exercises) return false;
+  return !!_completionsCache.exercises[week + '_' + dayIdx + '_' + exIdx];
 }
 
 function toggleEx(week, dayIdx, exIdx) {
-  const key = getCompletionKey(week, dayIdx, exIdx);
-  if (localStorage.getItem(key) === '1') {
-    localStorage.removeItem(key);
+  if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
+  if (!_completionsCache.exercises) _completionsCache.exercises = {};
+  const key = week + '_' + dayIdx + '_' + exIdx;
+  if (_completionsCache.exercises[key]) {
+    delete _completionsCache.exercises[key];
   } else {
-    localStorage.setItem(key, '1');
-    // Save weight on completion (RPE will be recorded separately)
-    const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
-    if (weightInput && weightInput.value) {
-      // Weight is saved but RPE prompt will appear on re-render
-    }
+    _completionsCache.exercises[key] = true;
   }
+  apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx });
   renderDetail();
 }
 
 function isDayDone(week, dayIdx) {
-  return localStorage.getItem(getDayCompletionKey(week, dayIdx)) === '1';
+  if (!_completionsCache || !_completionsCache.days) return false;
+  return !!_completionsCache.days[week + '_' + dayIdx];
 }
 
 function toggleDay(week, dayIdx, e) {
   e.stopPropagation();
-  const key = getDayCompletionKey(week, dayIdx);
-  if (localStorage.getItem(key) === '1') {
-    localStorage.removeItem(key);
+  if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
+  if (!_completionsCache.days) _completionsCache.days = {};
+  const key = week + '_' + dayIdx;
+  if (_completionsCache.days[key]) {
+    delete _completionsCache.days[key];
   } else {
-    localStorage.setItem(key, '1');
+    _completionsCache.days[key] = true;
   }
+  apiPost('/api/completions/day', { week, day_idx: dayIdx });
   renderDayGrid();
+}
+
+// ─── BODY WEIGHT / WEIGH-IN ────────────────────────────────────────────────
+function renderWeighInBar() {
+  const el = document.getElementById('weighin-bar');
+  if (!el) return;
+
+  const bwData = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
+  const today = todayStr();
+  const todayEntry = bwData.find(e => e.date === today);
+
+  // Calculate 7-day rolling average
+  const last7 = bwData.slice(-7);
+  const avg7 = last7.length > 0 ? (last7.reduce((s, e) => s + (e.weight || 0), 0) / last7.length).toFixed(1) : '--';
+
+  // Trend: this week vs last week average
+  const last14 = bwData.slice(-14);
+  const thisWeekEntries = last14.slice(-7);
+  const lastWeekEntries = last14.slice(0, Math.max(0, last14.length - 7));
+  let trendHtml = '';
+  if (thisWeekEntries.length > 0 && lastWeekEntries.length > 0) {
+    const thisAvg = thisWeekEntries.reduce((s, e) => s + e.weight, 0) / thisWeekEntries.length;
+    const lastAvg = lastWeekEntries.reduce((s, e) => s + e.weight, 0) / lastWeekEntries.length;
+    const diff = thisAvg - lastAvg;
+    const arrow = diff > 0.2 ? '\u2191' : diff < -0.2 ? '\u2193' : '\u2192';
+    const cls = diff > 0.2 ? 'trend-up' : diff < -0.2 ? 'trend-down' : 'trend-flat';
+    trendHtml = `<span class="weighin-trend ${cls}">${arrow} ${Math.abs(diff).toFixed(1)} lb</span>`;
+  }
+
+  let inputHtml;
+  if (todayEntry) {
+    inputHtml = `<span class="weighin-today-val">${todayEntry.weight} lb</span>
+      <button class="weighin-edit-btn" onclick="editWeighIn()" title="Edit">&#9998;</button>`;
+  } else {
+    inputHtml = `<input type="number" inputmode="decimal" id="weighin-input" class="weighin-input" placeholder="lbs" step="0.1">
+      <button class="btn btn-primary weighin-log-btn" onclick="logWeighIn()">Log</button>`;
+  }
+
+  el.innerHTML = `
+    <div class="weighin-row">
+      <div class="weighin-label">Weigh-In</div>
+      <div class="weighin-controls">${inputHtml}</div>
+      <div class="weighin-stats">
+        <span class="weighin-avg">7d avg: ${avg7} lb</span>
+        ${trendHtml}
+      </div>
+    </div>
+    <div class="weighin-chart"><canvas id="weighin-canvas" width="200" height="60"></canvas></div>
+  `;
+
+  // Draw sparkline
+  drawWeighInSparkline(bwData);
+}
+
+function logWeighIn() {
+  const input = document.getElementById('weighin-input');
+  if (!input) return;
+  const weight = parseFloat(input.value);
+  if (!weight || weight < 50 || weight > 500) return;
+
+  const today = todayStr();
+  // Update cache
+  if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
+  const existing = _bodyweightCache.findIndex(e => e.date === today);
+  if (existing >= 0) {
+    _bodyweightCache[existing].weight = weight;
+  } else {
+    _bodyweightCache.push({ date: today, weight });
+  }
+  apiPost('/api/bodyweight', { date: today, weight });
+  renderWeighInBar();
+}
+
+function editWeighIn() {
+  const bwData = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
+  const today = todayStr();
+  const entry = bwData.find(e => e.date === today);
+  const current = entry ? entry.weight : '';
+  const val = prompt('Edit today\'s weight (lbs):', current);
+  if (val !== null) {
+    const weight = parseFloat(val);
+    if (weight && weight >= 50 && weight <= 500) {
+      const idx = _bodyweightCache.findIndex(e => e.date === today);
+      if (idx >= 0) {
+        _bodyweightCache[idx].weight = weight;
+      } else {
+        _bodyweightCache.push({ date: today, weight });
+      }
+      apiPost('/api/bodyweight', { date: today, weight });
+      renderWeighInBar();
+    }
+  }
+}
+
+function drawWeighInSparkline(bwData) {
+  const canvas = document.getElementById('weighin-canvas');
+  if (!canvas || bwData.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const last30 = bwData.slice(-30);
+  if (last30.length < 2) return;
+
+  const weights = last30.map(e => e.weight);
+  const min = Math.min(...weights) - 1;
+  const max = Math.max(...weights) + 1;
+  const range = max - min || 1;
+
+  const xStep = W / (last30.length - 1);
+  const yScale = (v) => H - ((v - min) / range) * (H - 8) - 4;
+
+  // Draw dots
+  ctx.fillStyle = '#4ade80';
+  last30.forEach((e, i) => {
+    ctx.beginPath();
+    ctx.arc(i * xStep, yScale(e.weight), 2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw rolling average line
+  if (last30.length >= 3) {
+    ctx.strokeStyle = '#60a5fa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < last30.length; i++) {
+      const windowStart = Math.max(0, i - 6);
+      const window = last30.slice(windowStart, i + 1);
+      const avg = window.reduce((s, e) => s + e.weight, 0) / window.length;
+      const x = i * xStep;
+      const y = yScale(avg);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+// ─── SUPPLEMENT TRACKER ─────────────────────────────────────────────────────
+function renderSupplementBar() {
+  const el = document.getElementById('supplement-bar');
+  if (!el) return;
+  if (!_supplementsCache || !_supplementsCache.list || _supplementsCache.list.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const taken = _supplementsCache.taken || {};
+  const pills = _supplementsCache.list.map(s => {
+    const name = typeof s === 'string' ? s : s.name;
+    const required = typeof s === 'object' && s.required;
+    const isTaken = !!taken[name];
+    return `<button class="supplement-pill${isTaken ? ' taken' : ''}${required ? ' required' : ''}" onclick="toggleSupplement('${name.replace(/'/g, "\\'")}')">
+      ${isTaken ? '&#10003; ' : ''}${name}
+    </button>`;
+  }).join('');
+
+  el.innerHTML = `<div class="supplement-row">
+    <span class="supplement-label">Supplements</span>
+    ${pills}
+  </div>`;
+}
+
+function toggleSupplement(name) {
+  if (!_supplementsCache) _supplementsCache = { taken: {}, list: [] };
+  if (!_supplementsCache.taken) _supplementsCache.taken = {};
+  if (_supplementsCache.taken[name]) {
+    delete _supplementsCache.taken[name];
+  } else {
+    _supplementsCache.taken[name] = true;
+  }
+  apiPost('/api/supplements', { date: todayStr(), name });
+  renderSupplementBar();
+}
+
+// ─── WARM-UP SECTION ────────────────────────────────────────────────────────
+function renderWarmupSection(dayData) {
+  if (!dayData.warmup) return '';
+  const wu = dayData.warmup;
+  return `<div class="detail-section warmup-section">
+    <button class="warmup-toggle" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
+      <h3 style="margin:0">Warm-Up${wu.time ? ' - ' + wu.time : ''}</h3>
+      <span class="warmup-arrow">\u25BC</span>
+    </button>
+    <div class="warmup-body" id="warmup-body">
+      ${(wu.steps || []).map((step, i) => `<div class="warmup-step">
+        <span class="warmup-step-name">${step.name}</span>
+        ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
+        ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
+      </div>`).join('')}
+      <button class="btn btn-primary warmup-timer-btn" onclick="startWarmupTimer()">Start Warm-Up</button>
+    </div>
+  </div>`;
+}
+
+function startWarmupTimer() {
+  const weekData = workoutData[String(currentWeek)];
+  if (!weekData || currentDay === null) return;
+  const dayData = weekData.days[currentDay];
+  if (!dayData || !dayData.warmup || !dayData.warmup.steps) return;
+
+  const steps = dayData.warmup.steps;
+  let stepIdx = 0;
+  let secondsLeft = parseDuration(steps[0].duration);
+
+  function parseDuration(dur) {
+    if (!dur) return 30;
+    const m = dur.match(/(\d+)/);
+    if (!m) return 30;
+    const num = parseInt(m[1]);
+    if (dur.includes('min')) return num * 60;
+    return num;
+  }
+
+  function updateDisplay() {
+    const btn = document.querySelector('.warmup-timer-btn');
+    if (!btn) { clearInterval(warmupTimerInterval); return; }
+    if (stepIdx >= steps.length) {
+      btn.textContent = 'Done!';
+      btn.disabled = true;
+      clearInterval(warmupTimerInterval);
+      return;
+    }
+    const mins = Math.floor(secondsLeft / 60);
+    const secs = secondsLeft % 60;
+    btn.textContent = `${steps[stepIdx].name} - ${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  if (warmupTimerInterval) clearInterval(warmupTimerInterval);
+  updateDisplay();
+  warmupTimerInterval = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft < 0) {
+      stepIdx++;
+      if (stepIdx < steps.length) {
+        secondsLeft = parseDuration(steps[stepIdx].duration);
+      }
+    }
+    updateDisplay();
+  }, 1000);
+}
+
+// ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
+function renderCheckinSection(dayData, dayIdx) {
+  // Show on last day of week (index 6 = Sunday, or 5 = Saturday)
+  if (dayIdx < 5) return '';
+  return `<div class="detail-section checkin-form-section">
+    <h3>Weekly Check-In</h3>
+    <div class="checkin-form" id="checkin-form">
+      <div class="checkin-slider-row">
+        <label>Energy</label>
+        <input type="range" class="checkin-slider" id="checkin-energy" min="1" max="5" value="3">
+        <span class="checkin-val" id="checkin-energy-val">3</span>
+      </div>
+      <div class="checkin-slider-row">
+        <label>Sleep Quality</label>
+        <input type="range" class="checkin-slider" id="checkin-sleep" min="1" max="5" value="3">
+        <span class="checkin-val" id="checkin-sleep-val">3</span>
+      </div>
+      <div class="checkin-slider-row">
+        <label>Soreness</label>
+        <input type="range" class="checkin-slider" id="checkin-soreness" min="1" max="5" value="3">
+        <span class="checkin-val" id="checkin-soreness-val">3</span>
+      </div>
+      <div class="checkin-slider-row">
+        <label>Adherence</label>
+        <input type="range" class="checkin-slider" id="checkin-adherence" min="0" max="100" value="80" step="5">
+        <span class="checkin-val" id="checkin-adherence-val">80%</span>
+      </div>
+      <div class="checkin-slider-row">
+        <label>Waist (inches)</label>
+        <input type="number" inputmode="decimal" id="checkin-waist" class="checkin-waist-input" placeholder="e.g. 34.5" step="0.25">
+      </div>
+      <div class="checkin-slider-row">
+        <label>Notes</label>
+        <textarea id="checkin-notes" class="checkin-notes" placeholder="How did this week go?" rows="2"></textarea>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitCheckin()">Submit Check-In</button>
+    </div>
+  </div>`;
+}
+
+function initCheckinSliders() {
+  const sliders = ['energy', 'sleep', 'soreness', 'adherence'];
+  sliders.forEach(name => {
+    const el = document.getElementById('checkin-' + name);
+    const valEl = document.getElementById('checkin-' + name + '-val');
+    if (el && valEl) {
+      el.addEventListener('input', () => {
+        valEl.textContent = name === 'adherence' ? el.value + '%' : el.value;
+      });
+    }
+  });
+}
+
+function submitCheckin() {
+  const energy = parseInt(document.getElementById('checkin-energy').value) || 3;
+  const sleep = parseInt(document.getElementById('checkin-sleep').value) || 3;
+  const soreness = parseInt(document.getElementById('checkin-soreness').value) || 3;
+  const adherence = parseInt(document.getElementById('checkin-adherence').value) || 80;
+  const notes = (document.getElementById('checkin-notes').value || '').trim();
+  const waist = parseFloat(document.getElementById('checkin-waist').value) || null;
+
+  apiPost('/api/checkins', { week: currentWeek, energy, sleep, soreness, adherence, notes });
+
+  if (waist) {
+    apiPost('/api/measurements', { date: todayStr(), waist, notes });
+  }
+
+  // Visual feedback
+  const form = document.getElementById('checkin-form');
+  if (form) {
+    form.innerHTML = '<div style="text-align:center;color:var(--accent);padding:1rem;">Check-in submitted!</div>';
+  }
+}
+
+// ─── PROGRESS DASHBOARD ────────────────────────────────────────────────────
+function showProgress() {
+  const overlay = document.getElementById('progress-overlay');
+  if (!overlay) return;
+  overlay.classList.add('visible');
+  overlay.innerHTML = '<div class="progress-loading">Loading progress data...</div>';
+
+  fetch('/api/progress')
+    .then(r => r.json())
+    .then(data => renderProgressDashboard(data))
+    .catch(e => {
+      overlay.innerHTML = '<div class="progress-loading">Failed to load progress.</div>';
+    });
+}
+
+function closeProgress() {
+  const overlay = document.getElementById('progress-overlay');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+function renderProgressDashboard(data) {
+  const overlay = document.getElementById('progress-overlay');
+  if (!overlay) return;
+
+  overlay.innerHTML = `
+    <div class="progress-header">
+      <h2>Progress Dashboard</h2>
+      <button class="progress-close" onclick="closeProgress()">&times;</button>
+    </div>
+    <div class="progress-content">
+      <div class="progress-chart-section">
+        <h3>Body Weight</h3>
+        <canvas id="progress-bw-chart" width="340" height="180"></canvas>
+      </div>
+      <div class="progress-chart-section">
+        <h3>Key Lifts</h3>
+        <canvas id="progress-lifts-chart" width="340" height="180"></canvas>
+      </div>
+      <div class="progress-chart-section">
+        <h3>Waist Measurement</h3>
+        <canvas id="progress-waist-chart" width="340" height="120"></canvas>
+      </div>
+      <div class="progress-chart-section">
+        <h3>Weekly Check-Ins</h3>
+        <div id="progress-checkins"></div>
+      </div>
+    </div>
+  `;
+
+  // Draw body weight chart
+  if (data.bodyweight && data.bodyweight.length > 1) {
+    drawProgressChart('progress-bw-chart', data.bodyweight.map(e => e.weight), data.bodyweight.map(e => e.date), '#4ade80');
+  }
+
+  // Draw lifts chart (multiple lines)
+  if (data.lifts) {
+    drawLiftsChart('progress-lifts-chart', data.lifts);
+  }
+
+  // Draw waist chart
+  if (data.measurements && data.measurements.length > 1) {
+    drawProgressChart('progress-waist-chart', data.measurements.map(e => e.waist), data.measurements.map(e => e.date), '#f59e0b');
+  }
+
+  // Render checkins
+  if (data.checkins && data.checkins.length > 0) {
+    const el = document.getElementById('progress-checkins');
+    el.innerHTML = data.checkins.map(c => `
+      <div class="progress-checkin-row">
+        <span class="pc-week">Wk ${c.week}</span>
+        <span class="pc-score">E:${c.energy} S:${c.sleep} So:${c.soreness} A:${c.adherence}%</span>
+      </div>
+    `).join('');
+  }
+}
+
+function drawProgressChart(canvasId, values, labels, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || values.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const pad = 10;
+  ctx.clearRect(0, 0, W, H);
+
+  const min = Math.min(...values) - 1;
+  const max = Math.max(...values) + 1;
+  const range = max - min || 1;
+  const xStep = (W - pad * 2) / (values.length - 1);
+  const yScale = (v) => H - pad - ((v - min) / range) * (H - pad * 2);
+
+  // Line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad + i * xStep;
+    const y = yScale(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dots
+  ctx.fillStyle = color;
+  values.forEach((v, i) => {
+    ctx.beginPath();
+    ctx.arc(pad + i * xStep, yScale(v), 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawLiftsChart(canvasId, liftsData) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const pad = 10;
+  ctx.clearRect(0, 0, W, H);
+
+  const colors = ['#4ade80', '#60a5fa', '#f59e0b', '#f87171', '#a78bfa', '#94a3b8'];
+  let colorIdx = 0;
+
+  // Find global min/max across all lifts
+  let allVals = [];
+  for (const name in liftsData) {
+    const hist = liftsData[name];
+    if (Array.isArray(hist)) {
+      hist.forEach(e => allVals.push(e.weight || 0));
+    }
+  }
+  if (allVals.length < 2) return;
+
+  const min = Math.min(...allVals) - 5;
+  const max = Math.max(...allVals) + 5;
+  const range = max - min || 1;
+  const yScale = (v) => H - pad - ((v - min) / range) * (H - pad * 2);
+
+  for (const name in liftsData) {
+    const hist = liftsData[name];
+    if (!Array.isArray(hist) || hist.length < 2) continue;
+    const color = colors[colorIdx % colors.length];
+    colorIdx++;
+
+    const xStep = (W - pad * 2) / (hist.length - 1);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    hist.forEach((e, i) => {
+      const x = pad + i * xStep;
+      const y = yScale(e.weight);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
 }
 
 // ─── RENDER ─────────────────────────────────────────────────────────────────
 function renderAll() {
+  renderWeighInBar();
   renderGarminBar();
+  renderSupplementBar();
   renderReadiness();
   renderPhaseNav();
   renderPhaseBanner();
@@ -831,36 +1486,27 @@ function renderGarminBar() {
   metricsHtml += '<div class="garmin-metrics">';
 
   if (garminData) {
-    // HRV
     const hrv = garminData.hrv;
     if (hrv && hrv.lastNight != null) {
       const color = getMetricColor('hrv', readinessData);
       metricsHtml += metric('HRV', hrv.lastNight, `avg ${hrv.weeklyAvg || '?'}`, color);
     }
-
-    // Sleep
     const sleep = garminData.sleep;
     if (sleep) {
       const color = getMetricColor('sleep', readinessData);
       const score = sleep.score != null ? sleep.score : '?';
       metricsHtml += metric('Sleep', score, `${sleep.durationHours || '?'}h`, color);
     }
-
-    // Body Battery
     const bb = garminData.bodyBattery;
     if (bb && bb.current != null) {
       const color = getMetricColor('bodyBattery', readinessData);
       metricsHtml += metric('Battery', bb.current, '', color);
     }
-
-    // Training Readiness
     const tr = garminData.trainingReadiness;
     if (tr && tr.score != null) {
       const color = getMetricColor('trainingReadiness', readinessData);
       metricsHtml += metric('Ready', tr.score, tr.level || '', color);
     }
-
-    // Stress
     const stress = garminData.stress;
     if (stress && stress.overall != null) {
       const color = getMetricColor('stress', readinessData);
@@ -917,13 +1563,14 @@ function renderPhaseNav() {
     `<button class="phase-btn${p===currentPhase?' active':''}" onclick="setPhase(${p})">
       Phase ${p} &middot; Wks ${p===1?'1-4':p===2?'5-8':'9-12'}
     </button>`
-  ).join('');
+  ).join('') + `<button class="phase-btn progress-btn" onclick="showProgress()">Progress</button>`;
 }
 
 function renderPhaseBanner() {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
   const info = weekData.phaseInfo;
+  if (!info) return;
   const el = document.getElementById('phase-banner');
   el.innerHTML = `Focus: <span>${info.focus}</span> Lifting: <span>${info.lifting}</span> Deficit: <span>${info.deficit}</span> Protein: <span>${info.protein}</span>`;
 }
@@ -943,6 +1590,7 @@ function renderDayGrid() {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
   const days = weekData.days;
+  if (!days) return;
   const el = document.getElementById('day-grid');
 
   el.innerHTML = days.map((d, i) => {
@@ -977,6 +1625,7 @@ function renderDetail() {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
   const d = weekData.days[currentDay];
+  if (!d) return;
   const runClass = `run-${d.run.type}`;
 
   // Exercise rows with weight tracking and RPE
@@ -986,7 +1635,6 @@ function renderDetail() {
     const lastWt = getLastWeight(ex.name);
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
-    // Check if RPE already recorded for this session
     const exData = getExerciseData(ex.name);
     const hasRPE = exData && exData.history && exData.history.length > 0 &&
       exData.history[exData.history.length - 1].week === currentWeek &&
@@ -1030,14 +1678,16 @@ function renderDetail() {
 
   // Timing rows
   const timingRows = [];
-  for (let i = 0; i < d.timing.length; i += 2) {
-    timingRows.push(`<div class="timing-row">
-      <div class="timing-time">${d.timing[i]}</div>
-      <div class="timing-desc">${d.timing[i+1]}</div>
-    </div>`);
+  if (d.timing) {
+    for (let i = 0; i < d.timing.length; i += 2) {
+      timingRows.push(`<div class="timing-row">
+        <div class="timing-time">${d.timing[i]}</div>
+        <div class="timing-desc">${d.timing[i+1]}</div>
+      </div>`);
+    }
   }
 
-  // --- Garmin Day Stats section ---
+  // Garmin Day Stats
   let garminStatsHtml = '';
   if (garminConnected && garminData) {
     garminStatsHtml += '<div class="garmin-day-stats">';
@@ -1071,7 +1721,7 @@ function renderDetail() {
     garminStatsHtml = '<div class="garmin-nudge">Connect Garmin for personalized readiness data</div>';
   }
 
-  // --- Daily Goals section ---
+  // Daily Goals
   let goalsItems = '';
   if (!d.isRest && d.exercises.length > 0) {
     goalsItems += '<div class="dg-item">Complete all exercises. Rest times matter - don\'t rush heavy sets.</div>';
@@ -1092,7 +1742,7 @@ function renderDetail() {
     ${adjustmentHtml}
   </div>`;
 
-  // --- Coach chat history ---
+  // Coach chat history
   let chatMessagesHtml = '';
   if (coachHistory.length > 0) {
     chatMessagesHtml = coachHistory.map(m =>
@@ -1139,6 +1789,7 @@ function renderDetail() {
       ${garminStatsHtml}
       ${dailyGoalsHtml}
     </div>
+    ${renderWarmupSection(d)}
     ${!d.isRest && d.exercises.length > 0 ? `
     <div class="detail-section">
       <h3>Exercises</h3>
@@ -1153,14 +1804,15 @@ function renderDetail() {
       </div>
     </div>
     ${renderMealSection(d)}
-    <div class="detail-section">
+    ${d.timing ? `<div class="detail-section">
       <h3>Session Timing</h3>
       ${timingRows.join('')}
-    </div>
+    </div>` : ''}
     ${d.notes ? `
     <div class="detail-section">
       <div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div>
     </div>` : ''}
+    ${renderCheckinSection(d, currentDay)}
     <div class="detail-section">
       <h3>Coach</h3>
       <div class="coach-chat">
@@ -1175,6 +1827,9 @@ function renderDetail() {
 
   panel.classList.add('visible');
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  // Init sliders if check-in is present
+  initCheckinSliders();
 
   // Scroll chat to bottom
   const msgContainer = document.getElementById('coach-messages');
@@ -1198,7 +1853,6 @@ function sendCoachMessage() {
 function generateCoachResponse(userText) {
   const t = userText.toLowerCase();
 
-  // Gather context
   const weekData = workoutData[String(currentWeek)];
   const d = weekData ? weekData.days[currentDay] : null;
   const isLiftDay = d && !d.isRest && d.exercises.length > 0;
@@ -1212,7 +1866,6 @@ function generateCoachResponse(userText) {
     garminData.hrv.weeklyAvg != null && garminData.hrv.lastNight >= garminData.hrv.weeklyAvg * 0.85;
   const bbLow = garminData && garminData.bodyBattery && garminData.bodyBattery.current != null && garminData.bodyBattery.current < 30;
 
-  // Readiness addon
   let readinessNote = '';
   if (riskLevel === 'high') {
     readinessNote = ' Your Garmin data is showing elevated risk today - take the adjustments seriously.';
@@ -1222,7 +1875,6 @@ function generateCoachResponse(userText) {
     readinessNote = ' Garmin says you\'re good to go. Trust the data.';
   }
 
-  // Keyword matching - order matters, first match wins
   const patterns = [
     {
       keys: ['injured', 'injury', 'sharp pain', 'pulled'],
@@ -1378,7 +2030,6 @@ function generateCoachResponse(userText) {
     }
   ];
 
-  // Check each pattern
   for (const p of patterns) {
     for (const k of p.keys) {
       if (t.includes(k)) {
@@ -1387,7 +2038,6 @@ function generateCoachResponse(userText) {
     }
   }
 
-  // Default fallback
   let fallback = 'Noted. Here\'s the deal: stick to today\'s plan. ';
   if (isLiftDay) {
     fallback += `You've got ${d.exercises.length} exercises to knock out. Focus on controlled reps and full range of motion. `;

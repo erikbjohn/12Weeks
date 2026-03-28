@@ -317,6 +317,76 @@ def get_meal_plan(meal_type):
     return dict(MEAL_PLANS.get(meal_type, MEAL_PLANS["moderate"]))
 
 
+# ─── WARM-UP PROTOCOLS ─────────────────────────────────────────────────────
+# 5-minute warm-ups by session type. Do these before touching a barbell.
+
+WARMUPS = {
+    "upper": {
+        "label": "Upper Body Warm-Up",
+        "time": "5 min",
+        "steps": [
+            {"name": "Arm circles", "duration": "30s", "note": "15s forward, 15s backward"},
+            {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps, light band"},
+            {"name": "Band dislocates", "duration": "30s", "note": "10 slow reps"},
+            {"name": "Push-up to downward dog", "duration": "60s", "note": "8 reps, slow and controlled"},
+            {"name": "Cat-cow stretch", "duration": "30s", "note": "8 reps, breathe"},
+            {"name": "Empty bar bench press", "duration": "60s", "note": "15 reps, slow"},
+            {"name": "Empty bar OHP", "duration": "60s", "note": "10 reps, feel the groove"},
+        ],
+    },
+    "lower": {
+        "label": "Lower Body Warm-Up",
+        "time": "5 min",
+        "steps": [
+            {"name": "Bodyweight squats", "duration": "45s", "note": "15 reps, full depth"},
+            {"name": "Leg swings (front-back)", "duration": "30s", "note": "10 each leg, hold something"},
+            {"name": "Leg swings (side-side)", "duration": "30s", "note": "10 each leg"},
+            {"name": "Hip circles", "duration": "30s", "note": "8 each direction"},
+            {"name": "Walking lunges", "duration": "45s", "note": "8 each leg, bodyweight"},
+            {"name": "Glute bridges", "duration": "30s", "note": "15 reps, squeeze at top"},
+            {"name": "Empty bar squat", "duration": "60s", "note": "10 reps, below parallel"},
+        ],
+    },
+    "full": {
+        "label": "Full Body Warm-Up",
+        "time": "5 min",
+        "steps": [
+            {"name": "Jumping jacks", "duration": "30s", "note": "Get the heart rate up"},
+            {"name": "Arm circles + leg swings", "duration": "30s", "note": "Multitask"},
+            {"name": "Bodyweight squats", "duration": "30s", "note": "10 reps"},
+            {"name": "Push-ups", "duration": "30s", "note": "10 reps"},
+            {"name": "Hip circles", "duration": "30s", "note": "8 each direction"},
+            {"name": "Band pull-aparts", "duration": "30s", "note": "15 reps"},
+            {"name": "Inchworms", "duration": "60s", "note": "5 reps, slow walk out"},
+            {"name": "Empty bar complex", "duration": "60s", "note": "5 deadlifts + 5 rows + 5 hang cleans"},
+        ],
+    },
+}
+
+# Map day names to warm-up type
+DAY_WARMUP_TYPES = {
+    "Mon": "upper",  # Phase 1, changes by phase but upper is safe default
+    "Tue": "lower",
+    "Wed": "upper",
+    "Thu": "lower",
+    "Fri": "upper",
+    "Sat": "full",
+    "Sun": None,  # Rest day
+}
+
+
+# ─── SUPPLEMENTS ────────────────────────────────────────────────────────────
+
+SUPPLEMENTS = [
+    {"name": "Creatine 5g", "timing": "Any time, daily", "required": True},
+    {"name": "Whey Protein", "timing": "Post-workout or with meals", "required": False},
+    {"name": "Multivitamin", "timing": "With first meal", "required": False},
+    {"name": "Fish Oil", "timing": "With meal", "required": False},
+    {"name": "Vitamin D3", "timing": "With first meal", "required": False},
+    {"name": "Electrolytes", "timing": "During fasting window or with training", "required": False},
+]
+
+
 PHASES = {
     1: {
         "label": "Phase 1 - Wks 1-4",
@@ -475,7 +545,7 @@ def get_workouts(week):
         else:
             days = _phase3_week(week)
 
-    # Inject meal plan data into each day
+    # Inject meal plan and warmup data into each day
     for d in days:
         if is_deload:
             meal_type = "deload"
@@ -483,6 +553,12 @@ def get_workouts(week):
             meal_type = DAY_MEAL_TYPES.get(d["day"], "moderate")
         d["mealType"] = meal_type
         d["mealPlan"] = get_meal_plan(meal_type)
+
+        warmup_type = DAY_WARMUP_TYPES.get(d["day"])
+        if warmup_type and warmup_type in WARMUPS:
+            d["warmup"] = WARMUPS[warmup_type]
+        else:
+            d["warmup"] = None
 
     return days
 

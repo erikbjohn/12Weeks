@@ -9,3 +9,12 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: "3.12"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: 12weeks-db
+          property: connectionURI
+
+databases:
+  - name: 12weeks-db
+    plan: free
+    databaseName: twelve_weeks
