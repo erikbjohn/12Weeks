@@ -963,6 +963,9 @@ function renderPsychMessages() {
     return `<div class="psych-chat-bubble ${cls}">${m.content}</div>`;
   }).join('');
   container.scrollTop = container.scrollHeight;
+  // Auto-focus the input so user can just type
+  const input = document.getElementById('psych-input');
+  if (input) setTimeout(() => input.focus(), 100);
 }
 
 function showPsychTyping() {
