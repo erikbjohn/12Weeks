@@ -357,6 +357,41 @@ function getWeightTrend(exName) {
   return 'same';
 }
 
+// ─── WELCOME & ONBOARDING ──────────────────────────────────────────────────
+
+function showWelcome() {
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center">
+      <h2 style="font-size:1.8rem;margin-bottom:8px">Welcome to 12 Weeks</h2>
+      <div style="font-size:15px;color:var(--muted);line-height:1.8;margin-bottom:24px">
+        This is your personal training program -- built around your goals, your body, and your life.<br><br>
+        Before we get started, I'd like to get to know you. We'll have a conversation about what you want to accomplish, what's going on in your life, and how I can help you get there.<br><br>
+        After that, we'll test your strength to set your starting weights.
+      </div>
+      <div style="font-size:14px;color:var(--accent);margin-bottom:24px;font-family:'DM Mono',monospace">
+        Your coach: <strong style="font-size:16px">Erik</strong>
+      </div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:24px;background:var(--surface2);padding:14px;border-radius:8px;text-align:left">
+        Erik is a sports psychologist and peak performance coach. He'll be with you every morning for check-ins, available anytime via chat, and will adjust your program based on how you're doing -- physically and mentally.
+      </div>
+      <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="startOnboardingIntake()">Meet Your Coach</button>
+      <div style="margin-top:12px">
+        <button class="btn btn-secondary" style="width:100%" onclick="skipToPhysicalBaseline()">Skip to Physical Assessment</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function startOnboardingIntake() {
+  // Go to psych intake first, then physical baseline after
+  showPsychIntake();
+}
+
+function skipToPhysicalBaseline() {
+  showBaseline();
+}
+
 // ─── BASELINE ASSESSMENT ────────────────────────────────────────────────────
 let baselineStep = 0;
 let baselineWeights = {};
@@ -762,10 +797,10 @@ async function saveBaselineMeasurementsAndStart() {
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    // Now go to psych intake step
+    // Psych intake already happened, finish onboarding
     _baselinePhotoData = {};
     _baselinePhotoResults = {};
-    showPsychIntake();
+    saveBaseline();
   } catch (e) {
     console.error('Error saving baseline measurements:', e);
     if (statusEl) {
@@ -778,7 +813,7 @@ async function saveBaselineMeasurementsAndStart() {
 function skipBaselineMeasurements() {
   _baselinePhotoData = {};
   _baselinePhotoResults = {};
-  showPsychIntake();
+  saveBaseline();
 }
 
 // ─── SIMPLE MARKDOWN RENDERER ──────────────────────────────────────────────
@@ -853,7 +888,7 @@ function showPsychIntake() {
 }
 
 function skipPsychIntake() {
-  saveBaseline();
+  showBaseline();
 }
 
 async function startPsychConversation() {
@@ -1001,7 +1036,7 @@ async function showPsychReport() {
         <h2 style="margin-bottom:0.75rem">Your Psych Profile</h2>
         <div class="psych-report">${renderMarkdown(data.report)}</div>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
-          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaseline()">Continue to Program</button>
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showBaseline()">Next: Physical Assessment</button>
         </div>
       </div>
     </div>`;
@@ -1018,7 +1053,7 @@ async function showPsychReport() {
     if (card) {
       const btnDiv = document.createElement('div');
       btnDiv.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-top:1.25rem';
-      btnDiv.innerHTML = `<button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaseline()">Continue to Program</button>`;
+      btnDiv.innerHTML = `<button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showBaseline()">Next: Physical Assessment</button>`;
       card.appendChild(btnDiv);
     }
   }
@@ -1223,12 +1258,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for localStorage migration
     checkLocalStorageMigration();
 
-    // Only show baseline if truly not done AND no weights in DB
+    // Only show onboarding if truly not done AND no weights in DB
     const hasWeights = _weightsCache && Object.keys(_weightsCache).length > 0;
     if (!_stateCache.baseline_done && !hasWeights) {
-      showBaseline();
+      showWelcome();
     } else if (!_stateCache.baseline_done && hasWeights) {
-      // Weights exist but flag wasn't set (e.g. skipped measurements step) - fix it
       _stateCache.baseline_done = true;
       apiPost('/api/state', { baseline_done: true });
     }

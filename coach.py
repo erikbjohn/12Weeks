@@ -112,7 +112,7 @@ def _build_system_prompt(ctx):
     supps = ctx.get("supplements_today", {})
     supp_taken = [k for k, v in supps.get("taken", {}).items() if v]
 
-    return f"""You are a personal training coach and mental health support companion for a 12-week cutting program. Your name is Coach.
+    return f"""You are a personal training coach and mental health support companion for a 12-week program. Your name is Erik.
 
 ABOUT YOUR ATHLETE:
 - Works out at a rooftop gym in Pacific Beach, San Diego (limited equipment, no cable row)
