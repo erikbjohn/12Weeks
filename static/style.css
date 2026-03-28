@@ -1,0 +1,697 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+:root {
+  --bg: #0d0f0e;
+  --surface: #161918;
+  --surface2: #1e2220;
+  --border: #2a2e2c;
+  --border2: #353a38;
+  --text: #e8ede9;
+  --muted: #7a8a7d;
+  --dim: #4a5549;
+  --lift: #4ade80;
+  --lift-bg: #0d2218;
+  --lift-border: #1a4a2e;
+  --run-z2: #60a5fa;
+  --run-z2-bg: #0a1a2e;
+  --run-z2-border: #1a3a5e;
+  --run-tempo: #f59e0b;
+  --run-tempo-bg: #1e1200;
+  --run-tempo-border: #4a2e00;
+  --run-hiit: #f87171;
+  --run-hiit-bg: #1e0a0a;
+  --run-hiit-border: #4a1a1a;
+  --run-long: #a78bfa;
+  --run-long-bg: #130f28;
+  --run-long-border: #2e2060;
+  --run-easy: #94a3b8;
+  --run-easy-bg: #111418;
+  --run-easy-border: #252c34;
+  --run-min: #4a5549;
+  --run-min-bg: #0e0e0e;
+  --run-min-border: #222;
+  --accent: #4ade80;
+  --risk-low: #4ade80;
+  --risk-moderate: #f59e0b;
+  --risk-high: #f87171;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── HEADER ─── */
+header {
+  padding: 1.25rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+header .subtitle {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  margin-top: 2px;
+}
+
+/* ─── GARMIN STATUS BAR ─── */
+.garmin-bar {
+  padding: 10px 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.garmin-connect-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  width: 100%;
+  transition: all .15s;
+}
+
+.garmin-connect-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.garmin-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.garmin-metric {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.garmin-metric .gm-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.garmin-metric .gm-value {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.garmin-metric .gm-sub {
+  font-size: 9px;
+  color: var(--dim);
+  font-family: 'DM Mono', monospace;
+}
+
+/* ─── READINESS ALERT ─── */
+.readiness-alert {
+  padding: 10px 1rem;
+  border-bottom: 1px solid var(--border);
+  display: none;
+}
+
+.readiness-alert.visible { display: block; }
+
+.readiness-inner {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.readiness-alert.risk-low .readiness-inner {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--lift);
+}
+
+.readiness-alert.risk-moderate .readiness-inner {
+  background: var(--run-tempo-bg);
+  border: 1px solid var(--run-tempo-border);
+  color: var(--run-tempo);
+}
+
+.readiness-alert.risk-high .readiness-inner {
+  background: var(--run-hiit-bg);
+  border: 1px solid var(--run-hiit-border);
+  color: var(--run-hiit);
+}
+
+.readiness-score {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.readiness-flags {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* ─── PHASE BANNER ─── */
+.phase-banner {
+  padding: 8px 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  overflow-x: auto;
+}
+
+.phase-banner span { color: var(--text); }
+
+/* ─── PHASE NAV ─── */
+.phase-nav {
+  display: flex;
+  gap: 6px;
+  padding: 10px 1rem;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.phase-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.phase-btn:hover { border-color: var(--border2); color: var(--text); }
+.phase-btn.active { background: var(--lift-bg); border-color: var(--lift-border); color: var(--lift); }
+
+/* ─── WEEK TABS ─── */
+.week-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.week-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.week-tab:hover { color: var(--text); }
+.week-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.week-tab.deload { color: var(--run-easy); }
+.week-tab.deload.active { color: var(--run-easy); border-bottom-color: var(--run-easy); }
+
+/* ─── DAY GRID ─── */
+.day-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 1rem;
+}
+
+.day-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color .15s;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: stretch;
+}
+
+.day-card:hover { border-color: var(--border2); }
+.day-card.active { border-color: var(--accent) !important; }
+.day-card.rest { opacity: 0.6; }
+.day-card.completed { opacity: 0.5; }
+.day-card.completed .day-check { color: var(--accent); }
+
+.day-card-left {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+  min-width: 50px;
+}
+
+.day-abbr {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.day-card-center {
+  padding: 8px 12px;
+  min-width: 0;
+}
+
+.day-lift-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.day-run-label {
+  margin-top: 4px;
+}
+
+.run-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.run-z2 { background: var(--run-z2-bg); color: var(--run-z2); border: 1px solid var(--run-z2-border); }
+.run-tempo { background: var(--run-tempo-bg); color: var(--run-tempo); border: 1px solid var(--run-tempo-border); }
+.run-hiit { background: var(--run-hiit-bg); color: var(--run-hiit); border: 1px solid var(--run-hiit-border); }
+.run-long { background: var(--run-long-bg); color: var(--run-long); border: 1px solid var(--run-long-border); }
+.run-easy { background: var(--run-easy-bg); color: var(--run-easy); border: 1px solid var(--run-easy-border); }
+.run-min { background: var(--run-min-bg); color: var(--run-min); border: 1px solid var(--run-min-border); }
+
+.day-card-right {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  color: var(--dim);
+  font-size: 18px;
+}
+
+/* ─── DETAIL PANEL ─── */
+.detail-panel {
+  padding: 0 1rem 1rem;
+  display: none;
+}
+
+.detail-panel.visible { display: block; }
+
+.detail-inner {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.detail-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.detail-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.meta-chip {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.detail-section {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-section:last-child { border-bottom: none; }
+
+.detail-section h3 {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+/* ─── EXERCISE TABLE ─── */
+.exercise-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.exercise-row:last-child { border-bottom: none; }
+
+.ex-info { flex: 1; min-width: 0; }
+
+.ex-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ex-note {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.ex-sets {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ex-check {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+
+.ex-check.done {
+  background: var(--lift-bg);
+  border-color: var(--lift-border);
+  color: var(--accent);
+}
+
+/* ─── RUN DETAIL ─── */
+.run-detail-box {
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.run-detail-box .rdl {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.run-detail-box .rdt {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.run-detail-box .rdd {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* ─── TIMING ─── */
+.timing-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.timing-time {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  min-width: 52px;
+}
+
+.timing-desc {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ─── NOTES ─── */
+.notes-box {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 10px;
+}
+
+.notes-box strong { color: var(--lift); font-weight: 500; }
+
+/* ─── MODAL ─── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal-overlay.visible { display: flex; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 360px;
+}
+
+.modal h2 {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.modal input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  margin-bottom: 10px;
+  outline: none;
+}
+
+.modal input:focus { border-color: var(--accent); }
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  flex: 1;
+  text-align: center;
+}
+
+.btn-primary {
+  background: var(--lift-bg);
+  border-color: var(--lift-border);
+  color: var(--lift);
+}
+
+.btn-primary:hover { background: var(--lift-border); }
+
+.btn-secondary {
+  background: var(--surface2);
+  border-color: var(--border2);
+  color: var(--muted);
+}
+
+.btn-secondary:hover { color: var(--text); }
+
+.modal-error {
+  color: var(--run-hiit);
+  font-size: 12px;
+  margin-top: 8px;
+  display: none;
+}
+
+/* ─── GARMIN DISCONNECT ─── */
+.garmin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.garmin-header .gh-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.garmin-disconnect {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.garmin-disconnect:hover { color: var(--run-hiit); }
+
+/* ─── FOOTER ─── */
+footer {
+  padding: 1.25rem 1rem;
+  border-top: 1px solid var(--border);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--dim);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ─── SLEEP PANEL ─── */
+.sleep-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sleep-item {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.sleep-item .si-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.sleep-item .si-value {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ─── RESPONSIVE ─── */
+@media (min-width: 600px) {
+  header { padding: 1.5rem 2rem 1rem; }
+  .phase-nav { padding: 10px 2rem; }
+  .week-tabs { padding: 0 2rem; }
+  .day-grid { padding: 1rem 2rem; }
+  .detail-panel { padding: 0 2rem 1rem; }
+  .garmin-bar { padding: 10px 2rem; }
+  .readiness-alert { padding: 10px 2rem; }
+  .phase-banner { padding: 8px 2rem; }
+  footer { padding: 1.25rem 2rem; }
+}
+
+@media (min-width: 768px) {
+  .day-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1100px) {
+  .day-grid {
+    grid-template-columns: repeat(7, 1fr);
+  }
+  .day-card {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+  .day-card-left {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 8px;
+  }
+  .day-card-center { padding: 8px 10px; }
+  .day-card-right {
+    border-top: 1px solid var(--border);
+    justify-content: center;
+    padding: 6px;
+    font-size: 14px;
+  }
+}

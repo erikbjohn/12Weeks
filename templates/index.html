@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0d0f0e">
+  <title>12-Week Cut</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>12-Week Cut</h1>
+  <div class="subtitle">Lift 6:00am &rarr; Run &rarr; Done by 9:00am &middot; Daily running streak</div>
+</header>
+
+<div class="garmin-bar" id="garmin-bar"></div>
+<div class="readiness-alert" id="readiness-alert"></div>
+
+<div class="phase-nav" id="phase-nav"></div>
+<div class="phase-banner" id="phase-banner"></div>
+<div class="week-tabs" id="week-tabs"></div>
+<div class="day-grid" id="day-grid"></div>
+<div class="detail-panel" id="detail-panel"></div>
+
+<footer>
+  <div>Lift first &middot; Run after &middot; Done by 9am</div>
+  <div>Deload: Wks 4, 8, 12</div>
+  <div>Sunday = streak mile only</div>
+  <div>Creatine 5g daily</div>
+</footer>
+
+<!-- Garmin Login Modal -->
+<div class="modal-overlay" id="garmin-modal">
+  <div class="modal">
+    <h2>Connect Garmin</h2>
+    <input type="email" id="garmin-email" placeholder="Garmin email" autocomplete="email">
+    <input type="password" id="garmin-password" placeholder="Password" autocomplete="current-password">
+    <div class="modal-error" id="garmin-error"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="garmin-submit" onclick="garminLogin()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
