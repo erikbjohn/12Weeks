@@ -632,12 +632,15 @@ def api_morning_checkin_history():
 def api_psych_intake_status():
     intake = PsychIntake.query.first()
     if not intake:
-        return jsonify({"started": False, "completed": False, "has_report": False})
+        return jsonify({"started": False, "completed": False, "has_report": False, "locked": False})
+    locked = intake.locked_until and date.today() < intake.locked_until
     return jsonify({
         "started": True,
         "completed": intake.completed,
         "has_report": intake.report is not None,
         "message_count": len(intake.conversation or []),
+        "locked": bool(locked),
+        "locked_until": intake.locked_until.isoformat() if locked else None,
     })
 
 
@@ -663,6 +666,16 @@ def api_psych_intake_message():
         db.session.add(intake)
         db.session.commit()
 
+    # Check if locked out
+    if intake.locked_until and date.today() < intake.locked_until:
+        days_left = (intake.locked_until - date.today()).days
+        return jsonify({
+            "response": f"You're locked out for {days_left} more day{'s' if days_left != 1 else ''}. Come back when you've been alcohol-free for 7 days.",
+            "completed": False,
+            "locked": True,
+            "locked_until": intake.locked_until.isoformat(),
+        })
+
     # If this is the first message (starting the intake), send an empty
     # "start" to get the coach's opening question
     if not intake.conversation and not user_msg:
@@ -677,6 +690,21 @@ def api_psych_intake_message():
 
     # Get AI response
     response_text, is_complete = get_intake_response(user_msg, convo[:-1])
+
+    # Check for lockout signal
+    is_locked = "[INTAKE_LOCKED]" in response_text
+    if is_locked:
+        response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
+        intake.locked_until = date.today() + timedelta(days=7)
+        convo.append({"role": "assistant", "content": response_text})
+        intake.conversation = convo
+        db.session.commit()
+        return jsonify({
+            "response": response_text,
+            "completed": False,
+            "locked": True,
+            "locked_until": intake.locked_until.isoformat(),
+        })
 
     # Add assistant response
     convo.append({"role": "assistant", "content": response_text})

@@ -138,6 +138,7 @@ class PsychIntake(db.Model):
     conversation = db.Column(db.JSON, default=list)  # [{role, content}]
     report = db.Column(db.Text, nullable=True)
     completed = db.Column(db.Boolean, default=False)
+    locked_until = db.Column(db.Date, nullable=True)  # locked out until this date
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
