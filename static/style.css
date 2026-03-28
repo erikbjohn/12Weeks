@@ -655,6 +655,197 @@ footer {
   font-weight: 500;
 }
 
+/* ─── GARMIN DAY STATS (Detail Panel) ─── */
+.garmin-day-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.garmin-day-stats .gds-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.garmin-day-stats .gds-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.garmin-day-stats .gds-value {
+  font-family: 'Syne', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.garmin-day-stats .gds-sub {
+  font-size: 9px;
+  color: var(--dim);
+  font-family: 'DM Mono', monospace;
+}
+
+.garmin-nudge {
+  font-size: 11px;
+  color: var(--dim);
+  font-family: 'DM Mono', monospace;
+  padding: 8px 0;
+  text-align: center;
+}
+
+/* ─── DAILY GOALS ─── */
+.daily-goals {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.daily-goals .dg-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.daily-goals .dg-item {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  padding-left: 12px;
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.daily-goals .dg-item::before {
+  content: '\25B8';
+  position: absolute;
+  left: 0;
+  color: var(--dim);
+}
+
+/* ─── ADJUSTMENT BANNER ─── */
+.adjustment-banner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 10px;
+}
+
+.adjustment-banner.risk-moderate {
+  background: var(--run-tempo-bg);
+  border: 2px solid var(--run-tempo-border);
+  color: var(--run-tempo);
+}
+
+.adjustment-banner.risk-high {
+  background: var(--run-hiit-bg);
+  border: 2px solid var(--run-hiit-border);
+  color: var(--run-hiit);
+}
+
+.adjustment-banner .ab-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* ─── COACH CHAT ─── */
+.coach-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coach-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.coach-message,
+.user-message {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 90%;
+}
+
+.coach-message {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--text);
+  align-self: flex-start;
+}
+
+.user-message {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  align-self: flex-end;
+}
+
+.coach-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.coach-input input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.coach-input input:focus {
+  border-color: var(--accent);
+}
+
+.coach-input input::placeholder {
+  color: var(--dim);
+}
+
+.coach-input button {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--accent);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.coach-input button:hover {
+  background: var(--lift-border);
+}
+
 /* ─── RESPONSIVE ─── */
 @media (min-width: 600px) {
   header { padding: 1.5rem 2rem 1rem; }
