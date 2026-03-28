@@ -769,6 +769,13 @@ def api_chat_history():
     } for m in messages])
 
 
+@app.route("/api/chat/clear", methods=["POST"])
+def api_chat_clear():
+    ChatMessage.query.delete()
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     data = request.get_json()
