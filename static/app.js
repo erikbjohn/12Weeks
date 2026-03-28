@@ -495,6 +495,19 @@ function baselineNext() {
   const lift = BASELINE_LIFTS[liftIdx];
   const repsVal = parseInt(document.getElementById('bl-reps').value) || 0;
   baselineWeights[lift.name] = { reps: repsVal };
+
+  // Save this lift immediately to the DB so nothing is lost
+  const oneRM = estimate1RM(lift.suggested, repsVal);
+  const working = workingWeightFrom1RM(oneRM);
+  apiPost('/api/weights', {
+    exercise: lift.name,
+    weight: working,
+    sets_label: `baseline: ${lift.suggested}lb x ${repsVal}`,
+    rpe: 'just_right',
+    week: 0,
+    day_idx: 0,
+  });
+
   baselineStep++;
   renderBaseline();
 }
