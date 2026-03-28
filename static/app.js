@@ -1602,6 +1602,57 @@ function sendMorningCoachReply() {
 function closeMorningCheckin() {
   document.getElementById('morning-checkin-overlay').innerHTML = '';
   renderCheckinSummaryBar();
+
+  // If it's Sunday, trigger weekly planning check-in
+  const today = new Date();
+  if (today.getDay() === 0) {
+    triggerWeeklyPlanning();
+  }
+}
+
+async function triggerWeeklyPlanning() {
+  // Check if we already did weekly planning today
+  const planKey = '12w_weekly_plan_' + todayStr();
+  if (localStorage.getItem(planKey)) return;
+
+  // Open the chat overlay with a weekly planning prompt
+  toggleChatOverlay();
+
+  // Wait a beat for the overlay to render
+  await new Promise(r => setTimeout(r, 500));
+
+  // Send the weekly planning trigger to Coach
+  const weekNum = currentWeek;
+  const nextWeek = Math.min(weekNum + 1, 12);
+  const msg = `[WEEKLY_PLANNING] It's Sunday - time for our weekly planning session. I just finished week ${weekNum}. The coming week is week ${nextWeek}. Let's review how this week went and plan for next week. Ask me what I need to know for the week ahead.`;
+
+  // Find the chat input and programmatically send
+  const inputEl = document.getElementById('chat-overlay-input') || document.getElementById('chat-input-field');
+  if (inputEl) {
+    inputEl.value = msg;
+  }
+
+  // Actually send it
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: msg }),
+    });
+    const d = await res.json();
+
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'user', content: 'Weekly planning check-in', date: todayStr() });
+      _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
+    }
+
+    // Re-render the chat to show the response
+    if (typeof renderChatOverlay === 'function') renderChatOverlay();
+
+    localStorage.setItem(planKey, '1');
+  } catch(e) {
+    console.error('Weekly planning failed', e);
+  }
 }
 
 function renderCheckinSummaryBar() {
