@@ -362,29 +362,15 @@ function getWeightTrend(exName) {
 function showWelcome() {
   const el = document.getElementById('baseline-overlay');
   el.innerHTML = `<div class="baseline-overlay">
-    <div class="baseline-card" style="text-align:center">
-      <h2 style="font-size:1.8rem;margin-bottom:8px">Welcome to 12 Weeks</h2>
-      <div style="font-size:15px;color:var(--muted);line-height:1.8;margin-bottom:24px">
-        This is your personal training program -- built around your goals, your body, and your life.<br><br>
-        Before we get started, I'd like to get to know you. We'll have a conversation about what you want to accomplish, what's going on in your life, and how I can help you get there.<br><br>
-        After that, we'll test your strength to set your starting weights.
-      </div>
-      <div style="font-size:14px;color:var(--accent);margin-bottom:24px;font-family:'DM Mono',monospace">
-        Your coach: <strong style="font-size:16px">Erik</strong>
-      </div>
-      <div style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:24px;background:var(--surface2);padding:14px;border-radius:8px;text-align:left">
-        Erik is a sports psychologist and peak performance coach. He'll be with you every morning for check-ins, available anytime via chat, and will adjust your program based on how you're doing -- physically and mentally.
-      </div>
-      <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="startOnboardingIntake()">Meet Your Coach</button>
-      <div style="margin-top:12px">
-        <button class="btn btn-secondary" style="width:100%" onclick="skipToPhysicalBaseline()">Skip to Physical Assessment</button>
-      </div>
+    <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+      <h2 style="font-size:2.2rem;margin-bottom:12px;letter-spacing:-0.02em">12 Weeks.</h2>
+      <div style="font-size:15px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:2.5rem">Align aspirations with actions.</div>
+      <button class="btn btn-primary" style="width:100%;font-size:18px;padding:16px;font-weight:700" onclick="startOnboardingIntake()">Commit</button>
     </div>
   </div>`;
 }
 
 function startOnboardingIntake() {
-  // Go to psych intake first, then physical baseline after
   showPsychIntake();
 }
 
@@ -869,21 +855,8 @@ let _psychCompleted = false;
 function showPsychIntake() {
   _psychMessages = [];
   _psychCompleted = false;
-  const el = document.getElementById('baseline-overlay');
-  el.innerHTML = `<div class="baseline-overlay">
-    <div class="baseline-card psych-intake-card">
-      <div class="psych-intro">
-        <h2>Before We Start Training</h2>
-        <div class="baseline-desc" style="margin-bottom:1.25rem">
-          Let's talk. Your coach wants to understand where you're at mentally &mdash; your motivations, stress, sleep, what's working and what isn't.<br><br>
-          This helps personalize your experience over the next 12 weeks. Everything here is private and stored securely.
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="startPsychConversation()">Start Conversation</button>
-        </div>
-      </div>
-    </div>
-  </div>`;
+  // Skip intro screen -- go straight to conversation
+  startPsychConversation();
 }
 
 function skipPsychIntake() {
@@ -894,7 +867,7 @@ async function startPsychConversation() {
   const el = document.getElementById('baseline-overlay');
   el.innerHTML = `<div class="baseline-overlay">
     <div class="baseline-card psych-intake-card">
-      <h2 style="margin-bottom:0.75rem">Meet Erik</h2>
+      <h2 style="margin-bottom:0.75rem;font-size:1.1rem;color:var(--muted)">Erik</h2>
       <div class="psych-chat-messages" id="psych-chat-messages"></div>
       <div class="psych-input-bar" id="psych-input-bar">
         <input type="text" id="psych-input" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendPsychMessage()">
