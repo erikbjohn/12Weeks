@@ -30,18 +30,18 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
 with app.app_context():
-    db.create_all()
-    # Add missing columns to existing tables (SQLAlchemy create_all doesn't alter)
+    # Drop and recreate psych_intake if it's missing the locked_until column
     from sqlalchemy import inspect as sa_inspect, text
-    inspector = sa_inspect(db.engine)
-    for table_name, model in [("psych_intake", PsychIntake)]:
-        if table_name in inspector.get_table_names():
-            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
-            for col in model.__table__.columns:
-                if col.name not in existing_cols:
-                    col_type = col.type.compile(db.engine.dialect)
-                    db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}"))
-            db.session.commit()
+    try:
+        inspector = sa_inspect(db.engine)
+        if "psych_intake" in inspector.get_table_names():
+            cols = {c["name"] for c in inspector.get_columns("psych_intake")}
+            if "locked_until" not in cols:
+                db.session.execute(text("DROP TABLE psych_intake"))
+                db.session.commit()
+    except Exception:
+        pass
+    db.create_all()
 
 garmin = GarminClient()
 
