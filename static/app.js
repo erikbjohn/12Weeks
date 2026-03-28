@@ -401,7 +401,14 @@ function renderBaseline() {
 
   const liftIdx = baselineStep - 1;
 
-  if (liftIdx >= BASELINE_LIFTS.length) {
+  // ─── MEASUREMENTS & PHOTOS STEP (after summary) ───
+  if (liftIdx > BASELINE_LIFTS.length) {
+    renderBaselineMeasurements(el);
+    return;
+  }
+
+  // ─── SUMMARY SCREEN ───
+  if (liftIdx === BASELINE_LIFTS.length) {
     let rows = '';
     for (const lift of BASELINE_LIFTS) {
       const w = baselineWeights[lift.name] || { reps: 0 };
@@ -421,7 +428,7 @@ function renderBaseline() {
           Working weights are set at ~75% of your estimated 1RM (the right range for 4x10 in Phase 1).
         </div>
         <div class="baseline-summary">${rows}</div>
-        <button class="btn btn-primary" style="width:100%" onclick="saveBaseline()">Start Program</button>
+        <button class="btn btn-primary" style="width:100%" onclick="baselineStep=${BASELINE_LIFTS.length + 2};renderBaseline()">Next: Body Measurements</button>
       </div>
     </div>`;
     return;
@@ -534,6 +541,486 @@ function saveBaseline() {
   renderBaseline();
 }
 
+// ─── BASELINE MEASUREMENTS & PHOTOS STEP ────────────────────────────────────
+let _baselinePhotoData = {}; // { front: base64, side: base64, back: base64 }
+let _baselinePhotoResults = {}; // { front: {id, analysis}, ... }
+
+function renderBaselineMeasurements(el) {
+  const poses = ['front', 'side', 'back'];
+  let photoSlotsHtml = '';
+  for (const pose of poses) {
+    let slotContent;
+    if (_baselinePhotoData[pose]) {
+      const result = _baselinePhotoResults[pose];
+      let analysisHtml = '';
+      if (result && result.analysis) {
+        analysisHtml = `<div class="photo-analysis">
+          <div class="photo-analysis-label">AI Coach Analysis</div>
+          ${result.analysis}
+        </div>`;
+      }
+      slotContent = `<div class="photo-preview">
+        <img src="${_baselinePhotoData[pose]}" alt="${pose}">
+        <button class="photo-retake" onclick="retakeBaselinePhoto('${pose}')">Retake</button>
+      </div>${analysisHtml}`;
+    } else {
+      slotContent = `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+        <div class="photo-icon">&#128247;</div>
+        <div>Tap to capture</div>
+        <input type="file" accept="image/*" capture="environment" onchange="handleBaselinePhotoCapture('${pose}', this)">
+      </div>`;
+    }
+    photoSlotsHtml += `<div class="photo-slot">
+      <div class="photo-slot-label">${pose}</div>
+      <div id="bl-photo-slot-${pose}">${slotContent}</div>
+    </div>`;
+  }
+
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card baseline-measurements-card">
+      <h2>Baseline Measurements &amp; Photos</h2>
+      <div class="baseline-desc" style="margin-bottom:1rem">
+        Record your starting measurements and Day 1 photos. You can skip this and do it later.
+      </div>
+
+      <div class="bl-measure-section">
+        <div class="bl-measure-row">
+          <label for="bl-bodyweight" class="bl-measure-label">Body Weight (lbs)</label>
+          <input type="number" inputmode="decimal" id="bl-bodyweight" class="bl-measure-input bl-measure-input-lg" placeholder="e.g. 185" step="0.1" min="50" max="500">
+        </div>
+        <div class="bl-measure-row">
+          <label for="bl-waist" class="bl-measure-label">Waist (inches)</label>
+          <input type="number" inputmode="decimal" id="bl-waist" class="bl-measure-input" placeholder="e.g. 34" step="0.1" min="15" max="80">
+        </div>
+        <div class="bl-measure-row">
+          <label for="bl-notes" class="bl-measure-label">Notes (optional)</label>
+          <textarea id="bl-notes" class="bl-measure-textarea" rows="2" placeholder="e.g. Measured at navel, morning before eating"></textarea>
+        </div>
+      </div>
+
+      <div class="bl-photo-section">
+        <div class="bl-photo-heading">Day 1 Photos</div>
+        <div class="bl-photo-desc">Take your Day 1 photos. You'll retake these every Sunday to track progress.</div>
+        <div class="photo-grid">${photoSlotsHtml}</div>
+      </div>
+
+      <div id="bl-measure-status" class="bl-measure-status" style="display:none"></div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
+        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaselineMeasurementsAndStart()">Save &amp; Start Program</button>
+        <button class="btn btn-secondary bl-skip-btn" style="width:100%;font-size:15px;padding:12px" onclick="skipBaselineMeasurements()">Skip for Now</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function retakeBaselinePhoto(pose) {
+  delete _baselinePhotoData[pose];
+  delete _baselinePhotoResults[pose];
+  const slotEl = document.getElementById(`bl-photo-slot-${pose}`);
+  if (slotEl) {
+    slotEl.innerHTML = `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+      <div class="photo-icon">&#128247;</div>
+      <div>Tap to capture</div>
+      <input type="file" accept="image/*" capture="environment" onchange="handleBaselinePhotoCapture('${pose}', this)">
+    </div>`;
+  }
+}
+
+async function handleBaselinePhotoCapture(pose, inputEl) {
+  const file = inputEl.files[0];
+  if (!file) return;
+
+  const slotEl = document.getElementById(`bl-photo-slot-${pose}`);
+  if (!slotEl) return;
+
+  slotEl.innerHTML = `<div class="photo-loading"><div class="spinner"></div><div>Compressing...</div></div>`;
+
+  try {
+    const base64 = await compressImage(file, 800, 0.7);
+    _baselinePhotoData[pose] = base64;
+
+    slotEl.innerHTML = `
+      <div class="photo-preview">
+        <img src="${base64}" alt="${pose}">
+        <button class="photo-retake" onclick="retakeBaselinePhoto('${pose}')">Retake</button>
+      </div>
+      <div class="photo-loading" id="bl-photo-analysis-loading-${pose}">
+        <div class="spinner"></div>
+        <div>Your AI Coach is analyzing...</div>
+      </div>`;
+
+    const res = await fetch('/api/photos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo_data: base64, pose: pose })
+    });
+    const result = await res.json();
+    _baselinePhotoResults[pose] = result;
+    _photosCache = null;
+    _photoImagesCache[result.id] = base64;
+
+    const loadingEl = document.getElementById(`bl-photo-analysis-loading-${pose}`);
+    if (loadingEl) {
+      if (result.analysis) {
+        loadingEl.outerHTML = `<div class="photo-analysis">
+          <div class="photo-analysis-label">AI Coach Analysis</div>
+          ${result.analysis}
+        </div>`;
+      } else {
+        loadingEl.remove();
+      }
+    }
+  } catch (e) {
+    console.error('Baseline photo upload failed:', e);
+    slotEl.innerHTML = `<div style="color:var(--run-hiit);font-size:14px;padding:10px">Upload failed. Tap to retry.</div>`;
+    delete _baselinePhotoData[pose];
+  }
+}
+
+async function saveBaselineMeasurementsAndStart() {
+  const statusEl = document.getElementById('bl-measure-status');
+  const weightVal = parseFloat(document.getElementById('bl-bodyweight').value);
+  const waistVal = parseFloat(document.getElementById('bl-waist').value);
+  const notesVal = (document.getElementById('bl-notes').value || '').trim();
+  const today = todayStr();
+
+  // Show loading
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = `<div class="photo-loading"><div class="spinner"></div><div>Saving measurements...</div></div>`;
+  }
+
+  try {
+    // Save body weight
+    if (weightVal && weightVal > 0) {
+      await fetch('/api/bodyweight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: today, weight: weightVal })
+      });
+      _bodyweightCache = null;
+    }
+
+    // Save waist measurement
+    if (waistVal && waistVal > 0) {
+      await fetch('/api/measurements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: today, waist: waistVal, notes: notesVal })
+      });
+    }
+
+    // Upload any photos that haven't been uploaded yet (they're uploaded on capture, but just in case)
+    const poses = ['front', 'side', 'back'];
+    const photoAnalyses = [];
+    for (const pose of poses) {
+      if (_baselinePhotoData[pose] && !_baselinePhotoResults[pose]) {
+        if (statusEl) {
+          statusEl.innerHTML = `<div class="photo-loading"><div class="spinner"></div><div>Uploading ${pose} photo...</div></div>`;
+        }
+        const res = await fetch('/api/photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ photo_data: _baselinePhotoData[pose], pose: pose })
+        });
+        const result = await res.json();
+        _baselinePhotoResults[pose] = result;
+        _photosCache = null;
+        _photoImagesCache[result.id] = _baselinePhotoData[pose];
+      }
+      if (_baselinePhotoResults[pose] && _baselinePhotoResults[pose].analysis) {
+        photoAnalyses.push({ pose, analysis: _baselinePhotoResults[pose].analysis });
+      }
+    }
+
+    // Show brief analysis summary if photos were uploaded
+    if (photoAnalyses.length > 0) {
+      let summaryHtml = '<div class="bl-analysis-summary"><div class="bl-analysis-summary-title">Photo Analysis Summary</div>';
+      for (const pa of photoAnalyses) {
+        summaryHtml += `<div class="bl-analysis-item"><strong>${pa.pose}:</strong> ${pa.analysis}</div>`;
+      }
+      summaryHtml += '</div>';
+
+      if (statusEl) {
+        statusEl.innerHTML = summaryHtml + `<div style="margin-top:12px"><div class="photo-loading"><div class="spinner"></div><div>Starting program...</div></div></div>`;
+      }
+      // Brief pause so user can see the summary
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Now go to psych intake step
+    _baselinePhotoData = {};
+    _baselinePhotoResults = {};
+    showPsychIntake();
+  } catch (e) {
+    console.error('Error saving baseline measurements:', e);
+    if (statusEl) {
+      statusEl.innerHTML = `<div style="color:var(--run-hiit);font-size:15px;padding:10px">Error saving. Please try again.</div>`;
+      statusEl.style.display = 'block';
+    }
+  }
+}
+
+function skipBaselineMeasurements() {
+  _baselinePhotoData = {};
+  _baselinePhotoResults = {};
+  showPsychIntake();
+}
+
+// ─── SIMPLE MARKDOWN RENDERER ──────────────────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  let html = '';
+  let inUl = false;
+  let paragraph = [];
+
+  function flushParagraph() {
+    if (paragraph.length > 0) {
+      const pText = paragraph.join(' ').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html += `<p>${pText}</p>`;
+      paragraph = [];
+    }
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('## ')) {
+      flushParagraph();
+      if (inUl) { html += '</ul>'; inUl = false; }
+      const heading = trimmed.slice(3).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html += `<h3>${heading}</h3>`;
+    } else if (trimmed.startsWith('# ')) {
+      flushParagraph();
+      if (inUl) { html += '</ul>'; inUl = false; }
+      const heading = trimmed.slice(2).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html += `<h2>${heading}</h2>`;
+    } else if (/^[-*]\s+/.test(trimmed)) {
+      flushParagraph();
+      if (!inUl) { html += '<ul>'; inUl = true; }
+      const item = trimmed.replace(/^[-*]\s+/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html += `<li>${item}</li>`;
+    } else if (trimmed === '') {
+      flushParagraph();
+      if (inUl) { html += '</ul>'; inUl = false; }
+    } else {
+      paragraph.push(trimmed);
+    }
+  }
+  flushParagraph();
+  if (inUl) html += '</ul>';
+  return html;
+}
+
+// ─── PSYCHOLOGICAL INTAKE CHAT ─────────────────────────────────────────────
+let _psychMessages = [];
+let _psychCompleted = false;
+
+function showPsychIntake() {
+  _psychMessages = [];
+  _psychCompleted = false;
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card psych-intake-card">
+      <div class="psych-intro">
+        <h2>Before We Start Training</h2>
+        <div class="baseline-desc" style="margin-bottom:1.25rem">
+          Let's talk. Your coach wants to understand where you're at mentally &mdash; your motivations, stress, sleep, what's working and what isn't.<br><br>
+          This helps personalize your experience over the next 12 weeks. Everything here is private and stored securely.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="startPsychConversation()">Start Conversation</button>
+          <button class="btn btn-secondary bl-skip-btn" style="width:100%;font-size:15px;padding:12px" onclick="skipPsychIntake()">Skip for Now</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function skipPsychIntake() {
+  saveBaseline();
+}
+
+async function startPsychConversation() {
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card psych-intake-card">
+      <h2 style="margin-bottom:0.75rem">Coach Check-In</h2>
+      <div class="psych-chat-messages" id="psych-chat-messages"></div>
+      <div class="psych-input-bar" id="psych-input-bar">
+        <input type="text" id="psych-input" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendPsychMessage()">
+        <button onclick="sendPsychMessage()">Send</button>
+      </div>
+    </div>
+  </div>`;
+
+  // Check if there's an existing conversation
+  try {
+    const statusRes = await fetch('/api/psych-intake/status');
+    const status = await statusRes.json();
+    if (status.started && status.message_count > 0) {
+      const convRes = await fetch('/api/psych-intake/conversation');
+      const convData = await convRes.json();
+      if (convData.conversation && convData.conversation.length > 0) {
+        _psychMessages = convData.conversation;
+        _psychCompleted = convData.completed;
+        renderPsychMessages();
+        if (_psychCompleted) {
+          showPsychReport();
+          return;
+        }
+        return;
+      }
+    }
+  } catch (e) {
+    console.error('Error checking psych intake status:', e);
+  }
+
+  // Start fresh - send empty message to get opening question
+  showPsychTyping();
+  try {
+    const res = await fetch('/api/psych-intake/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: '' })
+    });
+    const data = await res.json();
+    hidePsychTyping();
+    if (data.response) {
+      _psychMessages.push({ role: 'coach', content: data.response });
+      renderPsychMessages();
+    }
+    if (data.completed) {
+      _psychCompleted = true;
+      showPsychReport();
+    }
+  } catch (e) {
+    hidePsychTyping();
+    console.error('Error starting psych conversation:', e);
+  }
+}
+
+async function sendPsychMessage() {
+  const input = document.getElementById('psych-input');
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  input.value = '';
+  _psychMessages.push({ role: 'user', content: msg });
+  renderPsychMessages();
+
+  showPsychTyping();
+  try {
+    const res = await fetch('/api/psych-intake/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    const data = await res.json();
+    hidePsychTyping();
+    if (data.response) {
+      _psychMessages.push({ role: 'coach', content: data.response });
+      renderPsychMessages();
+    }
+    if (data.completed) {
+      _psychCompleted = true;
+      showPsychReport();
+    }
+  } catch (e) {
+    hidePsychTyping();
+    console.error('Error sending psych message:', e);
+  }
+}
+
+function renderPsychMessages() {
+  const container = document.getElementById('psych-chat-messages');
+  if (!container) return;
+  container.innerHTML = _psychMessages.map(m => {
+    const cls = m.role === 'user' ? 'user' : 'coach';
+    return `<div class="psych-chat-bubble ${cls}">${m.content}</div>`;
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function showPsychTyping() {
+  const container = document.getElementById('psych-chat-messages');
+  if (!container) return;
+  const existing = container.querySelector('.psych-typing');
+  if (existing) return;
+  const typing = document.createElement('div');
+  typing.className = 'psych-typing';
+  typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+  container.appendChild(typing);
+  container.scrollTop = container.scrollHeight;
+  // Disable input while waiting
+  const input = document.getElementById('psych-input');
+  const btn = document.querySelector('.psych-input-bar button');
+  if (input) input.disabled = true;
+  if (btn) btn.disabled = true;
+}
+
+function hidePsychTyping() {
+  const container = document.getElementById('psych-chat-messages');
+  if (!container) return;
+  const typing = container.querySelector('.psych-typing');
+  if (typing) typing.remove();
+  // Re-enable input
+  const input = document.getElementById('psych-input');
+  const btn = document.querySelector('.psych-input-bar button');
+  if (input) input.disabled = false;
+  if (btn) btn.disabled = false;
+}
+
+async function showPsychReport() {
+  // Hide input bar
+  const inputBar = document.getElementById('psych-input-bar');
+  if (inputBar) inputBar.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/psych-intake/report');
+    const data = await res.json();
+    const el = document.getElementById('baseline-overlay');
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card psych-intake-card">
+        <h2 style="margin-bottom:0.75rem">Your Psych Profile</h2>
+        <div class="psych-report">${renderMarkdown(data.report)}</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaseline()">Continue to Program</button>
+        </div>
+      </div>
+    </div>`;
+  } catch (e) {
+    console.error('Error fetching psych report:', e);
+    // If report fails, still let them continue
+    const container = document.getElementById('psych-chat-messages');
+    if (container) {
+      container.innerHTML += `<div class="psych-chat-bubble coach">Thanks for sharing! Let's get started with your program.</div>`;
+      container.scrollTop = container.scrollHeight;
+    }
+    const el = document.getElementById('baseline-overlay');
+    const card = el.querySelector('.psych-intake-card');
+    if (card) {
+      const btnDiv = document.createElement('div');
+      btnDiv.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-top:1.25rem';
+      btnDiv.innerHTML = `<button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaseline()">Continue to Program</button>`;
+      card.appendChild(btnDiv);
+    }
+  }
+}
+
+async function redoPsychIntake() {
+  closeSettingsMenu();
+  try {
+    await fetch('/api/psych-intake/reset', { method: 'POST' });
+  } catch (e) {
+    console.error('Error resetting psych intake:', e);
+  }
+  showPsychIntake();
+}
+
 function showSettingsMenu() {
   const el = document.getElementById('settings-dropdown');
   if (el) {
@@ -548,6 +1035,7 @@ function showSettingsMenu() {
   const travelOn = _stateCache && _stateCache.traveling;
   dd.innerHTML = `
     <button onclick="redoBaseline()">Redo Baseline</button>
+    <button onclick="redoPsychIntake()">Redo Psych Intake</button>
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="exportData()">Export Data</button>

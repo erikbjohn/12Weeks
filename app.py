@@ -1,4 +1,4 @@
-"""Flask app for 12-Week Cut Tracker with Garmin integration."""
+"""Flask app for 12 Weeks Tracker with Garmin integration."""
 
 import os
 from datetime import date, timedelta, datetime
@@ -11,11 +11,12 @@ from workout_data import (
 from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response
+from psych_intake import get_intake_response, generate_intake_report
 from models import (
     db, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
-    ProgressPhoto,
+    ProgressPhoto, PsychIntake,
 )
 
 app = Flask(__name__)
@@ -623,6 +624,92 @@ def api_morning_checkin_history():
         "anxiety": e.anxiety,
         "notes": e.notes,
     } for e in entries])
+
+
+# ─── PSYCHOLOGICAL INTAKE ───────────────────────────────────────────────────
+
+@app.route("/api/psych-intake/status")
+def api_psych_intake_status():
+    intake = PsychIntake.query.first()
+    if not intake:
+        return jsonify({"started": False, "completed": False, "has_report": False})
+    return jsonify({
+        "started": True,
+        "completed": intake.completed,
+        "has_report": intake.report is not None,
+        "message_count": len(intake.conversation or []),
+    })
+
+
+@app.route("/api/psych-intake/conversation")
+def api_psych_intake_conversation():
+    intake = PsychIntake.query.first()
+    if not intake:
+        return jsonify({"conversation": [], "completed": False})
+    return jsonify({
+        "conversation": intake.conversation or [],
+        "completed": intake.completed,
+    })
+
+
+@app.route("/api/psych-intake/message", methods=["POST"])
+def api_psych_intake_message():
+    data = request.get_json()
+    user_msg = data.get("message", "").strip()
+
+    intake = PsychIntake.query.first()
+    if not intake:
+        intake = PsychIntake(conversation=[], completed=False)
+        db.session.add(intake)
+        db.session.commit()
+
+    # If this is the first message (starting the intake), send an empty
+    # "start" to get the coach's opening question
+    if not intake.conversation and not user_msg:
+        user_msg = "I'm ready to start the intake."
+
+    if not user_msg:
+        return jsonify({"error": "Message required"}), 400
+
+    # Add user message to conversation
+    convo = list(intake.conversation or [])
+    convo.append({"role": "user", "content": user_msg})
+
+    # Get AI response
+    response_text, is_complete = get_intake_response(user_msg, convo[:-1])
+
+    # Add assistant response
+    convo.append({"role": "assistant", "content": response_text})
+    intake.conversation = convo
+
+    if is_complete:
+        intake.completed = True
+        # Generate the report
+        report = generate_intake_report(convo)
+        intake.report = report
+
+    db.session.commit()
+
+    return jsonify({
+        "response": response_text,
+        "completed": is_complete,
+        "has_report": intake.report is not None,
+    })
+
+
+@app.route("/api/psych-intake/report")
+def api_psych_intake_report():
+    intake = PsychIntake.query.first()
+    if not intake or not intake.report:
+        return jsonify({"error": "No report available"}), 404
+    return jsonify({"report": intake.report})
+
+
+@app.route("/api/psych-intake/reset", methods=["POST"])
+def api_psych_intake_reset():
+    PsychIntake.query.delete()
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 # ─── AI COACH CHAT ──────────────────────────────────────────────────────────

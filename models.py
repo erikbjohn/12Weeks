@@ -131,6 +131,16 @@ class MorningCheckIn(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
+class PsychIntake(db.Model):
+    """Baseline psychological intake data."""
+    __tablename__ = "psych_intake"
+    id = db.Column(db.Integer, primary_key=True)
+    conversation = db.Column(db.JSON, default=list)  # [{role, content}]
+    report = db.Column(db.Text, nullable=True)
+    completed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
 class ChatMessage(db.Model):
     """AI coach conversation history."""
     __tablename__ = "chat_message"
