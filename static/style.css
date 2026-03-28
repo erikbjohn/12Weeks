@@ -2190,6 +2190,36 @@ footer {
   margin-bottom: 4px;
 }
 
+.mc-followup {
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--accent);
+  margin: -4px 0 8px 8px;
+}
+
+.mc-followup label {
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 500;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.mc-followup-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+}
+
+.mc-followup-input:focus {
+  border-color: var(--accent);
+}
+
 /* ─── CHECK-IN SUMMARY BAR ─── */
 .checkin-summary-bar {
   padding: 8px 1rem;

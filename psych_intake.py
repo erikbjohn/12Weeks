@@ -87,7 +87,19 @@ Write the report in this EXACT format:
 ## Readiness Score
 Overall readiness for the 12-week program: [1-10] with brief justification.
 
-Be honest and specific. This report will be used to personalize coaching, so vague platitudes are useless. Use direct quotes from the conversation where relevant."""
+Be honest and specific. This report will be used to personalize coaching, so vague platitudes are useless. Use direct quotes from the conversation where relevant.
+
+IMPORTANT: At the end of the report, add a section called:
+
+## Your 12-Week Game Plan
+
+Write this section as if the sports psychologist and the strength coach are sitting down together to brief the athlete. Address them directly ("you"). Cover:
+1. **Week 1-4 mental approach** - what to focus on psychologically during the foundation phase
+2. **Your biggest strength** - the #1 psychological advantage they have going in
+3. **Your biggest risk** - the #1 thing most likely to derail them, and how to handle it
+4. **When to push and when to pull back** - personalized guidelines based on their psychological profile
+5. **Daily mental practice** - one specific 2-minute mental exercise to do daily (visualization, journaling prompt, breathing technique, etc. - pick what fits THEM based on the conversation)
+6. **A direct message from your coaches** - 3-4 sentences of honest, motivating, direct talk. Not generic motivation. Specific to THIS person based on what they shared."""
 
 
 def get_intake_response(user_message, conversation_history):
@@ -124,7 +136,7 @@ def get_intake_response(user_message, conversation_history):
         return "Intake temporarily unavailable. Try again.", False
 
 
-def generate_intake_report(conversation_history):
+def generate_intake_report(conversation_history, lifting_data=None):
     """Generate the baseline psychological report from the intake conversation."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -142,14 +154,22 @@ def generate_intake_report(conversation_history):
         for m in conversation_history
     )
 
+    # Add lifting baseline data for the combined plan
+    lifting_context = ""
+    if lifting_data:
+        lifting_context = "\n\nBASELINE LIFTING DATA:\n"
+        for name, info in lifting_data.items():
+            lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
+        lifting_context += "\nUse this data to personalize the Game Plan section — reference their actual strength levels."
+
     try:
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            max_tokens=2500,
             system=REPORT_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
-                "content": f"Here is the complete intake conversation. Generate the baseline psychological report.\n\n{convo_text}",
+                "content": f"Here is the complete intake conversation. Generate the baseline psychological report.\n\n{convo_text}{lifting_context}",
             }],
         )
         return response.content[0].text

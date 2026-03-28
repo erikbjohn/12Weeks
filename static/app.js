@@ -1223,8 +1223,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check for localStorage migration
     checkLocalStorageMigration();
 
-    if (!_stateCache.baseline_done) {
+    // Only show baseline if truly not done AND no weights in DB
+    const hasWeights = _weightsCache && Object.keys(_weightsCache).length > 0;
+    if (!_stateCache.baseline_done && !hasWeights) {
       showBaseline();
+    } else if (!_stateCache.baseline_done && hasWeights) {
+      // Weights exist but flag wasn't set (e.g. skipped measurements step) - fix it
+      _stateCache.baseline_done = true;
+      apiPost('/api/state', { baseline_done: true });
     }
 
     // Travel banner
@@ -1393,6 +1399,10 @@ function showMorningCheckinOverlay() {
         </div>
         <span class="mc-slider-val" id="mc-soreness-val">5</span>
       </div>
+      <div class="mc-followup" id="mc-soreness-followup" style="display:none">
+        <label>Where are you sore?</label>
+        <input type="text" class="mc-followup-input" id="mc-soreness-where" placeholder="e.g. shoulders, quads, lower back...">
+      </div>
 
       <div class="mc-slider-row">
         <label>Mood</label>
@@ -1411,6 +1421,10 @@ function showMorningCheckinOverlay() {
         </div>
         <span class="mc-slider-val" id="mc-motivation-val">5</span>
       </div>
+      <div class="mc-followup" id="mc-motivation-followup" style="display:none">
+        <label>What's draining your motivation?</label>
+        <input type="text" class="mc-followup-input" id="mc-motivation-why" placeholder="e.g. tired, bored, work stress, no progress...">
+      </div>
 
       <div class="mc-slider-row">
         <label>Anxiety</label>
@@ -1420,35 +1434,66 @@ function showMorningCheckinOverlay() {
         </div>
         <span class="mc-slider-val" id="mc-anxiety-val">3</span>
       </div>
+      <div class="mc-followup" id="mc-anxiety-followup" style="display:none">
+        <label>What's causing the anxiety?</label>
+        <input type="text" class="mc-followup-input" id="mc-anxiety-why" placeholder="e.g. work deadline, relationship, health, finances...">
+      </div>
 
-      <div class="mc-textarea-label">Anything on your mind today?</div>
+      <div class="mc-textarea-label">Anything else on your mind today?</div>
       <textarea class="mc-textarea" id="mc-notes" placeholder="Optional \u2014 free text..."></textarea>
 
       <button class="btn btn-primary" style="width:100%" onclick="submitMorningCheckin()">Submit Check-In</button>
     </div>
   </div>`;
 
-  // Wire up slider value displays
+  // Wire up slider value displays and follow-up questions
   const sliders = ['sleep', 'stress', 'soreness', 'mood', 'motivation', 'anxiety'];
   sliders.forEach(name => {
     const slider = document.getElementById('mc-' + name);
     const valEl = document.getElementById('mc-' + name + '-val');
     if (slider && valEl) {
-      slider.addEventListener('input', () => { valEl.textContent = slider.value; });
+      slider.addEventListener('input', () => {
+        valEl.textContent = slider.value;
+        const val = parseInt(slider.value);
+        // Show follow-up for concerning values
+        if (name === 'soreness') {
+          const fu = document.getElementById('mc-soreness-followup');
+          if (fu) fu.style.display = val >= 6 ? 'block' : 'none';
+        }
+        if (name === 'motivation') {
+          const fu = document.getElementById('mc-motivation-followup');
+          if (fu) fu.style.display = val <= 4 ? 'block' : 'none';
+        }
+        if (name === 'anxiety') {
+          const fu = document.getElementById('mc-anxiety-followup');
+          if (fu) fu.style.display = val >= 6 ? 'block' : 'none';
+        }
+      });
     }
   });
 }
 
 function submitMorningCheckin() {
+  // Build notes from follow-ups + free text
+  const parts = [];
+  const sorenessWhere = (document.getElementById('mc-soreness-where')?.value || '').trim();
+  if (sorenessWhere) parts.push('Sore: ' + sorenessWhere);
+  const motivationWhy = (document.getElementById('mc-motivation-why')?.value || '').trim();
+  if (motivationWhy) parts.push('Low motivation: ' + motivationWhy);
+  const anxietyWhy = (document.getElementById('mc-anxiety-why')?.value || '').trim();
+  if (anxietyWhy) parts.push('Anxiety: ' + anxietyWhy);
+  const freeText = (document.getElementById('mc-notes').value || '').trim();
+  if (freeText) parts.push(freeText);
+
   const data = {
     date: todayStr(),
-    sleep: parseInt(document.getElementById('mc-sleep').value) || 5,
-    stress: parseInt(document.getElementById('mc-stress').value) || 5,
+    sleep_quality: parseInt(document.getElementById('mc-sleep').value) || 5,
+    stress_level: parseInt(document.getElementById('mc-stress').value) || 5,
     soreness: parseInt(document.getElementById('mc-soreness').value) || 5,
     mood: parseInt(document.getElementById('mc-mood').value) || 5,
     motivation: parseInt(document.getElementById('mc-motivation').value) || 5,
     anxiety: parseInt(document.getElementById('mc-anxiety').value) || 3,
-    notes: (document.getElementById('mc-notes').value || '').trim(),
+    notes: parts.join(' | '),
   };
 
   fetch('/api/morning-checkin', {

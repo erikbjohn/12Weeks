@@ -684,8 +684,9 @@ def api_psych_intake_message():
 
     if is_complete:
         intake.completed = True
-        # Generate the report
-        report = generate_intake_report(convo)
+        # Generate the report with lifting data for combined plan
+        lifting_data = _serialize_weights()
+        report = generate_intake_report(convo, lifting_data=lifting_data)
         intake.report = report
 
     db.session.commit()
