@@ -161,7 +161,23 @@ Write this section as if the sports psychologist and the strength coach are sitt
 3. **When to push and when to pull back** - personalized guidelines
 4. **Daily mental practice** - one specific 2-minute exercise to do daily (pick what fits THEM: visualization, journaling prompt, breathing technique, gratitude practice, etc.)
 5. **The commitment** - ask them to commit to one specific thing based on what they shared. Make it personal.
-6. **A direct message from your coaches** - 4-5 sentences of honest, direct talk. Not generic motivation. Reference specific things they said. Make them feel seen and understood. End with something that would make THIS person want to show up Monday morning."""
+6. **A direct message from your coaches** - 4-5 sentences of honest, direct talk. Not generic motivation. Reference specific things they said. Make them feel seen and understood. End with something that would make THIS person want to show up Monday morning.
+
+## Let's Walk Through Your Plan
+
+IMPORTANT: End the entire report with this section. Write it conversationally, as if the coach is sitting across from them explaining the plan they just built together. This is the moment where the coach looks them in the eye and says "here's what we're going to do and why."
+
+Walk them through:
+- What their week is going to look like (the 6am lift, the run after, the fasting window, the meals)
+- Why the plan is structured the way it is FOR THEM specifically
+- What Phase 1 is going to feel like -- be honest that it's hard, especially the first 2 weeks
+- The specific things that are going to suck and why they're worth it
+- What they'll start noticing by week 2-3 if they stick with it
+- Acknowledge that this plan is demanding -- 6 days of lifting + daily running + a caloric deficit is serious. Don't sugarcoat it.
+- But remind them WHY they said they're doing this (use their own words from the conversation)
+- End with something like: "This plan is tough. It's supposed to be. But you told me [specific thing they said about their motivation], and that's exactly the kind of reason that gets people through 12 weeks. I'm here every morning. Let's get after it."
+
+Be real. Be specific. Be direct. Make them feel like they have a coach who heard them, built something for them, and believes they can do it."""
 
 
 def get_intake_response(user_message, conversation_history):
