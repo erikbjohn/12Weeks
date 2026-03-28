@@ -2220,6 +2220,83 @@ footer {
   border-color: var(--accent);
 }
 
+/* ─── MORNING COACH RESPONSE ─── */
+.mc-coach-loading {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.mc-coach-bubble {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.mc-user-bubble {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+  align-self: flex-end;
+  margin-left: 20%;
+}
+
+.mc-coach-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 250px;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding-right: 4px;
+}
+
+.mc-coach-input-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.mc-coach-input-bar input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+}
+
+.mc-coach-input-bar input:focus { border-color: var(--accent); }
+
+.mc-coach-input-bar button {
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  color: var(--accent);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.mc-typing-indicator {
+  padding: 4px 0;
+}
+
+.mc-continue-btn {
+  margin-top: 16px;
+}
+
 /* ─── CHECK-IN SUMMARY BAR ─── */
 .checkin-summary-bar {
   padding: 8px 1rem;

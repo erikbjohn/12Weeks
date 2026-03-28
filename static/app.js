@@ -1503,6 +1503,103 @@ function submitMorningCheckin() {
   }).catch(e => console.error('Morning checkin submit failed', e));
 
   _morningCheckinCache = data;
+
+  // Transition to Coach response -- don't just close, show feedback
+  const el = document.getElementById('morning-checkin-overlay');
+  const card = el.querySelector('.morning-checkin-card');
+  if (card) {
+    // Build a summary of what they entered
+    const summary = `Morning check-in: Sleep ${data.sleep_quality}/10, Stress ${data.stress_level}/10, Soreness ${data.soreness}/10, Mood ${data.mood}/10, Motivation ${data.motivation}/10, Anxiety ${data.anxiety}/10.${data.notes ? ' Notes: ' + data.notes : ''}`;
+
+    card.innerHTML = `
+      <h2>Check-In Received</h2>
+      <div class="mc-coach-loading">
+        <div class="chat-typing"><span></span><span></span><span></span></div>
+        <div style="margin-top:8px;color:var(--muted);font-size:14px;">Coach is reviewing your check-in...</div>
+      </div>
+      <div id="mc-coach-response" style="display:none"></div>
+      <div id="mc-coach-chat" style="display:none">
+        <div id="mc-coach-messages" class="mc-coach-messages"></div>
+        <div class="mc-coach-input-bar">
+          <input type="text" id="mc-coach-input" placeholder="Reply to Coach..." onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
+          <button onclick="sendMorningCoachReply()">Send</button>
+        </div>
+      </div>
+      <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Continue to Workout</button>
+    `;
+
+    // Send to Coach for feedback
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: summary }),
+    }).then(r => r.json()).then(d => {
+      const loading = card.querySelector('.mc-coach-loading');
+      if (loading) loading.style.display = 'none';
+
+      const responseEl = document.getElementById('mc-coach-response');
+      const chatEl = document.getElementById('mc-coach-chat');
+      const continueBtn = document.getElementById('mc-continue-btn');
+
+      if (responseEl) {
+        responseEl.style.display = 'block';
+        responseEl.innerHTML = `<div class="mc-coach-bubble">${d.response || 'Ready to go. Let\'s get after it.'}</div>`;
+      }
+      if (chatEl) chatEl.style.display = 'block';
+      if (continueBtn) continueBtn.style.display = 'block';
+
+      // Also update chat history cache
+      if (_chatHistory) {
+        _chatHistory.push({ role: 'user', content: summary, date: todayStr() });
+        _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
+      }
+    }).catch(() => {
+      const loading = card.querySelector('.mc-coach-loading');
+      if (loading) loading.style.display = 'none';
+      const continueBtn = document.getElementById('mc-continue-btn');
+      if (continueBtn) continueBtn.style.display = 'block';
+    });
+  }
+}
+
+function sendMorningCoachReply() {
+  const input = document.getElementById('mc-coach-input');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  // Show user message
+  const messagesEl = document.getElementById('mc-coach-messages');
+  if (messagesEl) {
+    messagesEl.innerHTML += `<div class="mc-user-bubble">${text}</div>`;
+    messagesEl.innerHTML += `<div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ message: text }),
+  }).then(r => r.json()).then(d => {
+    if (messagesEl) {
+      const typing = messagesEl.querySelector('.mc-typing-indicator');
+      if (typing) typing.remove();
+      messagesEl.innerHTML += `<div class="mc-coach-bubble">${d.response}</div>`;
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'user', content: text, date: todayStr() });
+      _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
+    }
+  }).catch(() => {
+    if (messagesEl) {
+      const typing = messagesEl.querySelector('.mc-typing-indicator');
+      if (typing) typing.remove();
+    }
+  });
+}
+
+function closeMorningCheckin() {
   document.getElementById('morning-checkin-overlay').innerHTML = '';
   renderCheckinSummaryBar();
 }
