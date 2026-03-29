@@ -672,90 +672,86 @@ def api_psych_intake_conversation():
 
 @app.route("/api/psych-intake/message", methods=["POST"])
 def api_psych_intake_message():
-  try:
-    data = request.get_json()
-    user_msg = data.get("message", "").strip()
+    try:
+        data = request.get_json()
+        user_msg = data.get("message", "").strip()
 
-    intake = PsychIntake.query.first()
-    if not intake:
-        intake = PsychIntake(conversation=[], completed=False)
-        db.session.add(intake)
-        db.session.commit()
+        intake = PsychIntake.query.first()
+        if not intake:
+            intake = PsychIntake(conversation=[], completed=False)
+            db.session.add(intake)
+            db.session.commit()
 
-    # Check if locked out
-    if intake.locked_until and date.today() < intake.locked_until:
-        days_left = (intake.locked_until - date.today()).days
-        return jsonify({
-            "response": f"You're locked out for {days_left} more day{'s' if days_left != 1 else ''}. Come back when you've been alcohol-free for 7 days.",
-            "completed": False,
-            "locked": True,
-            "locked_until": intake.locked_until.isoformat(),
-        })
+        # Check if locked out
+        if intake.locked_until and date.today() < intake.locked_until:
+            days_left = (intake.locked_until - date.today()).days
+            return jsonify({
+                "response": f"You're locked out for {days_left} more day{'s' if days_left != 1 else ''}. Come back when you've been alcohol-free for 7 days.",
+                "completed": False,
+                "locked": True,
+                "locked_until": intake.locked_until.isoformat(),
+            })
 
-    # First message trigger - get Erik's opening without a fake user message
-    is_first = not intake.conversation and not user_msg
-    if is_first:
-        user_msg = "[START]"
+        # First message trigger - get Erik's opening without a fake user message
+        is_first = not intake.conversation and not user_msg
+        if is_first:
+            user_msg = "[START]"
 
-    if not user_msg:
-        return jsonify({"error": "Message required"}), 400
+        if not user_msg:
+            return jsonify({"error": "Message required"}), 400
 
-    # Add user message to conversation (skip the [START] trigger)
-    convo = list(intake.conversation or [])
-    if not is_first:
-        convo.append({"role": "user", "content": user_msg})
+        # Add user message to conversation (skip the [START] trigger)
+        convo = list(intake.conversation or [])
+        if not is_first:
+            convo.append({"role": "user", "content": user_msg})
 
-    # Get AI response
-    # convo = [..., asst, user(just added)]. We pass everything EXCEPT the
-    # last user message since get_intake_response appends it separately.
-    # This keeps proper role alternation: [asst, user, ..., asst] + user
-    if is_first:
-        history_for_api = []
-    else:
-        # Strip the user message we just appended — get_intake_response re-adds it
-        history_for_api = convo[:-1]
-    response_text, is_complete = get_intake_response(user_msg, history_for_api)
+        # Get AI response — pass history without the user message we just added
+        # (get_intake_response appends it separately to maintain role alternation)
+        if is_first:
+            history_for_api = []
+        else:
+            history_for_api = convo[:-1]
+        response_text, is_complete = get_intake_response(user_msg, history_for_api)
 
-    # Check for lockout signal
-    is_locked = "[INTAKE_LOCKED]" in response_text
-    if is_locked:
-        response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
-        intake.locked_until = date.today() + timedelta(days=7)
+        # Check for lockout signal
+        is_locked = "[INTAKE_LOCKED]" in response_text
+        if is_locked:
+            response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
+            intake.locked_until = date.today() + timedelta(days=7)
+            convo.append({"role": "assistant", "content": response_text})
+            intake.conversation = convo
+            db.session.commit()
+            return jsonify({
+                "response": response_text,
+                "completed": False,
+                "locked": True,
+                "locked_until": intake.locked_until.isoformat(),
+            })
+
+        # Add assistant response
         convo.append({"role": "assistant", "content": response_text})
         intake.conversation = convo
+
+        if is_complete:
+            intake.completed = True
+            lifting_data = _serialize_weights()
+            report = generate_intake_report(convo, lifting_data=lifting_data)
+            if report:
+                intake.report = report
+            else:
+                intake.completed = False
+
         db.session.commit()
+
         return jsonify({
             "response": response_text,
-            "completed": False,
-            "locked": True,
-            "locked_until": intake.locked_until.isoformat(),
+            "completed": is_complete,
+            "has_report": intake.report is not None,
+            "report_error": is_complete and intake.report is None,
         })
-
-    # Add assistant response
-    convo.append({"role": "assistant", "content": response_text})
-    intake.conversation = convo
-
-    if is_complete:
-        intake.completed = True
-        # Generate the report with lifting data for combined plan
-        lifting_data = _serialize_weights()
-        report = generate_intake_report(convo, lifting_data=lifting_data)
-        if report:
-            intake.report = report
-        else:
-            intake.completed = False  # Allow retry
-
-    db.session.commit()
-
-    return jsonify({
-        "response": response_text,
-        "completed": is_complete,
-        "has_report": intake.report is not None,
-        "report_error": is_complete and intake.report is None,
-    })
-  except Exception as e:
-    import traceback
-    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
 @app.route("/api/psych-intake/report")
