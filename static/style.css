@@ -3367,3 +3367,46 @@ footer {
 .progress-share { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .progress-share:hover { border-color: var(--accent); color: var(--text); }
 .milestone-card { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* ─── CONSTRAINTS ─── */
+.constraint-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 1rem 0; }
+.constraint-list { display: flex; flex-direction: column; gap: 8px; margin: 1rem 0; }
+.constraint-checkbox { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text); }
+.constraint-checkbox input { width: 18px; height: 18px; }
+.scheduled-activity-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; font-size: 14px; }
+.remove-btn { background: none; border: none; color: var(--red); font-size: 18px; cursor: pointer; }
+.pa-select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 100%; }
+
+/* ─── FOOD SELECTION ─── */
+.food-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 1rem 0; max-height: 400px; overflow-y: auto; }
+.food-item { padding: 12px; background: var(--surface2); border: 2px solid var(--border); border-radius: 10px; cursor: pointer; transition: all 0.15s; }
+.food-item:hover { border-color: var(--accent); }
+.food-item.selected { border-color: var(--accent); background: var(--lift-bg); }
+.food-item-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.food-item-macros { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.food-status { text-align: center; font-size: 13px; font-family: 'DM Mono', monospace; margin-bottom: 8px; }
+.food-status-warning { color: var(--amber); }
+.food-status-good { color: var(--accent); }
+.food-confirm-row { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.food-confirm-row:last-child { border-bottom: none; }
+
+/* ─── WEIGHT PROJECTION ─── */
+.projection-milestones { display: flex; justify-content: center; gap: 16px; margin: 1rem 0; }
+.proj-milestone { text-align: center; padding: 12px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
+.proj-milestone.highlight { border-color: var(--accent); background: var(--lift-bg); }
+.proj-week { display: block; font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+.proj-weight { display: block; font-size: 1.3rem; font-weight: 700; color: var(--text); margin-top: 4px; }
+.proj-milestone.highlight .proj-weight { color: var(--accent); }
+
+/* ─── WEEKLY REPORT ─── */
+.report-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 1rem 0; }
+.report-stat { text-align: center; padding: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+.report-stat-label { display: block; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.report-stat-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+.report-narrative { padding: 14px 16px; background: var(--surface); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 15px; line-height: 1.6; }
+
+/* ─── MORNING BRIEFING ─── */
+.morning-briefing-card { padding: 14px 16px; }
+.briefing-status { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+.briefing-message { font-size: 15px; line-height: 1.6; color: var(--text); margin-bottom: 8px; }
+.briefing-workout { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); }

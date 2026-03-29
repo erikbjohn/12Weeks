@@ -914,7 +914,7 @@ function renderConstraints() {
       <div class="baseline-card">
         <h2>Food Restrictions</h2>
         <div class="baseline-desc">Any dietary restrictions we need to know about?</div>
-        <div class="constraint-grid">${checkboxes}</div>
+        <div class="constraint-list">${checkboxes}</div>
         <div class="pa-measure-row" style="margin-top:1rem">
           <label>Any allergies? (optional)</label>
           <input type="text" id="constraint-allergies" placeholder="e.g. shellfish, tree nuts" value="${_constraintData.custom_allergies}">
