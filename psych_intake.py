@@ -192,7 +192,7 @@ def get_intake_response(user_message, conversation_history):
         # Use streaming to avoid Gunicorn timeout — first byte arrives fast
         full_text = ""
         with client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=500,
             system=INTAKE_SYSTEM_PROMPT,
             messages=messages,
@@ -236,7 +236,7 @@ def generate_intake_report(conversation_history, lifting_data=None):
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=4096,
             system=REPORT_SYSTEM_PROMPT,
             messages=[{
@@ -297,7 +297,7 @@ def generate_full_profile(conversation_history, physical_data=None, lifting_data
     try:
         full_text = ""
         with client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=2000,
             system=FULL_PROFILE_PROMPT,
             messages=[{

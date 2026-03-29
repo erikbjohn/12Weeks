@@ -42,7 +42,7 @@ def get_coach_response(user_message, context):
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=800,
             system=system_prompt,
             messages=messages,

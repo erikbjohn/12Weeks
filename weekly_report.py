@@ -154,7 +154,7 @@ def generate_report_narrative(metrics):
     try:
         full_text = ""
         with client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=300,
             system=REPORT_PROMPT,
             messages=[{"role": "user", "content": "\n".join(data_lines)}],

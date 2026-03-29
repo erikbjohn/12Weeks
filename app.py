@@ -975,7 +975,7 @@ def api_chat_stream():
 
             full_text = ""
             with client.messages.stream(
-                model="claude-sonnet-4-20250514",
+                model="claude-opus-4-20250514",
                 max_tokens=800,
                 system=system_prompt,
                 messages=messages,
@@ -1228,7 +1228,7 @@ Be direct and honest. This person wants real feedback, not flattery. They're usi
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=1000,
             messages=[{"role": "user", "content": content}],
         )
@@ -1775,7 +1775,7 @@ def api_morning_briefing():
 
         full_text = ""
         with client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-20250514",
             max_tokens=200,
             system=prompt,
             messages=[{"role": "user", "content": "Give me the morning briefing."}],
