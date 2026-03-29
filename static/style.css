@@ -3412,3 +3412,19 @@ footer {
 .briefing-status { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
 .briefing-message { font-size: 15px; line-height: 1.6; color: var(--text); margin-bottom: 8px; }
 .briefing-workout { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); }
+
+/* ─── TRAINING PLAN DISPLAY ─── */
+.plan-goal-badge { display: inline-block; padding: 4px 16px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; letter-spacing: 0.1em; color: var(--bg); }
+.plan-section { margin-bottom: 1.25rem; }
+.plan-section-label { font-family: 'DM Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 6px; }
+.plan-macros { display: flex; gap: 8px; }
+.plan-macro { flex: 1; text-align: center; padding: 10px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+.plan-macro-val { display: block; font-size: 1.2rem; font-weight: 700; color: var(--text); }
+.plan-macro-label { display: block; font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.plan-cal-table { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.plan-cal-row { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.plan-cal-row:last-child { border-bottom: none; }
+.plan-value { font-size: 15px; color: var(--text); }
+.plan-nonneg { font-size: 14px; color: var(--amber); font-weight: 600; }
+.plan-note { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 6px; }
+.plan-note-warn { background: var(--run-tempo-bg); border: 1px solid var(--run-tempo-border); color: var(--run-tempo); }

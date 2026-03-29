@@ -1486,7 +1486,7 @@ async function saveFoodSelections() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ selected_foods: _foodSelections, completed: true }),
   });
-  showFullProfile();
+  showFinalReveal();
 }
 
 // ─── WEIGHT PROJECTION ────────────────────────────────────────────────────
@@ -1580,6 +1580,244 @@ function drawProjectionChart(projection) {
       ctx.fillText('W' + p.week, pad + i * xStep, H - 4);
     }
   });
+}
+
+// ─── FINAL REVEAL FLOW ────────────────────────────────────────────────────
+
+async function showFinalReveal() {
+    const el = document.getElementById('baseline-overlay');
+
+    // Step 1: Loading
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+            <h2 style="font-size:1.5rem;margin-bottom:16px">Building Your Plan</h2>
+            <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
+            <div style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace">Analyzing everything you told me...</div>
+        </div>
+    </div>`;
+
+    // Step 2: Compute goal + generate profile in parallel
+    let goalData = window._goalData;
+    let profileText = null;
+
+    try {
+        // Compute goal if not already done
+        if (!goalData) {
+            const goalRes = await fetch('/api/goal/compute', { method: 'POST' });
+            goalData = await goalRes.json();
+            window._goalData = goalData;
+        }
+
+        // Generate profile
+        const profileRes = await fetch('/api/full-profile/generate', { method: 'POST' });
+        const profileStart = await profileRes.json();
+        if (profileStart.job_id) {
+            for (let i = 0; i < 120; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                const pollRes = await fetch('/api/full-profile/result/' + profileStart.job_id);
+                const pollData = await pollRes.json();
+                if (pollData.status !== 'pending') {
+                    profileText = pollData.profile;
+                    break;
+                }
+            }
+        }
+    } catch(e) {
+        console.error('Final reveal error:', e);
+    }
+
+    // Step 3: Show Athlete Profile
+    showRevealProfile(profileText, goalData);
+}
+
+function showRevealProfile(profileText, goalData) {
+    const el = document.getElementById('baseline-overlay');
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card psych-intake-card">
+            <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
+            <div class="psych-report">${profileText ? renderMarkdown(profileText) : '<p style="color:var(--muted)">Profile generation in progress...</p>'}</div>
+            <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showRevealProjection()">See Your Projection →</button>
+        </div>
+    </div>`;
+}
+
+function showRevealProjection() {
+    const el = document.getElementById('baseline-overlay');
+    const goalData = window._goalData;
+
+    if (!goalData || !goalData.weight_projection) {
+        showRevealPlan();
+        return;
+    }
+
+    const proj = goalData.weight_projection;
+    const w4 = proj.find(p => p.week === 4);
+    const w8 = proj.find(p => p.week === 8);
+    const w12 = proj.find(p => p.week === 12);
+
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center">
+            <h2>If You Follow This Plan</h2>
+            <div class="projection-milestones">
+                <div class="proj-milestone"><span class="proj-week">Week 4</span><span class="proj-weight">${w4 ? Math.round(w4.projected) : '?'} lbs</span></div>
+                <div class="proj-milestone"><span class="proj-week">Week 8</span><span class="proj-weight">${w8 ? Math.round(w8.projected) : '?'} lbs</span></div>
+                <div class="proj-milestone highlight"><span class="proj-week">Week 12</span><span class="proj-weight">${w12 ? Math.round(w12.projected) : '?'} lbs</span></div>
+            </div>
+            <canvas id="projection-chart" width="320" height="180" style="margin:1rem auto;display:block"></canvas>
+            <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showRevealPlan()">See Your Training Plan →</button>
+        </div>
+    </div>`;
+
+    setTimeout(() => drawProjectionChart(proj), 100);
+}
+
+function showRevealPlan() {
+    const el = document.getElementById('baseline-overlay');
+    const g = window._goalData || {};
+
+    const goalLabel = (g.goal_type || 'cut').toUpperCase();
+    const goalColor = g.goal_type === 'bulk' ? 'var(--blue)' : g.goal_type === 'recomp' ? 'var(--amber)' : 'var(--accent)';
+
+    // Day type calorie table
+    const dayTypes = g.calorie_by_day_type || {};
+    let calRows = '';
+    const dayLabels = {heavy_lift: 'Heavy Lift', long_run: 'Long Run', moderate: 'Moderate', rest: 'Rest', deload: 'Deload'};
+    for (const [dt, vals] of Object.entries(dayTypes)) {
+        const v = typeof vals === 'object' ? vals : {calories: vals};
+        calRows += `<div class="plan-cal-row"><span>${dayLabels[dt] || dt}</span><span>${v.calories || g.calories || '?'} cal</span></div>`;
+    }
+
+    const fastingLabel = (g.fasting_protocol || 'none').replace(/_/g, ':');
+    const electrolyteNote = g.electrolytes ? '<div class="plan-note plan-note-warn">Electrolyte supplementation required (sodium, potassium, magnesium)</div>' : '';
+
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card">
+            <div style="text-align:center;margin-bottom:1rem">
+                <span class="plan-goal-badge" style="background:${goalColor}">${goalLabel}</span>
+            </div>
+            <h2 style="text-align:center;margin-bottom:1.5rem">Your Training Plan</h2>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Daily Targets</div>
+                <div class="plan-macros">
+                    <div class="plan-macro"><span class="plan-macro-val">${g.calories || '?'}</span><span class="plan-macro-label">Calories</span></div>
+                    <div class="plan-macro"><span class="plan-macro-val">${g.protein || '?'}g</span><span class="plan-macro-label">Protein</span></div>
+                    <div class="plan-macro"><span class="plan-macro-val">${g.carbs || '?'}g</span><span class="plan-macro-label">Carbs</span></div>
+                    <div class="plan-macro"><span class="plan-macro-val">${g.fat || '?'}g</span><span class="plan-macro-label">Fat</span></div>
+                </div>
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Calories by Day Type</div>
+                <div class="plan-cal-table">${calRows}</div>
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Fasting Protocol</div>
+                <div class="plan-value">${fastingLabel === 'none' ? 'No fasting' : fastingLabel + ' intermittent fasting'}</div>
+                ${electrolyteNote}
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Training Structure</div>
+                <div class="plan-value">6 days lifting + daily mile minimum</div>
+                <div class="plan-value" style="font-size:13px;color:var(--muted)">No days off from running. The streak mile is sacred.</div>
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Non-Negotiables</div>
+                <div class="plan-nonneg">No alcohol. 5:30am daily. Follow the plan exactly.</div>
+            </div>
+
+            <h3 style="text-align:center;margin:1.5rem 0 1rem;color:var(--text)">Does this plan work for you?</h3>
+            <div style="display:flex;flex-direction:column;gap:10px">
+                <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="acceptPlan()">Let's Do This</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:14px;padding:12px" onclick="requestMoreAggressive()">I Want Bigger Results</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:13px;padding:10px;opacity:0.6" onclick="handleDialBack()">This Is Too Much</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function acceptPlan() {
+    apiPost('/api/goal', { plan_accepted: true });
+    _stateCache.baseline_done = true;
+    apiPost('/api/state', { baseline_done: true });
+    document.getElementById('baseline-overlay').innerHTML = '';
+    renderAll();
+}
+
+function requestMoreAggressive() {
+    const el = document.getElementById('baseline-overlay');
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center">
+            <h2>What Results Do You Want?</h2>
+            <div class="baseline-desc" style="margin-bottom:1rem">Tell me your goal. I'll build the plan to get you there.</div>
+            <div class="pa-measure-row">
+                <input type="text" id="aggressive-goal-input" placeholder="e.g. I want to be 175 lbs at 8% body fat" style="text-align:center">
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="submitMoreAggressive()">Build My New Plan</button>
+        </div>
+    </div>`;
+    setTimeout(() => { const inp = document.getElementById('aggressive-goal-input'); if (inp) inp.focus(); }, 100);
+}
+
+async function submitMoreAggressive() {
+    const input = document.getElementById('aggressive-goal-input');
+    const goal = (input?.value || '').trim();
+    if (!goal) return;
+
+    const el = document.getElementById('baseline-overlay');
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+            <h2>Recalculating</h2>
+            <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
+        </div>
+    </div>`;
+
+    try {
+        // Parse target weight from the input if possible
+        const weightMatch = goal.match(/(\d{2,3})\s*(lbs?|pounds?)/i);
+        const bfMatch = goal.match(/(\d{1,2})\s*%/);
+
+        const payload = {};
+        if (weightMatch) payload.target_weight = parseInt(weightMatch[1]);
+        if (bfMatch) payload.target_bf = parseInt(bfMatch[1]) / 100;
+        payload.aggressive_request = goal;
+
+        const res = await fetch('/api/goal/compute', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const newGoal = await res.json();
+        window._goalData = newGoal;
+
+        showRevealProjection();
+    } catch(e) {
+        showRevealPlan();
+    }
+}
+
+function handleDialBack() {
+    const el = document.getElementById('baseline-overlay');
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+            <h2 style="color:var(--muted)">12 Weeks Isn't For You</h2>
+            <p style="color:var(--muted);margin:1rem 0 1.5rem;font-size:15px;line-height:1.6">That's okay. Not everyone is ready.<br>Come back in a week if you change your mind.</p>
+            <div style="font-size:13px;color:var(--dim);font-family:'DM Mono',monospace">Locked until ${new Date(Date.now() + 7*24*60*60*1000).toLocaleDateString()}</div>
+        </div>
+    </div>`;
+
+    // Lock out for 1 week
+    fetch('/api/psych-intake/message', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: '[PLAN_REJECTED]' }),
+    });
+
+    // Set lockout via direct API
+    apiPost('/api/plan/lockout', {});
 }
 
 function finishOnboarding() {
@@ -1740,7 +1978,7 @@ async function startPsychConversation() {
         renderPsychMessages();
         updatePsychProgress();
         if (_psychCompleted) {
-          showPsychReport();
+          showConstraints();
           return;
         }
         return;
@@ -1766,7 +2004,7 @@ async function startPsychConversation() {
     }
     if (data.completed) {
       _psychCompleted = true;
-      showPsychReport();
+      showConstraints();
     }
   } catch (e) {
     hidePsychTyping();
@@ -1831,7 +2069,7 @@ async function sendPsychMessage() {
     }
     if (data.completed) {
       _psychCompleted = true;
-      showPsychReport();
+      showConstraints();
     }
   } catch (e) {
     hidePsychTyping();

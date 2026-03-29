@@ -1794,6 +1794,18 @@ def api_morning_briefing():
         return jsonify({"status": status, "message": f"{workout_name} today. Score: {score}.", "workout": workout_name})
 
 
+# ─── PLAN LOCKOUT ──────────────────────────────────────────────────────────
+
+@app.route("/api/plan/lockout", methods=["POST"])
+def api_plan_lockout():
+    """Lock user out for 1 week after rejecting the plan."""
+    intake = PsychIntake.query.first()
+    if intake:
+        intake.locked_until = date.today() + timedelta(days=7)
+        db.session.commit()
+    return jsonify({"ok": True, "locked_until": (date.today() + timedelta(days=7)).isoformat()})
+
+
 # ─── PHYSICAL ASSESSMENT ───────────────────────────────────────────────────
 
 @app.route("/api/physical-assessment/status")
