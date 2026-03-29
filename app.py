@@ -1312,6 +1312,24 @@ def api_physical_assessment_reset():
     return jsonify({"ok": True})
 
 
+@app.route("/api/admin/full-reset", methods=["POST"])
+def api_full_reset():
+    """Nuclear reset — wipe all user data, start fresh."""
+    secret = request.get_json().get("secret") if request.get_json() else None
+    if secret != os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me"):
+        return jsonify({"error": "Unauthorized"}), 403
+    tables = [
+        ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
+        ExerciseLog, ExerciseCompletion, DayCompletion,
+        BodyWeight, BodyMeasurement, WeeklyCheckIn,
+        MealLog, SupplementLog, ProgressPhoto, AppState,
+    ]
+    for t in tables:
+        t.query.delete()
+    db.session.commit()
+    return jsonify({"ok": True, "message": "All data wiped. App will show welcome screen."})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
