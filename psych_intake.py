@@ -233,12 +233,15 @@ def get_intake_response(user_message, conversation_history):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+        client = anthropic.Anthropic(api_key=api_key, timeout=90.0)
     except Exception:
         return "Intake temporarily unavailable.", False
 
+    # Trim history to last 14 messages to keep latency reasonable
+    trimmed = conversation_history[-14:] if len(conversation_history) > 14 else conversation_history
+
     messages = []
-    for msg in conversation_history:
+    for msg in trimmed:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
 
