@@ -1740,9 +1740,52 @@ function showRevealPlan() {
 }
 
 function acceptPlan() {
+    showStartDatePicker();
+}
+
+function showStartDatePicker() {
+    const el = document.getElementById('baseline-overlay');
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+
+    const daysUntilThisMon = dayOfWeek === 0 ? 1 : dayOfWeek === 1 ? 0 : 8 - dayOfWeek;
+    const thisMon = new Date(today); thisMon.setDate(today.getDate() + daysUntilThisMon);
+    const nextMon = new Date(thisMon); nextMon.setDate(thisMon.getDate() + 7);
+
+    const fmt = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const iso = (d) => d.toISOString().slice(0, 10);
+
+    const thisMonLabel = daysUntilThisMon === 0 ? 'Today (Monday)' : 'This Monday \u2014 ' + fmt(thisMon);
+
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:center">
+            <h2>When Do We Start?</h2>
+            <div class="baseline-desc" style="margin-bottom:1.5rem">Pick your Day 1. Programs start on Monday.</div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:1.5rem">
+                <button class="pa-choice" style="padding:16px" onclick="pickStartDate('${iso(thisMon)}')">${thisMonLabel}</button>
+                <button class="pa-choice" style="padding:16px" onclick="pickStartDate('${iso(nextMon)}')">Next Monday \u2014 ${fmt(nextMon)}</button>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:1rem">
+                <div class="plan-section-label">Wake-up Time</div>
+                <div style="font-size:14px;color:var(--muted);margin-bottom:8px">Default is 5:30am. You can go earlier. Never later.</div>
+                <select id="wake-time-select" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:16px;text-align:center">
+                    <option value="4:00">4:00 AM</option>
+                    <option value="4:30">4:30 AM</option>
+                    <option value="5:00">5:00 AM</option>
+                    <option value="5:30" selected>5:30 AM</option>
+                </select>
+            </div>
+            <div style="font-size:12px;color:var(--dim);margin-top:1rem;font-family:'DM Mono',monospace">No later than 5:30. Early is earned.</div>
+        </div>
+    </div>`;
+}
+
+function pickStartDate(dateStr) {
+    const wakeTime = document.getElementById('wake-time-select')?.value || '5:30';
     apiPost('/api/goal', { plan_accepted: true });
+    apiPost('/api/state', { baseline_done: true, start_date: dateStr });
     _stateCache.baseline_done = true;
-    apiPost('/api/state', { baseline_done: true });
+    _stateCache.start_date = dateStr;
     document.getElementById('baseline-overlay').innerHTML = '';
     renderAll();
 }
