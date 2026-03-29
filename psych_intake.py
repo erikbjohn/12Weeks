@@ -237,6 +237,12 @@ def get_intake_response(user_message, conversation_history):
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
 
+    # Claude API requires first message to be 'user'. The conversation
+    # starts with assistant ("Why are you here?") because [START] was hidden.
+    # Prepend a synthetic user message if needed.
+    if messages and messages[0]["role"] == "assistant":
+        messages.insert(0, {"role": "user", "content": "[START]"})
+
     try:
         response = client.messages.create(
             model="claude-sonnet-4-20250514",

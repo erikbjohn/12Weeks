@@ -1301,6 +1301,7 @@ async function sendPsychMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
     });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
     const data = await res.json();
     hidePsychTyping();
     if (data.locked) {
