@@ -201,19 +201,20 @@ function renderMealSection(dayData) {
       totalEaten.fat += macros.fat;
     }
 
+    const showAdjust = !(isRestDay && fasting);
     const foodRows = meal.foods.map(f => {
       const adjCal = Math.round((f.cal || 0) * multiplier);
+      const adjBtns = showAdjust ? `<span class="meal-food-adjust-inline">
+        <button onclick="adjustMealPortion(${idx}, -0.25)" title="Less">-</button>
+        <button onclick="adjustMealPortion(${idx}, 0.25)" title="More">+</button>
+      </span>` : '';
       return `<div class="meal-food-row">
         <span class="meal-food-name">${f.item}</span>
         <span class="meal-food-portion">${f.portion}${multiplier !== 1 ? '<span class="meal-multiplier">x' + multiplier.toFixed(2).replace(/\.?0+$/, '') + '</span>' : ''}</span>
         <span class="meal-food-portion">${adjCal}cal</span>
+        ${adjBtns}
       </div>`;
     }).join('');
-
-    const adjustBtns = (isRestDay && fasting) ? '' : `<div class="meal-food-adjust">
-      <button onclick="adjustMealPortion(${idx}, -0.25)" title="Less">-</button>
-      <button onclick="adjustMealPortion(${idx}, 0.25)" title="More">+</button>
-    </div>`;
 
     mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
       <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx})">
@@ -221,7 +222,7 @@ function renderMealSection(dayData) {
       </button>
       <div class="meal-time">${meal.time}</div>
       <div class="meal-content">
-        <div class="meal-name">${meal.name} ${adjustBtns}</div>
+        <div class="meal-name">${meal.name}</div>
         <div class="meal-foods">${foodRows}</div>
         <div class="meal-macros">
           <span class="mm-cal">${macros.cal} cal</span>

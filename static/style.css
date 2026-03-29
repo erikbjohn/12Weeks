@@ -1368,6 +1368,10 @@ footer {
   color: var(--text);
 }
 
+.meal-food-adjust-inline { display: inline-flex; gap: 2px; margin-left: 6px; flex-shrink: 0; }
+.meal-food-adjust-inline button { width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface2); color: var(--muted); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; padding: 0; line-height: 1; }
+.meal-food-adjust-inline button:hover { border-color: var(--accent); color: var(--text); }
+
 .meal-macros {
   display: flex;
   gap: 8px;
