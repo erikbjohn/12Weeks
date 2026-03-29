@@ -1318,16 +1318,23 @@ def api_full_reset():
     secret = request.get_json().get("secret") if request.get_json() else None
     if secret != os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me"):
         return jsonify({"error": "Unauthorized"}), 403
+    # Ensure all tables exist first
+    db.create_all()
     tables = [
         ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
         ExerciseLog, ExerciseCompletion, DayCompletion,
         BodyWeight, BodyMeasurement, WeeklyCheckIn,
-        MealLog, SupplementLog, ProgressPhoto, AppState,
+        MealLog, SupplementLog, ProgressPhoto, AppState, GarminTokens,
     ]
+    errors = []
     for t in tables:
-        t.query.delete()
+        try:
+            t.query.delete()
+        except Exception as e:
+            db.session.rollback()
+            errors.append(f"{t.__tablename__}: {e}")
     db.session.commit()
-    return jsonify({"ok": True, "message": "All data wiped. App will show welcome screen."})
+    return jsonify({"ok": True, "errors": errors, "message": "All data wiped."})
 
 
 if __name__ == "__main__":
