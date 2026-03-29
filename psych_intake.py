@@ -128,6 +128,39 @@ This section is NOT shown to the user. It's for the AI coach to reference later.
 
 Be specific. Use their actual words. No generic coaching platitudes."""
 
+FULL_PROFILE_PROMPT = """You are a sports psychologist and strength coach writing the complete athlete profile after intake AND physical assessment are done. You now have everything — their psychology AND their body data.
+
+Write in Lombardi voice. Direct. Honest. Invested. Address them as "you."
+
+IMPORTANT RULES:
+- Do NOT reference the specific athlete or actor they named. Use what those choices REVEAL about them, not the names themselves.
+- Be specific. Use their actual words and data.
+
+Write the report in this format:
+
+# Your Athlete Profile
+
+## Who You Are
+3-4 sentences. Based on their intake conversation — what drives them, what their accomplishment reveals, what kind of person commits to this. Make them feel seen.
+
+## Where You're Starting
+Based on their physical data (body weight, height, measurements, baseline test results). Be honest about their starting point. No sugarcoating but no cruelty. State the facts.
+
+## Your Strengths
+- [3-4 bullet points — psychological and physical strengths observed]
+
+## What Will Be Tested
+- [2-3 bullet points — honest about what's going to be hard for THIS person specifically]
+
+## How I'll Coach You
+- Communication style: [based on how they responded in intake]
+- When I'll push you harder: [specific]
+- When I'll pull back: [specific]
+- The one thing I won't tolerate: [specific to them]
+
+## The Standard
+One paragraph. What the next 12 weeks demands. What they'll become if they show up. End with fire — make them want to start tomorrow."""
+
 
 def get_intake_response(user_message, conversation_history):
     """Get the next response in the intake conversation."""
@@ -212,3 +245,66 @@ def generate_intake_report(conversation_history, lifting_data=None):
     except Exception as e:
         log.error("Report generation error: %s", e)
         return None  # Caller must handle None as error
+
+
+def generate_full_profile(conversation_history, physical_data=None, lifting_data=None):
+    """Generate the complete athlete profile after both psych + physical assessment."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+    except Exception:
+        return None
+
+    convo_text = "\n\n".join(
+        f"{'Coach' if m['role'] == 'assistant' else 'Athlete'}: {m['content']}"
+        for m in conversation_history
+    )
+
+    physical_context = ""
+    if physical_data:
+        physical_context = "\n\nPHYSICAL ASSESSMENT DATA:\n"
+        if physical_data.get("bodyweight"):
+            physical_context += f"- Body weight: {physical_data['bodyweight']} lbs\n"
+        if physical_data.get("height"):
+            physical_context += f"- Height: {physical_data['height']} inches\n"
+        if physical_data.get("waist"):
+            physical_context += f"- Waist: {physical_data['waist']} inches\n"
+        if physical_data.get("has_gym") is not None:
+            physical_context += f"- Gym access: {'Yes' if physical_data['has_gym'] else 'No'}\n"
+        if physical_data.get("pushup_count") is not None:
+            mod = " (from knees)" if physical_data.get("pushup_from_knees") else ""
+            physical_context += f"- Pushups: {physical_data['pushup_count']}{mod}\n"
+        if physical_data.get("plank_seconds") is not None:
+            physical_context += f"- Plank hold: {physical_data['plank_seconds']} seconds\n"
+        if physical_data.get("squat_count") is not None:
+            physical_context += f"- Bodyweight squats: {physical_data['squat_count']}\n"
+        if physical_data.get("pullup_count") is not None:
+            physical_context += f"- Pull-ups: {physical_data['pullup_count']}\n"
+
+    lifting_context = ""
+    if lifting_data:
+        lifting_context = "\nBASELINE LIFTING DATA:\n"
+        for name, info in lifting_data.items():
+            lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
+
+    try:
+        full_text = ""
+        with client.messages.stream(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            system=FULL_PROFILE_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Here is the complete intake conversation and physical assessment data. Generate the full athlete profile.\n\n{convo_text}{physical_context}{lifting_context}",
+            }],
+        ) as stream:
+            for text in stream.text_stream:
+                full_text += text
+        return full_text
+    except Exception as e:
+        log.error("Full profile generation error: %s", e)
+        return None

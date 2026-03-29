@@ -13,7 +13,7 @@ from workout_data import (
 from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response
-from psych_intake import get_intake_response, generate_intake_report
+from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
 from models import (
     db, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
@@ -824,6 +824,71 @@ def api_psych_intake_reset():
     PsychIntake.query.delete()
     db.session.commit()
     return jsonify({"ok": True})
+
+
+@app.route("/api/full-profile/generate", methods=["POST"])
+def api_generate_full_profile():
+    """Generate the complete athlete profile after psych + physical are done."""
+    intake = PsychIntake.query.first()
+    if not intake or not intake.conversation:
+        return jsonify({"error": "No intake conversation"}), 400
+
+    pa = PhysicalAssessment.query.first()
+    physical_data = None
+    if pa:
+        physical_data = {
+            "bodyweight": pa.bodyweight_lbs,
+            "height": pa.height_inches,
+            "waist": pa.waist_inches,
+            "has_gym": pa.has_gym,
+            "pushup_count": pa.pushup_count,
+            "pushup_from_knees": pa.pushup_from_knees,
+            "plank_seconds": pa.plank_seconds,
+            "squat_count": pa.squat_count,
+            "pullup_count": pa.pullup_count,
+        }
+
+    lifting_data = _serialize_weights()
+
+    # Run in background thread to avoid Gunicorn timeout
+    job_id = str(uuid.uuid4())[:8]
+    _intake_jobs[job_id] = {"status": "pending"}
+
+    def run_profile():
+        try:
+            profile = generate_full_profile(
+                intake.conversation,
+                physical_data=physical_data,
+                lifting_data=lifting_data,
+            )
+            _intake_jobs[job_id] = {
+                "status": "done" if profile else "error",
+                "profile": profile,
+            }
+        except Exception as e:
+            _intake_jobs[job_id] = {"status": "error", "profile": None, "error": str(e)}
+
+    thread = threading.Thread(target=run_profile)
+    thread.start()
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+
+@app.route("/api/full-profile/result/<job_id>")
+def api_full_profile_result(job_id):
+    job = _intake_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] == "pending":
+        return jsonify({"status": "pending"})
+    profile = job.get("profile")
+    del _intake_jobs[job_id]
+    if profile:
+        # Save to intake record
+        intake = PsychIntake.query.first()
+        if intake:
+            intake.report = profile
+            db.session.commit()
+    return jsonify({"status": job["status"], "profile": profile})
 
 
 # ─── AI COACH CHAT ──────────────────────────────────────────────────────────

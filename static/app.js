@@ -640,8 +640,7 @@ function saveBaseline() {
   apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
-  baselineStep = -1;
-  renderBaseline();
+  showFullProfile();
 }
 
 // ─── BASELINE MEASUREMENTS & PHOTOS STEP ────────────────────────────────────
@@ -1118,6 +1117,57 @@ function saveBwBaseline() {
   apiPost('/api/physical-assessment', { completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
+  showFullProfile();
+}
+
+// ─── FULL ATHLETE PROFILE ──────────────────────────────────────────────────
+async function showFullProfile() {
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+      <h2 style="font-size:1.5rem;margin-bottom:16px">Building Your Athlete Profile</h2>
+      <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
+      <div style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace">Combining your psych intake + physical assessment...</div>
+    </div>
+  </div>`;
+
+  try {
+    // Start profile generation (returns job_id immediately)
+    const startRes = await fetch('/api/full-profile/generate', { method: 'POST' });
+    const startData = await startRes.json();
+    if (!startData.job_id) throw new Error('No job_id');
+
+    // Poll for result
+    let profile = null;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const pollRes = await fetch('/api/full-profile/result/' + startData.job_id);
+      const pollData = await pollRes.json();
+      if (pollData.status === 'pending') continue;
+      profile = pollData.profile;
+      break;
+    }
+
+    if (profile) {
+      el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card psych-intake-card">
+          <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
+          <div class="psych-report">${renderMarkdown(profile)}</div>
+          <div style="margin-top:1.5rem">
+            <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="finishOnboarding()">Let's Get After It</button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      finishOnboarding();
+    }
+  } catch (e) {
+    console.error('Full profile error:', e);
+    finishOnboarding();
+  }
+}
+
+function finishOnboarding() {
   document.getElementById('baseline-overlay').innerHTML = '';
   renderAll();
 }
