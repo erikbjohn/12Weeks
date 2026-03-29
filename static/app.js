@@ -1191,6 +1191,37 @@ async function fetchWithRetry(url, options, timeoutMs, retries) {
   }
 }
 
+// ─── FETCH INTAKE WITH ASYNC POLL ─────────────────────────────────────────
+async function fetchIntakeWithPoll(url, options) {
+    // Step 1: Submit the request (returns immediately with job_id)
+    const submitRes = await fetch(url, options);
+    const submitData = await submitRes.json();
+
+    // If the response already has the result (e.g. locked state), return it
+    if (submitData.response !== undefined || submitData.error) {
+        return submitData;
+    }
+
+    // Step 2: Poll for result
+    const jobId = submitData.job_id;
+    if (!jobId) throw new Error('No job_id returned');
+
+    const maxAttempts = 60; // 60 * 2s = 2 minutes max
+    for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            const pollRes = await fetch('/api/psych-intake/result/' + jobId);
+            const pollData = await pollRes.json();
+            if (pollData.status === 'pending') continue;
+            return pollData; // done or error
+        } catch (e) {
+            // Network hiccup, keep polling
+            continue;
+        }
+    }
+    throw new Error('Timed out waiting for response');
+}
+
 // ─── PSYCHOLOGICAL INTAKE CHAT ─────────────────────────────────────────────
 let _psychMessages = [];
 let _psychCompleted = false;
@@ -1257,11 +1288,11 @@ async function startPsychConversation() {
   // Start fresh - send empty message to get opening question
   showPsychTyping();
   try {
-    const data = await fetchWithRetry('/api/psych-intake/message', {
+    const data = await fetchIntakeWithPoll('/api/psych-intake/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: '' })
-    }, 45000, 3);
+    });
     hidePsychTyping();
     if (data.response) {
       _psychMessages.push({ role: 'coach', content: data.response });
@@ -1318,11 +1349,11 @@ async function sendPsychMessage() {
 
   showPsychTyping();
   try {
-    const data = await fetchWithRetry('/api/psych-intake/message', {
+    const data = await fetchIntakeWithPoll('/api/psych-intake/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
-    }, 45000, 2);
+    });
     hidePsychTyping();
     if (data.locked) {
       showPsychLockedState(data.locked_until);
