@@ -1319,6 +1319,24 @@ async function sendPsychMessage() {
   } catch (e) {
     hidePsychTyping();
     console.error('Error sending psych message:', e);
+    // Show tappable error instead of silent fail
+    _psychMessages.push({ role: 'coach', content: 'Connection timed out. Tap here to retry.' });
+    renderPsychMessages();
+    const container = document.getElementById('psych-chat-messages');
+    if (container && container.lastElementChild) {
+      const errBubble = container.lastElementChild;
+      errBubble.style.cssText = 'cursor:pointer;color:var(--amber);border-color:var(--run-tempo-border)';
+      errBubble.onclick = () => {
+        _psychMessages.pop();
+        const lastUser = [..._psychMessages].reverse().find(m => m.role === 'user');
+        if (lastUser) {
+          _psychMessages.pop();
+          const input = document.getElementById('psych-input');
+          if (input) input.value = lastUser.content;
+          sendPsychMessage();
+        }
+      };
+    }
   }
 }
 
