@@ -1440,6 +1440,16 @@ async function showPsychReport() {
   if (inputBar) inputBar.style.display = 'none';
 
   const el = document.getElementById('baseline-overlay');
+
+  // Show loading screen while report generates
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+      <h2 style="font-size:1.5rem;margin-bottom:16px">Building Your Athlete Profile</h2>
+      <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
+      <div style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace">Analyzing your intake conversation...</div>
+    </div>
+  </div>`;
+
   try {
     const res = await fetch('/api/psych-intake/report');
     const data = await res.json();

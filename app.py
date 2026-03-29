@@ -731,68 +731,24 @@ def api_psych_intake_message():
         _history_for_api = list(history_for_api)
 
         def run_intake():
-            with app.app_context():
-                try:
-                    response_text, is_complete = get_intake_response(
-                        _user_msg, _history_for_api
-                    )
-
-                    intake_obj = PsychIntake.query.first()
-                    conversation = list(intake_obj.conversation or [])
-
-                    # Check for lockout signal
-                    is_locked = "[INTAKE_LOCKED]" in response_text
-                    if is_locked:
-                        response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
-                        intake_obj.locked_until = date.today() + timedelta(days=7)
-                        conversation.append({"role": "assistant", "content": response_text})
-                        intake_obj.conversation = conversation
-                        db.session.commit()
-                        _intake_jobs[job_id] = {
-                            "status": "done",
-                            "result": {
-                                "response": response_text,
-                                "completed": False,
-                                "locked": True,
-                                "locked_until": intake_obj.locked_until.isoformat(),
-                            },
-                        }
-                        return
-
-                    conversation.append({"role": "assistant", "content": response_text})
-                    intake_obj.conversation = conversation
-
-                    if is_complete:
-                        intake_obj.completed = True
-                        lifting_data = _serialize_weights()
-                        report = generate_intake_report(conversation, lifting_data=lifting_data)
-                        if report:
-                            intake_obj.report = report
-                        else:
-                            intake_obj.completed = False
-
-                    db.session.commit()
-
-                    _intake_jobs[job_id] = {
-                        "status": "done",
-                        "result": {
-                            "response": response_text,
-                            "completed": is_complete,
-                            "has_report": intake_obj.report is not None,
-                            "report_error": is_complete and intake_obj.report is None,
-                        },
-                    }
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    _intake_jobs[job_id] = {
-                        "status": "error",
-                        "result": {
-                            "response": "Connection issue. Tap to retry.",
-                            "completed": False,
-                            "error": str(e),
-                        },
-                    }
+            try:
+                # ONLY call Claude API here — no DB access in background thread
+                response_text, is_complete = get_intake_response(
+                    _user_msg, _history_for_api
+                )
+                _intake_jobs[job_id] = {
+                    "status": "done",
+                    "response_text": response_text,
+                    "is_complete": is_complete,
+                }
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                _intake_jobs[job_id] = {
+                    "status": "error",
+                    "response_text": "Connection issue. Tap to retry.",
+                    "is_complete": False,
+                }
 
         thread = threading.Thread(target=run_intake)
         thread.start()
@@ -811,10 +767,48 @@ def api_psych_intake_result(job_id):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
-    # Return result and clean up
-    result = job["result"]
+
+    # Job is done — save response to DB now (in the request thread, not background)
+    response_text = job.get("response_text", "")
+    is_complete = job.get("is_complete", False)
     del _intake_jobs[job_id]
-    return jsonify({"status": job["status"], **result})
+
+    intake = PsychIntake.query.first()
+    if not intake:
+        return jsonify({"status": "error", "response": "Intake not found"}), 500
+
+    convo = list(intake.conversation or [])
+
+    is_locked = "[INTAKE_LOCKED]" in response_text
+    if is_locked:
+        response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
+        intake.locked_until = date.today() + timedelta(days=7)
+
+    convo.append({"role": "assistant", "content": response_text})
+    intake.conversation = convo
+
+    if is_complete and not is_locked:
+        intake.completed = True
+        lifting_data = _serialize_weights()
+        report = generate_intake_report(convo, lifting_data=lifting_data)
+        if report:
+            intake.report = report
+        else:
+            intake.completed = False
+
+    db.session.commit()
+
+    result = {
+        "status": "done" if not job.get("status") == "error" else "error",
+        "response": response_text,
+        "completed": is_complete and not is_locked,
+        "has_report": intake.report is not None,
+        "report_error": is_complete and intake.report is None,
+    }
+    if is_locked:
+        result["locked"] = True
+        result["locked_until"] = intake.locked_until.isoformat()
+    return jsonify(result)
 
 
 @app.route("/api/psych-intake/report")
