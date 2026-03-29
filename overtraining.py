@@ -123,15 +123,15 @@ def assess_readiness(garmin_data):
     # Determine risk level
     if composite >= 65:
         risk_level = "low"
-        suggestion = "You're good to go. Train as planned."
+        suggestion = "Green light. Hit it hard today."
         ok = True
     elif composite >= 40:
         risk_level = "moderate"
-        suggestion = "Consider reducing volume by 1-2 sets per exercise, or dropping intensity by 10%. Focus on form over load."
+        suggestion = "Your body's talking — listen. Drop 1-2 sets or 10% weight. Form over ego today."
         ok = True
     else:
         risk_level = "high"
-        suggestion = "Consider swapping today's session for active recovery (20-30 min walk, mobility work). Your body is signaling it needs rest."
+        suggestion = "Stand down. Walk, stretch, recover. Pushing through this is how you lose a week, not gain a day."
         ok = False
 
     return {

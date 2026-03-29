@@ -18,39 +18,32 @@
 <header>
   <div class="header-row">
     <h1>12 Weeks</h1>
-    <button class="settings-btn" onclick="showSettingsMenu()" title="Settings">&#9881;</button>
+    <div class="header-actions">
+      <button class="header-btn" onclick="showProgress()" title="Progress">&#128200;</button>
+      <button class="header-btn" onclick="toggleChatOverlay()" title="Coach">&#128172;</button>
+      <button class="header-btn" onclick="showSettingsMenu()" title="Settings">&#9881;</button>
+    </div>
   </div>
   <div class="subtitle">Align aspirations with actions.</div>
 </header>
 
 <div id="baseline-overlay"></div>
-
 <div id="morning-checkin-overlay"></div>
-
-<div class="migration-banner" id="migration-banner"></div>
-
-<div id="weighin-bar" class="weighin-bar"></div>
-
-<div id="checkin-summary-bar"></div>
-
-<div class="garmin-bar" id="garmin-bar"></div>
-
-<div id="supplement-bar" class="supplement-bar"></div>
-
 <div class="readiness-alert" id="readiness-alert"></div>
-
-<div class="phase-nav" id="phase-nav"></div>
-<div class="phase-banner" id="phase-banner"></div>
-<div class="week-tabs" id="week-tabs"></div>
-<div class="day-grid" id="day-grid"></div>
+<div id="milestone-banner"></div>
+<div id="today-nav" class="today-nav"></div>
+<div id="today-hero" class="today-hero"></div>
 <div class="detail-panel" id="detail-panel"></div>
-
-<footer>
-  <div>Lift first &middot; Run after &middot; Done by 9am</div>
-  <div>Deload: Wks 4, 8, 12</div>
-  <div>Sunday = streak mile only</div>
-  <div>Creatine 5g daily</div>
-</footer>
+<div id="coach-inline" class="coach-inline-bar"></div>
+<div id="weighin-bar" class="weighin-bar"></div>
+<div id="checkin-summary-bar"></div>
+<div class="garmin-bar" id="garmin-bar"></div>
+<div id="supplement-bar" class="supplement-bar"></div>
+<!-- Legacy containers kept for renderAll compatibility -->
+<div class="phase-nav" id="phase-nav" style="display:none"></div>
+<div class="phase-banner" id="phase-banner" style="display:none"></div>
+<div class="week-tabs" id="week-tabs" style="display:none"></div>
+<div class="day-grid" id="day-grid" style="display:none"></div>
 
 <!-- Progress Dashboard Overlay -->
 <div class="progress-overlay" id="progress-overlay"></div>

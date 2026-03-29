@@ -32,7 +32,7 @@ def get_coach_response(user_message, context):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
     except Exception as e:
         log.error("Failed to init Anthropic client: %s", e)
         return "Coach is temporarily unavailable. Check your API key."
@@ -50,7 +50,7 @@ def get_coach_response(user_message, context):
         return response.content[0].text
     except Exception as e:
         log.error("Claude API error: %s", e)
-        return "Coach is temporarily unavailable. Try again in a moment."
+        return "Erik stepped away. He'll be back in a moment."
 
 
 def _build_system_prompt(ctx):

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logic Audit — 12 Weeks Audit</title>
+<style>
+:root { --bg: #0d0f0e; --surface: #161918; --surface2: #1e2220; --border: #2a2e2c; --text: #e8ede9; --muted: #9aaa9d; --accent: #4ade80; --red: #f87171; --amber: #f59e0b; --blue: #60a5fa; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 17px; line-height: 1.8; -webkit-font-smoothing: antialiased; }
+.container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+h2 { font-size: 1.4rem; font-weight: 700; margin: 2.5rem 0 1rem; color: var(--accent); letter-spacing: -0.01em; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.75rem; }
+p { margin-bottom: 1rem; }
+strong { color: #fff; }
+code { background: var(--surface2); padding: 2px 7px; border-radius: 4px; font-size: 0.9em; color: var(--amber); font-family: 'SF Mono', 'Fira Code', monospace; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.6; margin: 1rem 0 1.5rem; color: var(--muted); white-space: pre; }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.95rem; }
+th { text-align: left; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { padding: 10px 12px; border: 1px solid var(--border); vertical-align: top; }
+tr:nth-child(even) td { background: var(--surface); }
+ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+li { margin-bottom: 0.5rem; }
+nav { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+nav a { color: var(--muted); text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); transition: all 0.15s; }
+nav a:hover { color: var(--text); border-color: var(--accent); }
+nav a.active { color: var(--accent); border-color: var(--accent); background: var(--surface2); }
+.severity { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; }
+.sev-high { background: rgba(248,113,113,0.15); color: var(--red); }
+.sev-medium { background: rgba(245,158,11,0.15); color: var(--amber); }
+.sev-low { background: rgba(96,165,250,0.15); color: var(--blue); }
+.score { display: inline-block; width: 44px; height: 44px; line-height: 44px; text-align: center; border-radius: 50%; font-weight: 800; font-size: 1.1rem; }
+.score-9 { background: rgba(74,222,128,0.2); color: var(--accent); }
+.score-8 { background: rgba(74,222,128,0.15); color: var(--accent); }
+.score-7 { background: rgba(245,158,11,0.15); color: var(--amber); }
+.score-6 { background: rgba(248,113,113,0.15); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav>
+  <a href="00_executive_summary.html">Executive Summary</a>
+  <a href="01_logic_audit.html" class="active">Logic Audit</a>
+  <a href="02_engagement_audit.html">Engagement Audit</a>
+  <a href="03_ux_redesign.html">UX Redesign</a>
+</nav>
+
+<h1>Agent Logic Audit</h1>
+
+<h2>Full Agent Flow Map</h2>
+
+<h3>1. Onboarding Flow</h3>
+<pre>User opens app
+  &rarr; DOMContentLoaded fires
+  &rarr; 8 parallel API fetches (state, weights, completions, supplements, bodyweight, garmin, workouts, meals)
+  &rarr; Check: baseline_done &amp;&amp; hasWeights?
+    &boxur;&mdash; NO  &rarr; showWelcome() &rarr; "Commit" button
+    &boxv;         &rarr; startOnboardingIntake() &rarr; showPsychIntake()
+    &boxv;           &rarr; startPsychConversation()
+    &boxv;             &rarr; POST /api/psych-intake/message (empty body, triggers [START])
+    &boxv;             &rarr; Claude generates opening question ("Why are you here?")
+    &boxv;             &rarr; User responds in chat loop (10-15 exchanges)
+    &boxv;             &rarr; Claude sends [INTAKE_COMPLETE] signal
+    &boxv;             &rarr; generate_intake_report() called with conversation + lifting data
+    &boxv;             &rarr; showPsychReport() displays rendered markdown report
+    &boxv;             &rarr; "Next: Physical Assessment" button
+    &boxv;               &rarr; showBaseline() &rarr; 9-lift baseline test (reps at test weight)
+    &boxv;                 &rarr; estimate1RM &rarr; workingWeightFrom1RM (75% of est 1RM)
+    &boxv;                 &rarr; Each lift saved immediately via POST /api/weights
+    &boxv;                 &rarr; Summary screen &rarr; "Next: Body Measurements"
+    &boxv;                   &rarr; renderBaselineMeasurements()
+    &boxv;                     &rarr; Body weight input, waist input, 3 progress photos (front/side/back)
+    &boxv;                     &rarr; Photos trigger AI analysis via POST /api/photos &rarr; Claude Vision
+    &boxv;                     &rarr; "Save &amp; Start Program" &rarr; saveBaseline() &rarr; baseline_done = true
+    &boxur;&mdash; YES &rarr; renderAll() &rarr; checkMorningCheckin()</pre>
+
+<h3>2. Daily Flow (Post-Onboarding)</h3>
+<pre>User opens app (baseline_done = true)
+  &rarr; renderAll() (weigh-in, garmin, supplements, phase nav, week tabs, day grid)
+  &rarr; checkMorningCheckin()
+    &boxur;&mdash; Already done today &rarr; renderCheckinSummaryBar() (mood/sleep/stress badges)
+    &boxur;&mdash; Not done &rarr; showMorningCheckinOverlay()
+        &rarr; 6 sliders: sleep, stress, soreness, mood, motivation, anxiety
+        &rarr; Conditional follow-ups (soreness &ge;6, motivation &le;4, anxiety &ge;6)
+        &rarr; submitMorningCheckin()
+          &rarr; POST /api/morning-checkin (save to DB)
+          &rarr; POST /api/chat (send summary to Coach)
+          &rarr; Coach responds with contextual feedback
+          &rarr; User can reply in mini-chat
+          &rarr; "Continue to Workout" button &rarr; closeMorningCheckin()
+            &rarr; If Sunday: triggerWeeklyPlanning()</pre>
+
+<h3>3. AI Coach Chat (Persistent)</h3>
+<pre>User taps chat FAB
+  &rarr; toggleChatOverlay() &rarr; renderChatOverlay()
+  &rarr; Loads 7-day history from /api/chat/history
+  &rarr; User sends message &rarr; POST /api/chat
+    &rarr; _build_coach_context() gathers:
+      - 14 days of morning check-ins
+      - 14 days of chat history
+      - Body weight (all entries, last 14 sent)
+      - Garmin data + readiness assessment
+      - Current week/phase/workout
+      - Supplement status
+      - Psych intake report
+    &rarr; get_coach_response() &rarr; Claude Sonnet with full system prompt
+    &rarr; Response saved to ChatMessage table</pre>
+
+<h3>4. Psych Intake Agent</h3>
+<pre>Trigger: First-time user OR settings "Redo Psych Intake"
+  &rarr; POST /api/psych-intake/message with empty body &rarr; triggers [START]
+  &rarr; Claude operates under INTAKE_SYSTEM_PROMPT:
+    - Fixed opening sequence (Why here? &rarr; Sex &rarr; Age &rarr; Alcohol commitment &rarr; Athlete &rarr; Actor)
+    - Adaptive middle section (kids, personal questions)
+    - 3-strike lockout system for pushback &rarr; [INTAKE_LOCKED] &rarr; 7-day ban
+    - 12-15 exchanges &rarr; [INTAKE_COMPLETE]
+  &rarr; generate_intake_report():
+    - REPORT_SYSTEM_PROMPT builds comprehensive psych profile
+    - Includes 12-week strategy, game plan, phase breakdowns
+    - Fed into Coach context for all future interactions</pre>
+
+<h3>5. Overtraining Monitor</h3>
+<pre>Trigger: Garmin connected + data available
+  &rarr; assess_readiness(garmin_data) called on:
+    - App load (renderReadiness)
+    - Each coach message (_build_coach_context)
+  &rarr; Weighted composite score:
+    - Training Readiness 30%
+    - HRV 25%
+    - Sleep 20%
+    - Body Battery 15%
+    - Stress 10%
+  &rarr; Risk levels: low (&ge;65), moderate (40-64), high (&lt;40)
+  &rarr; Displayed in readiness alert bar + fed to Coach</pre>
+
+<h3>6. Progress Photo Analysis</h3>
+<pre>Trigger: User uploads photo (baseline or weekly)
+  &rarr; POST /api/photos
+  &rarr; _analyze_progress_photo():
+    - Claude Vision analyzes current pose photo
+    - Fetches most recent previous photo of same pose for comparison
+    - Includes body weight context
+    - Includes psych intake conversation (aspirational body type)
+    - Returns: BF% estimate, muscle assessment, progress notes, gap analysis, aesthetic score</pre>
+
+<hr>
+
+<h2>Logical Gaps, Race Conditions, and Dead Ends</h2>
+
+<h3>Critical Issues</h3>
+
+<p><strong>1. Race condition in psych intake conversation storage</strong> <span class="severity sev-high">HIGH</span></p>
+<p><code>app.py:708</code> — The conversation history passed to <code>get_intake_response()</code> is <code>convo[:-1]</code> (excluding the current user message), but the user message was just appended at line 705. This means Claude sees the conversation <em>without</em> the latest user message in its history, but receives it as the <code>user_message</code> parameter. This is correct for Claude's <code>messages</code> API but fragile — if the list mutation and slicing are ever reordered, messages could be duplicated or lost.</p>
+
+<p><strong>2. Psych intake role mismatch</strong> <span class="severity sev-medium">MEDIUM</span></p>
+<p>Frontend stores messages with role <code>'coach'</code> (<code>app.js:911</code>), but backend stores them as <code>'assistant'</code> (<code>app.py:726</code>). The <code>renderPsychMessages()</code> function checks for <code>role === 'user'</code> vs anything else, so this works, but <code>renderChatMessages()</code> checks for <code>role === 'user'</code> vs <code>'coach'</code> — if psych messages ever flow into the main chat renderer, they'd render incorrectly.</p>
+
+<p><strong>3. Chat history inconsistency between frontend and backend</strong> <span class="severity sev-medium">MEDIUM</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">XSS FIXED</span></p>
+<p>Frontend <code>_chatHistory</code> uses <code>{ role: 'coach', text: '...' }</code> while backend returns <code>{ role: 'assistant', content: '...' }</code>. The <code>renderChatMessages</code> function handles both (<code>m.text || m.content</code>) but checks <code>m.role === 'user'</code> and treats everything else as coach. <s><code>escapeHtml</code> is applied to chat messages but NOT to psych intake messages, creating an <strong>XSS vector</strong> in the psych chat.</s> <span style="color:var(--accent);">escapeHtml is now applied to psych intake messages.</span> The role mismatch remains but is cosmetic.</p>
+
+<p><strong>4. No timeout/retry on Claude API calls</strong> <span class="severity sev-medium">MEDIUM</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">FIXED</span></p>
+<p><s><code>coach.py</code>, <code>psych_intake.py</code>, and <code>_analyze_progress_photo</code> all make synchronous Claude API calls with no timeout.</s> <span style="color:var(--accent);">Timeouts added: coach.py 30s, psych_intake.py 30s (chat) / 60s (report), app.py photo analysis 45s.</span> Calls are still synchronous (no streaming/background tasks yet), but they no longer hang indefinitely.</p>
+
+<p><strong>5. Garmin singleton state</strong> <span class="severity sev-medium">MEDIUM</span></p>
+<p><code>garmin = GarminClient()</code> at module level means there's one GarminClient instance shared across all requests. The <code>_mfa_client_state</code> is stored on this instance — if two tabs attempted login simultaneously, MFA state would be corrupted.</p>
+
+<p><strong>6. Weekly planning trigger race</strong> <span class="severity sev-low">LOW</span></p>
+<p><code>triggerWeeklyPlanning()</code> uses <code>localStorage</code> to prevent duplicate triggers, but the coach message is sent before <code>localStorage.setItem()</code>. If the network call fails, the flag is never set and it won't retry. If it succeeds but the user closes the tab during the response, the flag IS set but the user never sees the response.</p>
+
+<p><strong>7. Dead end: INTAKE_LOCKED with no recovery path</strong> <span class="severity sev-low">LOW</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">FIXED</span></p>
+<p><s>When the psych intake locks the user out for 7 days, the frontend receives <code>locked: true</code> but <code>sendPsychMessage()</code> doesn't handle this — it just displays the response text. The user has no visual indication of what to do next or when they can return. The app effectively stalls at the intake screen with no way forward.</s> <span style="color:var(--accent);">INTAKE_LOCKED now shows a countdown timer with a close button, so the user can dismiss the overlay and return later.</span></p>
+
+<p><strong>8. Missing error boundary in morning check-in flow</strong> <span class="severity sev-low">LOW</span></p>
+<p>If the POST to <code>/api/chat</code> fails after submitting the morning check-in (line 1540-1569 in app.js), the loading indicator is hidden and the "Continue to Workout" button appears, but the coach response area stays empty. No error message is shown.</p>
+
+<h3>Minor Issues</h3>
+
+<ul>
+  <li><strong>9.</strong> <code>apiPost</code> fire-and-forget — The helper function catches errors but only logs them. No retry, no user notification. Weight recordings, completion toggles, and supplement logs can silently fail.</li>
+  <li><strong>10.</strong> <code>_build_coach_context</code> fetches ALL body weight entries (<code>app.py:839</code>) and then slices to last 14. For a long-running user, this query grows unbounded.</li>
+  <li><strong>11.</strong> Photo analysis sends up to 2000 chars of psych intake conversation (<code>app.py:984</code>) — truncation could cut mid-sentence.</li>
+  <li><strong>12.</strong> <code>max_tokens=800</code> on coach responses (<code>coach.py:48</code>) — generally fine given "1-3 sentences" format, but could truncate in edge cases.</li>
+</ul>
+
+<hr>
+
+<h2>Error Handling Assessment</h2>
+
+<table>
+  <tr><th>Agent/Module</th><th>Error Handling</th><th>Fallback</th><th>Notes</th></tr>
+  <tr><td><code>get_coach_response()</code></td><td>Try/catch with generic message</td><td>Returns "Coach is temporarily unavailable"</td><td style="color:var(--accent);">Good</td></tr>
+  <tr><td><code>get_intake_response()</code></td><td>Try/catch with generic message</td><td>Returns "Intake temporarily unavailable"</td><td style="color:var(--accent);">Good — but no retry</td></tr>
+  <tr><td><code>generate_intake_report()</code></td><td>Try/catch, error UI</td><td>Shows error with retry/skip</td><td style="color:var(--accent);">Fixed — retry/skip options</td></tr>
+  <tr><td><code>_analyze_progress_photo()</code></td><td>Try/catch, returns status string</td><td>"Photo saved. Analysis failed"</td><td style="color:var(--accent);">Good</td></tr>
+  <tr><td><code>assess_readiness()</code></td><td>No errors possible (pure logic)</td><td>Returns "unknown" risk</td><td style="color:var(--accent);">Good</td></tr>
+  <tr><td><code>GarminClient.login()</code></td><td>Try/catch with rate limiting</td><td>Returns (False, error_msg, False)</td><td style="color:var(--accent);">Good — 15-min cooldown on 429</td></tr>
+  <tr><td><code>GarminClient._cached()</code></td><td>Try/catch, returns stale cache</td><td>Falls back to cached data</td><td style="color:var(--accent);">Good</td></tr>
+  <tr><td>Frontend <code>apiPost()</code></td><td>Retry once + toast</td><td>Shows toast on failure</td><td style="color:var(--accent);">Fixed — retries once, shows toast</td></tr>
+  <tr><td>Frontend init</td><td>Try/catch with empty-data fallback</td><td>Renders with empty caches</td><td style="color:var(--amber);">Acceptable</td></tr>
+  <tr><td><code>submitMorningCheckin()</code></td><td>No error handling on POST</td><td>Fire-and-forget</td><td style="color:var(--red);">Bad — check-in could be lost</td></tr>
+</table>
+
+<hr>
+
+<h2>Confidence Scores (Logic Soundness)</h2>
+
+<table>
+  <tr><th>Agent</th><th style="width:70px;text-align:center">Score</th><th>Rationale</th></tr>
+  <tr><td><strong>Psych Intake</strong></td><td style="text-align:center"><span class="score score-7">7</span></td><td>Well-structured conversation flow with lockout mechanism. Role mismatch and locked-state dead end are concerns. Report generation is robust.</td></tr>
+  <tr><td><strong>AI Coach</strong></td><td style="text-align:center"><span class="score score-8">8</span></td><td>Excellent context assembly. System prompt is comprehensive and well-structured. Chat history management works. Main risk: synchronous blocking on Claude API.</td></tr>
+  <tr><td><strong>Overtraining Monitor</strong></td><td style="text-align:center"><span class="score score-9">9</span></td><td>Clean, stateless, well-weighted algorithm. Handles missing data gracefully. Good risk thresholds.</td></tr>
+  <tr><td><strong>Progress Photo Analyzer</strong></td><td style="text-align:center"><span class="score score-7">7</span></td><td>Vision analysis is solid. Aspiration context truncation is sloppy. Comparison photo logic works but only looks at most recent.</td></tr>
+  <tr><td><strong>Garmin Integration</strong></td><td style="text-align:center"><span class="score score-7">7</span></td><td>Good caching, token persistence, rate limit handling. Singleton state is a risk. MFA flow works but is fragile.</td></tr>
+  <tr><td><strong>Onboarding Flow</strong></td><td style="text-align:center"><span class="score score-6">6</span></td><td>Complex multi-step flow that mostly works. Transitions are manually chained with no state machine. Locked-out users hit a dead end.</td></tr>
+  <tr><td><strong>Morning Check-in</strong></td><td style="text-align:center"><span class="score score-8">8</span></td><td>Clean slider UI with smart conditional follow-ups. Coach integration works well. Sunday planning trigger is clever.</td></tr>
+  <tr><td><strong>Weight Progression</strong></td><td style="text-align:center"><span class="score score-8">8</span></td><td>RPE-based progression logic is sound. Phase transitions handle +20%/+10% jumps correctly. Deload detection works.</td></tr>
+</table>
+
+<hr>
+
+<h2>Recommendations (Priority Order)</h2>
+
+<ol>
+  <li><s><strong>Add request timeout to all Claude API calls</strong></s> <span style="color:var(--accent);font-weight:700;">&#10003; DONE</span> — Timeouts added: coach.py 30s, psych_intake.py 30s/60s, app.py 45s.</li>
+  <li><s><strong>Handle INTAKE_LOCKED state in frontend</strong></s> <span style="color:var(--accent);font-weight:700;">&#10003; DONE</span> — Countdown timer, close button, and return path implemented.</li>
+  <li><s><strong>Add retry/confirmation to critical <code>apiPost</code> calls</strong></s> <span style="color:var(--accent);font-weight:700;">&#10003; DONE</span> — Retries once on failure, shows toast on error.</li>
+  <li><s><strong>Fix XSS in psych chat messages</strong></s> <span style="color:var(--accent);font-weight:700;">&#10003; DONE</span> — <code>escapeHtml()</code> now applied to psych intake messages.</li>
+  <li><s><strong>Add error state to <code>generate_intake_report</code> rendering</strong></s> <span style="color:var(--accent);font-weight:700;">&#10003; DONE</span> — Error now shown with retry/skip options instead of rendering as report text.</li>
+</ol>
+
+<hr>
+
+<h2>Implementation Status (2026-03-28)</h2>
+
+<table>
+  <tr><th>Issue</th><th>Status</th></tr>
+  <tr><td>#3 XSS in psych chat messages</td><td style="color:var(--accent)">&#10003; Fixed — escapeHtml applied</td></tr>
+  <tr><td>#4 No timeout on Claude API calls</td><td style="color:var(--accent)">&#10003; Fixed — 30s/45s/60s timeouts added</td></tr>
+  <tr><td>#7 INTAKE_LOCKED dead end</td><td style="color:var(--accent)">&#10003; Fixed — countdown + close button</td></tr>
+  <tr><td>Psych intake save/resume</td><td style="color:var(--accent)">&#10003; Added — Welcome back, progress indicator, Continue Later</td></tr>
+  <tr><td>PhysicalAssessment model + endpoints</td><td style="color:var(--accent)">&#10003; Added — model in models.py, 3 API endpoints</td></tr>
+  <tr><td>#1 Conversation history slicing fragility</td><td style="color:var(--muted)">Open</td></tr>
+  <tr><td>#2 Psych intake role mismatch</td><td style="color:var(--muted)">Open (cosmetic)</td></tr>
+  <tr><td>#5 Garmin singleton state</td><td style="color:var(--muted)">Open</td></tr>
+  <tr><td>#6 Weekly planning trigger race</td><td style="color:var(--muted)">Open</td></tr>
+  <tr><td>#8 Missing error boundary in morning check-in</td><td style="color:var(--muted)">Open</td></tr>
+  <tr><td>#9 apiPost fire-and-forget</td><td style="color:var(--accent)">&#10003; Fixed — retries once, shows toast on failure</td></tr>
+  <tr><td>generate_intake_report error renders as report</td><td style="color:var(--accent)">&#10003; Fixed — shows error with retry/skip options</td></tr>
+</table>
+
+</div>
+</body>
+</html>

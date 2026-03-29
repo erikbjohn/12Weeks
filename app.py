@@ -2,7 +2,7 @@
 
 import os
 from datetime import date, timedelta, datetime
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, Response
 
 from workout_data import (
     get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS,
@@ -16,7 +16,7 @@ from models import (
     db, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
-    ProgressPhoto, PsychIntake, GarminTokens,
+    ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
 )
 
 app = Flask(__name__)
@@ -731,7 +731,10 @@ def api_psych_intake_message():
         # Generate the report with lifting data for combined plan
         lifting_data = _serialize_weights()
         report = generate_intake_report(convo, lifting_data=lifting_data)
-        intake.report = report
+        if report:
+            intake.report = report
+        else:
+            intake.completed = False  # Allow retry
 
     db.session.commit()
 
@@ -739,6 +742,7 @@ def api_psych_intake_message():
         "response": response_text,
         "completed": is_complete,
         "has_report": intake.report is not None,
+        "report_error": is_complete and intake.report is None,
     })
 
 
@@ -808,6 +812,60 @@ def api_chat():
         "response": response_text,
         "time": asst_chat.created_at.strftime("%I:%M %p") if asst_chat.created_at else None,
     })
+
+
+@app.route("/api/chat/stream", methods=["POST"])
+def api_chat_stream():
+    """Streaming coach response via SSE."""
+    data = request.get_json()
+    user_msg = data.get("message", "").strip()
+    if not user_msg:
+        return jsonify({"error": "Message required"}), 400
+
+    # Save user message
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today())
+    db.session.add(user_chat)
+    db.session.commit()
+
+    context = _build_coach_context()
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"error": "API key not configured"}), 500
+
+    def generate():
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+
+            from coach import _build_system_prompt, _build_messages
+            system_prompt = _build_system_prompt(context)
+            messages = _build_messages(user_msg, context.get("chat_history", []))
+
+            full_text = ""
+            with client.messages.stream(
+                model="claude-sonnet-4-20250514",
+                max_tokens=800,
+                system=system_prompt,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    full_text += text
+                    yield f"data: {text}\n\n"
+
+            # Save complete response
+            asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today())
+            db.session.add(asst_chat)
+            db.session.commit()
+
+            yield f"data: [DONE]\n\n"
+        except Exception as e:
+            import logging
+            logging.error("Stream error: %s", e)
+            yield f"data: [ERROR]\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _build_coach_context():
@@ -954,7 +1012,7 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
     except Exception:
         return "Photo saved. AI analysis unavailable."
 
@@ -1129,6 +1187,129 @@ def garmin_logout():
     garmin._cache = {}
     session.pop("garmin_connected", None)
     return jsonify({"connected": False})
+
+
+# ─── PUSH NOTIFICATIONS ────────────────────────────────────────────────────
+
+_push_subscriptions = []  # In-memory for now; could be stored in DB
+
+@app.route("/api/push/vapid-key")
+def api_vapid_key():
+    key = os.environ.get("VAPID_PUBLIC_KEY")
+    if not key:
+        return jsonify({"error": "Push not configured"}), 404
+    return jsonify({"publicKey": key})
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def api_push_subscribe():
+    data = request.get_json()
+    sub = data.get("subscription")
+    if not sub:
+        return jsonify({"error": "subscription required"}), 400
+    # Deduplicate
+    if sub not in _push_subscriptions:
+        _push_subscriptions.append(sub)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/push/test", methods=["POST"])
+def api_push_test():
+    """Send a test push notification."""
+    vapid_private = os.environ.get("VAPID_PRIVATE_KEY")
+    vapid_email = os.environ.get("VAPID_EMAIL", "mailto:test@example.com")
+    if not vapid_private or not _push_subscriptions:
+        return jsonify({"error": "Push not configured or no subscribers"}), 400
+    try:
+        from pywebpush import webpush
+        import json
+        for sub in _push_subscriptions:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps({"title": "12 Weeks", "body": "Time for your morning check-in!", "tag": "morning-checkin"}),
+                vapid_private_key=vapid_private,
+                vapid_claims={"sub": vapid_email},
+            )
+        return jsonify({"ok": True, "sent": len(_push_subscriptions)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ─── PHYSICAL ASSESSMENT ───────────────────────────────────────────────────
+
+@app.route("/api/physical-assessment/status")
+def api_physical_assessment_status():
+    pa = PhysicalAssessment.query.first()
+    if not pa:
+        return jsonify({"started": False, "completed": False})
+    return jsonify({
+        "started": True,
+        "completed": pa.completed,
+        "has_gym": pa.has_gym,
+        "has_measuring_tape": pa.has_measuring_tape,
+        "bodyweight": pa.bodyweight_lbs,
+        "waist": pa.waist_inches,
+        "height": pa.height_inches,
+    })
+
+
+@app.route("/api/physical-assessment", methods=["POST"])
+def api_physical_assessment_save():
+    data = request.get_json()
+    pa = PhysicalAssessment.query.first()
+    if not pa:
+        pa = PhysicalAssessment()
+        db.session.add(pa)
+
+    if "has_gym" in data:
+        pa.has_gym = data["has_gym"]
+    if "has_measuring_tape" in data:
+        pa.has_measuring_tape = data["has_measuring_tape"]
+    if "height" in data:
+        pa.height_inches = data["height"]
+    if "bodyweight" in data:
+        pa.bodyweight_lbs = data["bodyweight"]
+        # Also log to BodyWeight table
+        d = date.today()
+        bw = BodyWeight.query.filter_by(log_date=d).first()
+        if bw:
+            bw.weight_lbs = data["bodyweight"]
+        else:
+            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"]))
+    if "waist" in data:
+        pa.waist_inches = data["waist"]
+        d = date.today()
+        bm = BodyMeasurement.query.filter_by(log_date=d).first()
+        if bm:
+            bm.waist_inches = data["waist"]
+        else:
+            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"]))
+    if "pushup_count" in data:
+        pa.pushup_count = data["pushup_count"]
+    if "pushup_from_knees" in data:
+        pa.pushup_from_knees = data["pushup_from_knees"]
+    if "plank_seconds" in data:
+        pa.plank_seconds = data["plank_seconds"]
+    if "squat_count" in data:
+        pa.squat_count = data["squat_count"]
+    if "lunge_count_per_leg" in data:
+        pa.lunge_count_per_leg = data["lunge_count_per_leg"]
+    if "pullup_count" in data:
+        pa.pullup_count = data["pullup_count"]
+    if "gym_baseline_done" in data:
+        pa.gym_baseline_done = data["gym_baseline_done"]
+    if "completed" in data:
+        pa.completed = data["completed"]
+
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/physical-assessment/reset", methods=["POST"])
+def api_physical_assessment_reset():
+    PhysicalAssessment.query.delete()
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

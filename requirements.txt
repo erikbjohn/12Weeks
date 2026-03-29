@@ -5,3 +5,4 @@ anthropic>=0.42
 garminconnect>=0.2.20
 gunicorn>=22.0
 python-dotenv>=1.0
+pywebpush>=2.0

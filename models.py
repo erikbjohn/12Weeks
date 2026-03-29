@@ -150,6 +150,28 @@ class GarminTokens(db.Model):
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
+class PhysicalAssessment(db.Model):
+    """Baseline physical assessment data (gym or bodyweight)."""
+    __tablename__ = "physical_assessment"
+    id = db.Column(db.Integer, primary_key=True)
+    has_gym = db.Column(db.Boolean, default=True)
+    has_measuring_tape = db.Column(db.Boolean, default=False)
+    height_inches = db.Column(db.Float, nullable=True)
+    bodyweight_lbs = db.Column(db.Float, nullable=True)
+    waist_inches = db.Column(db.Float, nullable=True)
+    # Bodyweight assessment (for no-gym users)
+    pushup_count = db.Column(db.Integer, nullable=True)  # full pushups
+    pushup_from_knees = db.Column(db.Boolean, default=False)
+    plank_seconds = db.Column(db.Integer, nullable=True)
+    squat_count = db.Column(db.Integer, nullable=True)  # bodyweight squats
+    lunge_count_per_leg = db.Column(db.Integer, nullable=True)
+    pullup_count = db.Column(db.Integer, nullable=True)  # 0 if can't
+    # Gym baseline (for gym users) stored in ExerciseLog, just flag here
+    gym_baseline_done = db.Column(db.Boolean, default=False)
+    completed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
 class ChatMessage(db.Model):
     """AI coach conversation history."""
     __tablename__ = "chat_message"

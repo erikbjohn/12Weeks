@@ -18,16 +18,66 @@ let garminData = null;
 let readinessData = null;
 let warmupTimerInterval = null;
 let _chatOverlayOpen = false;
+let _mealDetailExpanded = false;
+let _milestonesShownThisSession = new Set();
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
 // ─── API HELPERS ────────────────────────────────────────────────────────────
+function showToast(msg, type) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + (type || 'info');
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
 function apiPost(url, body) {
-  fetch(url, {
+  return fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }).catch(e => console.error('POST failed:', url, e));
+  }).catch(e => {
+    console.warn('POST failed (attempt 1), retrying:', url, e);
+    return new Promise(resolve => setTimeout(resolve, 1000)).then(() =>
+      fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      })
+    ).catch(e2 => {
+      console.error('POST failed (attempt 2):', url, e2);
+      showToast('Save failed. Check your connection.', 'error');
+      // Queue for background sync if available
+      if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        queueForSync(url, body);
+      }
+    });
+  });
+}
+
+async function queueForSync(url, body) {
+    try {
+        const db = await new Promise((resolve, reject) => {
+            const req = indexedDB.open('12weeks-sync', 1);
+            req.onupgradeneeded = () => { req.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true }); };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        const tx = db.transaction('outbox', 'readwrite');
+        tx.objectStore('outbox').add({ url, body: JSON.stringify(body), timestamp: Date.now() });
+        const reg = await navigator.serviceWorker.ready;
+        await reg.sync.register('sync-posts');
+    } catch (e) {
+        console.warn('Failed to queue for sync:', e);
+    }
 }
 
 function todayStr() {
@@ -219,15 +269,33 @@ function renderMealSection(dayData) {
     </div>
   </div>`;
 
+  // Compact row: meal name checkboxes
+  let compactChecks = '';
+  meals.forEach((meal, idx) => {
+    const eaten = isMealEaten(idx);
+    compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx})">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
+  });
+
   return `<div class="detail-section">
     <h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
     ${fastToggleHtml}
     ${activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
-    <div class="meal-timeline">
-      ${mealsHtml}
-    </div>
     ${totalsHtml}
+    <div class="meal-compact-row">${compactChecks}</div>
+    <button class="meal-detail-toggle" onclick="toggleMealDetails()">
+      ${_mealDetailExpanded ? 'Hide details \u25B2' : 'Show meal details \u25BC'}
+    </button>
+    <div class="meal-detail-body${_mealDetailExpanded ? ' visible' : ''}">
+      <div class="meal-timeline">
+        ${mealsHtml}
+      </div>
+    </div>
   </div>`;
+}
+
+function toggleMealDetails() {
+  _mealDetailExpanded = !_mealDetailExpanded;
+  renderDetail();
 }
 
 // ─── BASELINE CONFIG ────────────────────────────────────────────────────────
@@ -365,7 +433,7 @@ function showWelcome() {
     <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
       <h2 style="font-size:2.2rem;margin-bottom:12px;letter-spacing:-0.02em">12 Weeks.</h2>
       <div style="font-size:15px;color:var(--muted);font-family:'DM Mono',monospace;margin-bottom:2.5rem">Align aspirations with actions.</div>
-      <button class="btn btn-primary" style="width:100%;font-size:18px;padding:16px;font-weight:700" onclick="startOnboardingIntake()">Commit</button>
+      <button class="btn btn-primary" style="width:100%;font-size:18px;padding:16px;font-weight:700" onclick="startOnboardingIntake()">I'm Ready</button>
     </div>
   </div>`;
 }
@@ -414,7 +482,7 @@ function renderBaseline() {
           For each lift, load the test weight shown and do <strong>as many reps as you can</strong> with good form. Stop when form breaks down.<br><br>
           We'll calculate your working weights from there.
         </div>
-        <button class="btn btn-primary" style="width:100%" onclick="baselineStep=1;renderBaseline()">Let's Go</button>
+        <button class="btn btn-primary" style="width:100%" onclick="baselineStep=1;renderBaseline()">Start Baseline Test (~10 min)</button>
       </div>
     </div>`;
     return;
@@ -449,7 +517,7 @@ function renderBaseline() {
           Working weights are set at ~75% of your estimated 1RM (the right range for 4x10 in Phase 1).
         </div>
         <div class="baseline-summary">${rows}</div>
-        <button class="btn btn-primary" style="width:100%" onclick="baselineStep=${BASELINE_LIFTS.length + 2};renderBaseline()">Next: Body Measurements</button>
+        <button class="btn btn-primary" style="width:100%" onclick="saveBaseline()">Start My 12 Weeks</button>
       </div>
     </div>`;
     return;
@@ -481,7 +549,7 @@ function renderBaseline() {
       </div>` : ''}
       <div style="display:flex;gap:8px">
         ${liftIdx > 0 ? '<button class="btn btn-secondary" onclick="baselineBack()">Back</button>' : ''}
-        <button class="btn btn-primary" style="flex:1" onclick="baselineNext()">${liftIdx === BASELINE_LIFTS.length - 1 ? 'Finish' : 'Next'}</button>
+        <button class="btn btn-primary" style="flex:1" onclick="baselineNext()">${liftIdx === BASELINE_LIFTS.length - 1 ? 'See My Results' : 'Next Lift \u2192'}</button>
       </div>
     </div>
   </div>`;
@@ -569,6 +637,7 @@ function saveBaseline() {
     });
   }
   apiPost('/api/weights/baseline', { exercises });
+  apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
   baselineStep = -1;
@@ -641,7 +710,7 @@ function renderBaselineMeasurements(el) {
       <div id="bl-measure-status" class="bl-measure-status" style="display:none"></div>
 
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
-        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaselineMeasurementsAndStart()">Save &amp; Start Program</button>
+        <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="saveBaselineMeasurementsAndStart()">Start My 12 Weeks</button>
         <button class="btn btn-secondary bl-skip-btn" style="width:100%;font-size:15px;padding:12px" onclick="skipBaselineMeasurements()">Skip for Now</button>
       </div>
     </div>
@@ -802,6 +871,257 @@ function skipBaselineMeasurements() {
   saveBaseline();
 }
 
+function skipMorningCheckin() {
+  document.getElementById('morning-checkin-overlay').innerHTML = '';
+}
+
+// ─── PHYSICAL ASSESSMENT FLOW ──────────────────────────────────────────────
+let _paStep = 0; // 0 = questions, 1 = measurements, 2 = baseline
+let _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null };
+let _bwBaselineStep = 0;
+let _bwBaselineData = {};
+
+function showPhysicalAssessment() {
+  _paStep = 0;
+  _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null };
+  renderPhysicalAssessment();
+}
+
+function renderPhysicalAssessment() {
+  const el = document.getElementById('baseline-overlay');
+
+  if (_paStep === 0) {
+    // Step 1: Questions
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Physical Assessment</h2>
+        <div class="baseline-desc" style="margin-bottom:1.5rem">A few quick questions so we can set up the right baseline test for you.</div>
+
+        <div class="pa-question">
+          <div class="pa-question-text">Do you have access to a gym with barbells and machines?</div>
+          <div class="pa-choices">
+            <div class="pa-choice${_paData.has_gym === true ? ' selected' : ''}" onclick="_paData.has_gym=true;renderPhysicalAssessment()">Yes</div>
+            <div class="pa-choice${_paData.has_gym === false ? ' selected' : ''}" onclick="_paData.has_gym=false;renderPhysicalAssessment()">No</div>
+          </div>
+        </div>
+
+        <div class="pa-question">
+          <div class="pa-question-text">Do you have a measuring tape?</div>
+          <div class="pa-choices">
+            <div class="pa-choice${_paData.has_tape === true ? ' selected' : ''}" onclick="_paData.has_tape=true;renderPhysicalAssessment()">Yes</div>
+            <div class="pa-choice${_paData.has_tape === false ? ' selected' : ''}" onclick="_paData.has_tape=false;renderPhysicalAssessment()">No</div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromQuestions()" ${_paData.has_gym === null || _paData.has_tape === null ? 'disabled' : ''}>Next</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (_paStep === 1) {
+    // Step 2: Measurements
+    const waistRow = _paData.has_tape ? `<div class="pa-measure-row">
+          <label>Waist (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-waist" placeholder="e.g. 34" step="0.1" min="15" max="80" value="${_paData.waist || ''}">
+        </div>` : '';
+
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Body Measurements</h2>
+        <div class="baseline-desc" style="margin-bottom:1.5rem">Let's get your starting numbers.</div>
+
+        <div class="pa-measure-row">
+          <label>Body Weight (lbs)</label>
+          <input type="number" inputmode="decimal" id="pa-weight" placeholder="e.g. 185" step="0.1" min="50" max="500" value="${_paData.weight || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Height (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-height" placeholder="e.g. 70" step="0.1" min="48" max="96" value="${_paData.height || ''}">
+        </div>
+        ${waistRow}
+
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromMeasurements()">Next</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (_paStep === 2) {
+    // Step 3: Route to gym or bodyweight baseline
+    if (_paData.has_gym) {
+      showBaseline();
+    } else {
+      _bwBaselineStep = 0;
+      _bwBaselineData = {};
+      renderBodyweightBaseline();
+    }
+  }
+}
+
+function paNextFromQuestions() {
+  if (_paData.has_gym === null || _paData.has_tape === null) return;
+  // Save questions to backend
+  apiPost('/api/physical-assessment', { has_gym: _paData.has_gym, has_measuring_tape: _paData.has_tape });
+  _paStep = 1;
+  renderPhysicalAssessment();
+}
+
+async function paNextFromMeasurements() {
+  const weightVal = parseFloat(document.getElementById('pa-weight').value);
+  const heightVal = parseFloat(document.getElementById('pa-height').value);
+  const waistEl = document.getElementById('pa-waist');
+  const waistVal = waistEl ? parseFloat(waistEl.value) : null;
+
+  _paData.weight = weightVal || null;
+  _paData.height = heightVal || null;
+  _paData.waist = waistVal || null;
+
+  // Save measurements
+  const payload = {};
+  if (_paData.weight) payload.bodyweight = _paData.weight;
+  if (_paData.height) payload.height = _paData.height;
+  if (_paData.waist) payload.waist = _paData.waist;
+  apiPost('/api/physical-assessment', payload);
+
+  // Also save body weight to bodyweight tracker
+  if (_paData.weight) {
+    apiPost('/api/bodyweight', { date: todayStr(), weight: _paData.weight });
+    if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
+    _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
+  }
+
+  _paStep = 2;
+  renderPhysicalAssessment();
+}
+
+// ─── BODYWEIGHT BASELINE FLOW ──────────────────────────────────────────────
+const BW_BASELINE_EXERCISES = [
+  {
+    key: 'pushups',
+    name: 'Pushups',
+    hint: 'Do as many pushups as you can with good form. If you can\'t do a full pushup, do them from your knees.',
+    inputLabel: 'Reps',
+    hasKneesCheckbox: true,
+  },
+  {
+    key: 'plank',
+    name: 'Plank Hold',
+    hint: 'Hold a plank as long as you can. Time yourself.',
+    inputLabel: 'Seconds',
+  },
+  {
+    key: 'squats',
+    name: 'Bodyweight Squats',
+    hint: 'Do as many bodyweight squats as you can. Full depth, heels on the ground.',
+    inputLabel: 'Reps',
+  },
+  {
+    key: 'lunges',
+    name: 'Lunges',
+    hint: 'Do as many walking lunges as you can per leg.',
+    inputLabel: 'Per leg',
+  },
+  {
+    key: 'pullups',
+    name: 'Pull-ups',
+    hint: 'If you have access to a bar, how many pull-ups can you do? Enter 0 if none or no bar available.',
+    inputLabel: 'Reps',
+  },
+];
+
+function renderBodyweightBaseline() {
+  const el = document.getElementById('baseline-overlay');
+  const total = BW_BASELINE_EXERCISES.length;
+
+  if (_bwBaselineStep < total) {
+    const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
+    const existing = _bwBaselineData[ex.key] || {};
+
+    let dots = '';
+    for (let i = 0; i < total; i++) {
+      const cls = i < _bwBaselineStep ? 'done' : i === _bwBaselineStep ? 'active' : '';
+      dots += '<div class="bp-dot ' + cls + '"></div>';
+    }
+
+    const checkboxHtml = ex.hasKneesCheckbox ? `<div class="bw-assess-checkbox">
+        <input type="checkbox" id="bw-knees" ${existing.from_knees ? 'checked' : ''}>
+        <label for="bw-knees">These were from my knees</label>
+      </div>` : '';
+
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card bw-assess-card">
+        <div class="baseline-progress">${dots}</div>
+        <div class="baseline-progress-text">${_bwBaselineStep + 1} / ${total}</div>
+        <div class="bw-assess-exercise">${ex.name}</div>
+        <div class="bw-assess-hint">${ex.hint}</div>
+        <div class="bw-assess-input">
+          <label>${ex.inputLabel}</label>
+          <input type="number" inputmode="numeric" id="bw-input" value="${existing.value || ''}" placeholder="0" min="0">
+        </div>
+        ${checkboxHtml}
+        <div style="display:flex;gap:8px">
+          ${_bwBaselineStep > 0 ? '<button class="btn btn-secondary" onclick="bwBaselineBack()">Back</button>' : ''}
+          <button class="btn btn-primary" style="flex:1" onclick="bwBaselineNext()">${_bwBaselineStep === total - 1 ? 'See My Results' : 'Next \u2192'}</button>
+        </div>
+      </div>
+    </div>`;
+
+    setTimeout(() => { const inp = document.getElementById('bw-input'); if (inp) inp.focus(); }, 100);
+    return;
+  }
+
+  // Summary screen
+  let rows = '';
+  for (const ex of BW_BASELINE_EXERCISES) {
+    const data = _bwBaselineData[ex.key] || {};
+    let valStr = (data.value || 0) + (ex.key === 'plank' ? ' sec' : ' reps');
+    if (ex.hasKneesCheckbox && data.from_knees) valStr += ' (from knees)';
+    rows += `<div class="bw-assess-summary-row">
+      <span>${ex.name}</span>
+      <span>${valStr}</span>
+    </div>`;
+  }
+
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card bw-assess-card">
+      <h2>Your Bodyweight Baseline</h2>
+      <div class="bw-assess-summary">${rows}</div>
+      <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="saveBwBaseline()">Start My 12 Weeks</button>
+    </div>
+  </div>`;
+}
+
+function bwBaselineNext() {
+  const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
+  const val = parseInt(document.getElementById('bw-input').value) || 0;
+  const kneesEl = document.getElementById('bw-knees');
+  _bwBaselineData[ex.key] = { value: val, from_knees: kneesEl ? kneesEl.checked : false };
+
+  // Save immediately — map to backend field names
+  const keyMap = { pushups: 'pushup_count', plank: 'plank_seconds', squats: 'squat_count', lunges: 'lunge_count_per_leg', pullups: 'pullup_count' };
+  const payload = {};
+  payload[keyMap[ex.key] || ex.key] = val;
+  if (ex.hasKneesCheckbox) payload.pushup_from_knees = kneesEl ? kneesEl.checked : false;
+  apiPost('/api/physical-assessment', payload);
+
+  _bwBaselineStep++;
+  renderBodyweightBaseline();
+}
+
+function bwBaselineBack() {
+  _bwBaselineStep--;
+  renderBodyweightBaseline();
+}
+
+function saveBwBaseline() {
+  apiPost('/api/physical-assessment', { completed: true });
+  _stateCache.baseline_done = true;
+  apiPost('/api/state', { baseline_done: true });
+  document.getElementById('baseline-overlay').innerHTML = '';
+  renderAll();
+}
+
 // ─── SIMPLE MARKDOWN RENDERER ──────────────────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
@@ -865,27 +1185,41 @@ function skipPsychIntake() {
 
 async function startPsychConversation() {
   const el = document.getElementById('baseline-overlay');
-  el.innerHTML = `<div class="baseline-overlay">
-    <div class="baseline-card psych-intake-card">
-      <div class="psych-chat-messages" id="psych-chat-messages"></div>
-      <div class="psych-input-bar" id="psych-input-bar">
+  el.innerHTML = `<div class="psych-intake-fullscreen">
+    <div class="psych-header">
+        <div class="psych-progress" id="psych-progress">Getting to know you</div>
+        <button class="psych-continue-later" onclick="dismissPsychIntake()" style="position:static">Continue Later</button>
+    </div>
+    <div class="psych-chat-messages" id="psych-chat-messages"></div>
+    <div class="psych-input-bar" id="psych-input-bar">
         <input type="text" id="psych-input" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendPsychMessage()">
         <button onclick="sendPsychMessage()">Send</button>
-      </div>
     </div>
   </div>`;
+
+  updatePsychProgress();
 
   // Check if there's an existing conversation
   try {
     const statusRes = await fetch('/api/psych-intake/status');
     const status = await statusRes.json();
+
+    // Handle locked state
+    if (status.locked) {
+      showPsychLockedState(status.locked_until);
+      return;
+    }
+
     if (status.started && status.message_count > 0) {
       const convRes = await fetch('/api/psych-intake/conversation');
       const convData = await convRes.json();
       if (convData.conversation && convData.conversation.length > 0) {
         _psychMessages = convData.conversation;
         _psychCompleted = convData.completed;
+        // Show welcome back message
+        _psychMessages.unshift({ role: 'coach', content: 'Welcome back. Picking up where we left off...' });
         renderPsychMessages();
+        updatePsychProgress();
         if (_psychCompleted) {
           showPsychReport();
           return;
@@ -910,6 +1244,7 @@ async function startPsychConversation() {
     if (data.response) {
       _psychMessages.push({ role: 'coach', content: data.response });
       renderPsychMessages();
+      updatePsychProgress();
     }
     if (data.completed) {
       _psychCompleted = true;
@@ -921,6 +1256,33 @@ async function startPsychConversation() {
   }
 }
 
+function dismissPsychIntake() {
+  document.getElementById('baseline-overlay').innerHTML = '';
+}
+
+function updatePsychProgress() {
+  const el = document.getElementById('psych-progress');
+  if (!el) return;
+  const userMsgs = _psychMessages.filter(m => m.role === 'user').length;
+  el.textContent = 'Getting to know you (' + userMsgs + ' of ~12)';
+}
+
+function showPsychLockedState(lockedUntil) {
+  const el = document.getElementById('baseline-overlay');
+  const lockDate = lockedUntil ? new Date(lockedUntil) : null;
+  const daysLeft = lockDate ? Math.max(0, Math.ceil((lockDate - new Date()) / (1000 * 60 * 60 * 24))) : '?';
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card psych-intake-card">
+      <div class="psych-locked-overlay">
+        <h3>Intake Paused</h3>
+        <p style="color:var(--muted);margin:1rem 0">You're locked out for <strong>${daysLeft}</strong> more day${daysLeft !== 1 ? 's' : ''}.</p>
+        <p style="color:var(--muted);margin-bottom:1.5rem">Come back when you've been alcohol-free for 7 days.</p>
+        <button class="btn btn-secondary" style="width:100%" onclick="dismissPsychIntake()">Close</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function sendPsychMessage() {
   const input = document.getElementById('psych-input');
   if (!input) return;
@@ -930,6 +1292,7 @@ async function sendPsychMessage() {
   input.value = '';
   _psychMessages.push({ role: 'user', content: msg });
   renderPsychMessages();
+  updatePsychProgress();
 
   showPsychTyping();
   try {
@@ -940,9 +1303,14 @@ async function sendPsychMessage() {
     });
     const data = await res.json();
     hidePsychTyping();
+    if (data.locked) {
+      showPsychLockedState(data.locked_until);
+      return;
+    }
     if (data.response) {
       _psychMessages.push({ role: 'coach', content: data.response });
       renderPsychMessages();
+      updatePsychProgress();
     }
     if (data.completed) {
       _psychCompleted = true;
@@ -959,7 +1327,7 @@ function renderPsychMessages() {
   if (!container) return;
   container.innerHTML = _psychMessages.map(m => {
     const cls = m.role === 'user' ? 'user' : 'coach';
-    return `<div class="psych-chat-bubble ${cls}">${m.content}</div>`;
+    return `<div class="psych-chat-bubble ${cls}">${escapeHtml(m.content)}</div>`;
   }).join('');
   container.scrollTop = container.scrollHeight;
   // Auto-focus the input so user can just type
@@ -1001,35 +1369,45 @@ async function showPsychReport() {
   const inputBar = document.getElementById('psych-input-bar');
   if (inputBar) inputBar.style.display = 'none';
 
+  const el = document.getElementById('baseline-overlay');
   try {
     const res = await fetch('/api/psych-intake/report');
     const data = await res.json();
-    const el = document.getElementById('baseline-overlay');
+    if (data.error || !data.report) {
+      // Report generation failed — show error with retry
+      el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card psych-intake-card" style="text-align:center">
+          <h2 style="margin-bottom:0.75rem;color:var(--amber)">Report Generation Failed</h2>
+          <p style="color:var(--muted);margin-bottom:1.5rem">Your intake conversation was saved. The report couldn't be generated right now.</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPsychReport()">Retry Report</button>
+            <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showPhysicalAssessment()">Skip Report — Continue to Physical Assessment</button>
+          </div>
+        </div>
+      </div>`;
+      return;
+    }
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card psych-intake-card">
         <h2 style="margin-bottom:0.75rem">Your Psych Profile</h2>
         <div class="psych-report">${renderMarkdown(data.report)}</div>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
-          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showBaseline()">Next: Physical Assessment</button>
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPhysicalAssessment()">Next: Physical Assessment</button>
         </div>
       </div>
     </div>`;
   } catch (e) {
     console.error('Error fetching psych report:', e);
-    // If report fails, still let them continue
-    const container = document.getElementById('psych-chat-messages');
-    if (container) {
-      container.innerHTML += `<div class="psych-chat-bubble coach">Thanks for sharing! Let's get started with your program.</div>`;
-      container.scrollTop = container.scrollHeight;
-    }
-    const el = document.getElementById('baseline-overlay');
-    const card = el.querySelector('.psych-intake-card');
-    if (card) {
-      const btnDiv = document.createElement('div');
-      btnDiv.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-top:1.25rem';
-      btnDiv.innerHTML = `<button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showBaseline()">Next: Physical Assessment</button>`;
-      card.appendChild(btnDiv);
-    }
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card psych-intake-card" style="text-align:center">
+        <h2 style="margin-bottom:0.75rem;color:var(--amber)">Report Generation Failed</h2>
+        <p style="color:var(--muted);margin-bottom:1.5rem">Your intake conversation was saved. The report couldn't be generated right now.</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPsychReport()">Retry Report</button>
+          <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showPhysicalAssessment()">Skip Report — Continue to Physical Assessment</button>
+        </div>
+      </div>
+    </div>`;
   }
 }
 
@@ -1056,8 +1434,8 @@ function showSettingsMenu() {
   dd.className = 'settings-dropdown visible';
   const travelOn = _stateCache && _stateCache.traveling;
   dd.innerHTML = `
-    <button onclick="redoBaseline()">Redo Baseline</button>
-    <button onclick="redoPsychIntake()">Redo Psych Intake</button>
+    <button onclick="if(confirm('This will reset your baseline weights. Continue?'))redoBaseline()">Redo Baseline</button>
+    <button onclick="if(confirm('This will reset your psych intake. Continue?'))redoPsychIntake()">Redo Psych Intake</button>
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="exportData()">Export Data</button>
@@ -1229,9 +1607,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
-    // Check for localStorage migration
-    checkLocalStorageMigration();
-
     // Only show onboarding if truly not done AND no weights in DB
     const hasWeights = _weightsCache && Object.keys(_weightsCache).length > 0;
     if (!_stateCache.baseline_done && !hasWeights) {
@@ -1372,14 +1747,49 @@ async function checkMorningCheckin() {
   }
 }
 
+function buildMorningBriefing() {
+  let lines = [];
+  if (garminConnected && garminData) {
+    const hrv = garminData.hrv;
+    const sleep = garminData.sleep;
+    const bb = garminData.bodyBattery;
+    if (hrv && hrv.lastNight != null) {
+      lines.push('Your HRV is ' + hrv.lastNight + ' (avg ' + (hrv.weeklyAvg || '?') + ').');
+    }
+    if (sleep) {
+      lines.push('Sleep: ' + (sleep.durationHours || '?') + ' hours, score ' + (sleep.score != null ? sleep.score : '?') + '.');
+    }
+    if (bb && bb.current != null) {
+      lines.push('Body battery: ' + bb.current + '.');
+    }
+  }
+  // Today's workout info
+  const weekData = workoutData[String(currentWeek)];
+  if (weekData) {
+    const todayIdx = new Date().getDay();
+    const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+    const dayData = weekData.days[mappedIdx];
+    if (dayData) {
+      lines.push('Today is ' + dayData.liftName + ' -- Week ' + currentWeek + '.');
+    }
+  }
+  lines.push('How are you feeling?');
+  return lines.join(' ');
+}
+
 function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
 
+  const briefing = buildMorningBriefing();
+
   el.innerHTML = `<div class="morning-checkin-overlay">
     <div class="morning-checkin-card">
-      <h2>Good Morning</h2>
-      <div class="mc-subtitle">Quick check-in before we start</div>
+      <div class="morning-briefing">
+        <div class="morning-briefing-label">Coach Erik</div>
+        <div class="morning-briefing-bubble">${briefing}</div>
+      </div>
+      <div class="mc-subtitle">Your check-in</div>
 
       <div class="mc-slider-row">
         <label>Sleep</label>
@@ -1450,7 +1860,8 @@ function showMorningCheckinOverlay() {
       <div class="mc-textarea-label">Anything else on your mind today?</div>
       <textarea class="mc-textarea" id="mc-notes" placeholder="Optional \u2014 free text..."></textarea>
 
-      <button class="btn btn-primary" style="width:100%" onclick="submitMorningCheckin()">Submit Check-In</button>
+      <button class="btn btn-primary" style="width:100%" onclick="submitMorningCheckin()">Let's Go</button>
+      <button class="btn btn-secondary" style="width:100%;margin-top:8px;opacity:0.7" onclick="skipMorningCheckin()">Skip Today</button>
     </div>
   </div>`;
 
@@ -1523,17 +1934,18 @@ function submitMorningCheckin() {
       <h2>Check-In Received</h2>
       <div class="mc-coach-loading">
         <div class="chat-typing"><span></span><span></span><span></span></div>
-        <div style="margin-top:8px;color:var(--muted);font-size:14px;">Coach is reviewing your check-in...</div>
+        <div style="margin-top:8px;color:var(--muted);font-size:14px;">Erik is looking at your numbers...</div>
       </div>
       <div id="mc-coach-response" style="display:none"></div>
       <div id="mc-coach-chat" style="display:none">
         <div id="mc-coach-messages" class="mc-coach-messages"></div>
         <div class="mc-coach-input-bar">
-          <input type="text" id="mc-coach-input" placeholder="Reply to Coach..." onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
+          <input type="text" id="mc-coach-input" placeholder="Reply to Erik..." onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
+          <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-coach-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMorningCoachReply()">Send</button>
         </div>
       </div>
-      <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Continue to Workout</button>
+      <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Show Me Today's Workout</button>
     `;
 
     // Send to Coach for feedback
@@ -1570,7 +1982,7 @@ function submitMorningCheckin() {
   }
 }
 
-function sendMorningCoachReply() {
+async function sendMorningCoachReply() {
   const input = document.getElementById('mc-coach-input');
   const text = (input.value || '').trim();
   if (!text) return;
@@ -1579,32 +1991,66 @@ function sendMorningCoachReply() {
   // Show user message
   const messagesEl = document.getElementById('mc-coach-messages');
   if (messagesEl) {
-    messagesEl.innerHTML += `<div class="mc-user-bubble">${text}</div>`;
+    messagesEl.innerHTML += `<div class="mc-user-bubble">${escapeHtml(text)}</div>`;
     messagesEl.innerHTML += `<div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  fetch('/api/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ message: text }),
-  }).then(r => r.json()).then(d => {
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+
     if (messagesEl) {
       const typing = messagesEl.querySelector('.mc-typing-indicator');
       if (typing) typing.remove();
-      messagesEl.innerHTML += `<div class="mc-coach-bubble">${d.response}</div>`;
+    }
+
+    const streamBubble = document.createElement('div');
+    streamBubble.className = 'mc-coach-bubble';
+    if (messagesEl) {
+      messagesEl.appendChild(streamBubble);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
+
+    let fullText = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          if (data === '[ERROR]') {
+            fullText = fullText || 'Connection issue. Try again.';
+            break;
+          }
+          fullText += data;
+          if (streamBubble) {
+            streamBubble.textContent = fullText;
+            if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+        }
+      }
+    }
+
     if (_chatHistory) {
       _chatHistory.push({ role: 'user', content: text, date: todayStr() });
-      _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
     }
-  }).catch(() => {
+  } catch(e) {
     if (messagesEl) {
       const typing = messagesEl.querySelector('.mc-typing-indicator');
       if (typing) typing.remove();
     }
-  });
+  }
 }
 
 function closeMorningCheckin() {
@@ -1748,12 +2194,13 @@ function renderChatOverlay() {
   el.classList.add('visible');
   el.innerHTML = `
     <div class="chat-header">
-      <h2>Coach</h2>
+      <h2>Coach Erik</h2>
       <button class="chat-close" onclick="closeChatOverlay()">&times;</button>
     </div>
     <div class="chat-messages" id="chat-overlay-messages"></div>
     <div class="chat-input-bar">
-      <input type="text" id="chat-overlay-input" placeholder="Talk to Coach..." onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
+      <input type="text" id="chat-overlay-input" placeholder="Ask Erik anything..." onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
+      <button class="chat-mic-btn" id="chat-mic-btn" onclick="toggleVoiceInput('chat-overlay-input')" title="Voice input">&#127908;</button>
       <button onclick="sendChatMessage('chat-overlay-input','chat-overlay-messages')">Send</button>
     </div>
   `;
@@ -1802,55 +2249,86 @@ function formatChatTime(timeStr) {
 }
 
 async function sendChatMessage(inputId, containerId) {
-  const input = document.getElementById(inputId);
-  if (!input) return;
-  const text = (input.value || '').trim();
-  if (!text) return;
-  input.value = '';
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const text = (input.value || '').trim();
+    if (!text) return;
+    input.value = '';
 
-  const now = new Date().toISOString();
-  _chatHistory.push({ role: 'user', text: text, time: now });
-  renderChatMessages(containerId);
-  // Also update the other container if it exists
-  syncChatContainers(containerId);
+    const now = new Date().toISOString();
+    _chatHistory.push({ role: 'user', text: text, time: now });
+    renderChatMessages(containerId);
+    syncChatContainers(containerId);
 
-  // Show typing indicator
-  const container = document.getElementById(containerId);
-  if (container) {
-    const typing = document.createElement('div');
-    typing.className = 'chat-typing';
-    typing.id = 'chat-typing-' + containerId;
-    typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-    container.appendChild(typing);
-    container.scrollTop = container.scrollHeight;
-  }
-
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ message: text }),
-    });
-    const data = await res.json();
-
-    // Remove typing indicator
-    const typingEl = document.getElementById('chat-typing-' + containerId);
-    if (typingEl) typingEl.remove();
-
-    if (data.error && data.error.includes('API_KEY')) {
-      _chatHistory.push({ role: 'coach', text: 'Add your ANTHROPIC_API_KEY in Render settings to enable Coach', time: new Date().toISOString() });
-    } else {
-      _chatHistory.push({ role: 'coach', text: data.response || data.message || 'No response', time: data.time || new Date().toISOString() });
+    // Show typing indicator
+    const container = document.getElementById(containerId);
+    if (container) {
+        const typing = document.createElement('div');
+        typing.className = 'chat-typing';
+        typing.id = 'chat-typing-' + containerId;
+        typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+        container.appendChild(typing);
+        container.scrollTop = container.scrollHeight;
     }
-  } catch(e) {
-    const typingEl = document.getElementById('chat-typing-' + containerId);
-    if (typingEl) typingEl.remove();
-    _chatHistory.push({ role: 'coach', text: 'Connection error. Try again.', time: new Date().toISOString() });
-  }
 
-  renderChatMessages(containerId);
-  syncChatContainers(containerId);
-  updateChatFabPulse();
+    try {
+        const res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: text }),
+        });
+
+        // Remove typing indicator and add streaming bubble
+        const typingEl = document.getElementById('chat-typing-' + containerId);
+        if (typingEl) typingEl.remove();
+
+        const streamBubble = document.createElement('div');
+        streamBubble.className = 'chat-bubble coach';
+        streamBubble.id = 'stream-bubble-' + containerId;
+        if (container) {
+            container.appendChild(streamBubble);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        let fullText = '';
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') break;
+                    if (data === '[ERROR]') {
+                        fullText = fullText || 'Erik stepped away. He\'ll be back in a moment.';
+                        break;
+                    }
+                    fullText += data;
+                    if (streamBubble) {
+                        streamBubble.textContent = fullText;
+                        if (container) container.scrollTop = container.scrollHeight;
+                    }
+                }
+            }
+        }
+
+        // Finalize
+        _chatHistory.push({ role: 'coach', text: fullText || 'No response', time: new Date().toISOString() });
+    } catch(e) {
+        const typingEl = document.getElementById('chat-typing-' + containerId);
+        if (typingEl) typingEl.remove();
+        _chatHistory.push({ role: 'coach', text: 'Connection error. Try again.', time: new Date().toISOString() });
+    }
+
+    renderChatMessages(containerId);
+    syncChatContainers(containerId);
+    updateChatFabPulse();
+    renderInlineCoach();
 }
 
 function syncChatContainers(sourceId) {
@@ -1875,6 +2353,84 @@ function renderInlineChat() {
     }
   }
   return chatMessagesHtml;
+}
+
+// ─── VOICE INPUT ──────────────────────────────────────────────────────────
+let _voiceRecognition = null;
+let _voiceActive = false;
+
+function toggleVoiceInput(inputId) {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        showToast('Voice input not supported in this browser', 'error');
+        return;
+    }
+
+    if (_voiceActive && _voiceRecognition) {
+        _voiceRecognition.stop();
+        _voiceActive = false;
+        updateMicButton(false);
+        return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    _voiceRecognition = new SpeechRecognition();
+    _voiceRecognition.continuous = false;
+    _voiceRecognition.interimResults = true;
+    _voiceRecognition.lang = 'en-US';
+
+    const input = document.getElementById(inputId);
+    let finalTranscript = '';
+
+    _voiceRecognition.onstart = () => {
+        _voiceActive = true;
+        updateMicButton(true);
+    };
+
+    _voiceRecognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript;
+            } else {
+                interim += event.results[i][0].transcript;
+            }
+        }
+        if (input) {
+            input.value = finalTranscript + interim;
+        }
+    };
+
+    _voiceRecognition.onend = () => {
+        _voiceActive = false;
+        updateMicButton(false);
+        if (input && finalTranscript.trim()) {
+            input.value = finalTranscript.trim();
+        }
+    };
+
+    _voiceRecognition.onerror = (e) => {
+        _voiceActive = false;
+        updateMicButton(false);
+        if (e.error !== 'no-speech') {
+            showToast('Voice error: ' + e.error, 'error');
+        }
+    };
+
+    finalTranscript = '';
+    _voiceRecognition.start();
+}
+
+function updateMicButton(active) {
+    const btns = document.querySelectorAll('.chat-mic-btn');
+    btns.forEach(btn => {
+        if (active) {
+            btn.classList.add('recording');
+            btn.innerHTML = '&#9899;'; // red circle
+        } else {
+            btn.classList.remove('recording');
+            btn.innerHTML = '&#127908;'; // microphone
+        }
+    });
 }
 
 // ─── GARMIN ─────────────────────────────────────────────────────────────────
@@ -2409,6 +2965,7 @@ function renderProgressDashboard(data) {
   overlay.innerHTML = `
     <div class="progress-header">
       <h2>Progress Dashboard</h2>
+      <button class="progress-share" onclick="shareWeeklySummary()">Share</button>
       <button class="progress-close" onclick="closeProgress()">&times;</button>
     </div>
     <div class="progress-content">
@@ -2541,6 +3098,131 @@ function drawLiftsChart(canvasId, liftsData) {
   }
 }
 
+// ─── MILESTONE DETECTION ────────────────────────────────────────────────────
+function checkMilestones() {
+  const milestones = [];
+
+  // 1. Weight PR: latest weight > max of all previous
+  const weights = loadWeights();
+  for (const exName in weights) {
+    const data = weights[exName];
+    if (!data || !data.history || data.history.length < 2) continue;
+    const hist = data.history;
+    const latest = hist[hist.length - 1].weight;
+    const previousMax = Math.max(...hist.slice(0, -1).map(h => h.weight));
+    if (latest > previousMax) {
+      milestones.push('PR: ' + exName + ' at ' + latest + ' lb!');
+    }
+  }
+
+  // 2. Body weight milestones: every 2 lbs lost from starting weight
+  if (Array.isArray(_bodyweightCache) && _bodyweightCache.length >= 2) {
+    const startWeight = _bodyweightCache[0].weight;
+    const currentWeight = _bodyweightCache[_bodyweightCache.length - 1].weight;
+    const lost = startWeight - currentWeight;
+    if (lost >= 2) {
+      const milestone = Math.floor(lost / 2) * 2;
+      milestones.push(milestone + ' lbs lost from starting weight!');
+    }
+  }
+
+  // 3. Streak: consecutive days with at least one exercise completion
+  if (_completionsCache && _completionsCache.days) {
+    const dayKeys = Object.keys(_completionsCache.days).filter(k => _completionsCache.days[k]);
+    if (dayKeys.length >= 7) {
+      milestones.push(dayKeys.length + '-day workout streak!');
+    }
+  }
+
+  // 4. Perfect week: all 6 workout days completed in current week
+  if (_completionsCache && _completionsCache.days) {
+    let completedDays = 0;
+    for (let di = 0; di < 6; di++) {
+      if (_completionsCache.days[currentWeek + '_' + di]) completedDays++;
+    }
+    if (completedDays === 6) {
+      milestones.push('Perfect week ' + currentWeek + '! All 6 workout days completed.');
+    }
+  }
+
+  // Show first unseen milestone
+  const banner = document.getElementById('milestone-banner');
+  if (!banner) return;
+  banner.innerHTML = '';
+
+  for (const m of milestones) {
+    if (!_milestonesShownThisSession.has(m)) {
+      _milestonesShownThisSession.add(m);
+      banner.innerHTML = '<div class="milestone-card"><span>' + escapeHtml(m) + '</span><button class="milestone-share-btn" onclick="shareMilestone(\'' + escapeHtml(m).replace(/'/g, "\\'") + '\')">Share</button></div>';
+      setTimeout(() => { banner.innerHTML = ''; }, 5000);
+      break;
+    }
+  }
+}
+
+// ─── SOCIAL SHARE ─────────────────────────────────────────────────────────
+function shareMilestone(text) {
+    const shareData = {
+        title: '12 Weeks',
+        text: text + ' #12Weeks #FitnessJourney',
+    };
+
+    if (navigator.share) {
+        navigator.share(shareData).catch(() => {});
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(shareData.text).then(() => {
+            showToast('Copied to clipboard!', 'success');
+        }).catch(() => {
+            showToast('Could not share', 'error');
+        });
+    }
+}
+
+function shareWeeklySummary() {
+    const bw = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
+    const latest = bw.length > 0 ? bw[bw.length - 1].weight : '?';
+    const first = bw.length > 0 ? bw[0].weight : '?';
+    const diff = (typeof latest === 'number' && typeof first === 'number') ? (first - latest).toFixed(1) : '?';
+
+    const text = `Week ${currentWeek} of 12 complete.\nStarting weight: ${first} lb\nCurrent weight: ${latest} lb\nProgress: ${diff} lb\n#12Weeks`;
+
+    if (navigator.share) {
+        navigator.share({ title: '12 Weeks Progress', text }).catch(() => {});
+    } else {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Copied to clipboard!', 'success');
+        }).catch(() => {});
+    }
+}
+
+function renderMilestonesForCoach() {
+  const milestones = [];
+  const weights = loadWeights();
+  for (const exName in weights) {
+    const data = weights[exName];
+    if (!data || !data.history || data.history.length < 2) continue;
+    const hist = data.history;
+    const latest = hist[hist.length - 1].weight;
+    const previousMax = Math.max(...hist.slice(0, -1).map(h => h.weight));
+    if (latest > previousMax) {
+      milestones.push('PR on ' + exName + ': ' + latest + ' lb');
+    }
+  }
+  if (Array.isArray(_bodyweightCache) && _bodyweightCache.length >= 2) {
+    const lost = _bodyweightCache[0].weight - _bodyweightCache[_bodyweightCache.length - 1].weight;
+    if (lost >= 2) milestones.push(Math.floor(lost / 2) * 2 + ' lbs lost');
+  }
+  if (_completionsCache && _completionsCache.days) {
+    let completedDays = 0;
+    for (let di = 0; di < 6; di++) {
+      if (_completionsCache.days[currentWeek + '_' + di]) completedDays++;
+    }
+    if (completedDays === 6) milestones.push('Perfect week ' + currentWeek);
+  }
+  return milestones.length > 0 ? 'Recent milestones: ' + milestones.join(', ') + '.' : '';
+}
+
 // ─── RENDER ─────────────────────────────────────────────────────────────────
 function renderAll() {
   renderWeighInBar();
@@ -2549,17 +3231,72 @@ function renderAll() {
   renderSupplementBar();
   renderReadiness();
   renderTravelBanner();
+  renderTodayNav();
+  renderTodayHero();
+  // Legacy renderers (hidden containers, kept for data compatibility)
   renderPhaseNav();
   renderPhaseBanner();
   renderWeekTabs();
   renderDayGrid();
   renderDetail();
+  renderInlineCoach();
+  checkMilestones();
+
+  // Auto-select today if no day is currently selected
+  if (currentDay === null) {
+    const todayIdx = new Date().getDay();
+    // JS getDay: 0=Sun, convert to Mon=0 format
+    const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+    setDay(mappedIdx);
+  }
+}
+
+function renderInlineCoach() {
+  const el = document.getElementById('coach-inline');
+  if (!el) return;
+
+  // Find the last coach message
+  const coachMsgs = _chatHistory.filter(m => m.role === 'assistant' || m.role === 'coach');
+  const lastMsg = coachMsgs.length > 0 ? coachMsgs[coachMsgs.length - 1] : null;
+
+  if (!lastMsg) {
+    el.innerHTML = `<div class="coach-inline-empty">
+      <div class="coach-inline-label">Coach Erik</div>
+      <div class="coach-inline-text">This is where you'll talk to Erik. He sees your sleep, lifts, and check-ins. Ask him anything.</div>
+      <button class="btn btn-primary" style="margin-top:8px" onclick="toggleChatOverlay()">Start a Conversation</button>
+    </div>`;
+    return;
+  }
+
+  const text = escapeHtml(lastMsg.text || lastMsg.content || '');
+  const milestoneStr = renderMilestonesForCoach();
+  el.innerHTML = `<div class="coach-inline-card">
+    <div class="coach-inline-label">Coach Erik</div>
+    ${milestoneStr ? '<div class="coach-inline-milestones" style="font-size:13px;color:var(--accent);margin-bottom:6px">' + escapeHtml(milestoneStr) + '</div>' : ''}
+    <div class="coach-inline-text">"${text}"</div>
+    <div class="coach-quick-replies">
+      <button onclick="quickCoachReply('How should I modify today\\'s workout?')">Modify today?</button>
+      <button onclick="quickCoachReply('I\\'m struggling today.')">I'm struggling</button>
+      <button onclick="quickCoachReply('I crushed it today!')">I crushed it</button>
+    </div>
+  </div>`;
+}
+
+function quickCoachReply(msg) {
+  toggleChatOverlay();
+  setTimeout(() => {
+    const input = document.getElementById('chat-overlay-input');
+    if (input) {
+      input.value = msg;
+      sendChatMessage('chat-overlay-input', 'chat-overlay-messages');
+    }
+  }, 300);
 }
 
 function renderGarminBar() {
   const el = document.getElementById('garmin-bar');
   if (!garminConnected) {
-    el.innerHTML = `<button class="garmin-connect-btn" onclick="showModal()">Connect Garmin Watch</button>`;
+    el.innerHTML = `<button class="garmin-connect-btn" onclick="showModal()">Connect Garmin \u2014 unlock HRV, sleep &amp; readiness</button>`;
     return;
   }
 
@@ -2635,6 +3372,86 @@ function renderReadiness() {
     <span class="readiness-score">${readinessData.score}/100</span>
     ${readinessData.suggestion}
     ${flagsHtml}
+  </div>`;
+}
+
+// ─── UNIFIED TODAY NAV ────────────────────────────────────────────────────
+function renderTodayNav() {
+  const el = document.getElementById('today-nav');
+  if (!el) return;
+  const weekData = workoutData[String(currentWeek)];
+  if (!weekData || !weekData.days) return;
+  const days = weekData.days;
+
+  const todayJsDay = new Date().getDay(); // 0=Sun
+  const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1; // convert to Mon=0
+
+  const dayBtns = days.map((d, i) => {
+    const isToday = i === todayMon;
+    const isActive = i === currentDay;
+    const done = isDayDone(currentWeek, i);
+    return `<button class="tn-day${isActive ? ' active' : ''}${isToday ? ' today' : ''}${done ? ' done' : ''}${d.isRest ? ' rest' : ''}" onclick="setDay(${i})">
+      <span class="tn-day-abbr">${d.day}</span>
+      ${done ? '<span class="tn-check">&#10003;</span>' : ''}
+    </button>`;
+  }).join('');
+
+  const info = weekData.phaseInfo || {};
+  const isDeload = currentWeek === 4 || currentWeek === 8 || currentWeek === 12;
+
+  el.innerHTML = `
+    <div class="tn-week-row">
+      <button class="tn-week-arrow" onclick="setWeek(Math.max(1, currentWeek-1))">&lsaquo;</button>
+      <span class="tn-week-label">Week ${currentWeek}${isDeload ? ' &middot; Deload' : ''} &middot; Phase ${weekData.phase}</span>
+      <button class="tn-week-arrow" onclick="setWeek(Math.min(12, currentWeek+1))">&rsaquo;</button>
+    </div>
+    <div class="tn-days">${dayBtns}</div>
+    <div class="tn-focus">${info.focus || ''} &middot; ${info.deficit || ''}</div>
+  `;
+}
+
+function renderTodayHero() {
+  const el = document.getElementById('today-hero');
+  if (!el) return;
+  const weekData = workoutData[String(currentWeek)];
+  if (!weekData || !weekData.days) { el.innerHTML = ''; return; }
+
+  // If no day selected, don't show hero (auto-select will fix this)
+  if (currentDay === null) { el.innerHTML = ''; return; }
+
+  const d = weekData.days[currentDay];
+  if (!d) { el.innerHTML = ''; return; }
+
+  const todayJsDay = new Date().getDay();
+  const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+  const isToday = currentDay === todayMon;
+  const dayLabel = isToday ? 'Today' : d.day;
+
+  if (d.isRest) {
+    el.innerHTML = `<div class="th-card th-rest">
+      <div class="th-label">${dayLabel}</div>
+      <div class="th-title">Rest Day</div>
+      <div class="th-sub">Streak mile only &middot; Recovery &middot; Hydrate</div>
+    </div>`;
+    return;
+  }
+
+  const runClass = 'run-' + d.run.type;
+  const done = isDayDone(currentWeek, currentDay);
+  const exCount = (d.exercises || []).length;
+  const exDone = (d.exercises || []).filter((_, i) => isExDone(currentWeek, currentDay, i)).length;
+
+  el.innerHTML = `<div class="th-card${done ? ' th-done' : ''}">
+    <div class="th-top">
+      <div>
+        <div class="th-label">${dayLabel}</div>
+        <div class="th-title">${d.liftName}</div>
+      </div>
+      <div class="th-progress-ring">${exDone}/${exCount}</div>
+    </div>
+    <div class="th-run">
+      <span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
+    </div>
   </div>`;
 }
 
@@ -2921,7 +3738,7 @@ async function renderDetail() {
       <div class="coach-chat">
         <div class="chat-messages" id="coach-messages" style="max-height:300px">${chatMessagesHtml}</div>
         <div class="chat-input-bar" style="border-top:none;padding:8px 0 0 0;background:none">
-          <input type="text" id="coach-input-field" placeholder="Talk to Coach..." onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
+          <input type="text" id="coach-input-field" placeholder="Ask Erik anything..." onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
           <button onclick="sendChatMessage('coach-input-field','coach-messages')">Send</button>
         </div>
       </div>
@@ -3259,4 +4076,52 @@ async function loadSundayPhotoPreviews() {
       compareGrid.innerHTML = '<div style="grid-column:1/-1;color:var(--muted);font-size:14px;padding:10px">No comparison photos available yet.</div>';
     }
   }
+}
+
+// ─── SERVICE WORKER REGISTRATION ──────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
+      .then(reg => {
+        console.log('SW registered:', reg.scope);
+        initPushNotifications(reg);
+      })
+      .catch(err => console.warn('SW registration failed:', err));
+  });
+}
+
+// ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────
+async function initPushNotifications(reg) {
+  try {
+    const res = await fetch('/api/push/vapid-key');
+    if (!res.ok) return;
+    const { publicKey } = await res.json();
+    if (!publicKey) return;
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    });
+    console.log('Push subscription registered');
+  } catch (e) {
+    console.warn('Push setup failed:', e);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }

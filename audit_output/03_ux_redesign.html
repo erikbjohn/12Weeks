@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UX Redesign — 12 Weeks Audit</title>
+<style>
+:root { --bg: #0d0f0e; --surface: #161918; --surface2: #1e2220; --border: #2a2e2c; --text: #e8ede9; --muted: #9aaa9d; --accent: #4ade80; --red: #f87171; --amber: #f59e0b; --blue: #60a5fa; --purple: #a78bfa; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 17px; line-height: 1.8; -webkit-font-smoothing: antialiased; }
+.container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+h2 { font-size: 1.4rem; font-weight: 700; margin: 2.5rem 0 1rem; color: var(--accent); letter-spacing: -0.01em; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.75rem; }
+p { margin-bottom: 1rem; }
+strong { color: #fff; }
+code { background: var(--surface2); padding: 2px 7px; border-radius: 4px; font-size: 0.9em; color: var(--amber); font-family: 'SF Mono', 'Fira Code', monospace; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.6; margin: 1rem 0 1.5rem; color: var(--muted); white-space: pre; }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.95rem; }
+th { text-align: left; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { padding: 10px 12px; border: 1px solid var(--border); vertical-align: top; }
+tr:nth-child(even) td { background: var(--surface); }
+ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+li { margin-bottom: 0.5rem; }
+nav { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+nav a { color: var(--muted); text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); transition: all 0.15s; }
+nav a:hover { color: var(--text); border-color: var(--accent); }
+nav a.active { color: var(--accent); border-color: var(--accent); background: var(--surface2); }
+.wireframe { background: var(--surface); border: 2px solid var(--border); border-radius: 12px; padding: 1.5rem; margin: 1rem 0 1.5rem; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; color: var(--muted); }
+.wireframe .wf-header { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px; color: var(--text); font-weight: 600; }
+.wireframe .wf-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin: 8px 0; }
+.wireframe .wf-card-title { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.wireframe .wf-btn { display: inline-block; background: var(--accent); color: var(--bg); padding: 4px 12px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; }
+.wireframe .wf-btn-secondary { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+.good { color: var(--accent); }
+.bad { color: var(--red); }
+.checklist { list-style: none; margin-left: 0; }
+.checklist li { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 10px; }
+.checklist li:last-child { border-bottom: none; }
+.check-box { width: 20px; height: 20px; border: 2px solid var(--border); border-radius: 4px; flex-shrink: 0; margin-top: 3px; }
+.check-box.done { background: var(--accent); border-color: var(--accent); position: relative; }
+.check-box.done::after { content: '\2713'; position: absolute; top: -2px; left: 3px; color: var(--bg); font-size: 14px; font-weight: 800; }
+.section-label { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
+.label-quick { background: rgba(74,222,128,0.15); color: var(--accent); }
+.label-medium { background: rgba(245,158,11,0.15); color: var(--amber); }
+.label-structural { background: rgba(167,139,250,0.15); color: var(--purple); }
+.label-future { background: rgba(96,165,250,0.15); color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav>
+  <a href="00_executive_summary.html">Executive Summary</a>
+  <a href="01_logic_audit.html">Logic Audit</a>
+  <a href="02_engagement_audit.html">Engagement Audit</a>
+  <a href="03_ux_redesign.html" class="active">UX Redesign</a>
+</nav>
+
+<h1>UI/UX Redesign</h1>
+
+<h2>Current UI Critique</h2>
+
+<h3>Structure Overview</h3>
+<pre>Header ("12 Weeks" + settings gear)
+&boxur;&mdash; Baseline/Intake overlay (onboarding, covers everything)
+&boxur;&mdash; Morning check-in overlay (daily, covers everything)
+&boxur;&mdash; Migration banner
+&boxur;&mdash; Weigh-in bar
+&boxur;&mdash; Check-in summary bar (mood/sleep/stress badges)
+&boxur;&mdash; Garmin metrics bar
+&boxur;&mdash; Supplement tracker bar
+&boxur;&mdash; Readiness alert
+&boxur;&mdash; Phase nav (Phase 1/2/3 tabs)
+&boxur;&mdash; Phase banner (week info, deficit, focus)
+&boxur;&mdash; Week tabs (1-12)
+&boxur;&mdash; Day grid (Mon-Sun cards)
+&boxur;&mdash; Detail panel (selected day's workout + meals)
+&boxur;&mdash; Footer (static tips)
+&boxur;&mdash; Progress overlay (triggered from somewhere?)
+&boxur;&mdash; Garmin login modal
+&boxur;&mdash; Chat FAB (floating action button, bottom-right)
+&boxur;&mdash; Chat overlay</pre>
+
+<h3>What's Good</h3>
+<ol>
+  <li class="good"><strong>Dark theme with high contrast</strong> — readable, professional, matches a gym/performance aesthetic</li>
+  <li class="good"><strong>Color-coded run types</strong> — Z2 blue, tempo amber, HIIT red, long purple — excellent at-a-glance differentiation</li>
+  <li class="good"><strong>Garmin metrics grid</strong> — compact, informative, color-coded by readiness score</li>
+  <li class="good"><strong>Morning check-in sliders</strong> — fast to use, conditional follow-ups are smart</li>
+  <li class="good"><strong>Meal plan with macro tracking</strong> — detailed but scannable, portion adjustment buttons are practical</li>
+  <li class="good"><strong>Phase/week/day navigation</strong> — logical hierarchy</li>
+</ol>
+
+<h3>What's Broken</h3>
+<ol>
+  <li class="good"><s><strong>Information overload on the main screen</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Main screen reordered: workout/readiness first, weigh-in/garmin/supplements at bottom</span></li>
+  <li class="good"><s><strong>No visual hierarchy for "what should I do RIGHT NOW"</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Workout and readiness are now the hero elements</span></li>
+  <li class="good"><s><strong>Footer is wasted space</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Footer removed, migration banner removed</span></li>
+  <li class="good"><s><strong>Chat FAB is the only way to reach the Coach</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Inline coach message with quick-reply buttons on main screen</span></li>
+  <li class="good"><s><strong>Progress dashboard is orphaned</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Progress dashboard button added to header</span></li>
+  <li class="good"><s><strong>No visual distinction between today and other days</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Today auto-selected in day grid</span></li>
+  <li class="good"><s><strong>Psych intake chat is crammed into a card</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — Full-screen psych intake with full viewport flexbox layout</span></li>
+  <li class="bad"><strong>Supplement tracker is flat and forgettable</strong> — Small toggle pills that blend into the surface.</li>
+  <li class="bad"><strong>No empty states</strong> — Bars render with "--" or "?" with no guidance on what to do.</li>
+  <li class="good"><s><strong>Destructive settings with no confirmation</strong></s> <span style="color:var(--accent);font-size:0.85rem;"> FIXED — confirm() added to Redo Baseline and Redo Psych Intake</span></li>
+</ol>
+
+<hr>
+
+<h2>Redesigned User Flow</h2>
+
+<h3>Step 1: Open App &rarr; Coach-First Morning</h3>
+
+<div class="wireframe">
+  <div class="wf-header">Good morning.</div>
+  <p>Your HRV is 52 (&darr; from 58 avg)<br>Sleep: 6.8h, score 72<br>Body battery: 45</p>
+  <p style="color:var(--text);">Today is Bench day — Week 6.<br>How are you feeling?</p>
+  <div class="wf-card">
+    <div class="wf-card-title">Tap to expand check-in sliders</div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <span class="wf-btn wf-btn-secondary">Skip Check-In</span>
+    <span class="wf-btn">Let's Go</span>
+  </div>
+</div>
+
+<p>The Coach speaks first. Garmin data and today's workout are presented as the Coach's context, not as separate UI bars. The check-in sliders are opt-in, not blocking.</p>
+
+<h3>Step 2: Today's View (Primary Screen)</h3>
+
+<div class="wireframe">
+  <div class="wf-header" style="display:flex;justify-content:space-between;">
+    <span>12 Weeks</span>
+    <span style="color:var(--muted)">Week 6 &middot; Phase 2 &middot; Bench Day</span>
+  </div>
+  <div class="wf-card" style="border-color:var(--accent);">
+    <div class="wf-card-title">Readiness: 72/100 — Train as planned</div>
+  </div>
+  <div class="wf-card">
+    <div class="wf-card-title">Today's Workout</div>
+    <div style="margin-top:4px">
+      Warm-up (5 min) &nbsp; &#9654;<br>
+      &#9744; Bench Press &nbsp; 135lb &nbsp; RPE<br>
+      &#9744; Incline DB &nbsp; 55lb &nbsp; RPE<br>
+      &#9744; Cable Fly &nbsp; 25lb &nbsp; RPE<br>
+      &#9744; Lat Pulldown &nbsp; 100lb &nbsp; RPE<br>
+      &#9744; Face Pulls &nbsp; 20lb &nbsp; RPE<br>
+      Run: 30min Z2
+    </div>
+  </div>
+  <div class="wf-card">
+    <div class="wf-card-title">Nutrition &middot; Heavy Lift Day &middot; 1800 cal</div>
+    <div>&#9744; Pre (5:30a) &nbsp; &#9744; Break Fast &nbsp; &#9744; Lunch &nbsp; &#9744; Dinner</div>
+    <div style="color:var(--accent);margin-top:4px">P: 45/155g &nbsp; C: 12/100g &nbsp; F: 8/80g</div>
+  </div>
+  <div class="wf-card" style="display:flex;justify-content:space-between;">
+    <span>183.2 lb (7d: 184.1)</span>
+    <span>Creatine &#10003; &nbsp; Whey &#10003;</span>
+  </div>
+  <div class="wf-card">
+    <div class="wf-card-title">Coach</div>
+    <div style="color:var(--text);">"Good numbers this morning. Push the bench today."</div>
+    <div style="margin-top:8px">
+      <span class="wf-btn wf-btn-secondary">How should I modify today?</span>
+      <span class="wf-btn wf-btn-secondary">I'm struggling</span>
+      <span class="wf-btn wf-btn-secondary">I crushed it</span>
+    </div>
+  </div>
+</div>
+
+<p>Key changes:</p>
+<ul>
+  <li><strong>Workout is the hero.</strong> First full-width card, not buried below 7 bars.</li>
+  <li><strong>Readiness is a single-line summary</strong>, not a multi-line alert.</li>
+  <li><strong>Meals are collapsed</strong> to a progress bar + checkboxes. Expand for detail.</li>
+  <li><strong>Weigh-in and supplements are a "Quick Actions" bar</strong> — compact, secondary.</li>
+  <li><strong>Coach's latest message is inline</strong>, not hidden behind a FAB.</li>
+  <li><strong>Quick-reply buttons</strong> so users don't have to think of what to say.</li>
+</ul>
+
+<h3>Step 3: Workout Execution</h3>
+
+<div class="wireframe">
+  <div class="wf-card-title">Bench Press</div>
+  <div style="color:var(--text);font-size:1.1em">4 x 10 @ 135 lb</div>
+  <div style="color:var(--muted);margin:4px 0">Last week: 130 lb (&uarr;5 lb)</div>
+  <div style="margin:8px 0">
+    Weight: <span style="background:var(--surface2);padding:2px 12px;border:1px solid var(--border);border-radius:4px">[135]</span> lb
+  </div>
+  <div style="margin:8px 0">How did it feel?</div>
+  <div style="display:flex;gap:8px">
+    <span class="wf-btn wf-btn-secondary">Too Easy</span>
+    <span class="wf-btn">Just Right</span>
+    <span class="wf-btn wf-btn-secondary">Too Hard</span>
+  </div>
+  <div style="margin-top:12px"><span class="wf-btn">&#10003; Done</span></div>
+</div>
+
+<h3>Onboarding Flow (Redesigned)</h3>
+<pre>Screen 1: Welcome
+  "12 Weeks. Align aspirations with actions."
+  [I'm Ready]
+
+Screen 2: Coach Intake (Full-Screen Chat)
+  Full-height chat interface (not a card inside an overlay)
+  Progress indicator: "Getting to know you (4/12)"
+  [Continue Later] button in top-right
+  Saved state shown on re-entry: "Welcome back. We left off at..."
+
+Screen 3: Psych Report (Scrollable Full-Screen)
+  Rendered report with collapsible sections
+  [Start Physical Assessment &rarr;]
+
+Screen 4: Baseline Lifts
+  Same flow but with:
+  - "Skip this lift" option for unknown exercises
+  - Video/GIF reference for each lift
+  - Time estimate: "~10 minutes for 9 lifts"
+
+Screen 5: Measurements + Photos
+  Same flow (already well-designed)
+  [Start Training &rarr;]</pre>
+
+<hr>
+
+<h2>Component-Level Recommendations</h2>
+
+<h3>Remove</h3>
+<ol>
+  <li style="color:var(--accent)"><s><strong>Static footer</strong></s> — <strong>DONE</strong> — removed</li>
+  <li style="color:var(--accent)"><s><strong>Migration banner</strong></s> — <strong>DONE</strong> — removed</li>
+  <li><strong>Separate check-in summary bar</strong> — merge into the Coach's morning briefing</li>
+  <li><strong>Phase nav AND week tabs AND day grid as separate elements</strong> — merge into a unified navigation</li>
+</ol>
+
+<h3>Add</h3>
+<ol>
+  <li><strong>"Today" hero card</strong> — auto-selects today, shows workout + readiness at a glance</li>
+  <li><strong>Inline Coach message</strong> — latest Coach message visible on main screen without opening overlay</li>
+  <li><strong>Progress sparklines</strong> — mini charts in the weigh-in bar and lift weight inputs</li>
+  <li><strong>Milestone banners</strong> — brief celebrations for PRs, streaks, weight milestones</li>
+  <li><strong>Coach quick-reply buttons</strong> — pre-written prompts below the inline Coach message</li>
+  <li><strong>Skip/dismiss on morning check-in</strong> — add "Skip today" that records a blank check-in</li>
+  <li><strong>Empty state guidance</strong> — "Connect Garmin to unlock readiness tracking" with benefit explanation</li>
+</ol>
+
+<h3>Reorder (Main Screen Top to Bottom)</h3>
+
+<table>
+  <tr><th>#</th><th>Current Order</th><th>Proposed Order</th></tr>
+  <tr><td>1</td><td>Header</td><td>Header (with progress + chat icons)</td></tr>
+  <tr><td>2</td><td>Weigh-in</td><td>Readiness (one-line)</td></tr>
+  <tr><td>3</td><td>Check-in summary</td><td>Today's workout (hero card, auto-expanded)</td></tr>
+  <tr><td>4</td><td>Garmin</td><td>Nutrition (collapsed macro summary)</td></tr>
+  <tr><td>5</td><td>Supplements</td><td>Quick actions (weigh-in + supplements, single row)</td></tr>
+  <tr><td>6</td><td>Readiness</td><td>Coach (inline latest message + reply)</td></tr>
+  <tr><td>7</td><td>Phase nav</td><td>Week navigation (collapsible, for browsing other days)</td></tr>
+  <tr><td>8</td><td>Phase banner</td><td>&mdash;</td></tr>
+  <tr><td>9</td><td>Week tabs</td><td>&mdash;</td></tr>
+  <tr><td>10</td><td>Day grid</td><td>&mdash;</td></tr>
+  <tr><td>11</td><td>Detail panel</td><td>&mdash;</td></tr>
+</table>
+
+<hr>
+
+<h2>Copy Rewrites</h2>
+
+<h3>Primary CTAs</h3>
+<table>
+  <tr><th>Location</th><th>Current</th><th>Proposed</th></tr>
+  <tr><td>Welcome button</td><td>"Commit"</td><td style="color:var(--accent)">"I'm Ready"</td></tr>
+  <tr><td>Psych intake start</td><td>(no CTA, auto-starts)</td><td style="color:var(--accent)">"Meet Your Coach"</td></tr>
+  <tr><td>Physical assessment start</td><td>"Let's Go"</td><td style="color:var(--accent)">"Start Baseline Test (~10 min)"</td></tr>
+  <tr><td>Baseline lift "Next"</td><td>"Next" / "Finish"</td><td style="color:var(--accent)">"Next Lift &rarr;" / "See My Results"</td></tr>
+  <tr><td>Measurements save</td><td>"Save &amp; Start Program"</td><td style="color:var(--accent)">"Start My 12 Weeks"</td></tr>
+  <tr><td>Morning check-in submit</td><td>"Submit Check-In"</td><td style="color:var(--accent)">"Let's Go"</td></tr>
+  <tr><td>Continue to workout</td><td>"Continue to Workout"</td><td style="color:var(--accent)">"Show Me Today's Workout"</td></tr>
+  <tr><td>Chat send button</td><td>"Send"</td><td style="color:var(--accent)">"&rarr;" (arrow icon)</td></tr>
+</table>
+
+<h3>Empty States</h3>
+<table>
+  <tr><th>Location</th><th>Current</th><th>Proposed</th></tr>
+  <tr><td>No Garmin</td><td>"Connect Garmin Watch" (button)</td><td style="color:var(--accent)">"Connect your Garmin to unlock HRV tracking, sleep analysis, and smart readiness scores." [Connect]</td></tr>
+  <tr><td>No body weight</td><td>Input field only</td><td style="color:var(--accent)">"Step on the scale. We track your 7-day rolling average, not daily fluctuations." [Log Weight]</td></tr>
+  <tr><td>No chat history</td><td>Empty chat area</td><td style="color:var(--accent)">"This is where you'll talk to Erik, your coach. He sees everything — your sleep, your lifts, your check-ins. Ask him anything."</td></tr>
+  <tr><td>No progress photos</td><td>(not shown)</td><td style="color:var(--accent)">"Take your first photos. We'll compare them every week so you can see what the mirror doesn't show yet."</td></tr>
+  <tr><td>Coach unavailable</td><td>"Coach is temporarily unavailable. Try again in a moment."</td><td style="color:var(--accent)">"Erik stepped away. He'll be back in a moment. (If this persists, check your API key in settings.)"</td></tr>
+</table>
+
+<hr>
+
+<h2>Implementation Checklist</h2>
+
+<div class="section-label label-quick">Quick Wins — &lt; 1 day each</div>
+<ul class="checklist">
+  <li><div class="check-box done"></div><div><strong>Add "Skip" button to morning check-in overlay</strong> — <span style="color:var(--accent)">DONE</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Auto-select today in day grid</strong> — <span style="color:var(--accent)">DONE</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Add progress dashboard button</strong> — <span style="color:var(--accent)">DONE — added to header</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Fix intake locked dead-end</strong> — <span style="color:var(--accent)">DONE — countdown + close button</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Escape psych intake</strong> — <span style="color:var(--accent)">DONE — Continue Later button added</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Apply escapeHtml to psych messages</strong> — <span style="color:var(--accent)">DONE — XSS fixed</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Rewrite copy</strong> — <span style="color:var(--accent)">DONE — all CTAs and coach voice updated</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Confirmation on destructive settings</strong> — <span style="color:var(--accent)">DONE — confirm() on Redo Baseline/Psych Intake</span></div></li>
+</ul>
+
+<div class="section-label label-medium">Medium Effort — 1-3 days each</div>
+<ul class="checklist">
+  <li><div class="check-box done"></div><div><strong>Reorder main screen</strong> — <span style="color:var(--accent)">DONE — workout/readiness first, weigh-in/garmin/supplements bottom</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Collapse nutrition section</strong> — <span style="color:var(--accent)">DONE — compact summary with macro bars, expand for food detail</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Inline Coach message on main screen</strong> — <span style="color:var(--accent)">DONE — latest message + quick-reply buttons</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Add typing timeout to Claude API calls</strong> — <span style="color:var(--accent)">DONE — coach 30s, psych 30s/60s, photo 45s</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Add retry logic to critical apiPost calls</strong> — <span style="color:var(--accent)">DONE — retries once, shows toast on failure</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Milestone detection system</strong> — <span style="color:var(--accent)">DONE — PRs, weight loss milestones, streaks, perfect weeks with celebration banners</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Full-screen psych intake chat</strong> — <span style="color:var(--accent)">DONE — full viewport flexbox layout</span></div></li>
+</ul>
+
+<div class="section-label label-structural">Structural Changes — 3-7 days each</div>
+<ul class="checklist">
+  <li><div class="check-box done"></div><div><strong>Coach-first morning flow</strong> — <span style="color:var(--accent)">DONE — coach speaks first with Garmin data and workout info, sliders below</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Unified "Today" view</strong> — <span style="color:var(--accent)">DONE — horizontal day scroller with week arrows, today hero card with workout name + exercise progress ring + run info</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Streaming Claude responses</strong> — <span style="color:var(--accent)">DONE — SSE endpoint + streaming chat bubbles</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Progressive web app improvements</strong> — <span style="color:var(--accent)">DONE — service worker with cache-first for static assets, network-first for API, background sync for offline POSTs via IndexedDB</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Redesigned navigation</strong> — <span style="color:var(--accent)">DONE — horizontal day scroller replaces phase nav + week tabs + day grid, week arrows for browsing</span></div></li>
+</ul>
+
+<div class="section-label label-future">Future Considerations</div>
+<ul class="checklist">
+  <li><div class="check-box done"></div><div><strong>Streaming coach responses</strong> — <span style="color:var(--accent)">DONE — SSE endpoint + streaming chat bubbles</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Push notifications</strong> — <span style="color:var(--accent)">DONE — VAPID-based Web Push with /api/push/* endpoints, service worker push handler, frontend subscription with permission request</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Social accountability</strong> — <span style="color:var(--accent)">DONE — Web Share API for milestones (with clipboard fallback), shareWeeklySummary() in progress dashboard</span></div></li>
+  <li><div class="check-box done"></div><div><strong>Voice input for Coach chat</strong> — <span style="color:var(--accent)">DONE — Web Speech API with mic button on chat input, recording indicator, interim results display</span></div></li>
+</ul>
+
+<hr>
+
+<h2>Implementation Status (2026-03-28)</h2>
+
+<p><strong>Quick Wins:</strong> <span style="color:var(--accent);font-weight:700;">8 of 8 complete</span></p>
+<p><strong>Medium Effort:</strong> <span style="color:var(--accent);font-weight:700;">7 of 7 complete</span></p>
+<p><strong>Structural:</strong> <span style="color:var(--accent);font-weight:700;">5 of 5 complete</span></p>
+
+<h3>Additional Changes Implemented (Not in Original Checklist)</h3>
+<table>
+  <tr><th>Change</th><th>Status</th></tr>
+  <tr><td>PhysicalAssessment model + API endpoints (gym/no-gym, measurements, baseline exercises)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Physical assessment flow after psych report (gym question, tape question, measurements, exercises)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Overtraining copy rewritten to coach voice ("Green light. Hit it hard today." etc.)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Footer removed, migration banner removed</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>New CSS styles for coach inline, physical assessment, psych intake</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Collapsible nutrition section with macro progress bars, expand for food detail</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Retry logic on apiPost — retries once, shows toast on failure</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Milestone detection + celebration banners (PRs, weight loss, streaks, perfect weeks)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Coach-first morning flow — coach speaks first with Garmin data and workout info</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Full-screen psych intake chat — full viewport flexbox layout</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>generate_intake_report error rendering — shows error with retry/skip options</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Streaming Claude responses — SSE endpoint + streaming chat bubbles</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Unified Today view — horizontal day scroller with week arrows, today hero card</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Redesigned navigation — horizontal day scroller replaces phase nav + week tabs + day grid</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Service worker (PWA) — cache-first static, network-first API, background sync via IndexedDB</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Push notifications — VAPID Web Push with /api/push/* endpoints, service worker handler</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Social accountability — Web Share API for milestones, shareWeeklySummary()</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Voice input — Web Speech API with mic button, recording indicator, interim results</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>pywebpush added to requirements.txt</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+</table>
+
+</div>
+</body>
+</html>

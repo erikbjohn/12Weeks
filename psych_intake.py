@@ -218,7 +218,7 @@ def get_intake_response(user_message, conversation_history):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
     except Exception:
         return "Intake temporarily unavailable.", False
 
@@ -252,7 +252,7 @@ def generate_intake_report(conversation_history, lifting_data=None):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
     except Exception:
         return "Report generation unavailable."
 
@@ -283,4 +283,4 @@ def generate_intake_report(conversation_history, lifting_data=None):
         return response.content[0].text
     except Exception as e:
         log.error("Report generation error: %s", e)
-        return f"Report generation failed: {str(e)[:100]}"
+        return None  # Caller must handle None as error

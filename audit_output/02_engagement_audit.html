@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Engagement Audit — 12 Weeks Audit</title>
+<style>
+:root { --bg: #0d0f0e; --surface: #161918; --surface2: #1e2220; --border: #2a2e2c; --text: #e8ede9; --muted: #9aaa9d; --accent: #4ade80; --red: #f87171; --amber: #f59e0b; --blue: #60a5fa; --purple: #a78bfa; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; font-size: 17px; line-height: 1.8; -webkit-font-smoothing: antialiased; }
+.container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+h1 { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+h2 { font-size: 1.4rem; font-weight: 700; margin: 2.5rem 0 1rem; color: var(--accent); letter-spacing: -0.01em; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.75rem; }
+p { margin-bottom: 1rem; }
+strong { color: #fff; }
+code { background: var(--surface2); padding: 2px 7px; border-radius: 4px; font-size: 0.9em; color: var(--amber); font-family: 'SF Mono', 'Fira Code', monospace; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.95rem; }
+th { text-align: left; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td { padding: 10px 12px; border: 1px solid var(--border); vertical-align: top; }
+tr:nth-child(even) td { background: var(--surface); }
+ul, ol { margin: 0.5rem 0 1rem 1.5rem; }
+li { margin-bottom: 0.5rem; }
+nav { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+nav a { color: var(--muted); text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 0.9rem; background: var(--surface); border: 1px solid var(--border); transition: all 0.15s; }
+nav a:hover { color: var(--text); border-color: var(--accent); }
+nav a.active { color: var(--accent); border-color: var(--accent); background: var(--surface2); }
+.impact-tag { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; margin-left: 8px; }
+.impact-high { background: rgba(248,113,113,0.15); color: var(--red); }
+.impact-medium { background: rgba(245,158,11,0.15); color: var(--amber); }
+.impact-low { background: rgba(96,165,250,0.15); color: var(--blue); }
+.impact-critical { background: rgba(248,113,113,0.2); color: var(--red); }
+.callout { background: var(--surface); border-left: 3px solid var(--accent); padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1rem 0 1.5rem; }
+.copy-rewrite { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0.5rem 0 1.5rem; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.copy-rewrite .current, .copy-rewrite .proposed { padding: 12px 16px; }
+.copy-rewrite .current { background: var(--surface); border-right: 1px solid var(--border); }
+.copy-rewrite .proposed { background: var(--surface2); }
+.copy-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+.copy-text { font-size: 0.95rem; }
+.copy-text.old { color: var(--muted); text-decoration: line-through; }
+.copy-text.new { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav>
+  <a href="00_executive_summary.html">Executive Summary</a>
+  <a href="01_logic_audit.html">Logic Audit</a>
+  <a href="02_engagement_audit.html" class="active">Engagement Audit</a>
+  <a href="03_ux_redesign.html">UX Redesign</a>
+</nav>
+
+<h1>Engagement Audit</h1>
+
+<h2>User Touchpoint Analysis</h2>
+
+<table>
+  <tr><th>#</th><th>Touchpoint</th><th>Agent</th><th>Type</th><th>User Action</th></tr>
+  <tr><td>1</td><td>Welcome screen</td><td>None</td><td>Static</td><td>Tap "Commit"</td></tr>
+  <tr><td>2</td><td>Psych intake chat</td><td>Intake Agent</td><td>Conversational (10-15 exchanges)</td><td>Type responses</td></tr>
+  <tr><td>3</td><td>Psych report display</td><td>Report Generator</td><td>Read-only</td><td>Tap "Next"</td></tr>
+  <tr><td>4</td><td>Baseline lift test (x9)</td><td>None</td><td>Data entry</td><td>Enter reps per lift</td></tr>
+  <tr><td>5</td><td>Baseline summary</td><td>None</td><td>Read-only</td><td>Tap "Next"</td></tr>
+  <tr><td>6</td><td>Body measurements + photos</td><td>Photo Analyzer</td><td>Mixed</td><td>Enter data + take photos</td></tr>
+  <tr><td>7</td><td>Morning check-in (daily)</td><td>None</td><td>6 sliders + text</td><td>Adjust sliders, submit</td></tr>
+  <tr><td>8</td><td>Coach morning response</td><td>Coach Agent</td><td>Read + optional reply</td><td>Read, optionally chat</td></tr>
+  <tr><td>9</td><td>Weigh-in bar (daily)</td><td>None</td><td>Single input</td><td>Enter weight</td></tr>
+  <tr><td>10</td><td>Supplement tracker (daily)</td><td>None</td><td>Toggle buttons</td><td>Tap pills</td></tr>
+  <tr><td>11</td><td>Garmin metrics display</td><td>Overtraining Monitor</td><td>Read-only</td><td>None (auto)</td></tr>
+  <tr><td>12</td><td>Readiness alert</td><td>Overtraining Monitor</td><td>Read-only</td><td>None (auto)</td></tr>
+  <tr><td>13</td><td>Workout detail view</td><td>None</td><td>Interactive</td><td>View exercises, log RPE/weight</td></tr>
+  <tr><td>14</td><td>Meal plan tracker</td><td>None</td><td>Checkbox + adjust</td><td>Mark meals, adjust portions</td></tr>
+  <tr><td>15</td><td>Coach chat (FAB)</td><td>Coach Agent</td><td>Conversational</td><td>Open overlay, type</td></tr>
+  <tr><td>16</td><td>Weekly check-in (Sat/Sun)</td><td>None</td><td>Sliders + text</td><td>Submit weekly review</td></tr>
+  <tr><td>17</td><td>Sunday planning</td><td>Coach Agent</td><td>Auto-triggered chat</td><td>Respond to coach</td></tr>
+  <tr><td>18</td><td>Progress dashboard</td><td>None</td><td>Charts</td><td>View only</td></tr>
+  <tr><td>19</td><td>Weekly progress photos</td><td>Photo Analyzer</td><td>Photo upload</td><td>Take + upload photos</td></tr>
+</table>
+
+<hr>
+
+<h2>Drop-Off and Stuck Points</h2>
+
+<h3>1. Psych Intake — The Biggest Risk <span class="impact-tag impact-high">HIGH IMPACT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">FIXED</span></h3>
+<p><strong>Problem:</strong> <s>The psych intake is a 10-15 message conversation with no progress indicator, no save-resume clarity, and no way to skip.</s></p>
+<p><strong>Resolution:</strong></p>
+<ul>
+  <li style="color:var(--accent)">Progress indicator added: "Getting to know you (X of ~12)"</li>
+  <li style="color:var(--accent)">Continue Later button added to intake chat header</li>
+  <li style="color:var(--accent)">"Welcome back" message shown on resume</li>
+  <li style="color:var(--accent)">INTAKE_LOCKED now shows countdown timer with close button — no longer bricks the app</li>
+</ul>
+
+<h3>2. Baseline Lift Test — Tedious for Beginners <span class="impact-tag impact-medium">MEDIUM IMPACT</span></h3>
+<p><strong>Problem:</strong> 9 sequential lift tests requiring the user to physically load a barbell and perform max reps. No way to skip individual lifts. No "I don't know this exercise" option. No video/form guidance.</p>
+<ul>
+  <li><code>BASELINE_LIFTS</code> includes barbell hip thrusts — an exercise many beginners don't know</li>
+  <li>The dot-progress indicator helps but there's no time estimate</li>
+  <li>Each lift is saved immediately — good for data safety, but the user doesn't know this</li>
+</ul>
+
+<h3>3. Morning Check-in — Blocks the Entire App <span class="impact-tag impact-medium">MEDIUM IMPACT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">FIXED</span></h3>
+<p><strong>Problem:</strong> <s>The morning check-in overlay covers the entire screen with no dismiss option. The user MUST complete it before accessing their workout.</s></p>
+<p style="color:var(--accent)"><strong>Resolution:</strong> Skip button added to the morning check-in overlay. Users can now bypass the check-in and go straight to their workout.</p>
+
+<h3>4. Coach Chat — No Conversation Starters <span class="impact-tag impact-low">LOW IMPACT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">FIXED</span></h3>
+<p><strong>Problem:</strong> <s>The chat overlay opens to an empty state or old messages. There's no prompt, no suggested questions, no quick-action buttons.</s></p>
+<p style="color:var(--accent)"><strong>Resolution:</strong> Inline coach message now displayed on the main screen with quick-reply buttons ("How should I modify today?" / "I'm struggling" / "I crushed it"). Users no longer need to open a separate overlay to interact with the coach.</p>
+
+<hr>
+
+<h2>Latency Bottlenecks</h2>
+
+<h3>1. Synchronous Claude API Calls <span class="impact-tag impact-critical">CRITICAL</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">MITIGATED</span></h3>
+<p><strong>Where:</strong> Every coach message, every intake message, every photo analysis, every intake report generation.</p>
+<p><strong>Mitigation applied:</strong> <span style="color:var(--accent);">Timeouts added to all API calls (coach 30s, psych chat 30s, psych report 60s, photo analysis 45s). Calls will no longer hang indefinitely.</span> Calls are still synchronous — full async/streaming is a future improvement.</p>
+
+<h3>2. 8 Parallel Fetches on Load <span class="impact-tag impact-medium">MEDIUM</span></h3>
+<p><strong>Where:</strong> <code>DOMContentLoaded</code> handler (<code>app.js:1162-1171</code>)</p>
+<p><strong>Impact:</strong> Well-optimized via <code>Promise.all()</code>. However, the Garmin status check + subsequent <code>refreshGarmin()</code> happens sequentially after, adding 1-3 seconds to perceived load time.</p>
+
+<h3>3. Photo Upload + Analysis <span class="impact-tag impact-medium">MEDIUM</span></h3>
+<p><strong>Impact:</strong> Photo compression happens client-side (good), but then the base64 image is sent in a JSON POST body, followed by synchronous Claude Vision analysis. Total time: 5-15 seconds per photo.</p>
+<p><strong>Mitigation already in place:</strong> Photos show "AI Coach is analyzing..." with a spinner. This is good feedback.</p>
+
+<h3>4. Coach Context Assembly <span class="impact-tag impact-low">LOW</span></h3>
+<p><strong>Impact:</strong> Queries 6 different database tables synchronously. For a mature user with months of data, the body weight query could return hundreds of rows. Not a problem yet, but will degrade.</p>
+
+<hr>
+
+<h2>Missing Feedback Loops</h2>
+
+<h3>1. Weight and Completion Saves — No Confirmation</h3>
+<p>When a user logs a weight or toggles a completion checkbox, <code>apiPost()</code> fires and forgets. If the network is flaky (common on phone in a gym), data is silently lost.</p>
+<p><strong>Fix:</strong> Add a subtle toast or checkbox color flash on successful save. Show a red indicator on failure with retry.</p>
+
+<h3>2. Supplement Toggles — No Daily Summary</h3>
+<p>Users can toggle supplements throughout the day, but there's no end-of-day summary or reminder for missed supplements.</p>
+<p><strong>Fix:</strong> Add a "You missed: Fish Oil, Vitamin D3" nudge in the evening, or have the Coach mention it.</p>
+
+<h3>3. No Progress Milestones or Celebrations</h3>
+<p>The app tracks weight loss, lift progression, and completion rates, but never proactively celebrates milestones. No "Bench press PR!" or "Perfect week!"</p>
+<p><strong>Fix:</strong> Check for milestones in <code>renderAll()</code> and show a brief banner. Feed milestones into Coach context.</p>
+
+<h3>4. No "Streak" Visibility</h3>
+<p>The app tracks daily completion but there's no streak counter, no week-over-week comparison, no visual progress toward the 12-week goal.</p>
+
+<h3>5. Garmin Connection — No Nudge to Connect</h3>
+<p>The bar shows "Connect Garmin Watch" with no explanation of WHY connecting matters.</p>
+
+<hr>
+
+<h2>Copy Rewrites <span style="color:var(--accent);font-weight:700;font-size:0.85rem;">ALL APPLIED</span></h2>
+
+<p><strong>Welcome Screen Button</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Commit"</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"I'm Ready"</div></div>
+</div>
+
+<p><strong>Morning Check-in Title</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Good Morning" &rarr; "Quick check-in before we start"</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Before we train"</div></div>
+</div>
+
+<p><strong>Morning Check-in Coach Loading</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Coach is reviewing your check-in..."</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Erik is looking at your numbers..."</div></div>
+</div>
+
+<p><strong>Coach Chat Placeholder</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Talk to Coach..."</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Ask Erik anything..."</div></div>
+</div>
+
+<p><strong>Readiness Alert (Low Risk)</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"You're good to go. Train as planned."</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Green light. Hit it hard today."</div></div>
+</div>
+
+<p><strong>Readiness Alert (Moderate)</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Consider reducing volume by 1-2 sets per exercise, or dropping intensity by 10%. Focus on form over load."</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Your body's talking — listen. Drop 1-2 sets or 10% weight. Form over ego today."</div></div>
+</div>
+
+<p><strong>Readiness Alert (High)</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Consider swapping today's session for active recovery (20-30 min walk, mobility work). Your body is signaling it needs rest."</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Stand down. Walk, stretch, recover. Pushing through this is how you lose a week, not gain a day."</div></div>
+</div>
+
+<p><strong>Garmin Not Connected</strong></p>
+<div class="copy-rewrite">
+  <div class="current"><div class="copy-label">Current</div><div class="copy-text old">"Connect Garmin Watch"</div></div>
+  <div class="proposed"><div class="copy-label">Proposed</div><div class="copy-text new">"Connect Garmin — unlock HRV, sleep, and readiness tracking"</div></div>
+</div>
+
+<hr>
+
+<h2>Top 3 Engagement Improvements</h2>
+
+<h3>1. Add Coach-Initiated Morning Briefing <span class="impact-tag impact-high">HIGH IMPACT</span> <span class="impact-tag impact-medium">MEDIUM EFFORT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">DONE</span></h3>
+<p><strong>What:</strong> Instead of a silent check-in form, open the morning with the Coach greeting the user based on yesterday's data and today's plan. "You slept 7.5 hours, body battery is 68. Today is bench day. How are you feeling?"</p>
+<p><strong>Why:</strong> The current flow is: fill out form &rarr; wait for coach &rarr; get generic response. Flipping it so the Coach speaks first makes the interaction feel like a real coaching session, not a medical intake form.</p>
+<p><strong>How:</strong> Pre-fetch Garmin data before showing the check-in overlay. Show the Coach's opening message first, then show sliders as the user's response to the Coach's question.</p>
+
+<h3>2. Fix the Intake Dead-End and Add Progress Indicator <span class="impact-tag impact-high">HIGH IMPACT</span> <span class="impact-tag impact-low">LOW EFFORT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">DONE</span></h3>
+<p><strong>What:</strong></p>
+<ul>
+  <li style="color:var(--accent)">&#10003; Add a message counter to the intake chat ("Getting to know you (X of ~12)")</li>
+  <li style="color:var(--accent)">&#10003; Add a "Continue Later" button that saves and dismisses</li>
+  <li style="color:var(--accent)">&#10003; Handle INTAKE_LOCKED with a proper UI: countdown, close button, return path</li>
+  <li style="color:var(--accent)">&#10003; Show "Welcome back" on re-entry</li>
+</ul>
+
+<h3>3. Add Milestone Detection and Celebration <span class="impact-tag impact-medium">MEDIUM IMPACT</span> <span class="impact-tag impact-low">LOW EFFORT</span> <span style="color:var(--accent);font-weight:700;font-size:0.85rem;margin-left:8px;">DONE</span></h3>
+<p><strong>What:</strong> Detect and surface achievements: first week complete, weight PR on any lift, body weight milestones (every 2 lbs lost), streak achievements (7 days, 14 days), perfect adherence weeks.</p>
+<p><strong>Why:</strong> The app collects rich data but never reflects it back as accomplishments. The Coach's personality is "honest, direct, no hollow praise" — but SPECIFIC recognition of REAL achievements is part of the coaching philosophy ("Real breakthrough &rarr; recognize it specifically").</p>
+<p><strong>How:</strong> Add a <code>checkMilestones()</code> function to <code>renderAll()</code> that compares current data against stored thresholds. Show milestones as brief banners. Feed them into Coach context.</p>
+
+<hr>
+
+<h2>Implementation Status (2026-03-28)</h2>
+
+<table>
+  <tr><th>Item</th><th>Status</th></tr>
+  <tr><td>Psych intake: progress indicator, Continue Later, Welcome back, LOCKED fix</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Morning check-in: Skip button</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Coach chat: inline message + quick-reply buttons on main screen</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Claude API timeouts (all calls)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>All copy rewrites applied (CTAs, readiness alerts, coach voice)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Physical assessment flow added (gym/no-gym, measurements, exercises)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Coach-first morning briefing (coach speaks first with Garmin data)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Milestone detection + celebration banners</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Streak visibility (included in milestone detection)</td><td style="color:var(--accent)">&#10003; Done</td></tr>
+  <tr><td>Supplement end-of-day nudge</td><td style="color:var(--amber)">Not started</td></tr>
+</table>
+
+</div>
+</body>
+</html>
