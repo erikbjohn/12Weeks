@@ -19,6 +19,7 @@ from models import (
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
+    UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
 )
 
 app = Flask(__name__)
@@ -1363,6 +1364,434 @@ def api_push_test():
         return jsonify({"ok": True, "sent": len(_push_subscriptions)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ─── CONSTRAINTS ───────────────────────────────────────────────────────────
+
+@app.route("/api/constraints")
+def api_constraints():
+    c = UserConstraints.query.first()
+    if not c:
+        return jsonify({"completed": False})
+    return jsonify({
+        "completed": c.completed,
+        "food_restrictions": c.food_restrictions or [],
+        "custom_allergies": c.custom_allergies,
+        "scheduled_activities": c.scheduled_activities or [],
+        "schedule_notes": c.schedule_notes,
+    })
+
+@app.route("/api/constraints", methods=["POST"])
+def api_constraints_save():
+    data = request.get_json()
+    c = UserConstraints.query.first()
+    if not c:
+        c = UserConstraints()
+        db.session.add(c)
+    if "food_restrictions" in data:
+        c.food_restrictions = data["food_restrictions"]
+    if "custom_allergies" in data:
+        c.custom_allergies = data["custom_allergies"]
+    if "scheduled_activities" in data:
+        c.scheduled_activities = data["scheduled_activities"]
+    if "schedule_notes" in data:
+        c.schedule_notes = data["schedule_notes"]
+    if "completed" in data:
+        c.completed = data["completed"]
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+# ─── GOAL COMPUTATION ─────────────────────────────────────────────────────
+
+@app.route("/api/goal/compute", methods=["POST"])
+def api_goal_compute():
+    """Compute training goal from intake + physical data."""
+    from goal_engine import (
+        detect_goal, compute_tdee, compute_targets,
+        compute_phase_plan, compute_day_calories,
+        determine_fasting_protocol, project_weight_curve,
+    )
+
+    intake = PsychIntake.query.first()
+    pa = PhysicalAssessment.query.first()
+    if not intake or not pa:
+        return jsonify({"error": "Intake and physical assessment required"}), 400
+
+    # Extract actor answer from conversation
+    actor_answer = ""
+    convo = intake.conversation or []
+    for i, msg in enumerate(convo):
+        if msg.get("role") == "user" and i > 0:
+            prev = convo[i-1].get("content", "")
+            if "actor" in prev.lower() or "movie" in prev.lower() or "body you want" in prev.lower():
+                actor_answer = msg["content"]
+                break
+
+    # Extract sex and age from conversation
+    sex = "male"
+    age = 30
+    for msg in convo:
+        content = msg.get("content", "").lower().strip()
+        if msg.get("role") == "user":
+            if content in ("male", "female", "m", "f"):
+                sex = "female" if content in ("female", "f") else "male"
+            try:
+                num = int(content)
+                if 15 <= num <= 80:
+                    age = num
+            except ValueError:
+                pass
+
+    weight = pa.bodyweight_lbs or 180
+    height = pa.height_inches or 70
+
+    goal_info = detect_goal(actor_answer)
+    goal_type = goal_info["goal_type"]
+    target_bf = goal_info["target_bf"]
+
+    tdee_info = compute_tdee(weight, height, age, sex)
+
+    # Compute target weight from body fat
+    # Estimate current BF: rough formula (not perfect but functional)
+    if sex == "male":
+        est_bf = 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
+    else:
+        est_bf = 0.22 if weight < 150 else 0.28 if weight < 180 else 0.33
+    lean_mass = weight * (1 - est_bf)
+    target_weight = lean_mass / (1 - target_bf)
+
+    targets = compute_targets(tdee_info["tdee"], goal_type, weight)
+    fasting = determine_fasting_protocol(goal_type, targets["calories"])
+    phase_plan = compute_phase_plan(goal_type, weight, target_weight, est_bf)
+    projection = project_weight_curve(weight, target_weight, tdee_info["tdee"], targets["calories"])
+
+    # Compute per-day-type calories
+    day_types = ["heavy_lift", "long_run", "moderate", "rest", "deload"]
+    cal_by_day = {}
+    for dt in day_types:
+        cal_by_day[dt] = compute_day_calories(targets["calories"], goal_type, dt)
+
+    # Save to DB
+    goal = TrainingGoal.query.first()
+    if not goal:
+        goal = TrainingGoal(goal_type=goal_type)
+        db.session.add(goal)
+    goal.goal_type = goal_type
+    goal.target_weight = round(target_weight, 1)
+    goal.target_bf_pct = target_bf
+    goal.daily_calories = targets["calories"]
+    goal.protein_grams = targets["protein"]
+    goal.carb_grams = targets["carbs"]
+    goal.fat_grams = targets["fat"]
+    goal.phase_plan = phase_plan
+    goal.calorie_by_day_type = cal_by_day
+    goal.fasting_protocol = fasting["protocol"]
+    goal.electrolyte_supplementation = fasting["electrolytes"]
+    goal.weight_projection = projection
+    db.session.commit()
+
+    return jsonify({
+        "goal_type": goal_type,
+        "target_weight": round(target_weight, 1),
+        "target_bf_pct": target_bf,
+        "calories": targets["calories"],
+        "protein": targets["protein"],
+        "carbs": targets["carbs"],
+        "fat": targets["fat"],
+        "fasting_protocol": fasting["protocol"],
+        "electrolytes": fasting["electrolytes"],
+        "phase_plan": phase_plan,
+        "weight_projection": projection,
+        "calorie_by_day_type": cal_by_day,
+    })
+
+@app.route("/api/goal")
+def api_goal():
+    goal = TrainingGoal.query.first()
+    if not goal:
+        return jsonify({"computed": False})
+    return jsonify({
+        "computed": True,
+        "goal_type": goal.goal_type,
+        "target_weight": goal.target_weight,
+        "target_bf_pct": goal.target_bf_pct,
+        "calories": goal.daily_calories,
+        "protein": goal.protein_grams,
+        "carbs": goal.carb_grams,
+        "fat": goal.fat_grams,
+        "fasting_protocol": goal.fasting_protocol,
+        "electrolytes": goal.electrolyte_supplementation,
+        "phase_plan": goal.phase_plan,
+        "weight_projection": goal.weight_projection,
+        "calorie_by_day_type": goal.calorie_by_day_type,
+    })
+
+
+# ─── FOOD CATALOG + SELECTIONS ────────────────────────────────────────────
+
+@app.route("/api/food-catalog")
+def api_food_catalog():
+    from food_catalog import get_filtered_catalog
+    constraints = UserConstraints.query.first()
+    restrictions = constraints.food_restrictions if constraints else []
+    catalog = get_filtered_catalog(restrictions)
+    return jsonify(catalog)
+
+@app.route("/api/food-selections")
+def api_food_selections():
+    fs = UserFoodSelections.query.first()
+    if not fs:
+        return jsonify({"completed": False, "selected_foods": {}})
+    return jsonify({"completed": fs.completed, "selected_foods": fs.selected_foods or {}})
+
+@app.route("/api/food-selections", methods=["POST"])
+def api_food_selections_save():
+    data = request.get_json()
+    fs = UserFoodSelections.query.first()
+    if not fs:
+        fs = UserFoodSelections()
+        db.session.add(fs)
+    if "selected_foods" in data:
+        fs.selected_foods = data["selected_foods"]
+    if "completed" in data:
+        fs.completed = data["completed"]
+    db.session.commit()
+    return jsonify({"ok": True})
+
+@app.route("/api/food-selections/validate", methods=["POST"])
+def api_food_selections_validate():
+    from food_catalog import validate_selections
+    data = request.get_json()
+    selections = data.get("selected_foods", {})
+    goal = TrainingGoal.query.first()
+    daily_cal = goal.daily_calories if goal else 1800
+    daily_protein = goal.protein_grams if goal else 150
+    result = validate_selections(selections, daily_cal, daily_protein)
+    return jsonify(result)
+
+
+# ─── WEEKLY REPORT ─────────────────────────────────────────────────────────
+
+@app.route("/api/weekly-report/generate", methods=["POST"])
+def api_weekly_report_generate():
+    from weekly_report import compute_weekly_metrics, generate_report_narrative
+
+    s = _get_state()
+    week = s.current_week
+
+    metrics = compute_weekly_metrics(week)
+
+    # Save computed metrics immediately
+    report = WeeklyReport.query.filter_by(week=week).first()
+    if not report:
+        report = WeeklyReport(week=week, report_date=date.today())
+        db.session.add(report)
+    report.workouts_completed = metrics["workouts_completed"]
+    report.workouts_total = metrics["workouts_total"]
+    report.weight_start = metrics["weight_start"]
+    report.weight_end = metrics["weight_end"]
+    report.weight_trend = metrics["weight_trend"]
+    report.weight_vs_projected = metrics["weight_vs_projected"]
+    report.key_lifts_summary = metrics["key_lifts"]
+    report.checkin_avg = metrics["checkin_avg"]
+    report.adherence_pct = metrics["adherence_pct"]
+    db.session.commit()
+
+    # Generate narrative in background
+    job_id = str(uuid.uuid4())[:8]
+    _intake_jobs[job_id] = {"status": "pending"}
+
+    def run_narrative():
+        try:
+            narrative = generate_report_narrative(metrics)
+            _intake_jobs[job_id] = {"status": "done", "narrative": narrative}
+            # Save narrative to DB
+            with app.app_context():
+                r = WeeklyReport.query.filter_by(week=week).first()
+                if r and narrative:
+                    r.narrative = narrative
+                    db.session.commit()
+        except Exception as e:
+            _intake_jobs[job_id] = {"status": "error", "narrative": None}
+
+    thread = threading.Thread(target=run_narrative)
+    thread.start()
+
+    return jsonify({
+        "job_id": job_id,
+        "metrics": metrics,
+    })
+
+@app.route("/api/weekly-report/<int:week>")
+def api_weekly_report(week):
+    report = WeeklyReport.query.filter_by(week=week).first()
+    if not report:
+        return jsonify({"error": "No report for this week"}), 404
+    return jsonify({
+        "week": report.week,
+        "workouts_completed": report.workouts_completed,
+        "workouts_total": report.workouts_total,
+        "weight_start": report.weight_start,
+        "weight_end": report.weight_end,
+        "weight_trend": report.weight_trend,
+        "weight_vs_projected": report.weight_vs_projected,
+        "key_lifts": report.key_lifts_summary,
+        "checkin_avg": report.checkin_avg,
+        "adherence_pct": report.adherence_pct,
+        "narrative": report.narrative,
+    })
+
+@app.route("/api/weekly-report/result/<job_id>")
+def api_weekly_report_result(job_id):
+    job = _intake_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] == "pending":
+        return jsonify({"status": "pending"})
+    narrative = job.get("narrative")
+    del _intake_jobs[job_id]
+    return jsonify({"status": job["status"], "narrative": narrative})
+
+
+# ─── GOAL RECALIBRATION ───────────────────────────────────────────────────
+
+@app.route("/api/goal/recalibrate", methods=["POST"])
+def api_goal_recalibrate():
+    from goal_engine import recalibrate_projection, compute_tdee
+
+    data = request.get_json()
+    actual_weight = data.get("weight")
+    week = data.get("week")
+
+    if not actual_weight or not week:
+        return jsonify({"error": "weight and week required"}), 400
+
+    goal = TrainingGoal.query.first()
+    pa = PhysicalAssessment.query.first()
+    if not goal or not pa:
+        return jsonify({"error": "Goal not computed yet"}), 400
+
+    # Extract age/sex for TDEE recalc
+    intake = PsychIntake.query.first()
+    sex = "male"
+    age = 30
+    if intake and intake.conversation:
+        for msg in intake.conversation:
+            content = msg.get("content", "").lower().strip()
+            if msg.get("role") == "user":
+                if content in ("male", "female", "m", "f"):
+                    sex = "female" if content in ("female", "f") else "male"
+                try:
+                    num = int(content)
+                    if 15 <= num <= 80:
+                        age = num
+                except ValueError:
+                    pass
+
+    tdee_params = {
+        "height_in": pa.height_inches or 70,
+        "age": age,
+        "sex": sex,
+    }
+
+    result = recalibrate_projection(
+        actual_weight, week,
+        goal.weight_projection or [],
+        tdee_params
+    )
+
+    # Update goal
+    goal.weight_projection = result["updated_projection"]
+    goal.daily_calories = result["new_daily_calories"]
+    db.session.commit()
+
+    return jsonify(result)
+
+
+# ─── MORNING BRIEFING ─────────────────────────────────────────────────────
+
+MORNING_BRIEFING_PROMPT = """You are Erik — high-performance coach. Lombardi voice. Direct. Invested. No fluff.
+
+STATUS: {status}
+DATA: {data}
+WORKOUT: {workout}
+
+Write ONE sentence. If GREEN: acknowledge the data, name today's workout, get them out the door. If YELLOW: name the adjustment needed. If RED: say "We need to talk" and ask what's going on.
+
+No motivational speeches. Facts + orders. End with the workout name or a question (never a dead statement)."""
+
+@app.route("/api/morning-briefing", methods=["POST"])
+def api_morning_briefing():
+    data = request.get_json()
+
+    # Get readiness status
+    garmin_data = garmin.get_today_summary() if garmin.connected else None
+    readiness = assess_readiness(garmin_data)
+    score = readiness.get("score") or 70
+
+    if score >= 65:
+        status = "GREEN"
+    elif score >= 40:
+        status = "YELLOW"
+    else:
+        status = "RED"
+
+    # Get today's workout
+    s = _get_state()
+    workouts = get_workouts(s.current_week)
+    today_idx = date.today().weekday()
+    workout_today = workouts[today_idx] if today_idx < len(workouts) else None
+    workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
+
+    # Build data summary
+    data_summary = f"Readiness: {score}/100."
+    if garmin_data:
+        hrv = garmin_data.get("hrv", {})
+        sleep = garmin_data.get("sleep", {})
+        if hrv.get("lastNight"):
+            data_summary += f" HRV: {hrv['lastNight']}."
+        if sleep.get("score"):
+            data_summary += f" Sleep: {sleep['score']}."
+
+    # Checkin data
+    checkin = data or {}
+    if checkin.get("mood"):
+        data_summary += f" Mood: {checkin['mood']}/10."
+    if checkin.get("soreness") and checkin["soreness"] >= 7:
+        data_summary += f" Soreness: {checkin['soreness']}/10."
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"status": status, "message": f"{status}. {workout_name} today.", "workout": workout_name})
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+
+        prompt = MORNING_BRIEFING_PROMPT.format(
+            status=status, data=data_summary, workout=workout_name
+        )
+
+        full_text = ""
+        with client.messages.stream(
+            model="claude-sonnet-4-20250514",
+            max_tokens=200,
+            system=prompt,
+            messages=[{"role": "user", "content": "Give me the morning briefing."}],
+        ) as stream:
+            for text in stream.text_stream:
+                full_text += text
+
+        return jsonify({
+            "status": status,
+            "message": full_text.strip(),
+            "workout": workout_name,
+            "readiness_score": score,
+            "needs_discussion": status == "RED",
+        })
+    except Exception:
+        return jsonify({"status": status, "message": f"{workout_name} today. Score: {score}.", "workout": workout_name})
 
 
 # ─── PHYSICAL ASSESSMENT ───────────────────────────────────────────────────

@@ -641,7 +641,7 @@ function saveBaseline() {
   apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
-  showFullProfile();
+  computeGoal();
 }
 
 // ─── BASELINE MEASUREMENTS & PHOTOS STEP ────────────────────────────────────
@@ -881,6 +881,132 @@ let _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist
 let _bwBaselineStep = 0;
 let _bwBaselineData = {};
 
+// ─── CONSTRAINTS STEP ──────────────────────────────────────────────────────
+let _constraintStep = 0;
+let _constraintData = { food_restrictions: [], custom_allergies: '', scheduled_activities: [], schedule_notes: '' };
+
+function showConstraints() {
+  _constraintStep = 0;
+  _constraintData = { food_restrictions: [], custom_allergies: '', scheduled_activities: [], schedule_notes: '' };
+  renderConstraints();
+}
+
+function renderConstraints() {
+  const el = document.getElementById('baseline-overlay');
+
+  if (_constraintStep === 0) {
+    // Food restrictions
+    const restrictions = [
+      {id: 'vegetarian', label: 'Vegetarian'},
+      {id: 'vegan', label: 'Vegan'},
+      {id: 'no_dairy', label: 'No Dairy'},
+      {id: 'no_gluten', label: 'No Gluten'},
+      {id: 'halal', label: 'Halal'},
+      {id: 'kosher', label: 'Kosher'},
+    ];
+
+    const checkboxes = restrictions.map(r => `<label class="constraint-checkbox">
+      <input type="checkbox" value="${r.id}" ${_constraintData.food_restrictions.includes(r.id) ? 'checked' : ''} onchange="toggleConstraint('${r.id}')">
+      <span>${r.label}</span>
+    </label>`).join('');
+
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Food Restrictions</h2>
+        <div class="baseline-desc">Any dietary restrictions we need to know about?</div>
+        <div class="constraint-grid">${checkboxes}</div>
+        <div class="pa-measure-row" style="margin-top:1rem">
+          <label>Any allergies? (optional)</label>
+          <input type="text" id="constraint-allergies" placeholder="e.g. shellfish, tree nuts" value="${_constraintData.custom_allergies}">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:1.5rem">
+          <button class="btn btn-secondary" onclick="_constraintStep=1;renderConstraints()">No Restrictions</button>
+          <button class="btn btn-primary" style="flex:1" onclick="constraintFoodNext()">Next</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (_constraintStep === 1) {
+    // Scheduled activities
+    const actList = _constraintData.scheduled_activities.map((a, i) =>
+      `<div class="scheduled-activity-row">
+        <span>${a.day} — ${a.activity} (${a.duration_min}min)</span>
+        <button onclick="removeScheduledActivity(${i})" class="remove-btn">&times;</button>
+      </div>`
+    ).join('') || '<div style="color:var(--muted);font-size:14px">No activities added yet</div>';
+
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Scheduled Commitments</h2>
+        <div class="baseline-desc">Any group runs, races, or activities we need to build around?</div>
+
+        <div id="scheduled-list">${actList}</div>
+
+        <div class="add-activity-form" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+          <div class="pa-measure-row">
+            <label>Day</label>
+            <select id="activity-day" class="pa-select">
+              <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option selected>Saturday</option><option>Sunday</option>
+            </select>
+          </div>
+          <div class="pa-measure-row">
+            <label>Activity</label>
+            <input type="text" id="activity-name" placeholder="e.g. Group trail run">
+          </div>
+          <div class="pa-measure-row">
+            <label>Duration (minutes)</label>
+            <input type="number" id="activity-duration" placeholder="e.g. 90" min="10" max="300">
+          </div>
+          <button class="btn btn-secondary" style="width:100%;margin-top:8px" onclick="addScheduledActivity()">+ Add Activity</button>
+        </div>
+
+        <div class="pa-measure-row" style="margin-top:1rem">
+          <label>Anything else about your schedule? (optional)</label>
+          <textarea id="constraint-schedule-notes" rows="2" placeholder="e.g. I travel every other Thursday" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;font-size:14px">${_constraintData.schedule_notes}</textarea>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;margin-top:1.5rem" onclick="constraintScheduleNext()">Next: Physical Assessment</button>
+      </div>
+    </div>`;
+    return;
+  }
+}
+
+function toggleConstraint(id) {
+  const idx = _constraintData.food_restrictions.indexOf(id);
+  if (idx >= 0) _constraintData.food_restrictions.splice(idx, 1);
+  else _constraintData.food_restrictions.push(id);
+}
+
+function constraintFoodNext() {
+  const allergies = (document.getElementById('constraint-allergies')?.value || '').trim();
+  _constraintData.custom_allergies = allergies;
+  _constraintStep = 1;
+  renderConstraints();
+}
+
+function addScheduledActivity() {
+  const day = document.getElementById('activity-day').value;
+  const name = (document.getElementById('activity-name')?.value || '').trim();
+  const duration = parseInt(document.getElementById('activity-duration')?.value) || 60;
+  if (!name) return;
+  _constraintData.scheduled_activities.push({ day, activity: name, duration_min: duration, type: 'activity' });
+  renderConstraints();
+}
+
+function removeScheduledActivity(idx) {
+  _constraintData.scheduled_activities.splice(idx, 1);
+  renderConstraints();
+}
+
+function constraintScheduleNext() {
+  _constraintData.schedule_notes = (document.getElementById('constraint-schedule-notes')?.value || '').trim();
+  apiPost('/api/constraints', { ..._constraintData, completed: true });
+  showPhysicalAssessment();
+}
+
 function showPhysicalAssessment() {
   _paStep = 0;
   _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null };
@@ -1118,7 +1244,7 @@ function saveBwBaseline() {
   apiPost('/api/physical-assessment', { completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
-  showFullProfile();
+  computeGoal();
 }
 
 // ─── FULL ATHLETE PROFILE ──────────────────────────────────────────────────
@@ -1155,7 +1281,7 @@ async function showFullProfile() {
           <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
           <div class="psych-report">${renderMarkdown(profile)}</div>
           <div style="margin-top:1.5rem">
-            <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="finishOnboarding()">Let's Get After It</button>
+            <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showWeightProjection()">Next: Weight Projection</button>
           </div>
         </div>
       </div>`;
@@ -1166,6 +1292,240 @@ async function showFullProfile() {
     console.error('Full profile error:', e);
     finishOnboarding();
   }
+}
+
+// ─── COMPUTE GOAL ──────────────────────────────────────────────────────────
+async function computeGoal() {
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+      <h2 style="font-size:1.5rem;margin-bottom:16px">Computing Your Plan</h2>
+      <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
+      <div style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace">Analyzing your goals and building your program...</div>
+    </div>
+  </div>`;
+
+  try {
+    const res = await fetch('/api/goal/compute', { method: 'POST' });
+    const goalData = await res.json();
+    window._goalData = goalData;
+    showFoodSelection();
+  } catch(e) {
+    console.error('Goal computation failed:', e);
+    showFoodSelection(); // Continue anyway
+  }
+}
+
+// ─── FOOD SELECTION ────────────────────────────────────────────────────────
+let _foodCatalog = null;
+let _foodSelections = { proteins: [], carbs: [], vegetables: [], fats: [] };
+let _foodStep = 0;
+const FOOD_CATEGORIES = ['proteins', 'carbs', 'vegetables', 'fats'];
+const FOOD_MIN = 3;
+const FOOD_MAX = 5;
+
+async function showFoodSelection() {
+  const el = document.getElementById('baseline-overlay');
+
+  if (!_foodCatalog) {
+    el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem"><div class="chat-typing" style="justify-content:center"><span></span><span></span><span></span></div></div></div>`;
+    try {
+      const res = await fetch('/api/food-catalog');
+      _foodCatalog = await res.json();
+    } catch(e) {
+      showFullProfile();
+      return;
+    }
+  }
+
+  _foodStep = 0;
+  renderFoodSelection();
+}
+
+function renderFoodSelection() {
+  const el = document.getElementById('baseline-overlay');
+  const category = FOOD_CATEGORIES[_foodStep];
+
+  if (_foodStep >= FOOD_CATEGORIES.length) {
+    // Confirm screen
+    let summary = '';
+    for (const cat of FOOD_CATEGORIES) {
+      const items = _foodSelections[cat].map(id => {
+        const food = _foodCatalog[cat]?.find(f => f.id === id);
+        return food ? food.name : id;
+      }).join(', ');
+      summary += `<div class="food-confirm-row"><strong>${cat}:</strong> ${items}</div>`;
+    }
+
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Your Foods for 12 Weeks</h2>
+        <div class="baseline-desc" style="color:var(--amber);margin-bottom:1rem">This is it. These are the only foods you'll eat. Make sure you like them.</div>
+        <div class="food-confirm-list">${summary}</div>
+        <div style="display:flex;gap:8px;margin-top:1.5rem">
+          <button class="btn btn-secondary" onclick="_foodStep=0;renderFoodSelection()">Change</button>
+          <button class="btn btn-primary" style="flex:1" onclick="saveFoodSelections()">Lock It In</button>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const foods = _foodCatalog[category] || [];
+  const selected = _foodSelections[category] || [];
+  const catLabel = category.charAt(0).toUpperCase() + category.slice(1);
+  const count = selected.length;
+
+  const foodItems = foods.map(f => {
+    const isSelected = selected.includes(f.id);
+    const portionInfo = `${f.default_portion} ${f.unit} = ${Math.round(f.cal * f.default_portion)} cal, ${Math.round(f.protein * f.default_portion)}P`;
+    return `<div class="food-item${isSelected ? ' selected' : ''}" onclick="toggleFood('${category}','${f.id}')">
+      <div class="food-item-name">${f.name}</div>
+      <div class="food-item-macros">${portionInfo}</div>
+    </div>`;
+  }).join('');
+
+  const canProceed = count >= FOOD_MIN;
+  const statusText = count < FOOD_MIN ? `Pick at least ${FOOD_MIN - count} more` : count >= FOOD_MAX ? 'Maximum reached' : `${count} selected`;
+  const statusClass = count < FOOD_MIN ? 'food-status-warning' : 'food-status-good';
+
+  // Progress dots
+  let dots = '';
+  for (let i = 0; i < FOOD_CATEGORIES.length; i++) {
+    dots += `<div class="bp-dot ${i < _foodStep ? 'done' : i === _foodStep ? 'active' : ''}"></div>`;
+  }
+
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card">
+      <div class="baseline-progress">${dots}</div>
+      <h2>Pick Your ${catLabel}</h2>
+      <div class="baseline-desc">This is all you'll eat for 12 weeks. Pick ${FOOD_MIN}-${FOOD_MAX} ${category} you actually like.</div>
+      <div class="food-status ${statusClass}">${statusText}</div>
+      <div class="food-grid">${foodItems}</div>
+      <div style="display:flex;gap:8px;margin-top:1rem">
+        ${_foodStep > 0 ? '<button class="btn btn-secondary" onclick="_foodStep--;renderFoodSelection()">Back</button>' : ''}
+        <button class="btn btn-primary" style="flex:1" onclick="foodCategoryNext()" ${!canProceed ? 'disabled' : ''}>${_foodStep === FOOD_CATEGORIES.length - 1 ? 'Review Selections' : 'Next'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleFood(category, foodId) {
+  const sel = _foodSelections[category];
+  const idx = sel.indexOf(foodId);
+  if (idx >= 0) {
+    sel.splice(idx, 1);
+  } else if (sel.length < FOOD_MAX) {
+    sel.push(foodId);
+  }
+  renderFoodSelection();
+}
+
+function foodCategoryNext() {
+  _foodStep++;
+  renderFoodSelection();
+}
+
+async function saveFoodSelections() {
+  await fetch('/api/food-selections', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ selected_foods: _foodSelections, completed: true }),
+  });
+  showFullProfile();
+}
+
+// ─── WEIGHT PROJECTION ────────────────────────────────────────────────────
+async function showWeightProjection() {
+  const el = document.getElementById('baseline-overlay');
+  const goalData = window._goalData;
+
+  if (!goalData || !goalData.weight_projection) {
+    finishOnboarding();
+    return;
+  }
+
+  const proj = goalData.weight_projection;
+  const startWeight = proj.length > 0 ? proj[0].projected : '?';
+  const endWeight = proj.length > 0 ? proj[proj.length - 1].projected : '?';
+  const w4 = proj.find(p => p.week === 4);
+  const w8 = proj.find(p => p.week === 8);
+  const w12 = proj.find(p => p.week === 12);
+
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center">
+      <h2>Your Weight Projection</h2>
+      <div class="baseline-desc" style="margin-bottom:1rem">If you follow this plan exactly:</div>
+      <div class="projection-milestones">
+        <div class="proj-milestone"><span class="proj-week">Week 4</span><span class="proj-weight">${w4 ? w4.projected : '?'} lbs</span></div>
+        <div class="proj-milestone"><span class="proj-week">Week 8</span><span class="proj-weight">${w8 ? w8.projected : '?'} lbs</span></div>
+        <div class="proj-milestone highlight"><span class="proj-week">Week 12</span><span class="proj-weight">${w12 ? w12.projected : '?'} lbs</span></div>
+      </div>
+      <canvas id="projection-chart" width="320" height="180" style="margin:1rem auto;display:block"></canvas>
+      <div style="font-size:13px;color:var(--muted);margin-top:0.5rem">
+        ${goalData.goal_type === 'cut' ? 'Deficit: ' + goalData.calories + ' cal/day' : goalData.goal_type === 'bulk' ? 'Surplus: ' + goalData.calories + ' cal/day' : goalData.calories + ' cal/day'}
+        ${goalData.fasting_protocol !== 'none' ? ' · Fasting: ' + goalData.fasting_protocol.replace('_',':') : ''}
+        ${goalData.electrolytes ? ' · Electrolytes required' : ''}
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="finishOnboarding()">Let's Get After It</button>
+    </div>
+  </div>`;
+
+  // Draw projection chart
+  setTimeout(() => drawProjectionChart(proj), 100);
+}
+
+function drawProjectionChart(projection) {
+  const canvas = document.getElementById('projection-chart');
+  if (!canvas || projection.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, pad = 20;
+  ctx.clearRect(0, 0, W, H);
+
+  const weights = projection.map(p => p.projected);
+  const min = Math.min(...weights) - 2;
+  const max = Math.max(...weights) + 2;
+  const range = max - min || 1;
+  const xStep = (W - pad * 2) / (projection.length - 1);
+  const y = (v) => H - pad - ((v - min) / range) * (H - pad * 2);
+
+  // Line
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  projection.forEach((p, i) => {
+    const px = pad + i * xStep;
+    const py = y(p.projected);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.stroke();
+
+  // Dots + labels for key weeks
+  ctx.fillStyle = '#4ade80';
+  projection.forEach((p, i) => {
+    const px = pad + i * xStep;
+    const py = y(p.projected);
+    if (p.week === 1 || p.week === 4 || p.week === 8 || p.week === 12) {
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e8ede9';
+      ctx.font = '11px Inter';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.round(p.projected), px, py - 10);
+      ctx.fillStyle = '#4ade80';
+    }
+  });
+
+  // Week labels
+  ctx.fillStyle = '#9aaa9d';
+  ctx.font = '10px DM Mono';
+  ctx.textAlign = 'center';
+  projection.forEach((p, i) => {
+    if (p.week === 1 || p.week === 4 || p.week === 8 || p.week === 12) {
+      ctx.fillText('W' + p.week, pad + i * xStep, H - 4);
+    }
+  });
 }
 
 function finishOnboarding() {
@@ -1512,7 +1872,7 @@ async function showPsychReport() {
           <p style="color:var(--muted);margin-bottom:1.5rem">Your intake conversation was saved. The report couldn't be generated right now.</p>
           <div style="display:flex;flex-direction:column;gap:10px">
             <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPsychReport()">Retry Report</button>
-            <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showPhysicalAssessment()">Skip Report — Continue to Physical Assessment</button>
+            <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showConstraints()">Skip Report — Continue to Constraints</button>
           </div>
         </div>
       </div>`;
@@ -1523,7 +1883,7 @@ async function showPsychReport() {
         <h2 style="margin-bottom:0.75rem">Your Psych Profile</h2>
         <div class="psych-report">${renderMarkdown(data.report)}</div>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:1.25rem">
-          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPhysicalAssessment()">Next: Physical Assessment</button>
+          <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showConstraints()">Next: Constraints</button>
         </div>
       </div>
     </div>`;
@@ -1535,7 +1895,7 @@ async function showPsychReport() {
         <p style="color:var(--muted);margin-bottom:1.5rem">Your intake conversation was saved. The report couldn't be generated right now.</p>
         <div style="display:flex;flex-direction:column;gap:10px">
           <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="showPsychReport()">Retry Report</button>
-          <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showPhysicalAssessment()">Skip Report — Continue to Physical Assessment</button>
+          <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:12px" onclick="showConstraints()">Skip Report — Continue to Constraints</button>
         </div>
       </div>
     </div>`;
@@ -2079,31 +2439,27 @@ function submitMorningCheckin() {
       <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Show Me Today's Workout</button>
     `;
 
-    // Send to Coach for feedback
-    fetch('/api/chat', {
+    // Fetch morning briefing
+    fetch('/api/morning-briefing', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ message: summary }),
+      body: JSON.stringify(data),
     }).then(r => r.json()).then(d => {
       const loading = card.querySelector('.mc-coach-loading');
       if (loading) loading.style.display = 'none';
 
+      const statusColor = d.status === 'GREEN' ? 'var(--accent)' : d.status === 'YELLOW' ? 'var(--amber)' : 'var(--red)';
       const responseEl = document.getElementById('mc-coach-response');
-      const chatEl = document.getElementById('mc-coach-chat');
-      const continueBtn = document.getElementById('mc-continue-btn');
-
       if (responseEl) {
         responseEl.style.display = 'block';
-        responseEl.innerHTML = `<div class="mc-coach-bubble">${d.response || 'Ready to go. Let\'s get after it.'}</div>`;
+        responseEl.innerHTML = `<div class="morning-briefing-card">
+            <div class="briefing-status" style="color:${statusColor}">${d.status}</div>
+            <div class="briefing-message">${d.message || ''}</div>
+            <div class="briefing-workout">${d.workout || ''}</div>
+        </div>`;
       }
-      if (chatEl) chatEl.style.display = 'block';
+      const continueBtn = document.getElementById('mc-continue-btn');
       if (continueBtn) continueBtn.style.display = 'block';
-
-      // Also update chat history cache
-      if (_chatHistory) {
-        _chatHistory.push({ role: 'user', content: summary, date: todayStr() });
-        _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
-      }
     }).catch(() => {
       const loading = card.querySelector('.mc-coach-loading');
       if (loading) loading.style.display = 'none';
@@ -2188,9 +2544,49 @@ function closeMorningCheckin() {
   document.getElementById('morning-checkin-overlay').innerHTML = '';
   renderCheckinSummaryBar();
 
-  // If it's Sunday, trigger weekly planning check-in
   const today = new Date();
   if (today.getDay() === 0) {
+    showSundayFlow();
+  }
+}
+
+async function showSundayFlow() {
+  // Step 1: Generate and show weekly report
+  try {
+    const reportRes = await fetch('/api/weekly-report/generate', { method: 'POST' });
+    const reportData = await reportRes.json();
+
+    // Poll for narrative
+    let narrative = null;
+    if (reportData.job_id) {
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const pollRes = await fetch('/api/weekly-report/result/' + reportData.job_id);
+        const pollData = await pollRes.json();
+        if (pollData.status !== 'pending') {
+          narrative = pollData.narrative;
+          break;
+        }
+      }
+    }
+
+    // Show report card
+    const m = reportData.metrics || {};
+    const overlay = document.getElementById('morning-checkin-overlay');
+    overlay.innerHTML = `<div class="morning-checkin-overlay">
+      <div class="morning-checkin-card" style="max-width:500px">
+        <h2>Week ${m.week || currentWeek} Summary</h2>
+        <div class="report-stats">
+          <div class="report-stat"><span class="report-stat-label">Workouts</span><span class="report-stat-val">${m.workouts_completed || 0}/${m.workouts_total || 6}</span></div>
+          <div class="report-stat"><span class="report-stat-label">Weight</span><span class="report-stat-val">${m.weight_change ? (m.weight_change > 0 ? '+' : '') + m.weight_change + ' lbs' : '--'}</span></div>
+          <div class="report-stat"><span class="report-stat-label">vs Target</span><span class="report-stat-val">${m.weight_vs_projected || '--'}</span></div>
+          <div class="report-stat"><span class="report-stat-label">Adherence</span><span class="report-stat-val">${m.adherence_pct || 0}%</span></div>
+        </div>
+        ${narrative ? '<div class="report-narrative">' + narrative + '</div>' : ''}
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="document.getElementById('morning-checkin-overlay').innerHTML='';triggerWeeklyPlanning()">Continue to Weekly Planning</button>
+      </div>
+    </div>`;
+  } catch(e) {
     triggerWeeklyPlanning();
   }
 }

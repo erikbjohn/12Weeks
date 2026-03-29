@@ -172,6 +172,65 @@ class PhysicalAssessment(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
+class UserConstraints(db.Model):
+    """User dietary and schedule constraints."""
+    __tablename__ = "user_constraints"
+    id = db.Column(db.Integer, primary_key=True)
+    food_restrictions = db.Column(db.JSON, default=list)
+    custom_allergies = db.Column(db.Text, nullable=True)
+    scheduled_activities = db.Column(db.JSON, default=list)
+    schedule_notes = db.Column(db.Text, nullable=True)
+    completed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
+class TrainingGoal(db.Model):
+    """Computed training goal — calories, macros, projections."""
+    __tablename__ = "training_goal"
+    id = db.Column(db.Integer, primary_key=True)
+    goal_type = db.Column(db.String(20), nullable=False)  # "cut", "bulk", "recomp"
+    target_weight = db.Column(db.Float, nullable=True)
+    target_bf_pct = db.Column(db.Float, nullable=True)
+    daily_calories = db.Column(db.Integer, nullable=True)
+    protein_grams = db.Column(db.Integer, nullable=True)
+    carb_grams = db.Column(db.Integer, nullable=True)
+    fat_grams = db.Column(db.Integer, nullable=True)
+    phase_plan = db.Column(db.JSON, nullable=True)
+    calorie_by_day_type = db.Column(db.JSON, nullable=True)
+    fasting_protocol = db.Column(db.String(20), nullable=True)
+    electrolyte_supplementation = db.Column(db.Boolean, default=False)
+    weight_projection = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
+class UserFoodSelections(db.Model):
+    """User's chosen foods for the 12-week program."""
+    __tablename__ = "user_food_selections"
+    id = db.Column(db.Integer, primary_key=True)
+    selected_foods = db.Column(db.JSON, default=dict)
+    completed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
+class WeeklyReport(db.Model):
+    """Sunday weekly progress report."""
+    __tablename__ = "weekly_report"
+    id = db.Column(db.Integer, primary_key=True)
+    week = db.Column(db.Integer, nullable=False, unique=True)
+    report_date = db.Column(db.Date, nullable=False)
+    workouts_completed = db.Column(db.Integer, default=0)
+    workouts_total = db.Column(db.Integer, default=6)
+    weight_start = db.Column(db.Float, nullable=True)
+    weight_end = db.Column(db.Float, nullable=True)
+    weight_trend = db.Column(db.String(10))
+    weight_vs_projected = db.Column(db.String(10))  # "ahead", "on_track", "behind"
+    key_lifts_summary = db.Column(db.JSON, nullable=True)
+    checkin_avg = db.Column(db.JSON, nullable=True)
+    adherence_pct = db.Column(db.Float, nullable=True)
+    narrative = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
 class ChatMessage(db.Model):
     """AI coach conversation history."""
     __tablename__ = "chat_message"
