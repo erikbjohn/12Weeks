@@ -103,7 +103,9 @@ THINGS YOU SHOULD NEVER ASK:
 - "How many days is your streak?" -- doesn't matter here.
 
 CLOSING:
-When you have enough (~12-15 total exchanges): reference their athlete. One sentence about what that person has that most people don't. Then: "Monday. 6am. We start." Then [INTAKE_COMPLETE] on its own line.
+When you have enough (~10-12 total exchanges): reference their athlete. One sentence about what that person has that most people don't. Then: "Monday. 6am. We start." Then [INTAKE_COMPLETE] on its own line.
+
+IMPORTANT: If the conversation has reached 18+ total messages, CLOSE IT NOW on your very next response. Do not ask more questions. Go straight to the closing: athlete reference, "Monday. 6am. We start.", [INTAKE_COMPLETE]. Long conversations hurt performance.
 
 Crisis (suicidal ideation, self-harm): direct to 988 Suicide & Crisis Lifeline."""
 
@@ -233,15 +235,12 @@ def get_intake_response(user_message, conversation_history):
 
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=90.0)
+        client = anthropic.Anthropic(api_key=api_key, timeout=180.0)
     except Exception:
         return "Intake temporarily unavailable.", False
 
-    # Trim history to last 14 messages to keep latency reasonable
-    trimmed = conversation_history[-14:] if len(conversation_history) > 14 else conversation_history
-
     messages = []
-    for msg in trimmed:
+    for msg in conversation_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message})
 
