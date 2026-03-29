@@ -233,16 +233,19 @@ def get_intake_response(user_message, conversation_history):
         messages.insert(0, {"role": "user", "content": "[START]"})
 
     try:
-        response = client.messages.create(
+        # Use streaming to avoid Gunicorn timeout — first byte arrives fast
+        full_text = ""
+        with client.messages.stream(
             model="claude-sonnet-4-20250514",
             max_tokens=500,
             system=INTAKE_SYSTEM_PROMPT,
             messages=messages,
-        )
-        text = response.content[0].text
-        is_complete = "[INTAKE_COMPLETE]" in text
-        # Clean the marker from the displayed text
-        display_text = text.replace("[INTAKE_COMPLETE]", "").strip()
+        ) as stream:
+            for text in stream.text_stream:
+                full_text += text
+
+        is_complete = "[INTAKE_COMPLETE]" in full_text
+        display_text = full_text.replace("[INTAKE_COMPLETE]", "").strip()
         return display_text, is_complete
     except Exception as e:
         log.error("Intake API error: %s", e)
