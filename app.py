@@ -672,6 +672,7 @@ def api_psych_intake_conversation():
 
 @app.route("/api/psych-intake/message", methods=["POST"])
 def api_psych_intake_message():
+  try:
     data = request.get_json()
     user_msg = data.get("message", "").strip()
 
@@ -705,7 +706,15 @@ def api_psych_intake_message():
         convo.append({"role": "user", "content": user_msg})
 
     # Get AI response
-    response_text, is_complete = get_intake_response(user_msg, convo[:-1])
+    # convo = [..., asst, user(just added)]. We pass everything EXCEPT the
+    # last user message since get_intake_response appends it separately.
+    # This keeps proper role alternation: [asst, user, ..., asst] + user
+    if is_first:
+        history_for_api = []
+    else:
+        # Strip the user message we just appended — get_intake_response re-adds it
+        history_for_api = convo[:-1]
+    response_text, is_complete = get_intake_response(user_msg, history_for_api)
 
     # Check for lockout signal
     is_locked = "[INTAKE_LOCKED]" in response_text
@@ -744,6 +753,9 @@ def api_psych_intake_message():
         "has_report": intake.report is not None,
         "report_error": is_complete and intake.report is None,
     })
+  except Exception as e:
+    import traceback
+    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
 @app.route("/api/psych-intake/report")
