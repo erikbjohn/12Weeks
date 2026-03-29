@@ -1026,16 +1026,16 @@ function renderPhysicalAssessment() {
         <div class="pa-question">
           <div class="pa-question-text">Do you have access to a gym with barbells and machines?</div>
           <div class="pa-choices">
-            <div class="pa-choice${_paData.has_gym === true ? ' selected' : ''}" onclick="_paData.has_gym=true;renderPhysicalAssessment()">Yes</div>
-            <div class="pa-choice${_paData.has_gym === false ? ' selected' : ''}" onclick="_paData.has_gym=false;renderPhysicalAssessment()">No</div>
+            <div class="pa-choice${_paData.has_gym === true ? ' selected' : ''}" onclick="_paData.has_gym=true;paUpdateChoices()">Yes</div>
+            <div class="pa-choice${_paData.has_gym === false ? ' selected' : ''}" onclick="_paData.has_gym=false;paUpdateChoices()">No</div>
           </div>
         </div>
 
         <div class="pa-question">
           <div class="pa-question-text">Do you have a measuring tape?</div>
           <div class="pa-choices">
-            <div class="pa-choice${_paData.has_tape === true ? ' selected' : ''}" onclick="_paData.has_tape=true;renderPhysicalAssessment()">Yes</div>
-            <div class="pa-choice${_paData.has_tape === false ? ' selected' : ''}" onclick="_paData.has_tape=false;renderPhysicalAssessment()">No</div>
+            <div class="pa-choice${_paData.has_tape === true ? ' selected' : ''}" onclick="_paData.has_tape=true;paUpdateChoices()">Yes</div>
+            <div class="pa-choice${_paData.has_tape === false ? ' selected' : ''}" onclick="_paData.has_tape=false;paUpdateChoices()">No</div>
           </div>
         </div>
 
@@ -1083,6 +1083,24 @@ function renderPhysicalAssessment() {
       renderBodyweightBaseline();
     }
   }
+}
+
+function paUpdateChoices() {
+  // Update selected states without re-rendering the whole page
+  const choices = document.querySelectorAll('.pa-question');
+  if (choices[0]) {
+    const gymBtns = choices[0].querySelectorAll('.pa-choice');
+    gymBtns[0].classList.toggle('selected', _paData.has_gym === true);
+    gymBtns[1].classList.toggle('selected', _paData.has_gym === false);
+  }
+  if (choices[1]) {
+    const tapeBtns = choices[1].querySelectorAll('.pa-choice');
+    tapeBtns[0].classList.toggle('selected', _paData.has_tape === true);
+    tapeBtns[1].classList.toggle('selected', _paData.has_tape === false);
+  }
+  // Enable/disable next button
+  const nextBtn = document.querySelector('.pa-question ~ .btn-primary, .baseline-card > .btn-primary');
+  if (nextBtn) nextBtn.disabled = (_paData.has_gym === null || _paData.has_tape === null);
 }
 
 function paNextFromQuestions() {
