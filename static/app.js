@@ -1617,9 +1617,9 @@ async function fetchIntakeWithPoll(url, options) {
     const jobId = submitData.job_id;
     if (!jobId) throw new Error('No job_id returned');
 
-    const maxAttempts = 60; // 60 * 2s = 2 minutes max
+    const maxAttempts = 120; // 120 * 500ms = 1 minute max
     for (let i = 0; i < maxAttempts; i++) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 500));
         try {
             const pollRes = await fetch('/api/psych-intake/result/' + jobId);
             const pollData = await pollRes.json();
