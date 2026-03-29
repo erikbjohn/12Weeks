@@ -1168,6 +1168,29 @@ function renderMarkdown(text) {
   return html;
 }
 
+// ─── FETCH WITH TIMEOUT + RETRY ───────────────────────────────────────────
+async function fetchWithRetry(url, options, timeoutMs, retries) {
+  timeoutMs = timeoutMs || 30000;
+  retries = retries || 2;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return await res.json();
+    } catch (e) {
+      if (attempt < retries - 1) {
+        console.warn('Fetch attempt ' + (attempt+1) + ' failed, retrying...', e.message);
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        throw e;
+      }
+    }
+  }
+}
+
 // ─── PSYCHOLOGICAL INTAKE CHAT ─────────────────────────────────────────────
 let _psychMessages = [];
 let _psychCompleted = false;
@@ -1234,12 +1257,11 @@ async function startPsychConversation() {
   // Start fresh - send empty message to get opening question
   showPsychTyping();
   try {
-    const res = await fetch('/api/psych-intake/message', {
+    const data = await fetchWithRetry('/api/psych-intake/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: '' })
-    });
-    const data = await res.json();
+    }, 45000, 3);
     hidePsychTyping();
     if (data.response) {
       _psychMessages.push({ role: 'coach', content: data.response });
@@ -1296,13 +1318,11 @@ async function sendPsychMessage() {
 
   showPsychTyping();
   try {
-    const res = await fetch('/api/psych-intake/message', {
+    const data = await fetchWithRetry('/api/psych-intake/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
-    });
-    if (!res.ok) throw new Error('Server returned ' + res.status);
-    const data = await res.json();
+    }, 45000, 2);
     hidePsychTyping();
     if (data.locked) {
       showPsychLockedState(data.locked_until);
