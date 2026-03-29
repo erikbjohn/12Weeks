@@ -159,6 +159,12 @@ class PhysicalAssessment(db.Model):
     height_inches = db.Column(db.Float, nullable=True)
     bodyweight_lbs = db.Column(db.Float, nullable=True)
     waist_inches = db.Column(db.Float, nullable=True)
+    stomach_inches = db.Column(db.Float, nullable=True)
+    chest_inches = db.Column(db.Float, nullable=True)
+    bicep_inches = db.Column(db.Float, nullable=True)
+    thigh_inches = db.Column(db.Float, nullable=True)
+    hips_inches = db.Column(db.Float, nullable=True)
+    neck_inches = db.Column(db.Float, nullable=True)
     # Bodyweight assessment (for no-gym users)
     pushup_count = db.Column(db.Integer, nullable=True)  # full pushups
     pushup_from_knees = db.Column(db.Boolean, default=False)

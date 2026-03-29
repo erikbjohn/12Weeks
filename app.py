@@ -1843,6 +1843,18 @@ def api_physical_assessment_save():
             bm.waist_inches = data["waist"]
         else:
             db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"]))
+    if "stomach" in data:
+        pa.stomach_inches = data["stomach"]
+    if "chest" in data:
+        pa.chest_inches = data["chest"]
+    if "bicep" in data:
+        pa.bicep_inches = data["bicep"]
+    if "thigh" in data:
+        pa.thigh_inches = data["thigh"]
+    if "hips" in data:
+        pa.hips_inches = data["hips"]
+    if "neck" in data:
+        pa.neck_inches = data["neck"]
     if "pushup_count" in data:
         pa.pushup_count = data["pushup_count"]
     if "pushup_from_knees" in data:

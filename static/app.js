@@ -1009,7 +1009,7 @@ function constraintScheduleNext() {
 
 function showPhysicalAssessment() {
   _paStep = 0;
-  _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null };
+  _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null, stomach: null, chest: null, bicep: null, thigh: null, hips: null, neck: null };
   renderPhysicalAssessment();
 }
 
@@ -1047,15 +1047,42 @@ function renderPhysicalAssessment() {
 
   if (_paStep === 1) {
     // Step 2: Measurements
-    const waistRow = _paData.has_tape ? `<div class="pa-measure-row">
-          <label>Waist (inches)</label>
-          <input type="number" inputmode="decimal" id="pa-waist" placeholder="e.g. 34" step="0.1" min="15" max="80" value="${_paData.waist || ''}">
+    const tapeRows = _paData.has_tape ? `
+        <div class="pa-measure-section-label">Tape Measurements</div>
+        <div class="pa-measure-hint">Measure relaxed, standing straight, tape flat against skin. Don't suck in.</div>
+        <div class="pa-measure-row">
+          <label>Waist — at navel (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-waist" placeholder="e.g. 34" step="0.25" min="15" max="80" value="${_paData.waist || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Stomach — around belly button (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-stomach" placeholder="e.g. 36" step="0.25" min="15" max="80" value="${_paData.stomach || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Chest — at nipple line, arms down (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-chest" placeholder="e.g. 42" step="0.25" min="20" max="70" value="${_paData.chest || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Bicep — flexed, widest point, right arm (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-bicep" placeholder="e.g. 14" step="0.25" min="6" max="30" value="${_paData.bicep || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Thigh — widest point, right leg (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-thigh" placeholder="e.g. 24" step="0.25" min="10" max="45" value="${_paData.thigh || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Hips — widest point around glutes (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-hips" placeholder="e.g. 40" step="0.25" min="20" max="70" value="${_paData.hips || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Neck — around Adam's apple (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-neck" placeholder="e.g. 16" step="0.25" min="8" max="30" value="${_paData.neck || ''}">
         </div>` : '';
 
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card">
         <h2>Body Measurements</h2>
-        <div class="baseline-desc" style="margin-bottom:1.5rem">Let's get your starting numbers.</div>
+        <div class="baseline-desc" style="margin-bottom:1rem">Let's get your starting numbers. These are your Day 1 benchmarks.</div>
 
         <div class="pa-measure-row">
           <label>Body Weight (lbs)</label>
@@ -1063,9 +1090,9 @@ function renderPhysicalAssessment() {
         </div>
         <div class="pa-measure-row">
           <label>Height (inches)</label>
-          <input type="number" inputmode="decimal" id="pa-height" placeholder="e.g. 70" step="0.1" min="48" max="96" value="${_paData.height || ''}">
+          <input type="number" inputmode="decimal" id="pa-height" placeholder="e.g. 70 (5'10 = 70)" step="0.1" min="48" max="96" value="${_paData.height || ''}">
         </div>
-        ${waistRow}
+        ${tapeRows}
 
         <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromMeasurements()">Next</button>
       </div>
@@ -1112,20 +1139,29 @@ function paNextFromQuestions() {
 }
 
 async function paNextFromMeasurements() {
-  const weightVal = parseFloat(document.getElementById('pa-weight').value);
-  const heightVal = parseFloat(document.getElementById('pa-height').value);
-  const waistEl = document.getElementById('pa-waist');
-  const waistVal = waistEl ? parseFloat(waistEl.value) : null;
+  const getVal = (id) => { const el = document.getElementById(id); return el ? parseFloat(el.value) || null : null; };
 
-  _paData.weight = weightVal || null;
-  _paData.height = heightVal || null;
-  _paData.waist = waistVal || null;
+  _paData.weight = getVal('pa-weight');
+  _paData.height = getVal('pa-height');
+  _paData.waist = getVal('pa-waist');
+  _paData.stomach = getVal('pa-stomach');
+  _paData.chest = getVal('pa-chest');
+  _paData.bicep = getVal('pa-bicep');
+  _paData.thigh = getVal('pa-thigh');
+  _paData.hips = getVal('pa-hips');
+  _paData.neck = getVal('pa-neck');
 
   // Save measurements
   const payload = {};
   if (_paData.weight) payload.bodyweight = _paData.weight;
   if (_paData.height) payload.height = _paData.height;
   if (_paData.waist) payload.waist = _paData.waist;
+  if (_paData.stomach) payload.stomach = _paData.stomach;
+  if (_paData.chest) payload.chest = _paData.chest;
+  if (_paData.bicep) payload.bicep = _paData.bicep;
+  if (_paData.thigh) payload.thigh = _paData.thigh;
+  if (_paData.hips) payload.hips = _paData.hips;
+  if (_paData.neck) payload.neck = _paData.neck;
   apiPost('/api/physical-assessment', payload);
 
   // Also save body weight to bodyweight tracker
