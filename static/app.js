@@ -4623,21 +4623,28 @@ function toggleSupplement(name) {
 function renderWarmupSection(dayData) {
   if (!dayData.warmup) return '';
   const wu = dayData.warmup;
-  const firstStep = wu.steps && wu.steps.length > 0 ? wu.steps[0].name : 'Warm-Up';
   return `<div class="detail-section warmup-section">
     <button class="warmup-toggle open" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
       <h3 style="margin:0">Warm-Up${wu.time ? ' - ' + wu.time : ''}</h3>
       <span class="warmup-arrow">\u25BC</span>
     </button>
     <div class="warmup-body visible" id="warmup-body">
-      <button class="btn btn-primary warmup-timer-btn" onclick="startWarmupTimer()">Start Warm-Up</button>
-      ${(wu.steps || []).map((step, i) => { const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i]; return `<div class="warmup-step">
+      ${(wu.steps || []).map((step, i) => {
+        const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i];
+        const hasDuration = !!step.duration;
+        return `<div class="warmup-step" id="wu-step-${i}">
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
-        <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
-        ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
-        ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
-      </div>`; }).join('')}
+        <div class="wu-step-content">
+          <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
+          ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
+        </div>
+        ${hasDuration && !isWuDone ? `<button class="wu-start-btn" onclick="startWuStepTimer(${i},'${step.duration.replace(/'/g, "\\'")}')" id="wu-start-${i}">${step.duration}</button>` : ''}
+        ${hasDuration && isWuDone ? `<span class="warmup-step-duration" style="opacity:0.5">${step.duration}</span>` : ''}
+        ${!hasDuration ? '' : ''}
+        <div class="wu-timer" id="wu-timer-${i}"></div>
+      </div>`;
+      }).join('')}
     </div>
   </div>`;
 }
@@ -4648,6 +4655,68 @@ function toggleWarmup(week, dayIdx, stepIdx, btn) {
   btn.classList.toggle('done');
   btn.innerHTML = _warmupCache[key] ? '&#10003;' : '';
   apiPost('/api/warmup-completions', { week, day_idx: dayIdx, step_idx: stepIdx });
+  // Stop timer for this step if running
+  if (_warmupCache[key] && warmupTimerInterval) {
+    clearInterval(warmupTimerInterval);
+    warmupTimerInterval = null;
+    const timerEl = document.getElementById('wu-timer-' + stepIdx);
+    if (timerEl) timerEl.innerHTML = '';
+  }
+  // Hide the start button for completed steps
+  const startBtn = document.getElementById('wu-start-' + stepIdx);
+  if (startBtn && _warmupCache[key]) {
+    startBtn.style.display = 'none';
+  }
+}
+
+function startWuStepTimer(stepIdx, durationStr) {
+  // Stop any existing timer
+  if (warmupTimerInterval) clearInterval(warmupTimerInterval);
+
+  const timerEl = document.getElementById('wu-timer-' + stepIdx);
+  const startBtn = document.getElementById('wu-start-' + stepIdx);
+  if (!timerEl) return;
+
+  // Parse duration
+  let seconds = 30;
+  const m = durationStr.match(/(\d+)/);
+  if (m) {
+    seconds = parseInt(m[1]);
+    if (durationStr.includes('min')) seconds *= 60;
+  }
+
+  // Hide start button, show timer
+  if (startBtn) startBtn.style.display = 'none';
+
+  let remaining = seconds;
+  timerEl.innerHTML = `<span class="wu-countdown">${formatWuTimer(remaining)}</span>`;
+
+  warmupTimerInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(warmupTimerInterval);
+      warmupTimerInterval = null;
+      timerEl.innerHTML = `<span class="wu-countdown wu-done">DONE</span>`;
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      // Auto-check this step
+      const checkBtn = document.querySelector(`#wu-step-${stepIdx} .wu-check`);
+      if (checkBtn && !checkBtn.classList.contains('done')) {
+        toggleWarmup(currentWeek, currentDay, stepIdx, checkBtn);
+      }
+      setTimeout(() => { timerEl.innerHTML = ''; }, 2000);
+    } else {
+      timerEl.innerHTML = `<span class="wu-countdown">${formatWuTimer(remaining)}</span>`;
+    }
+  }, 1000);
+}
+
+function formatWuTimer(sec) {
+  if (sec >= 60) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${sec}s`;
 }
 
 function renderPostWorkoutCoach() {
@@ -4800,57 +4869,7 @@ async function saveRunLog() {
   }
 }
 
-function startWarmupTimer() {
-  const weekData = workoutData[String(currentWeek)];
-  if (!weekData || currentDay === null) return;
-  const dayData = weekData.days[currentDay];
-  if (!dayData || !dayData.warmup || !dayData.warmup.steps) return;
-
-  const steps = dayData.warmup.steps;
-  let stepIdx = 0;
-  let secondsLeft = parseDuration(steps[0].duration);
-
-  function parseDuration(dur) {
-    if (!dur) return 30;
-    const m = dur.match(/(\d+)/);
-    if (!m) return 30;
-    const num = parseInt(m[1]);
-    if (dur.includes('min')) return num * 60;
-    return num;
-  }
-
-  function updateDisplay() {
-    const btn = document.querySelector('.warmup-timer-btn');
-    if (!btn) { clearInterval(warmupTimerInterval); return; }
-    if (stepIdx >= steps.length) {
-      btn.textContent = 'Done!';
-      btn.disabled = true;
-      clearInterval(warmupTimerInterval);
-      return;
-    }
-    const mins = Math.floor(secondsLeft / 60);
-    const secs = secondsLeft % 60;
-    btn.textContent = `${steps[stepIdx].name} - ${mins}:${secs.toString().padStart(2, '0')}`;
-  }
-
-  if (warmupTimerInterval) clearInterval(warmupTimerInterval);
-  updateDisplay();
-  warmupTimerInterval = setInterval(() => {
-    secondsLeft--;
-    if (secondsLeft < 0) {
-      // Auto-check the completed step
-      const checkBtns = document.querySelectorAll('.wu-check');
-      if (checkBtns[stepIdx] && !checkBtns[stepIdx].classList.contains('done')) {
-        toggleWarmup(currentWeek, currentDay, stepIdx, checkBtns[stepIdx]);
-      }
-      stepIdx++;
-      if (stepIdx < steps.length) {
-        secondsLeft = parseDuration(steps[stepIdx].duration);
-      }
-    }
-    updateDisplay();
-  }, 1000);
-}
+// startWarmupTimer removed — each warm-up step now has its own Start button
 
 // ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
 function renderCheckinSection(dayData, dayIdx) {
