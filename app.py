@@ -497,6 +497,17 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/restart-plan")
+@login_required
+def restart_plan():
+    """Reset plan_accepted and redirect to index with action param."""
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if goal:
+        goal.plan_accepted = False
+        db.session.commit()
+    return redirect("/?action=restart-plan")
+
+
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
 
 @app.route("/api/workouts")

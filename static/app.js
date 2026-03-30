@@ -2715,9 +2715,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Always check if onboarding is truly complete
-    const onboardingDone = await checkOnboardingComplete();
-    if (!onboardingDone) {
-      await resumeOnboarding();
+    // Check for ?action=restart-plan query param
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('action') === 'restart-plan') {
+      // Clear the query param from URL
+      window.history.replaceState({}, '', '/');
+      showFinalReveal();
+    } else {
+      const onboardingDone = await checkOnboardingComplete();
+      if (!onboardingDone) {
+        await resumeOnboarding();
+      }
     }
 
     // Travel banner
