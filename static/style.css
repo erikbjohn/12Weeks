@@ -3447,6 +3447,15 @@ footer {
 .plan-progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 1.5s ease; }
 .plan-progress-step { font-size: 14px; color: var(--muted); font-family: 'DM Mono', monospace; min-height: 1.5em; transition: opacity 0.3s; }
 
+/* ─── FORECAST CARDS ─── */
+.forecast-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
+.forecast-label { font-family: 'DM Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 6px; }
+.forecast-row { display: flex; align-items: center; gap: 10px; }
+.forecast-now { font-size: 1.1rem; font-weight: 700; color: var(--muted); }
+.forecast-arrow { color: var(--dim); font-size: 1.2rem; }
+.forecast-target { font-size: 1.3rem; font-weight: 800; color: var(--accent); }
+.forecast-detail { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 4px; }
+
 /* ─── EQUIPMENT SELECTION ─── */
 .equip-confirm-list { margin: 0.5rem 0; }
 .equip-confirm-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text); }

@@ -1914,30 +1914,89 @@ function showRevealProjection() {
     const el = document.getElementById('baseline-overlay');
     const goalData = window._goalData;
 
-    if (!goalData || !goalData.weight_projection) {
+    if (!goalData) {
         showRevealPlan();
         return;
     }
 
-    const proj = goalData.weight_projection;
+    // Weight projection
+    const proj = goalData.weight_projection || [];
     const w4 = proj.find(p => p.week === 4);
     const w8 = proj.find(p => p.week === 8);
     const w12 = proj.find(p => p.week === 12);
 
-    el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card" style="text-align:center">
-            <h2>If You Follow This Plan</h2>
-            <div class="projection-milestones">
-                <div class="proj-milestone"><span class="proj-week">Week 4</span><span class="proj-weight">${w4 ? Math.round(w4.projected) : '?'} lbs</span></div>
-                <div class="proj-milestone"><span class="proj-week">Week 8</span><span class="proj-weight">${w8 ? Math.round(w8.projected) : '?'} lbs</span></div>
-                <div class="proj-milestone highlight"><span class="proj-week">Week 12</span><span class="proj-weight">${w12 ? Math.round(w12.projected) : '?'} lbs</span></div>
+    let weightHtml = '';
+    if (proj.length > 0) {
+        weightHtml = `<div class="forecast-card">
+            <div class="forecast-label">Body Weight</div>
+            <div class="forecast-row">
+                <span class="forecast-now">${Math.round(proj[0].projected)} lbs</span>
+                <span class="forecast-arrow">→</span>
+                <span class="forecast-target">${w12 ? Math.round(w12.projected) : '?'} lbs</span>
             </div>
-            <canvas id="projection-chart" width="320" height="180" style="margin:1rem auto;display:block"></canvas>
+            <div class="forecast-detail">Wk 4: ${w4 ? Math.round(w4.projected) : '?'} · Wk 8: ${w8 ? Math.round(w8.projected) : '?'} · Wk 12: ${w12 ? Math.round(w12.projected) : '?'}</div>
+        </div>`;
+    }
+
+    // 1RM projections from baseline data
+    // Phase 1 (wk 1-4): volume → ~10-15% 1RM gain for beginners
+    // Phase 2 (wk 5-8): strength 5x5 → ~15-20% gain
+    // Phase 3 (wk 9-12): power → ~5-10% gain
+    const weights = _weightsCache || {};
+    const keyLifts = [
+        { name: 'Barbell Bench Press', short: 'Bench' },
+        { name: 'Barbell Back Squat', short: 'Squat' },
+        { name: 'Conventional Deadlift', short: 'Deadlift' },
+        { name: 'Barbell Bent-Over Row', short: 'Row' },
+        { name: 'DB Overhead Press', short: 'OHP' },
+    ];
+
+    let liftRows = '';
+    for (const lift of keyLifts) {
+        const data = weights[lift.name];
+        if (!data || !data.history || data.history.length === 0) continue;
+
+        const last = data.history[data.history.length - 1];
+        const setsLabel = last.reps || '';
+        let current1RM = 0;
+
+        // Parse baseline reps to compute 1RM
+        const baselineMatch = String(setsLabel).match(/(\d+)lb\s*x\s*(\d+)/);
+        if (baselineMatch) {
+            const testWt = parseInt(baselineMatch[1]);
+            const reps = parseInt(baselineMatch[2]);
+            current1RM = Math.round(testWt * (1 + reps / 30));
+        } else {
+            current1RM = Math.round(data.current * 1.33); // rough estimate from working weight
+        }
+
+        if (current1RM <= 0) continue;
+
+        // Project 1RM gains: ~30-40% total over 12 weeks for intermediate
+        const wk4_1rm = Math.round(current1RM * 1.12);
+        const wk8_1rm = Math.round(current1RM * 1.25);
+        const wk12_1rm = Math.round(current1RM * 1.35);
+
+        liftRows += `<div class="forecast-card">
+            <div class="forecast-label">${lift.short} (Est. 1RM)</div>
+            <div class="forecast-row">
+                <span class="forecast-now">${current1RM} lbs</span>
+                <span class="forecast-arrow">→</span>
+                <span class="forecast-target">${wk12_1rm} lbs</span>
+            </div>
+            <div class="forecast-detail">Wk 4: ${wk4_1rm} · Wk 8: ${wk8_1rm} · Wk 12: ${wk12_1rm}</div>
+        </div>`;
+    }
+
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card" style="text-align:left">
+            <h2 style="text-align:center;margin-bottom:1rem">Your 12-Week Forecast</h2>
+            <div class="baseline-desc" style="text-align:center;margin-bottom:1.5rem">Based on your baseline and the training plan</div>
+            ${weightHtml}
+            ${liftRows}
             <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showRevealPlan()">See Your Training Plan →</button>
         </div>
     </div>`;
-
-    setTimeout(() => drawProjectionChart(proj), 100);
 }
 
 function showRevealPlan() {
