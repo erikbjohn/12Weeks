@@ -4623,12 +4623,14 @@ function toggleSupplement(name) {
 function renderWarmupSection(dayData) {
   if (!dayData.warmup) return '';
   const wu = dayData.warmup;
+  const firstStep = wu.steps && wu.steps.length > 0 ? wu.steps[0].name : 'Warm-Up';
   return `<div class="detail-section warmup-section">
     <button class="warmup-toggle open" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
       <h3 style="margin:0">Warm-Up${wu.time ? ' - ' + wu.time : ''}</h3>
       <span class="warmup-arrow">\u25BC</span>
     </button>
     <div class="warmup-body visible" id="warmup-body">
+      <button class="btn btn-primary warmup-timer-btn" onclick="startWarmupTimer()">Start Warm-Up</button>
       ${(wu.steps || []).map((step, i) => { const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i]; return `<div class="warmup-step">
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
@@ -4636,7 +4638,6 @@ function renderWarmupSection(dayData) {
         ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
         ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
       </div>`; }).join('')}
-      <button class="btn btn-primary warmup-timer-btn" onclick="startWarmupTimer()">Start Warm-Up</button>
     </div>
   </div>`;
 }
@@ -4837,6 +4838,11 @@ function startWarmupTimer() {
   warmupTimerInterval = setInterval(() => {
     secondsLeft--;
     if (secondsLeft < 0) {
+      // Auto-check the completed step
+      const checkBtns = document.querySelectorAll('.wu-check');
+      if (checkBtns[stepIdx] && !checkBtns[stepIdx].classList.contains('done')) {
+        toggleWarmup(currentWeek, currentDay, stepIdx, checkBtns[stepIdx]);
+      }
       stepIdx++;
       if (stepIdx < steps.length) {
         secondsLeft = parseDuration(steps[stepIdx].duration);
@@ -5712,10 +5718,9 @@ async function renderDetail() {
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
     const exData = getExerciseData(displayName);
-    const hasRPE = exData && exData.history && exData.history.length > 0 &&
-      exData.history[exData.history.length - 1].week === currentWeek &&
-      exData.history[exData.history.length - 1].day === currentDay;
-    const lastRPE = hasRPE ? exData.history[exData.history.length - 1].rpe : null;
+    const lastEntry = exData && exData.history && exData.history.length > 0 ? exData.history[exData.history.length - 1] : null;
+    const hasRPE = lastEntry && lastEntry.week === currentWeek && lastEntry.day === currentDay && lastEntry.rpe;
+    const lastRPE = hasRPE ? lastEntry.rpe : null;
 
     let rpeHtml = '';
     if (done && !hasRPE) {
@@ -5730,7 +5735,7 @@ async function renderDetail() {
       const rpeCls = { too_easy: 'rpe-easy', just_right: 'rpe-right', too_hard: 'rpe-hard' };
       rpeHtml = `<div class="rpe-feedback">
         <span class="rpe-label">Felt:</span>
-        <button class="rpe-btn ${rpeCls[lastRPE] || 'rpe-right'} selected" disabled>${rpeLabels[lastRPE] || lastRPE}</button>
+        <button class="rpe-btn ${rpeCls[lastRPE] || 'rpe-right'} selected" disabled>${rpeLabels[lastRPE]}</button>
       </div>`;
     }
 
