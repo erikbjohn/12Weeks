@@ -78,15 +78,21 @@ async function replayQueuedPosts() {
 
   for (const item of all) {
     try {
-      await fetch(item.url, {
+      const res = await fetch(item.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: item.body,
+        credentials: 'same-origin',
       });
-      store.delete(item.id);
+      if (res.ok) {
+        store.delete(item.id);
+      } else if (res.status === 401) {
+        break; // Session expired, stop retrying until re-auth
+      } else {
+        break; // Server error, retry later
+      }
     } catch (e) {
-      // Will retry next sync
-      break;
+      break; // Network error, retry later
     }
   }
 }

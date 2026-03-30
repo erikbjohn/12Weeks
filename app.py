@@ -844,15 +844,8 @@ def api_bodyweight_record():
     if bw:
         bw.weight_lbs = data["weight"]
     else:
-        # log_date has a global unique constraint; check if another user owns it
-        existing = BodyWeight.query.filter_by(log_date=d).first()
-        if existing:
-            # Update in place (shouldn't happen in single-user, but handles constraint)
-            existing.weight_lbs = data["weight"]
-            existing.user_id = current_user.id
-        else:
-            bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
-            db.session.add(bw)
+        bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
+        db.session.add(bw)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -1301,6 +1294,11 @@ def api_psych_intake_message():
         intake.conversation = convo
         db.session.commit()
 
+        # Check for existing pending job — prevent duplicate threads
+        for jid, job in _intake_jobs.items():
+            if job.get("status") == "pending":
+                return jsonify({"job_id": jid, "status": "pending"})
+
         # Create a job and run Claude in a background thread
         job_id = str(uuid.uuid4())[:8]
         _intake_jobs[job_id] = {"status": "pending", "result": None}
@@ -1374,8 +1372,6 @@ def api_psych_intake_result(job_id):
         report = generate_intake_report(convo, lifting_data=lifting_data)
         if report:
             intake.report = report
-        else:
-            intake.completed = False
 
     db.session.commit()
 
@@ -2593,10 +2589,7 @@ def api_physical_assessment_save():
         if bw:
             bw.weight_lbs = data["bodyweight"]
         else:
-            # log_date has a global unique constraint, so another user may own this date
-            existing_bw = BodyWeight.query.filter_by(log_date=d).first()
-            if not existing_bw:
-                db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
+            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
     if "waist" in data:
         pa.waist_inches = data["waist"]
         d = date.today()
@@ -2604,9 +2597,7 @@ def api_physical_assessment_save():
         if bm:
             bm.waist_inches = data["waist"]
         else:
-            existing_bm = BodyMeasurement.query.filter_by(log_date=d).first()
-            if not existing_bm:
-                db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
+            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
     if "stomach" in data:
         pa.stomach_inches = data["stomach"]
     if "chest" in data:

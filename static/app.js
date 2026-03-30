@@ -2451,6 +2451,10 @@ async function sendPsychMessage() {
       renderPsychMessages();
       updatePsychProgress();
     }
+    if (data.report_error) {
+      _psychMessages.push({ role: 'coach', content: 'Intake complete, but report generation failed. You can continue — it will retry automatically.' });
+      renderPsychMessages();
+    }
     if (data.completed) {
       _psychCompleted = true;
       showConstraints();

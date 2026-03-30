@@ -376,5 +376,9 @@
             }
         }
     </script>
+    <script>
+        // Clear any cached app data on login page
+        try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}
+    </script>
 </body>
 </html>
