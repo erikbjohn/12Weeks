@@ -3808,7 +3808,7 @@ async function showSundayFlow() {
         for (const cat of shopData.categories) {
           shopHtml += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
           for (const item of cat.items) {
-            shopHtml += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total} (${item.times_used}x)</span></div>`;
+            shopHtml += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total}</span></div>`;
           }
           shopHtml += `</div>`;
         }

@@ -2531,65 +2531,111 @@ def api_exercise_alternatives(exercise_name):
 @app.route("/api/shopping-list")
 @login_required
 def api_shopping_list():
-    """Generate a weekly shopping list from the meal plans with total amounts."""
+    """Generate a weekly grocery list — raw ingredients you buy at the store."""
     import re
     s = _get_state()
     week = s.current_week
     workouts = get_workouts(week)
 
-    # Aggregate all foods across the week with parsed amounts
-    grocery = {}  # item → {"unit": str, "total_amount": float, "count": int, "category": str}
+    # Map recipe names → raw grocery item + unit normalization
+    INGREDIENT_MAP = {
+        # Eggs — all forms are just eggs
+        "Eggs, scrambled": ("Eggs", "large"),
+        "Eggs, omelette": ("Eggs", "large"),
+        "Hard boiled egg": ("Eggs", "large"),
+        "Hard boiled eggs": ("Eggs", "large"),
+        # Chicken — all forms are just chicken breast
+        "Grilled chicken breast": ("Chicken breast", "oz"),
+        "Baked chicken breast": ("Chicken breast", "oz"),
+        # Greens — normalize
+        "Mixed greens": ("Mixed greens", "cups"),
+        "Side salad (mixed greens)": ("Mixed greens", "cups"),
+        "Spinach side salad": ("Spinach", "cups"),
+        "Spinach": ("Spinach", "cups"),
+        "Spinach (in omelette)": ("Spinach", "cups"),
+        # Broccoli
+        "Steamed broccoli": ("Broccoli", "cups"),
+        # Asparagus
+        "Steamed asparagus": ("Asparagus", "cups"),
+        # Oil dressings — all just olive oil
+        "Olive oil + lemon dressing": ("Olive oil", "tbsp"),
+        "Olive oil dressing": ("Olive oil", "tbsp"),
+        # Rice
+        "White rice": ("White rice", "cups cooked"),
+        # Whey
+        "Whey protein shake": ("Whey protein powder", "scoops"),
+        # Coffee
+        "Black coffee": ("Coffee", "brew"),
+        # Water / electrolytes — skip, not a grocery item
+        "Water": (None, None),
+        "Electrolytes (salt, potassium)": ("Electrolytes", "serving"),
+    }
 
-    # Simple category detection
-    proteins = {"chicken", "turkey", "beef", "salmon", "tilapia", "shrimp", "tuna", "egg",
-                "yogurt", "cottage", "tofu", "tempeh", "whey", "protein", "jerky", "steak"}
-    carbs = {"rice", "oat", "potato", "quinoa", "bread", "pasta", "bean", "lentil",
-             "banana", "blueberr", "apple", "orange", "toast"}
-    veggies = {"broccoli", "spinach", "kale", "asparagus", "green bean", "pepper",
-               "zucchini", "cauliflower", "greens", "tomato", "salad", "lettuce", "salsa"}
-    fats = {"olive oil", "coconut oil", "avocado", "almond", "walnut", "peanut",
-            "chia", "flax", "cheese", "butter"}
-
-    def categorize(name):
-        nl = name.lower()
-        for p in proteins:
-            if p in nl:
-                return "Proteins"
-        for v in veggies:
-            if v in nl:
-                return "Produce"
-        for c in carbs:
-            if c in nl:
-                return "Carbs & Grains"
-        for f in fats:
-            if f in nl:
-                return "Fats & Oils"
-        return "Other"
+    CATEGORY_MAP = {
+        "Chicken breast": "Proteins",
+        "Eggs": "Proteins",
+        "Greek yogurt": "Proteins",
+        "Whey protein powder": "Proteins",
+        "Cheddar cheese": "Proteins",
+        "Salmon fillet": "Proteins",
+        "Mixed greens": "Produce",
+        "Spinach": "Produce",
+        "Broccoli": "Produce",
+        "Asparagus": "Produce",
+        "Cherry tomatoes": "Produce",
+        "Avocado": "Produce",
+        "Banana": "Produce",
+        "Blueberries": "Produce",
+        "Sweet potato": "Produce",
+        "Salsa": "Produce",
+        "Lemon": "Produce",
+        "White rice": "Pantry",
+        "Quinoa": "Pantry",
+        "Olive oil": "Pantry",
+        "Almonds": "Pantry",
+        "Coffee": "Pantry",
+        "Whey protein powder": "Pantry",
+        "Electrolytes": "Pantry",
+    }
 
     def parse_amount(portion):
-        """Parse portion string like '6 oz', '1 cup', '1/2', '1 scoop' into (amount, unit)."""
         if not portion:
-            return (1, "serving")
+            return 1.0
         p = portion.strip().lower()
-        # Handle fractions
         p = p.replace("½", "0.5").replace("¼", "0.25").replace("¾", "0.75")
-        m = re.match(r'^(\d+(?:\.\d+)?(?:/\d+)?)\s*(.*)', p)
+        # Handle "as needed", "unlimited"
+        if "needed" in p or "unlimited" in p:
+            return 0
+        # Handle "1 oz (23 nuts)" → extract the number
+        m = re.match(r'^(\d+(?:\.\d+)?(?:/\d+)?)', p)
         if m:
             num_str = m.group(1)
-            unit = m.group(2).strip() or "serving"
             if '/' in num_str:
                 parts = num_str.split('/')
                 try:
-                    num = float(parts[0]) / float(parts[1])
+                    return float(parts[0]) / float(parts[1])
                 except (ValueError, ZeroDivisionError):
-                    num = 1
-            else:
-                try:
-                    num = float(num_str)
-                except ValueError:
-                    num = 1
-            return (num, unit)
-        return (1, portion)
+                    return 1.0
+            return float(num_str)
+        return 1.0
+
+    def normalize_unit(portion):
+        """Extract just the unit from a portion string."""
+        if not portion:
+            return "serving"
+        p = portion.strip().lower()
+        p = p.replace("½", "0.5").replace("¼", "0.25").replace("¾", "0.75")
+        m = re.match(r'^[\d./]+\s*(.*)', p)
+        if m:
+            unit = m.group(1).strip()
+            # Clean up units
+            unit = re.sub(r'\(.*\)', '', unit).strip()  # remove parentheticals
+            unit = unit.rstrip('s') if unit.endswith('s') and unit not in ('cups',) else unit
+            return unit or "serving"
+        return "serving"
+
+    # Aggregate
+    grocery = {}  # normalized_name → {unit, total, category}
 
     for day_data in workouts:
         mp = day_data.get("mealPlan")
@@ -2597,43 +2643,67 @@ def api_shopping_list():
             continue
         for meal in mp["meals"]:
             for food in meal.get("foods", []):
-                item = food["item"]
+                raw_name = food["item"]
                 portion = food.get("portion", "")
-                amount, unit = parse_amount(portion)
 
-                if item in grocery:
-                    if grocery[item]["unit"] == unit:
-                        grocery[item]["total_amount"] += amount
-                    grocery[item]["count"] += 1
+                # Normalize to raw ingredient
+                if raw_name in INGREDIENT_MAP:
+                    name, unit = INGREDIENT_MAP[raw_name]
+                    if name is None:
+                        continue  # skip water etc.
                 else:
-                    grocery[item] = {
-                        "unit": unit,
-                        "total_amount": amount,
-                        "count": 1,
-                        "category": categorize(item),
-                    }
+                    name = raw_name
+                    unit = normalize_unit(portion)
 
-    # Build categorized list
+                amount = parse_amount(portion)
+                if amount == 0:
+                    continue
+
+                if name in grocery:
+                    grocery[name]["total"] += amount
+                else:
+                    cat = CATEGORY_MAP.get(name, "Other")
+                    grocery[name] = {"unit": unit, "total": amount, "category": cat}
+
+    # Convert totals to shopping quantities
+    def to_shopping_qty(name, total, unit):
+        """Convert meal-plan units to store quantities."""
+        if name == "Chicken breast" and unit == "oz":
+            lbs = total / 16
+            if lbs >= 1:
+                return f"{lbs:.1f} lbs"
+            return f"{total:.0f} oz"
+        if name == "Eggs":
+            count = int(total)
+            dozens = count // 12
+            remainder = count % 12
+            if dozens >= 1 and remainder == 0:
+                return f"{dozens} dozen"
+            if dozens >= 1:
+                return f"{dozens} dozen + {remainder}"
+            return f"{count} eggs"
+        if unit == "cups cooked" and name == "White rice":
+            # ~1 cup dry = 3 cups cooked
+            dry_cups = total / 3
+            return f"{dry_cups:.1f} cups dry"
+        if unit == "cups cooked" and name == "Quinoa":
+            dry_cups = total / 2.5
+            return f"{dry_cups:.1f} cups dry"
+        # Default
+        if total == int(total):
+            return f"{int(total)} {unit}"
+        return f"{total:.1f} {unit}"
+
+    # Build categorized output
     categories = {}
     for name, info in sorted(grocery.items()):
         cat = info["category"]
         if cat not in categories:
             categories[cat] = []
-        total = info["total_amount"]
-        unit = info["unit"]
-        # Format nicely
-        if total == int(total):
-            total_str = str(int(total))
-        else:
-            total_str = f"{total:.1f}"
-        categories[cat].append({
-            "item": name,
-            "total": f"{total_str} {unit}",
-            "times_used": info["count"],
-        })
+        qty = to_shopping_qty(name, info["total"], info["unit"])
+        categories[cat].append({"item": name, "total": qty})
 
-    # Order categories
-    cat_order = ["Proteins", "Produce", "Carbs & Grains", "Fats & Oils", "Other"]
+    cat_order = ["Proteins", "Produce", "Pantry", "Other"]
     ordered = []
     for cat in cat_order:
         if cat in categories:
