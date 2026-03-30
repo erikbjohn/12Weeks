@@ -1009,7 +1009,7 @@ function constraintScheduleNext() {
 
 function showPhysicalAssessment() {
   _paStep = 0;
-  _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null, stomach: null, chest: null, bicep: null, thigh: null, hips: null, neck: null };
+  _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null, chest: null, bicep: null, thigh: null, hips: null, neck: null };
   renderPhysicalAssessment();
 }
 
@@ -1051,12 +1051,8 @@ function renderPhysicalAssessment() {
         <div class="pa-measure-section-label">Tape Measurements</div>
         <div class="pa-measure-hint">Measure relaxed, standing straight, tape flat against skin. Don't suck in.</div>
         <div class="pa-measure-row">
-          <label>Waist — at navel (inches)</label>
+          <label>Waist — narrowest point above hip bones (inches)</label>
           <input type="number" inputmode="decimal" id="pa-waist" placeholder="e.g. 34" step="0.25" min="15" max="80" value="${_paData.waist || ''}">
-        </div>
-        <div class="pa-measure-row">
-          <label>Stomach — around belly button (inches)</label>
-          <input type="number" inputmode="decimal" id="pa-stomach" placeholder="e.g. 36" step="0.25" min="15" max="80" value="${_paData.stomach || ''}">
         </div>
         <div class="pa-measure-row">
           <label>Chest — at nipple line, arms down (inches)</label>
@@ -1144,7 +1140,6 @@ async function paNextFromMeasurements() {
   _paData.weight = getVal('pa-weight');
   _paData.height = getVal('pa-height');
   _paData.waist = getVal('pa-waist');
-  _paData.stomach = getVal('pa-stomach');
   _paData.chest = getVal('pa-chest');
   _paData.bicep = getVal('pa-bicep');
   _paData.thigh = getVal('pa-thigh');
@@ -1156,7 +1151,6 @@ async function paNextFromMeasurements() {
   if (_paData.weight) payload.bodyweight = _paData.weight;
   if (_paData.height) payload.height = _paData.height;
   if (_paData.waist) payload.waist = _paData.waist;
-  if (_paData.stomach) payload.stomach = _paData.stomach;
   if (_paData.chest) payload.chest = _paData.chest;
   if (_paData.bicep) payload.bicep = _paData.bicep;
   if (_paData.thigh) payload.thigh = _paData.thigh;
