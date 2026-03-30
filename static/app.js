@@ -1858,13 +1858,12 @@ async function showFinalReveal() {
         }
     }, 2000);
 
-    // Step 2: Compute goal + generate profile in parallel
-    let goalData = window._goalData;
+    // Step 2: ALWAYS recompute goal + generate profile
+    let goalData = null;
     let profileText = null;
 
     try {
-        // Compute goal if not already done
-        if (!goalData) {
+        {
             const goalRes = await fetch('/api/goal/compute', { method: 'POST' });
             goalData = await goalRes.json();
             window._goalData = goalData;
