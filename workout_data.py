@@ -323,7 +323,7 @@ def get_meal_plan(meal_type):
 WARMUPS = {
     "upper": {
         "label": "Upper Body Warm-Up",
-        "time": "5 min",
+        "time": "10 min",
         "steps": [
             {"name": "Arm circles", "duration": "30s", "note": "15s forward, 15s backward"},
             {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps, light band"},
@@ -336,7 +336,7 @@ WARMUPS = {
     },
     "lower": {
         "label": "Lower Body Warm-Up",
-        "time": "5 min",
+        "time": "10 min",
         "steps": [
             {"name": "Bodyweight squats", "duration": "45s", "note": "15 reps, full depth"},
             {"name": "Leg swings (front-back)", "duration": "30s", "note": "10 each leg, hold something"},
@@ -349,7 +349,7 @@ WARMUPS = {
     },
     "full": {
         "label": "Full Body Warm-Up",
-        "time": "5 min",
+        "time": "10 min",
         "steps": [
             {"name": "Jumping jacks", "duration": "30s", "note": "Get the heart rate up"},
             {"name": "Arm circles + leg swings", "duration": "30s", "note": "Multitask"},
