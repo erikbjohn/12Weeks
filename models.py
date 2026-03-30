@@ -71,6 +71,30 @@ class ExerciseCompletion(db.Model):
     __table_args__ = (db.UniqueConstraint("week", "day_idx", "exercise_idx"),)
 
 
+class WarmupCompletion(db.Model):
+    __tablename__ = "warmup_completion"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    step_idx = db.Column(db.Integer, nullable=False)
+    done = db.Column(db.Boolean, default=False)
+
+
+class RunLog(db.Model):
+    __tablename__ = "run_log"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    log_date = db.Column(db.Date, default=date.today)
+    week = db.Column(db.Integer)
+    day_idx = db.Column(db.Integer)
+    distance_miles = db.Column(db.Float)
+    avg_hr = db.Column(db.Integer)
+    elevation_ft = db.Column(db.Integer)
+    duration_min = db.Column(db.Integer)
+    notes = db.Column(db.Text)
+
+
 class DayCompletion(db.Model):
     """Day-level completion."""
     __tablename__ = "day_completion"

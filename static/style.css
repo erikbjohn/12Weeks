@@ -389,6 +389,85 @@ header .subtitle {
 }
 
 /* ─── EXERCISE TABLE ─── */
+.exercise-block {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.exercise-block:last-child { border-bottom: none; }
+
+.exercise-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ex-last-weight {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+/* Per-set rows */
+.set-rows { display: flex; flex-direction: column; gap: 4px; }
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.set-row.set-done { opacity: 0.5; }
+
+.set-check {
+  width: 24px; height: 24px; min-width: 24px;
+  border: 1px solid var(--border2); border-radius: 5px;
+  background: var(--surface2); color: transparent;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 12px; flex-shrink: 0;
+  transition: all .15s;
+}
+.set-check.done {
+  background: var(--lift-bg); border-color: var(--lift-border);
+  color: var(--accent);
+}
+
+.set-label {
+  font-size: 13px; color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  min-width: 38px; flex-shrink: 0;
+}
+
+.set-wt, .set-reps {
+  width: 60px; flex-shrink: 0;
+}
+
+.set-x {
+  font-size: 14px; color: var(--muted);
+  font-family: 'DM Mono', monospace;
+}
+
+/* Rest timer */
+.rest-timer { display: none; text-align: center; padding: 8px 0; }
+.rest-countdown {
+  font-family: 'DM Mono', monospace;
+  font-size: 28px; font-weight: 700;
+  color: var(--accent);
+  animation: pulse-timer 1s infinite;
+}
+.rest-countdown.rest-done {
+  color: var(--lift); font-size: 32px;
+  animation: none;
+}
+@keyframes pulse-timer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Legacy — keep for any remaining uses */
 .exercise-row {
   display: grid;
   grid-template-columns: 28px 1fr auto;
@@ -398,12 +477,8 @@ header .subtitle {
   border-bottom: 1px solid var(--border);
   align-items: center;
 }
-
 .exercise-row:last-child { border-bottom: none; }
-
 .ex-check { grid-row: 1; grid-column: 1; }
-.ex-info { grid-row: 1; grid-column: 2; min-width: 0; }
-.ex-sets { grid-row: 1; grid-column: 3; }
 .weight-input-wrap { grid-row: 2; grid-column: 2 / 4; }
 .reps-input-wrap { grid-row: 3; grid-column: 2 / 4; }
 
@@ -3571,13 +3646,17 @@ footer {
   .ex-name { font-size: 16px !important; }
   .ex-sets { font-size: 15px !important; }
   .ex-note { font-size: 14px !important; }
-  .weight-input { width: 80px; font-size: 16px; padding: 8px; }
-  .reps-input { width: 80px; font-size: 16px; padding: 8px; }
+  .weight-input { width: 70px; font-size: 16px; padding: 8px; }
+  .reps-input { width: 70px; font-size: 16px; padding: 8px; }
   .weight-last { font-size: 13px; }
   .exercise-row { gap: 6px 8px; }
+  .set-label { font-size: 12px; min-width: 32px; }
+  .set-wt, .set-reps { width: 65px; }
+  .rest-countdown { font-size: 32px; }
 
   /* Bigger RPE buttons — tapped between sets while sweating */
-  .rpe-btn { padding: 10px 14px !important; font-size: 15px !important; min-height: 44px; }
+  .rpe-feedback { flex-wrap: wrap; }
+  .rpe-btn { padding: 8px 6px !important; font-size: 14px !important; min-height: 44px; flex: 1; text-align: center; }
 
   /* Coach inline */
   .coach-inline-text { font-size: 16px; }

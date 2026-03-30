@@ -27,7 +27,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    UserEquipment,
+    UserEquipment, WarmupCompletion, RunLog,
 )
 
 app = Flask(__name__)
@@ -634,14 +634,21 @@ def reset_onboarding():
 @app.route("/api/workouts")
 @login_required
 def api_workouts():
+    from equipment_swaps import auto_swap_workout
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    user_equipment = eq.available_equipment if eq else []
     all_weeks = {}
     for week in range(1, 13):
         phase = get_phase(week)
+        days = get_workouts(week)
+        for day in days:
+            if "exercises" in day:
+                day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
         all_weeks[str(week)] = {
             "week": week,
             "phase": phase,
             "phaseInfo": PHASES[phase],
-            "days": get_workouts(week),
+            "days": days,
         }
     return jsonify(all_weeks)
 
@@ -651,11 +658,18 @@ def api_workouts():
 def api_week(week):
     if week < 1 or week > 12:
         return jsonify({"error": "Week must be 1-12"}), 400
+    from equipment_swaps import auto_swap_workout
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    user_equipment = eq.available_equipment if eq else []
     phase = get_phase(week)
+    days = get_workouts(week)
+    for day in days:
+        if "exercises" in day:
+            day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
     return jsonify({
         "week": week, "phase": phase,
         "phaseInfo": PHASES[phase],
-        "days": get_workouts(week),
+        "days": days,
     })
 
 
@@ -2872,6 +2886,64 @@ def api_test_create_user():
     db.session.commit()
 
     return jsonify({"ok": True, "user_id": user.id})
+
+
+@app.route("/api/warmup-completions")
+@login_required
+def api_warmup_completions():
+    """Get all warm-up completions for current user."""
+    comps = WarmupCompletion.query.filter_by(user_id=current_user.id).all()
+    return jsonify({f"{c.week}_{c.day_idx}_{c.step_idx}": c.done for c in comps})
+
+
+@app.route("/api/warmup-completions", methods=["POST"])
+@login_required
+def api_warmup_toggle():
+    data = request.get_json()
+    w, d, s = data["week"], data["day_idx"], data["step_idx"]
+    wc = WarmupCompletion.query.filter_by(user_id=current_user.id, week=w, day_idx=d, step_idx=s).first()
+    if wc:
+        wc.done = not wc.done
+    else:
+        wc = WarmupCompletion(week=w, day_idx=d, step_idx=s, done=True, user_id=current_user.id)
+        db.session.add(wc)
+    db.session.commit()
+    return jsonify({"done": wc.done})
+
+
+@app.route("/api/run-log", methods=["POST"])
+@login_required
+def api_run_log():
+    data = request.get_json()
+    existing = RunLog.query.filter_by(
+        user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx")
+    ).first()
+    if existing:
+        existing.distance_miles = data.get("distance_miles")
+        existing.avg_hr = data.get("avg_hr")
+        existing.elevation_ft = data.get("elevation_ft")
+        existing.duration_min = data.get("duration_min")
+        existing.notes = data.get("notes")
+    else:
+        existing = RunLog(
+            user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx"),
+            distance_miles=data.get("distance_miles"), avg_hr=data.get("avg_hr"),
+            elevation_ft=data.get("elevation_ft"), duration_min=data.get("duration_min"),
+            notes=data.get("notes"), log_date=date.today(),
+        )
+        db.session.add(existing)
+    db.session.commit()
+    return jsonify({"ok": True, "id": existing.id})
+
+
+@app.route("/api/run-log")
+@login_required
+def api_run_logs():
+    logs = RunLog.query.filter_by(user_id=current_user.id).all()
+    return jsonify({f"{l.week}_{l.day_idx}": {
+        "distance_miles": l.distance_miles, "avg_hr": l.avg_hr,
+        "elevation_ft": l.elevation_ft, "duration_min": l.duration_min,
+    } for l in logs})
 
 
 if __name__ == "__main__":

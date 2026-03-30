@@ -7,6 +7,10 @@ let _supplementsCache = null;
 let _bodyweightCache = null;
 let _morningCheckinCache = null;
 let _chatHistory = [];
+let _warmupCache = {};
+let _runLogCache = {};
+let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, reps, weight }
+let _restTimerInterval = null;
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -25,6 +29,14 @@ let _milestonesShownThisSession = new Set();
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
 // ─── API HELPERS ────────────────────────────────────────────────────────────
+function checkAuth(res) {
+  if (res.status === 401) {
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+  return res;
+}
+
 function showToast(msg, type) {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -45,6 +57,9 @@ function apiPost(url, body) {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
+  }).then(res => {
+    if (res.status === 401) { window.location.href = '/login'; return; }
+    return res;
   }).catch(e => {
     console.warn('POST failed (attempt 1), retrying:', url, e);
     return new Promise(resolve => setTimeout(resolve, 1000)).then(() =>
@@ -362,15 +377,146 @@ function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, re
   apiPost('/api/weights', { exercise: exName, weight, sets_label: setsLabel, rpe, rpe_score: rpeScore, reps_completed: repsCompleted, week, day_idx: dayIdx });
 }
 
+function saveWeightInput(week, dayIdx, exIdx, exName) {
+  const input = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
+  if (!input) return;
+  const weight = parseFloat(input.value) || 0;
+  if (weight <= 0) return;
+  // Update cache
+  if (!_weightsCache) _weightsCache = {};
+  if (!_weightsCache[exName]) _weightsCache[exName] = { current: 0, history: [] };
+  _weightsCache[exName].current = weight;
+  // Save to backend (without RPE — that comes later)
+  apiPost('/api/weights', { exercise: exName, weight, week, day_idx: dayIdx });
+}
+
+function parseRestSeconds(rest) {
+  if (!rest) return 60;
+  // Handle "60-90s" → use the lower bound
+  const m = rest.match(/(\d+)/);
+  return m ? parseInt(m[1]) : 60;
+}
+
+function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
+  const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
+  const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
+  const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
+  const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
+  const reps = repsInput ? parseInt(repsInput.value) || 0 : 0;
+
+  if (_setCache[key]) {
+    // Un-check
+    delete _setCache[key];
+    btn.classList.remove('done');
+    btn.innerHTML = '';
+    btn.closest('.set-row').classList.remove('set-done');
+  } else {
+    // Check — mark set done
+    _setCache[key] = { done: true, weight, reps };
+    btn.classList.add('done');
+    btn.innerHTML = '&#10003;';
+    btn.closest('.set-row').classList.add('set-done');
+
+    // Save weight to backend
+    if (weight > 0) {
+      if (!_weightsCache) _weightsCache = {};
+      if (!_weightsCache[exName]) _weightsCache[exName] = { current: 0, history: [] };
+      _weightsCache[exName].current = weight;
+      apiPost('/api/weights', { exercise: exName, weight, week, day_idx: dayIdx, sets_label: `set ${setIdx + 1}`, reps_completed: reps || null });
+    }
+
+    // Start rest timer
+    startRestTimer(exIdx, restSec);
+
+    // Check if all sets done → mark exercise complete + show RPE
+    const setsMatch = document.querySelectorAll(`[id^="wt-${week}-${dayIdx}-${exIdx}-"]`);
+    const totalSets = setsMatch.length;
+    let allDone = true;
+    for (let s = 0; s < totalSets; s++) {
+      if (!_setCache[`${week}_${dayIdx}_${exIdx}_${s}`]) { allDone = false; break; }
+    }
+    if (allDone && !isExDone(week, dayIdx, exIdx)) {
+      // Auto-mark exercise as complete
+      if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
+      if (!_completionsCache.exercises) _completionsCache.exercises = {};
+      _completionsCache.exercises[`${week}_${dayIdx}_${exIdx}`] = true;
+      apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx });
+      renderDetail();
+    }
+  }
+  // Persist set cache to sessionStorage
+  sessionStorage.setItem('set_cache', JSON.stringify(_setCache));
+}
+
+function startRestTimer(exIdx, seconds) {
+  const el = document.getElementById('rest-timer-' + exIdx);
+  if (!el) return;
+  if (_restTimerInterval) clearInterval(_restTimerInterval);
+
+  let remaining = seconds;
+  el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
+  el.style.display = 'block';
+
+  _restTimerInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(_restTimerInterval);
+      _restTimerInterval = null;
+      el.innerHTML = `<div class="rest-countdown rest-done">GO</div>`;
+      // Vibrate if available
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      setTimeout(() => { el.style.display = 'none'; }, 3000);
+    } else {
+      el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
+    }
+  }, 1000);
+}
+
+function formatTimer(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
+}
+
 function getLastRPEs(exName, count) {
   const data = getExerciseData(exName);
   if (!data || !data.history || data.history.length === 0) return [];
   return data.history.slice(-count).map(h => h.rpe);
 }
 
+// Fallback weight estimates for exercises without history
+const WEIGHT_ESTIMATES = {
+  "Incline DB Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : null; },
+  "Cable Seated Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.8) : null; },
+  "Face Pull": () => 25,
+  "Lateral Raise": () => 15,
+  "EZ-Bar Curl": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : null; },
+  "Cable Tricep Pushdown": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.4) : null; },
+  "Leg Press": (cache) => { const squat = cache["Barbell Back Squat"]; return squat ? Math.round(squat.current * 1.5) : null; },
+  "Romanian Deadlift": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.65) : null; },
+  "Leg Curl": () => 50,
+  "Leg Extension": () => 50,
+  "Calf Raise": () => 100,
+  "Dumbbell Shoulder Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.3) : null; },
+  "Cable Lateral Raise": () => 10,
+  "Barbell Row": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.5) : null; },
+  "Dumbbell Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.4) : null; },
+  "Hammer Curl": () => 25,
+  "Overhead Tricep Extension": () => 25,
+};
+
 function getSuggestedWeight(exName, currentWeekNum) {
   const data = getExerciseData(exName);
-  if (!data) return { weight: null, reason: '' };
+  if (!data) {
+    // No history — try to estimate from related exercises
+    const estimator = WEIGHT_ESTIMATES[exName];
+    if (estimator) {
+      const cache = _weightsCache || {};
+      const est = estimator(cache);
+      if (est != null && est > 0) return { weight: est, reason: 'estimated' };
+    }
+    return { weight: null, reason: '' };
+  }
 
   const currentWt = data.current || 0;
   const history = data.history || [];
@@ -2928,15 +3074,21 @@ function importData() {
 
 // ─── RPE FEEDBACK ───────────────────────────────────────────────────────────
 function submitRPE(week, dayIdx, exIdx, exName, rpe) {
-  const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
-  const weight = weightInput ? parseFloat(weightInput.value) || 0 : 0;
-  const repsInput = document.getElementById('reps-' + week + '-' + dayIdx + '-' + exIdx);
-  const repsCompleted = repsInput ? parseInt(repsInput.value) || null : null;
+  // Read from per-set inputs — use the last set's weight
+  let weight = 0;
+  let totalReps = 0;
+  for (let s = 0; s < 20; s++) {
+    const wtEl = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${s}`);
+    if (!wtEl) break;
+    const w = parseFloat(wtEl.value) || 0;
+    if (w > 0) weight = w;
+    const rEl = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${s}`);
+    if (rEl) totalReps += parseInt(rEl.value) || 0;
+  }
   const weekData = workoutData[String(week)];
   const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
-  // Map 3-button RPE to numeric score for load progression
   const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
-  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, repsCompleted);
+  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, totalReps || null);
   renderDetail();
 }
 
@@ -3050,6 +3202,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetch('/api/meals?date=' + todayStr()),
     ]);
 
+    if (stateRes.status === 401) {
+      window.location.href = '/login';
+      return;
+    }
+
     _stateCache = await stateRes.json();
     _weightsCache = await weightsRes.json();
     _completionsCache = await compRes.json();
@@ -3068,6 +3225,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       garminConnected = garminStatus.connected;
       if (garminConnected) await refreshGarmin();
     } catch(e) {}
+
+    // Warm-up completions
+    try { const wuRes = await fetch('/api/warmup-completions'); _warmupCache = await wuRes.json(); } catch(e) { _warmupCache = {}; }
+
+    // Run logs
+    try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
+
+    // Per-set completion cache (session-based)
+    try { _setCache = JSON.parse(sessionStorage.getItem('set_cache') || '{}'); } catch(e) { _setCache = {}; }
 
     // Set state from cache
     currentWeek = _stateCache.current_week || 1;
@@ -4424,16 +4590,62 @@ function renderWarmupSection(dayData) {
       <span class="warmup-arrow">\u25BC</span>
     </button>
     <div class="warmup-body visible" id="warmup-body">
-      ${(wu.steps || []).map((step, i) => `<div class="warmup-step">
-        <button class="wu-check" onclick="this.classList.toggle('done');this.innerHTML=this.classList.contains('done')?'&#10003;':''">
+      ${(wu.steps || []).map((step, i) => { const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i]; return `<div class="warmup-step">
+        <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
         <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
         ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
         ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
-      </div>`).join('')}
+      </div>`; }).join('')}
       <button class="btn btn-primary warmup-timer-btn" onclick="startWarmupTimer()">Start Warm-Up</button>
     </div>
   </div>`;
+}
+
+function toggleWarmup(week, dayIdx, stepIdx, btn) {
+  const key = week + '_' + dayIdx + '_' + stepIdx;
+  _warmupCache[key] = !_warmupCache[key];
+  btn.classList.toggle('done');
+  btn.innerHTML = _warmupCache[key] ? '&#10003;' : '';
+  apiPost('/api/warmup-completions', { week, day_idx: dayIdx, step_idx: stepIdx });
+}
+
+async function saveRunLog() {
+  const dist = parseFloat(document.getElementById('run-dist')?.value) || null;
+  const hr = parseInt(document.getElementById('run-hr')?.value) || null;
+  const elev = parseInt(document.getElementById('run-elev')?.value) || null;
+
+  await apiPost('/api/run-log', {
+    week: currentWeek, day_idx: currentDay,
+    distance_miles: dist, avg_hr: hr, elevation_ft: elev,
+  });
+
+  const key = currentWeek + '_' + currentDay;
+  if (!_runLogCache) _runLogCache = {};
+  _runLogCache[key] = { distance_miles: dist, avg_hr: hr, elevation_ft: elev };
+
+  showToast('Run logged!', 'success');
+
+  // Trigger post-workout coach feedback
+  const weekData = workoutData[String(currentWeek)];
+  const dayData = weekData ? weekData.days[currentDay] : null;
+  const workoutName = dayData ? dayData.liftName : 'workout';
+  const triggerMsg = '[WORKOUT_COMPLETE] ' + workoutName + ' done. Run: ' + (dist || '?') + ' mi, HR ' + (hr || '?') + ', elev ' + (elev || '?') + ' ft. Give post-workout feedback.';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: triggerMsg }),
+    });
+    const data = await res.json();
+    if (data.response) {
+      _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+      renderCoachTop();
+    }
+  } catch(e) {
+    console.error('Post-workout feedback failed:', e);
+  }
 }
 
 function startWarmupTimer() {
@@ -5340,25 +5552,42 @@ async function renderDetail() {
       </div>`;
     }
 
-    return `<div class="exercise-row">
-      <button class="ex-check${done?' done':''}" onclick="toggleEx(${currentWeek},${currentDay},${i})">
-        ${done ? '&#10003;' : ''}
-      </button>
-      <div class="ex-info">
-        <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form tutorial')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${displayName.replace(/'/g, "\\'")}',event)" title="Swap exercise">&#128260;</span></div>
-        ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
+    // Parse sets format: "4x10" → { count: 4, reps: "10" }
+    const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
+    const setCount = setsMatch ? parseInt(setsMatch[1]) : 1;
+    const targetReps = setsMatch ? setsMatch[2] : ex.sets;
+    const restSeconds = parseRestSeconds(ex.rest);
+    const escapedName = displayName.replace(/'/g, "\\'");
+
+    // Build per-set rows
+    let setRowsHtml = '';
+    for (let s = 0; s < setCount; s++) {
+      const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
+      const setDone = !!(_setCache && _setCache[setKey]);
+      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
+        <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
+          ${setDone ? '&#10003;' : ''}
+        </button>
+        <span class="set-label">Set ${s + 1}</span>
+        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${weightVal}" placeholder="lb">
+        <span class="set-x">&times;</span>
+        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setDone && _setCache[setKey].reps ? _setCache[setKey].reps : ''}" placeholder="${targetReps}" min="0" max="100">
+      </div>`;
+    }
+
+    return `<div class="exercise-block">
+      <div class="exercise-header">
+        <div class="ex-info">
+          <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form tutorial')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
+          ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
+        </div>
+        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}</div>
       </div>
-      <div class="weight-input-wrap">
-        <input class="weight-input" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}" value="${weightVal}" placeholder="lb">
-        ${lastWt != null ? `<div class="weight-last">Last: ${lastWt} lb</div>` : ''}
-        ${suggestion.reason ? `<div class="weight-suggestion">${suggestion.reason}</div>` : ''}
-      </div>
-      <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}</div>
-      <div class="reps-input-wrap">
-        <input class="reps-input" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}" placeholder="reps done" min="0" max="100">
-      </div>
-      ${rpeHtml ? `<div style="grid-column:2/4">${rpeHtml}</div>` : ''}
-      <div id="swap-container-${i}" style="grid-column:2/4"></div>
+      ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${suggestion.reason && suggestion.reason !== 'estimated' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
+      <div class="set-rows">${setRowsHtml}</div>
+      <div id="rest-timer-${i}" class="rest-timer"></div>
+      ${rpeHtml ? `<div>${rpeHtml}</div>` : ''}
+      <div id="swap-container-${i}"></div>
     </div>`;
   }).join('');
 
@@ -5491,6 +5720,23 @@ async function renderDetail() {
         <div class="rdt"><span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span></div>
         <div class="rdd" style="margin-top:8px">${d.run.detail}</div>
       </div>
+      ${(() => { const runKey = currentWeek + '_' + currentDay; const existingRun = _runLogCache ? _runLogCache[runKey] : null; return `<div class="run-log-form" style="margin-top:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Distance (mi)</label>
+            <input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" value="${existingRun ? existingRun.distance_miles || '' : ''}" placeholder="mi">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Avg HR</label>
+            <input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" value="${existingRun ? existingRun.avg_hr || '' : ''}" placeholder="bpm">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Elevation (ft)</label>
+            <input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" value="${existingRun ? existingRun.elevation_ft || '' : ''}" placeholder="ft">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Log Run</button>
+      </div>`; })()}
     </div>
     ${renderMealSection(d)}
     ${d.timing ? `<div class="detail-section">
