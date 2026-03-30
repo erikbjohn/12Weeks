@@ -614,16 +614,15 @@ function renderBaseline() {
       const working = workingWeightFrom1RM(oneRM);
       rows += `<div class="baseline-summary-row">
         <span class="bsr-name">${lift.name}</span>
-        <span class="bsr-detail">${lift.suggested} lb x ${w.reps} reps</span>
-        <span class="bsr-result">Est 1RM: ${oneRM} lb</span>
-        <span class="bsr-weight">Working: ${working} lb</span>
+        <span class="bsr-detail"><strong>${w.reps} reps</strong> at ${lift.suggested} lb</span>
+        <span class="bsr-weight">→ ${working} lb working</span>
       </div>`;
     }
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card">
-        <h2>Your Starting Weights</h2>
+        <h2>Your Baseline Results</h2>
         <div class="baseline-desc" style="margin-bottom:12px">
-          Working weights are set at ~75% of your estimated 1RM (the right range for 4x10 in Phase 1).
+          Your reps determine your working weights. We set the test weight — you showed us what you can do.
         </div>
         <div class="baseline-summary">${rows}</div>
         <button class="btn btn-primary" style="width:100%" onclick="saveBaseline()">Start My 12 Weeks</button>

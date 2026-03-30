@@ -244,13 +244,23 @@ def generate_intake_report(conversation_history, lifting_data=None):
         for m in conversation_history
     )
 
-    # Add lifting baseline data for the combined plan
+    # Add lifting baseline data — REPS are the achievement, weights were set by the coach
     lifting_context = ""
     if lifting_data:
-        lifting_context = "\n\nBASELINE LIFTING DATA:\n"
+        lifting_context = "\n\nBASELINE TEST RESULTS (coach chose the test weights, athlete performed the reps):\n"
         for name, info in lifting_data.items():
-            lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
-        lifting_context += "\nUse this data to personalize the Game Plan section — reference their actual strength levels."
+            history = info.get("history", [])
+            if history:
+                last = history[-1]
+                sets_label = last.get("reps", "")
+                if "baseline:" in str(sets_label):
+                    # Format: "baseline: 95lb x 13"
+                    lifting_context += f"- {name}: {sets_label} → working weight {info.get('current', '?')} lb\n"
+                else:
+                    lifting_context += f"- {name}: {info.get('current', '?')} lb (reps: {sets_label})\n"
+            else:
+                lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
+        lifting_context += "\nIMPORTANT: The REPS are the athlete's achievement. The test weights were chosen by the coach. Reference the reps, not the weights, when discussing their fitness level."
 
     try:
         response = client.messages.create(
@@ -308,9 +318,18 @@ def generate_full_profile(conversation_history, physical_data=None, lifting_data
 
     lifting_context = ""
     if lifting_data:
-        lifting_context = "\nBASELINE LIFTING DATA:\n"
+        lifting_context = "\nBASELINE TEST RESULTS (coach chose test weights, athlete performed reps — REPS are the achievement):\n"
         for name, info in lifting_data.items():
-            lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
+            history = info.get("history", [])
+            if history:
+                last = history[-1]
+                sets_label = last.get("reps", "")
+                if "baseline:" in str(sets_label):
+                    lifting_context += f"- {name}: {sets_label} → working weight {info.get('current', '?')} lb\n"
+                else:
+                    lifting_context += f"- {name}: {info.get('current', '?')} lb (reps: {sets_label})\n"
+            else:
+                lifting_context += f"- {name}: working weight {info.get('current', '?')} lb\n"
 
     try:
         full_text = ""
