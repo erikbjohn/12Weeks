@@ -3126,13 +3126,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Travel banner
     renderTravelBanner();
 
-    renderAll();
-
-    // Morning check-in now handled by coach-top chat widget
-    // (checkMorningCheckin removed from init)
-
-    // Load chat history
+    // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
+
+    renderAll();
   } catch(e) {
     console.error('Init failed', e);
     // Fallback: try to render with empty data
@@ -4895,7 +4892,7 @@ async function renderCoachTop() {
     // Check if coach has spoken today
     const todayCoachMsgs = _chatHistory.filter(m =>
         (m.role === 'coach' || m.role === 'assistant') &&
-        m.time && m.time.startsWith(today)
+        ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
 
     // Build bubbles from recent messages (skip internal triggers)
@@ -5508,14 +5505,9 @@ async function renderDetail() {
   </div>`;
 
   panel.classList.add('visible');
-  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   // Init sliders if check-in is present
   initCheckinSliders();
-
-  // Scroll chat to bottom
-  const msgContainer = document.getElementById('coach-messages');
-  if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
 
   // Load Sunday photo previews asynchronously
   if (isSunday(d)) {

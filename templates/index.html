@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=33">
+  <link rel="stylesheet" href="/static/style.css?v=34">
 </head>
 <body>
 
@@ -28,6 +28,9 @@
   <div class="subtitle">Align aspirations with actions.</div>
 </header>
 
+<!-- COACH — first thing after the header, always visible -->
+<div id="coach-top" class="coach-top-widget"></div>
+
 <div id="invite-dropdown" class="invite-dropdown"></div>
 <div id="baseline-overlay"></div>
 <div id="morning-checkin-overlay"></div>
@@ -36,9 +39,6 @@
 <div id="milestone-banner"></div>
 <div id="today-nav" class="today-nav"></div>
 <div id="today-hero" class="today-hero"></div>
-
-<!-- COACH — right under today's workout -->
-<div id="coach-top" class="coach-top-widget"></div>
 
 <div class="detail-panel" id="detail-panel"></div>
 <div id="weighin-bar" class="weighin-bar"></div>
@@ -86,6 +86,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
-<script src="/static/app.js?v=33"></script>
+<script src="/static/app.js?v=34"></script>
 </body>
 </html>
