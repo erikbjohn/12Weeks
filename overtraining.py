@@ -18,7 +18,7 @@ def assess_readiness(garmin_data):
             "risk_level": "unknown",
             "score": None,
             "flags": [],
-            "suggestion": "Connect Garmin to get readiness data.",
+            "suggestion": "No readiness data. Connect your Garmin watch to unlock this.",
             "ok_to_train": True,
             "metrics": {},
         }
@@ -110,7 +110,7 @@ def assess_readiness(garmin_data):
             "risk_level": "unknown",
             "score": None,
             "flags": flags,
-            "suggestion": "Not enough Garmin data available for assessment.",
+            "suggestion": "Garmin connected but no data yet. Wear your watch tonight.",
             "ok_to_train": True,
             "metrics": {},
         }

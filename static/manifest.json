@@ -2,8 +2,11 @@
   "name": "12 Weeks",
   "short_name": "12 Weeks",
   "description": "Your personal 12-week training program",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#0d0f0e",
   "theme_color": "#0d0f0e",
   "icons": [

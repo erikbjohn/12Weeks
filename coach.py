@@ -28,14 +28,14 @@ def get_coach_response(user_message, context):
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "Coach is not configured yet. Add your ANTHROPIC_API_KEY in Render environment variables."
+        return "System error. We'll be back."
 
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
     except Exception as e:
         log.error("Failed to init Anthropic client: %s", e)
-        return "Coach is temporarily unavailable. Check your API key."
+        return "Technical issue. Try again in 60 seconds."
 
     system_prompt = _build_system_prompt(context)
     messages = _build_messages(user_message, context.get("chat_history", []))

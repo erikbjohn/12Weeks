@@ -370,7 +370,7 @@ function getSuggestedWeight(exName, currentWeekNum) {
   const history = data.history || [];
 
   if (isDeloadWeek(currentWeekNum)) {
-    return { weight: Math.round(currentWt * 0.6), reason: 'deload: 60%' };
+    return { weight: Math.round(currentWt * 0.6), reason: 'Deload week \u2014 60% weight, focus on form & recovery' };
   }
 
   if (history.length > 0) {
@@ -1046,7 +1046,7 @@ function renderConstraints() {
           </div>
           <div class="pa-measure-row">
             <label>Duration (minutes)</label>
-            <input type="number" id="activity-duration" placeholder="e.g. 90" min="10" max="300">
+            <input type="number" inputmode="numeric" id="activity-duration" placeholder="e.g. 90" min="10" max="300">
           </div>
           <button class="btn btn-secondary" style="width:100%;margin-top:8px" onclick="addScheduledActivity()">+ Add Activity</button>
         </div>
@@ -1902,7 +1902,8 @@ async function showFinalReveal() {
 function showRevealProfile(profileText, goalData) {
     const el = document.getElementById('baseline-overlay');
     el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card psych-intake-card">
+        <div class="baseline-card psych-intake-card" style="position:relative">
+            <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('baseline-overlay').innerHTML='';renderAll()">&times;</button>
             <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
             <div class="psych-report">${profileText ? renderMarkdown(profileText) : '<p style="color:var(--muted)">Profile generation in progress...</p>'}</div>
             <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showBaselineAssessment()">See Your Baseline →</button>
@@ -1954,8 +1955,7 @@ function renderBaselineAssessment(data) {
     let strengthHtml = '';
     if (strength.length > 0) {
         const rows = strength.map(s => {
-            const pctColor = s.percentile >= 75 ? 'var(--accent)' : s.percentile >= 50 ? 'var(--text)' : s.percentile >= 25 ? 'var(--amber)' : 'var(--red)';
-            const barWidth = Math.min(100, s.percentile);
+            const barWidth = Math.max(5, Math.min(100, s.percentile));
             const shortName = s.exercise.replace('Barbell ', '').replace('Conventional ', '').replace('DB ', '');
             return `<div class="assess-lift-row">
                 <div class="assess-lift-name">${shortName}</div>
@@ -1963,8 +1963,8 @@ function renderBaselineAssessment(data) {
                     <span class="assess-lift-1rm">${s.estimated_1rm} lb 1RM</span>
                     <span class="assess-lift-ratio">${s.relative_strength}x BW</span>
                 </div>
-                <div class="assess-lift-pct-bar"><div class="assess-lift-pct-fill" style="width:${barWidth}%;background:${pctColor}"></div></div>
-                <div class="assess-lift-pct-label" style="color:${pctColor}">${s.percentile}th percentile · ${s.rating}</div>
+                <div class="assess-lift-pct-bar"><div class="assess-lift-pct-fill" style="width:${barWidth}%;background:var(--accent)"></div></div>
+                <div class="assess-lift-pct-label">${s.percentile}th percentile · ${s.rating}</div>
             </div>`;
         }).join('');
         strengthHtml = `<div class="assess-section"><div class="assess-section-label">Strength (Est. 1RM vs Population)</div>${rows}</div>`;
@@ -2000,7 +2000,8 @@ function renderBaselineAssessment(data) {
     }
 
     el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card" style="text-align:left;max-width:600px">
+        <div class="baseline-card" style="text-align:left;max-width:600px;position:relative">
+            <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('baseline-overlay').innerHTML='';renderAll()">&times;</button>
             <h2 style="text-align:center;margin-bottom:0.5rem">Your Baseline Assessment</h2>
             <div class="baseline-desc" style="text-align:center;margin-bottom:1.5rem">Here's where you stand. Every Sunday we remeasure.</div>
             ${bodyCompHtml}
@@ -2072,7 +2073,8 @@ function showRevealPlan() {
     const electrolyteNote = g.electrolytes ? '<div class="plan-note plan-note-warn">Electrolyte supplementation required (sodium, potassium, magnesium)</div>' : '';
 
     el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card" style="text-align:left">
+        <div class="baseline-card" style="text-align:left;position:relative">
+            <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('baseline-overlay').innerHTML='';renderAll()">&times;</button>
             <div style="text-align:center;margin-bottom:1rem">
                 <span class="plan-goal-badge" style="background:${goalColor}">${goalLabel}</span>
             </div>
@@ -2412,7 +2414,7 @@ async function startPsychConversation() {
     </div>
     <div class="psych-chat-messages" id="psych-chat-messages"></div>
     <div class="psych-input-bar" id="psych-input-bar">
-        <input type="text" id="psych-input" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendPsychMessage()">
+        <input type="text" id="psych-input" placeholder="Type your response..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendPsychMessage()">
         <button onclick="sendPsychMessage()">Send</button>
     </div>
   </div>`;
@@ -3364,7 +3366,7 @@ function submitMorningCheckin() {
       <div id="mc-coach-chat" style="display:none">
         <div id="mc-coach-messages" class="mc-coach-messages"></div>
         <div class="mc-coach-input-bar">
-          <input type="text" id="mc-coach-input" placeholder="Reply to Erik..." onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
+          <input type="text" id="mc-coach-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-coach-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMorningCoachReply()">Send</button>
         </div>
@@ -3659,7 +3661,7 @@ function renderChatOverlay() {
     </div>
     <div class="chat-messages" id="chat-overlay-messages"></div>
     <div class="chat-input-bar">
-      <input type="text" id="chat-overlay-input" placeholder="Ask Erik anything..." onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
+      <input type="text" id="chat-overlay-input" placeholder="Ask Erik anything..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
       <button class="chat-mic-btn" id="chat-mic-btn" onclick="toggleVoiceInput('chat-overlay-input')" title="Voice input">&#127908;</button>
       <button onclick="sendChatMessage('chat-overlay-input','chat-overlay-messages')">Send</button>
     </div>
@@ -5211,7 +5213,7 @@ async function renderDetail() {
       <div class="coach-chat">
         <div class="chat-messages" id="coach-messages" style="max-height:300px">${chatMessagesHtml}</div>
         <div class="chat-input-bar" style="border-top:none;padding:8px 0 0 0;background:none">
-          <input type="text" id="coach-input-field" placeholder="Ask Erik anything..." onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
+          <input type="text" id="coach-input-field" placeholder="Ask Erik anything..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
           <button onclick="sendChatMessage('coach-input-field','coach-messages')">Send</button>
         </div>
       </div>

@@ -195,13 +195,13 @@ def get_intake_response(user_message, conversation_history):
     """Get the next response in the intake conversation."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return "Add your ANTHROPIC_API_KEY in Render settings to enable the intake.", False
+        return "System not ready. Contact your admin.", False
 
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=180.0)
     except Exception:
-        return "Intake temporarily unavailable.", False
+        return "Connection issue. Try again.", False
 
     messages = []
     for msg in conversation_history:
@@ -231,7 +231,7 @@ def get_intake_response(user_message, conversation_history):
         return display_text, is_complete
     except Exception as e:
         log.error("Intake API error: %s", e)
-        return "Intake temporarily unavailable. Try again.", False
+        return "Connection issue. Try again.", False
 
 
 def generate_intake_report(conversation_history, lifting_data=None):

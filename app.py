@@ -685,9 +685,12 @@ def api_weights():
 @login_required
 def api_weights_record():
     data = request.get_json()
+    weight = data.get("weight", 0)
+    if weight < 0 or weight > 1500:
+        return jsonify({"error": "Invalid weight"}), 400
     log = ExerciseLog(
         exercise_name=data["exercise"],
-        weight=data["weight"],
+        weight=weight,
         sets_label=data.get("sets_label"),
         rpe=data.get("rpe"),
         rpe_score=data.get("rpe_score"),
@@ -838,12 +841,15 @@ def api_bodyweight():
 @login_required
 def api_bodyweight_record():
     data = request.get_json()
+    weight = data.get("weight")
+    if not weight or weight < 50 or weight > 600:
+        return jsonify({"error": "Weight must be between 50 and 600 lbs"}), 400
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
     bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bw:
-        bw.weight_lbs = data["weight"]
+        bw.weight_lbs = weight
     else:
-        bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
+        bw = BodyWeight(log_date=d, weight_lbs=weight, user_id=current_user.id)
         db.session.add(bw)
     db.session.commit()
     return jsonify({"ok": True})
@@ -2585,6 +2591,20 @@ def api_physical_assessment_status():
 @login_required
 def api_physical_assessment_save():
     data = request.get_json()
+    # Validate physical measurements
+    _pa_ranges = {
+        "height": (48, 96), "bodyweight": (50, 600),
+        "waist": (5, 80), "stomach": (5, 80), "chest": (5, 80),
+        "bicep": (5, 80), "thigh": (5, 80), "hips": (5, 80), "neck": (5, 80),
+    }
+    for field, (lo, hi) in _pa_ranges.items():
+        if field in data and data[field] is not None:
+            try:
+                val = float(data[field])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"Invalid {field} value"}), 400
+            if val < lo or val > hi:
+                return jsonify({"error": f"{field.title()} must be between {lo} and {hi}"}), 400
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not pa:
         pa = PhysicalAssessment(user_id=current_user.id)
