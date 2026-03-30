@@ -783,8 +783,15 @@ def api_bodyweight_record():
     if bw:
         bw.weight_lbs = data["weight"]
     else:
-        bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
-        db.session.add(bw)
+        # log_date has a global unique constraint; check if another user owns it
+        existing = BodyWeight.query.filter_by(log_date=d).first()
+        if existing:
+            # Update in place (shouldn't happen in single-user, but handles constraint)
+            existing.weight_lbs = data["weight"]
+            existing.user_id = current_user.id
+        else:
+            bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
+            db.session.add(bw)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -2514,7 +2521,10 @@ def api_physical_assessment_save():
         if bw:
             bw.weight_lbs = data["bodyweight"]
         else:
-            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
+            # log_date has a global unique constraint, so another user may own this date
+            existing_bw = BodyWeight.query.filter_by(log_date=d).first()
+            if not existing_bw:
+                db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
     if "waist" in data:
         pa.waist_inches = data["waist"]
         d = date.today()
@@ -2522,7 +2532,9 @@ def api_physical_assessment_save():
         if bm:
             bm.waist_inches = data["waist"]
         else:
-            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
+            existing_bm = BodyMeasurement.query.filter_by(log_date=d).first()
+            if not existing_bm:
+                db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
     if "stomach" in data:
         pa.stomach_inches = data["stomach"]
     if "chest" in data:
@@ -2589,18 +2601,26 @@ def api_test_create_user():
 
     existing = User.query.filter_by(email=email).first()
     if existing:
+        uid = existing.id
         # Delete existing test user and all their data
         for model in [ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
                       ExerciseLog, ExerciseCompletion, DayCompletion, BodyWeight,
                       BodyMeasurement, WeeklyCheckIn, MealLog, SupplementLog,
                       ProgressPhoto, AppState, UserConstraints, TrainingGoal,
-                      UserFoodSelections, WeeklyReport, Invite]:
+                      UserFoodSelections, WeeklyReport, UserEquipment]:
             try:
-                model.query.filter_by(user_id=existing.id).delete()
+                model.query.filter_by(user_id=uid).delete()
                 db.session.commit()
             except Exception:
                 db.session.rollback()
-        User.query.filter_by(id=existing.id).delete()
+        # Invite uses created_by / used_by, not user_id
+        try:
+            Invite.query.filter_by(created_by=uid).delete()
+            Invite.query.filter_by(used_by=uid).delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        User.query.filter_by(id=uid).delete()
         db.session.commit()
 
     user = User(
