@@ -3328,6 +3328,38 @@ def admin_dashboard():
     return render_template("admin.html", users=users, invites=invites, pending=pending)
 
 
+@app.route("/api/admin/reset-assessment", methods=["POST"])
+@admin_required
+def api_admin_reset_assessment():
+    """Reset a user's physical assessment so they redo it on next login."""
+    data = request.get_json()
+    email = data.get("email", "").strip().lower()
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": f"User {email} not found"}), 404
+
+    # Reset physical assessment
+    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+    if pa:
+        db.session.delete(pa)
+
+    # Clear bad BodyWeight entries
+    BodyWeight.query.filter_by(user_id=user.id).delete()
+
+    # Reset goal so it recomputes with correct weight
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    if goal:
+        goal.plan_accepted = False
+
+    # Reset baseline state
+    state = AppState.query.filter_by(user_id=user.id).first()
+    if state:
+        state.baseline_done = False
+
+    db.session.commit()
+    return jsonify({"ok": True, "message": f"Reset assessment for {email}. They will redo physical assessment on next login."})
+
+
 @app.route("/api/test/create-user", methods=["POST"])
 def api_test_create_user():
     """Create test user for e2e testing. Only works for test@12weeks.com."""
