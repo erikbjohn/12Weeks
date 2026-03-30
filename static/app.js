@@ -218,18 +218,9 @@ function renderMealSection(dayData) {
   const plan = dayData.mealPlan;
   if (!plan) return '';
 
-  const isRestDay = dayData.day === 'Sun' || (dayData.isRest && dayData.mealType === 'rest');
-  const fasting = isFastingToday();
-
-  let fastToggleHtml = '';
-  if (isRestDay) {
-    fastToggleHtml = `<div class="fast-toggle">
-      <button class="${!fasting ? 'active' : ''}" onclick="toggleFasting(false)">16:8 Eating</button>
-      <button class="${fasting ? 'active' : ''}" onclick="toggleFasting(true)">24h Fast</button>
-    </div>`;
-  }
-
-  const activePlan = (isRestDay && fasting) ? (window._mealPlansCache || {}).fast_day || plan : plan;
+  // Sunday = automatic fast day (no toggle — it's the plan)
+  const isSundayFast = dayData.day === 'Sun';
+  const activePlan = isSundayFast ? ((window._mealPlansCache || {}).fast_day || plan) : plan;
 
   let totalEaten = { cal: 0, protein: 0, carbs: 0, fat: 0 };
   let mealsHtml = '';
@@ -300,8 +291,8 @@ function renderMealSection(dayData) {
 
   return `<div class="detail-section">
     <h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
-    ${fastToggleHtml}
-    ${activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
+    ${isSundayFast ? '<div class="meal-plan-note" style="color:var(--accent)">Fast day. Water, black coffee, electrolytes only.</div>' : ''}
+    ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
     ${totalsHtml}
     <div class="meal-compact-row">${compactChecks}</div>
     <button class="meal-detail-toggle" onclick="toggleMealDetails()">
