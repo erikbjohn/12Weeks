@@ -1908,17 +1908,12 @@ def _build_coach_context():
         ChatMessage.log_date >= since
     ).order_by(ChatMessage.created_at).all()]
 
-    # Body weight
+    # Body weight — all entries (user weighs weekly, not daily)
     bw_entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
-    bodyweight = []
-    for i, e in enumerate(bw_entries):
-        window = bw_entries[max(0, i - 6):i + 1]
-        avg = sum(w.weight_lbs for w in window) / len(window)
-        bodyweight.append({
-            "date": e.log_date.isoformat(),
-            "weight": e.weight_lbs,
-            "rolling_avg": round(avg, 1),
-        })
+    bodyweight = [{
+        "date": e.log_date.isoformat(),
+        "weight": e.weight_lbs,
+    } for e in bw_entries]
 
     # Garmin data
     garmin_data = None

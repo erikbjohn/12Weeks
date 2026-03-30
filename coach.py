@@ -237,18 +237,26 @@ def _build_system_prompt(ctx):
     # Recent check-in trends
     checkin_summary = _summarize_checkins(ctx.get("checkins", []))
 
-    # Body weight trend
+    # Body weight trend — full program history (weekly weigh-ins)
     bw = ctx.get("bodyweight", [])
     bw_summary = ""
     if bw:
         latest = bw[-1]
-        bw_summary = f"Latest weight: {latest['weight']} lb (7-day avg: {latest.get('rolling_avg', '?')} lb)."
-        if len(bw) >= 7:
-            week_ago = [e for e in bw if e["date"] <= (date.today() - timedelta(days=7)).isoformat()]
-            if week_ago:
-                delta = latest.get("rolling_avg", latest["weight"]) - week_ago[-1].get("rolling_avg", week_ago[-1]["weight"])
-                direction = "down" if delta < 0 else "up" if delta > 0 else "flat"
-                bw_summary += f" Trend: {direction} {abs(delta):.1f} lb vs last week."
+        first = bw[0]
+        bw_summary = f"Latest weight: {latest['weight']} lb ({latest['date']})."
+        total_delta = latest['weight'] - first['weight']
+        if len(bw) >= 2:
+            direction = "down" if total_delta < 0 else "up" if total_delta > 0 else "flat"
+            bw_summary += f" Program total: {direction} {abs(total_delta):.1f} lb (started at {first['weight']} lb)."
+            # Week-over-week change
+            prev = bw[-2]
+            weekly_delta = latest['weight'] - prev['weight']
+            wk_dir = "down" if weekly_delta < 0 else "up" if weekly_delta > 0 else "flat"
+            bw_summary += f" Last weigh-in: {wk_dir} {abs(weekly_delta):.1f} lb vs previous ({prev['date']})."
+        # Full history for pattern analysis
+        if len(bw) >= 3:
+            weights_str = " → ".join(f"{e['weight']}" for e in bw[-6:])
+            bw_summary += f"\n  Weight history (recent): {weights_str}"
 
     # Today's workout
     workout_summary = ""
