@@ -19,7 +19,7 @@ from workout_data import (
 )
 from garmin_client import GarminClient
 from overtraining import assess_readiness
-from coach import get_coach_response
+from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
 from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, DayCompletion,
@@ -27,7 +27,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    UserEquipment, WarmupCompletion, RunLog, SetLog,
+    UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
 )
 
 app = Flask(__name__)
@@ -1789,6 +1789,29 @@ def api_chat():
     db.session.add(asst_chat)
     db.session.commit()
 
+    # Extract and save memories (runs in background, non-blocking)
+    uid = current_user.id
+    week = context.get("week", 1)
+    _app = app._get_current_object()
+
+    def _save_memories():
+        with _app.app_context():
+            try:
+                memories = extract_memories(user_msg, response_text, context)
+                for mem in memories:
+                    cm = CoachMemory(
+                        user_id=uid, content=mem["content"],
+                        memory_type=mem["type"], week=week,
+                    )
+                    db.session.add(cm)
+                if memories:
+                    db.session.commit()
+            except Exception as e:
+                log.warning("Memory save failed: %s", e)
+
+    import threading
+    threading.Thread(target=_save_memories, daemon=True).start()
+
     return jsonify({
         "response": response_text,
         "time": asst_chat.created_at.strftime("%I:%M %p") if asst_chat.created_at else None,
@@ -2040,6 +2063,12 @@ def _build_coach_context():
     # Schedule notes
     schedule_notes = constraints.schedule_notes if constraints else None
 
+    # Coach memory — persistent observations across conversations
+    memories = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
+        CoachMemory.created_at.desc()
+    ).limit(20).all()
+    coach_memories = [{"type": m.memory_type, "content": m.content, "week": m.week} for m in memories]
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -2068,6 +2097,7 @@ def _build_coach_context():
         "meals_today": meals_today,
         "completed_days_this_week": completed_days,
         "schedule_notes": schedule_notes,
+        "coach_memories": coach_memories,
     }
 
 

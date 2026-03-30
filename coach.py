@@ -108,6 +108,68 @@ def _format_meals_today(meals):
     return "Meals today: None eaten yet"
 
 
+def _format_memories(memories):
+    if not memories:
+        return ""
+    lines = ["COACH MEMORY (persistent observations — survive across conversations):"]
+    for m in memories:
+        prefix = f"[wk{m.get('week', '?')}]" if m.get('week') else ""
+        mtype = m.get('type', 'note')
+        lines.append(f"  {prefix} [{mtype}] {m['content']}")
+    return '\n'.join(lines)
+
+
+def extract_memories(user_message, coach_response, context):
+    """Extract memory-worthy observations from the exchange.
+    Returns a list of dicts: [{"type": str, "content": str}] or empty list.
+    Called after every coach response to decide if anything should be persisted."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return []
+
+    # Only check every 5th message to avoid excessive API calls
+    chat_len = len(context.get("chat_history", []))
+    if chat_len % 5 != 0 and chat_len > 1:
+        return []
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=15.0)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            system="""You extract coaching memories from athlete conversations. Return ONLY observations worth remembering across future sessions. If nothing is notable, return exactly: NONE
+
+Format each memory on its own line as: TYPE: content
+Types: injury, commitment, preference, observation, milestone
+
+Examples:
+injury: Left shoulder pain during overhead press — monitor and avoid heavy OHP
+commitment: Committed to 5am workouts Mon/Wed/Fri
+preference: Hates running in heat — prefers early morning
+observation: Tends to sandbag on leg day — needs pushing
+milestone: First unassisted pull-up achieved week 3""",
+            messages=[{
+                "role": "user",
+                "content": f"Athlete said: {user_message}\n\nCoach responded: {coach_response}\n\nExtract memories (or NONE):",
+            }],
+        )
+        text = response.content[0].text.strip()
+        if text == "NONE" or not text:
+            return []
+
+        memories = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if ":" in line and line.split(":")[0].strip().lower() in ("injury", "commitment", "preference", "observation", "milestone"):
+                parts = line.split(":", 1)
+                memories.append({"type": parts[0].strip().lower(), "content": parts[1].strip()})
+        return memories
+    except Exception as e:
+        log.warning("Memory extraction failed: %s", e)
+        return []
+
+
 def get_coach_response(user_message, context):
     """
     Send a message to Claude with full training context.
@@ -304,6 +366,22 @@ ALWAYS use the athlete's name when addressing them directly. Their name is {ctx.
 
 FORMAT: ONE question per response. 1-3 sentences max. No fluff.
 
+CONTEXT AWARENESS:
+You have access to the athlete's FULL profile below: their training goal, caloric targets, macros,
+exercise history (every lift, every set, every rep), run data, baseline assessment, body measurements,
+equipment, fasting protocol, food selections, and persistent coach memories.
+
+USE THIS DATA. When giving feedback:
+- Reference specific numbers: "You hit 105 for 10 on set 1 but dropped to 7 on set 4."
+- Compare to history: "Last week you did 95x10. This week 105x10. That's progress."
+- Connect to goals: "Your target is 1800 cal. You're fasting until 11am. Plan accordingly."
+- Note patterns from coach memories: injuries, preferences, tendencies.
+- Adjust advice based on equipment available.
+
+COACH MEMORY contains observations from previous conversations that were important enough to save.
+Reference these naturally — "Last time you mentioned your shoulder was bothering you. How's it feeling?"
+Do NOT tell the athlete you have a memory system. Just use the information as if you remember.
+
 SESSION STRUCTURE:
 Start: What did you commit to? Did you do it?
 Then: What's in your way -- real obstacle or story you're telling yourself?
@@ -344,6 +422,8 @@ Equipment available: {', '.join(ctx.get('equipment', [])) or 'Not specified'}
 
 Days completed this week: {ctx.get('completed_days_this_week', []) or 'None yet'}
 {f"Schedule notes: {ctx.get('schedule_notes')}" if ctx.get('schedule_notes') else ''}
+
+{_format_memories(ctx.get('coach_memories', []))}
 
 INTAKE PROFILE:
 {ctx.get('intake_report', 'No intake completed yet.') or 'No intake completed yet.'}

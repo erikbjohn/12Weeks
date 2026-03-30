@@ -39,6 +39,19 @@ class Invite(db.Model):
     used_at = db.Column(db.DateTime, nullable=True)
 
 
+class CoachMemory(db.Model):
+    """Rolling memory for the AI coach — persists across conversations.
+    Stores key observations, commitments, injury notes, and athlete patterns
+    that must survive beyond the 20-message chat window."""
+    __tablename__ = "coach_memory"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)  # The summary text
+    memory_type = db.Column(db.String(30), default="summary")  # summary, commitment, injury, observation
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    week = db.Column(db.Integer)  # Which week this was recorded
+
+
 class ExerciseLog(db.Model):
     """Per-exercise weight/reps/RPE history."""
     __tablename__ = "exercise_log"
