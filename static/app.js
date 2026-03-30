@@ -5260,29 +5260,31 @@ async function renderCoachTop() {
         ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
 
-    // Show only Erik's last message — coach voice, not chat log
+    // Show only Erik's last message FROM TODAY — new day = fresh message
     let bubblesHtml = '';
-    const coachMsgs = _chatHistory.filter(m =>
+    const todayCoachVisible = _chatHistory.filter(m =>
         (m.role === 'coach' || m.role === 'assistant') &&
-        !(m.text || m.content || '').startsWith('[')
+        !(m.text || m.content || '').startsWith('[') &&
+        ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
-    if (coachMsgs.length > 0) {
-        const last = coachMsgs[coachMsgs.length - 1];
+    if (todayCoachVisible.length > 0) {
+        const last = todayCoachVisible[todayCoachVisible.length - 1];
         bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
     }
 
-    // Render the shell immediately (with or without bubbles)
+    // Render the shell immediately
     el.innerHTML = renderCoachTopShell(bubblesHtml);
 
-    // If coach hasn't spoken today, fire off a morning greeting in the background
+    // If coach hasn't spoken today, fire off a morning greeting
     if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
         const weekData = workoutData[String(currentWeek)];
         const todayDayIdx = new Date().getDay();
         const mappedIdx = todayDayIdx === 0 ? 6 : todayDayIdx - 1;
         const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
         const workoutName = dayData ? dayData.liftName : 'Rest';
+        const timing = dayData && dayData.timing ? dayData.timing[0] : '6:00';
 
-        const triggerMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Greet the athlete and ask how they're feeling.`;
+        const triggerMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Session starts at ${timing}. Greet the athlete, state the schedule, and tell them to check in on how they feel.`;
 
         // Show loading state
         const msgsEl = document.getElementById('coach-top-messages');
