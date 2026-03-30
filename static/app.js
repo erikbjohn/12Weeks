@@ -4888,39 +4888,38 @@ async function renderCoachTop() {
     const el = document.getElementById('coach-top');
     if (!el) return;
 
-    // Check if we need to send a morning message
     const today = todayStr();
     const morningKey = '12w_morning_' + today;
     const hasMorningMessage = localStorage.getItem(morningKey);
 
-    // Get recent chat messages
-    const recentMsgs = _chatHistory.slice(-6); // Last 6 messages
+    // Check if coach has spoken today
+    const todayCoachMsgs = _chatHistory.filter(m =>
+        (m.role === 'coach' || m.role === 'assistant') &&
+        m.time && m.time.startsWith(today)
+    );
 
-    // Build message bubbles
-    let bubblesHtml = '';
-    if (recentMsgs.length === 0 && !hasMorningMessage) {
-        // No messages today — coach needs to speak first
-        bubblesHtml = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
-        el.innerHTML = renderCoachTopShell(bubblesHtml);
+    if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
+        // Coach hasn't spoken today — send morning greeting
+        el.innerHTML = renderCoachTopShell(`<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is checking in...</div></div>`);
 
-        // Auto-send morning check-in message
         const weekData = workoutData[String(currentWeek)];
-        const todayIdx = new Date().getDay();
-        const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+        const todayDayIdx = new Date().getDay();
+        const mappedIdx = todayDayIdx === 0 ? 6 : todayDayIdx - 1;
         const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
         const workoutName = dayData ? dayData.liftName : 'Rest';
 
-        const morningMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Greet the athlete and ask how they're feeling. This is their daily check-in conversation.`;
+        // Send as internal trigger — NOT shown to user
+        const triggerMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Greet the athlete and ask how they're feeling.`;
 
         try {
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: morningMsg }),
+                body: JSON.stringify({ message: triggerMsg }),
             });
             const data = await res.json();
             if (data.response) {
-                _chatHistory.push({ role: 'user', text: morningMsg, time: new Date().toISOString() });
+                // Only push the COACH response to visible history, not the trigger
                 _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
                 localStorage.setItem(morningKey, '1');
             }
@@ -4928,12 +4927,12 @@ async function renderCoachTop() {
             console.error('Morning message failed:', e);
         }
 
-        // Re-render with the new messages
         renderCoachTop();
         return;
     }
 
     // Build bubbles from recent messages (skip internal triggers)
+    const recentMsgs = _chatHistory.slice(-6);
     for (const m of recentMsgs) {
         const text = m.text || m.content || '';
         // Skip internal trigger messages
