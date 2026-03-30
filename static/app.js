@@ -2025,12 +2025,14 @@ function showRevealPlan() {
     const w8 = proj.find(p => p.week === 8);
     const w12 = proj.find(p => p.week === 12);
     const startWt = g.starting_weight || (proj.length > 0 ? Math.round(proj[0].projected) : '?');
-    const endWt = w12 ? Math.round(w12.projected) : g.target_weight || '?';
-    const deficit = g.daily_deficit || 0;
-    const weeklyLoss = g.weekly_loss_lbs || 0;
-    const totalLoss = g.total_loss_lbs || 0;
-    const tdee = g.tdee || '?';
+    const targetWt = g.target_weight ? Math.round(g.target_weight) : '?';
+    const tdee = g.tdee || 2500;
     const targetBf = g.target_bf_pct ? Math.round(g.target_bf_pct * 100) : '?';
+    // Compute what it TAKES to hit the goal weight in 12 weeks
+    const totalLoss = (typeof startWt === 'number' && typeof targetWt === 'number') ? startWt - targetWt : 0;
+    const weeklyLossNeeded = totalLoss > 0 ? Math.round(totalLoss / 12 * 10) / 10 : 0;
+    const dailyDeficitNeeded = Math.round(weeklyLossNeeded * 3500 / 7);
+    const dailyCalories = Math.round(tdee - dailyDeficitNeeded);
 
     // Strength projections from baseline (same as assessment but projected forward)
     const weights = _weightsCache || {};
@@ -2077,44 +2079,42 @@ function showRevealPlan() {
             <h2 style="text-align:center;margin-bottom:1.5rem">Your Training Plan</h2>
 
             <div class="plan-section">
-                <div class="plan-section-label">Projected Results (12 Weeks)</div>
+                <div class="plan-section-label">The Goal (12 Weeks)</div>
                 <div class="plan-outcomes">
                     <div class="plan-outcome-row">
                         <span>Body Weight</span>
-                        <span>${startWt} → <strong>${endWt} lbs</strong> (−${totalLoss} lbs)</span>
+                        <span>${startWt} → <strong>${targetWt} lbs</strong> (−${totalLoss} lbs)</span>
                     </div>
                     <div class="plan-outcome-row">
                         <span>Target Body Fat</span>
                         <span><strong>${targetBf}%</strong></span>
                     </div>
                     <div class="plan-outcome-row">
-                        <span>Wk 4 / Wk 8 / Wk 12</span>
-                        <span>${w4 ? Math.round(w4.projected) : '?'} / ${w8 ? Math.round(w8.projected) : '?'} / ${endWt} lbs</span>
+                        <span>Required Loss Rate</span>
+                        <span><strong>${weeklyLossNeeded} lbs/week</strong></span>
                     </div>
                     ${strengthProjections}
                 </div>
             </div>
 
             <div class="plan-section">
-                <div class="plan-section-label">The Math</div>
+                <div class="plan-section-label">What It Takes</div>
                 <div class="plan-outcomes">
                     <div class="plan-outcome-row">
-                        <span>Your TDEE</span>
+                        <span>Your TDEE (burn)</span>
                         <span><strong>${tdee}</strong> cal/day</span>
                     </div>
-                    <div class="plan-outcome-row">
-                        <span>Daily Intake</span>
-                        <span><strong>${g.calories || '?'}</strong> cal/day</span>
-                    </div>
                     <div class="plan-outcome-row" style="color:var(--accent)">
-                        <span>Daily Deficit</span>
-                        <span><strong>${deficit}</strong> cal/day</span>
+                        <span>Required Deficit</span>
+                        <span><strong>${dailyDeficitNeeded}</strong> cal/day</span>
                     </div>
-                    <div class="plan-outcome-row" style="color:var(--accent)">
-                        <span>Weekly Loss</span>
-                        <span><strong>${weeklyLoss}</strong> lbs/week</span>
+                    <div class="plan-outcome-row" style="color:var(--accent);font-weight:700">
+                        <span>Daily Intake to Hit Goal</span>
+                        <span><strong>${dailyCalories}</strong> cal/day</span>
                     </div>
                 </div>
+                ${dailyCalories < 1200 ? '<div class="plan-note plan-note-warn">This is an aggressive deficit. Extended fasting days, strict meal discipline, and electrolyte supplementation are required.</div>' : ''}
+                ${dailyCalories < 800 ? '<div class="plan-note plan-note-warn">This requires OMAD or alternate-day fasting. Not for beginners. You committed to this.</div>' : ''}
             </div>
 
             <div class="plan-section">
