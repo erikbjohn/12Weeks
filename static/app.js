@@ -458,28 +458,8 @@ async function checkOnboardingComplete() {
 }
 
 async function resumeOnboarding() {
-  // Check each onboarding step and resume where the user left off
+  // Check steps in FORWARD order — first incomplete step gets shown
   try {
-    // Step 1: Check food selections
-    const foodRes = await fetch('/api/food-selections');
-    const foodData = await foodRes.json();
-    if (foodData.completed) {
-      // Food done — show final reveal (profile + projection + plan)
-      showFinalReveal();
-      return;
-    }
-
-    // Step 2: Check goal
-    const goalRes = await fetch('/api/goal');
-    const goalData = await goalRes.json();
-    if (goalData.computed) {
-      // Goal computed but food not done — go to food selection
-      window._goalData = goalData;
-      showFoodSelection();
-      return;
-    }
-
-    // Check remaining steps in FORWARD order — find the first incomplete one
     const intakeRes = await fetch('/api/psych-intake/status');
     const intakeData = await intakeRes.json();
     if (!intakeData.completed) {
@@ -1123,9 +1103,22 @@ async function constraintScheduleNext() {
   showPhysicalAssessment();
 }
 
-function showPhysicalAssessment() {
-  _paStep = 0;
+async function showPhysicalAssessment() {
   _paData = { has_gym: null, has_tape: null, weight: null, height: null, waist: null, chest: null, bicep: null, thigh: null, hips: null, neck: null };
+  // Check if gym/tape questions were already answered — skip to measurements if so
+  try {
+    const res = await fetch('/api/physical-assessment/status');
+    const status = await res.json();
+    if (status.started && status.has_gym !== null) {
+      _paData.has_gym = status.has_gym;
+      _paData.has_tape = status.has_measuring_tape;
+      _paStep = 1; // Skip to measurements
+    } else {
+      _paStep = 0;
+    }
+  } catch(e) {
+    _paStep = 0;
+  }
   renderPhysicalAssessment();
 }
 
