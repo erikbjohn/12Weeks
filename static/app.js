@@ -4610,6 +4610,87 @@ function toggleWarmup(week, dayIdx, stepIdx, btn) {
   apiPost('/api/warmup-completions', { week, day_idx: dayIdx, step_idx: stepIdx });
 }
 
+function renderPostWorkoutCoach() {
+  // Show post-workout coach chat at the bottom of the detail panel
+  // Only visible after the run is logged (workout complete)
+  const runKey = currentWeek + '_' + currentDay;
+  const hasRun = _runLogCache && _runLogCache[runKey];
+  if (!hasRun) return '';
+
+  // Get today's coach messages (post-workout feedback)
+  const today = todayStr();
+  const postWorkoutMsgs = _chatHistory.filter(m => {
+    const text = m.text || m.content || '';
+    // Show all non-trigger messages from today's session
+    return !text.startsWith('[MORNING_CHECKIN]') && !text.startsWith('[WORKOUT_COMPLETE]') && !text.startsWith('[WEEKLY_PLANNING]');
+  }).slice(-8);
+
+  let bubblesHtml = '';
+  for (const m of postWorkoutMsgs) {
+    const text = m.text || m.content || '';
+    const isUser = m.role === 'user';
+    const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
+    bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
+  }
+
+  return `<div class="detail-section">
+    <div class="coach-top-card">
+      <div class="coach-top-label">COACH ERIK — POST-WORKOUT</div>
+      <div class="coach-top-messages" id="post-workout-messages" style="max-height:300px">${bubblesHtml || '<div style="color:var(--muted);font-size:13px;padding:8px 0">Coach feedback will appear here after you log your run.</div>'}</div>
+      <div class="coach-top-input-bar">
+        <input type="text" id="post-workout-input" placeholder="Talk to Erik about your workout..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendPostWorkoutMessage()">
+        <button onclick="sendPostWorkoutMessage()">Send</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function sendPostWorkoutMessage() {
+  const input = document.getElementById('post-workout-input');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  const msgsEl = document.getElementById('post-workout-messages');
+  if (msgsEl) {
+    msgsEl.innerHTML += `<div class="coach-top-bubble user">${escapeHtml(text)}</div>`;
+    msgsEl.innerHTML += `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  _chatHistory.push({ role: 'user', text, time: new Date().toISOString() });
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+    const data = await res.json();
+    if (data.response) {
+      _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+      // Update the messages area
+      if (msgsEl) {
+        // Remove loading indicator and add response
+        const loading = msgsEl.querySelector('.coach-top-loading');
+        if (loading) loading.remove();
+        msgsEl.innerHTML += `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+      }
+      // Also update the top coach widget
+      renderCoachTop();
+    }
+  } catch(e) {
+    _chatHistory.push({ role: 'coach', text: 'Connection issue. Try again.', time: new Date().toISOString() });
+    if (msgsEl) {
+      const loading = msgsEl.querySelector('.coach-top-loading');
+      if (loading) loading.remove();
+      msgsEl.innerHTML += `<div class="coach-top-bubble coach" style="color:var(--muted)">Connection issue. Try again.</div>`;
+    }
+  }
+}
+
 async function saveRunLog() {
   const dist = parseFloat(document.getElementById('run-dist')?.value) || null;
   const hr = parseInt(document.getElementById('run-hr')?.value) || null;
@@ -4626,11 +4707,35 @@ async function saveRunLog() {
 
   showToast('Run logged!', 'success');
 
+  // Re-render to show the post-workout coach section
+  renderDetail();
+
   // Trigger post-workout coach feedback
   const weekData = workoutData[String(currentWeek)];
   const dayData = weekData ? weekData.days[currentDay] : null;
   const workoutName = dayData ? dayData.liftName : 'workout';
-  const triggerMsg = '[WORKOUT_COMPLETE] ' + workoutName + ' done. Run: ' + (dist || '?') + ' mi, HR ' + (hr || '?') + ', elev ' + (elev || '?') + ' ft. Give post-workout feedback.';
+
+  // Build a summary of the workout for the coach
+  let exerciseSummary = '';
+  if (dayData && dayData.exercises) {
+    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+    for (let i = 0; i < dayData.exercises.length; i++) {
+      const ex = dayData.exercises[i];
+      const swapKey = currentWeek + '_' + currentDay + '_' + i;
+      const name = swaps[swapKey] || ex.name;
+      const exData = getExerciseData(name);
+      const wt = exData ? exData.current : 0;
+      if (wt > 0) exerciseSummary += `${name}: ${wt}lb. `;
+    }
+  }
+
+  const triggerMsg = `[WORKOUT_COMPLETE] ${workoutName} done. ${exerciseSummary}Run: ${dist || '?'} mi, HR ${hr || '?'}, elev ${elev || '?'} ft. Give post-workout feedback.`;
+
+  // Show loading in the post-workout coach area
+  const msgsEl = document.getElementById('post-workout-messages');
+  if (msgsEl) {
+    msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is reviewing your workout...</div></div>`;
+  }
 
   try {
     const res = await fetch('/api/chat', {
@@ -4641,10 +4746,17 @@ async function saveRunLog() {
     const data = await res.json();
     if (data.response) {
       _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+      if (msgsEl) {
+        msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+      }
       renderCoachTop();
     }
   } catch(e) {
     console.error('Post-workout feedback failed:', e);
+    if (msgsEl) {
+      msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Couldn't reach Erik. Tap below to try again.</div>`;
+    }
   }
 }
 
@@ -5748,6 +5860,7 @@ async function renderDetail() {
       <div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div>
     </div>` : ''}
     ${renderCheckinSection(d, currentDay)}
+    ${renderPostWorkoutCoach()}
   </div>`;
 
   panel.classList.add('visible');
