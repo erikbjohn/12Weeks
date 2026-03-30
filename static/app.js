@@ -2884,7 +2884,12 @@ async function showGroceryList() {
     for (const cat of (data.categories || [])) {
       html += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
       for (const item of cat.items) {
-        html += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total}</span></div>`;
+        const safeId = item.item.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div class="shop-item" onclick="this.classList.toggle('shop-done')">
+          <button class="shop-check" aria-label="Check off ${item.item}"></button>
+          <span class="shop-item-name">${item.item}</span>
+          <span class="shop-item-qty">${item.total}</span>
+        </div>`;
       }
       html += `</div>`;
     }
