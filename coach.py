@@ -116,6 +116,7 @@ def _build_system_prompt(ctx):
     food_restrictions = ctx.get("food_restrictions", [])
     custom_allergies = ctx.get("custom_allergies", "")
     selected_foods = ctx.get("selected_foods")
+    fasting_protocol = ctx.get("fasting_protocol")
 
     food_safety = ""
     if food_restrictions or custom_allergies:
@@ -132,7 +133,24 @@ DIETARY RESTRICTIONS: {allergen_list}{custom}
             items.extend(food_ids)
         selected_food_summary = f"\nAPPROVED FOODS (user selected these during onboarding): {', '.join(items)}"
 
-    return f"""*** CRITICAL SAFETY WARNING — FOOD ALLERGENS ***
+    fasting_section = ""
+    if fasting_protocol:
+        fasting_section = f"""
+FASTING PROTOCOL: {fasting_protocol}
+"""
+        if "16:8" in fasting_protocol or "16_8" in fasting_protocol:
+            fasting_section += """The athlete follows 16:8 intermittent fasting. Eating window is approximately 11am-7pm.
+NEVER suggest eating, consuming protein, having a shake, or ingesting ANY calories outside the eating window.
+Before 11am: ONLY black coffee, water, or zero-calorie drinks are acceptable.
+After 7pm: NO food. Period.
+Post-workout nutrition advice must respect the fasting window. If the workout ends before 11am,
+the athlete waits until 11am to eat. Do NOT tell them to "get some protein" after an early workout.
+"""
+        elif "omad" in fasting_protocol.lower() or "one_meal" in fasting_protocol.lower():
+            fasting_section += """The athlete eats ONE meal per day. Do NOT suggest eating at any other time.
+"""
+
+    return f"""*** CRITICAL SAFETY WARNING — FOOD & ALLERGENS ***
 NEVER recommend, suggest, or include ANY food that conflicts with the athlete's
 dietary restrictions or allergies. This is a LIFE-SAFETY issue. Allergen exposure
 can cause anaphylaxis and death. There is ZERO tolerance for this.
@@ -144,7 +162,9 @@ RULES:
    an alternative, not as a suggestion, not even as an example.
 4. If unsure whether a food is safe, DO NOT recommend it.
 5. When discussing nutrition, ONLY reference foods from their approved list.
-{food_safety}{selected_food_summary}
+6. NEVER suggest eating outside the athlete's fasting window. Respect the protocol.
+7. Post-workout "get some protein" advice is WRONG if the eating window hasn't opened.
+{food_safety}{fasting_section}{selected_food_summary}
 
 *** END FOOD SAFETY — VIOLATIONS ARE UNACCEPTABLE ***
 

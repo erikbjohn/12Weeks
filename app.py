@@ -1938,6 +1938,10 @@ def _build_coach_context():
     if fs and fs.selected_foods:
         selected_foods_summary = fs.selected_foods
 
+    # Fasting protocol
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    fasting_protocol = goal.fasting_protocol if goal else None
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -1954,6 +1958,7 @@ def _build_coach_context():
         "food_restrictions": food_restrictions,
         "custom_allergies": custom_allergies,
         "selected_foods": selected_foods_summary,
+        "fasting_protocol": fasting_protocol,
     }
 
 
