@@ -1268,6 +1268,7 @@ def api_psych_intake_status():
     if not intake:
         return jsonify({"started": False, "completed": False, "has_report": False, "locked": False})
     locked = intake.locked_until and date.today() < intake.locked_until
+    lockout_expired = intake.locked_until and date.today() >= intake.locked_until
     return jsonify({
         "started": True,
         "completed": intake.completed,
@@ -1275,6 +1276,7 @@ def api_psych_intake_status():
         "message_count": len(intake.conversation or []),
         "locked": bool(locked),
         "locked_until": intake.locked_until.isoformat() if locked else None,
+        "lockout_expired": bool(lockout_expired),
     })
 
 
@@ -2577,18 +2579,12 @@ def api_goal_recalibrate():
 
 # ─── MORNING BRIEFING ─────────────────────────────────────────────────────
 
-MORNING_BRIEFING_PROMPT = """You are Erik — high-performance coach. Lombardi voice. Direct. Invested. No fluff.
-
-Write ONE sentence. If GREEN: acknowledge the data, name today's workout, get them out the door. If YELLOW: name the adjustment needed. If RED: say "We need to talk" and ask what's going on.
-
-No motivational speeches. Facts + orders. End with the workout name or a question (never a dead statement)."""
-
 @app.route("/api/morning-briefing", methods=["POST"])
 @login_required
 def api_morning_briefing():
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    # Get readiness status
+    # Build the morning briefing as a coach message with full context
     garmin_data = garmin.get_today_summary() if garmin.connected else None
     readiness = assess_readiness(garmin_data)
     score = readiness.get("score") or 70
@@ -2607,50 +2603,31 @@ def api_morning_briefing():
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
     workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
 
-    # Build data summary
-    data_summary = f"Readiness: {score}/100."
-    if garmin_data:
-        hrv = garmin_data.get("hrv", {})
-        sleep = garmin_data.get("sleep", {})
-        if hrv.get("lastNight"):
-            data_summary += f" HRV: {hrv['lastNight']}."
-        if sleep.get("score"):
-            data_summary += f" Sleep: {sleep['score']}."
+    # Build checkin summary
+    checkin_summary = f"Morning check-in: Sleep {data.get('sleep_quality', 5)}/10, Stress {data.get('stress_level', 5)}/10, Soreness {data.get('soreness', 5)}/10, Mood {data.get('mood', 5)}/10, Motivation {data.get('motivation', 5)}/10, Anxiety {data.get('anxiety', 3)}/10."
+    if data.get('notes'):
+        checkin_summary += f" Notes: {data['notes']}"
 
-    # Checkin data
-    checkin = data or {}
-    if checkin.get("mood"):
-        data_summary += f" Mood: {checkin['mood']}/10."
-    if checkin.get("soreness") and checkin["soreness"] >= 7:
-        data_summary += f" Soreness: {checkin['soreness']}/10."
+    # Use full coach context + special trigger
+    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). Today is {workout_name} — Week {s.current_week}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return jsonify({"status": status, "message": f"{status}. {workout_name} today.", "workout": workout_name})
+    context = _build_coach_context()
+    response_text = get_coach_response(briefing_msg, context)
 
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+    # Save as chat messages
+    user_chat = ChatMessage(role="user", content=checkin_summary, log_date=date.today(), user_id=current_user.id)
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id)
+    db.session.add(user_chat)
+    db.session.add(asst_chat)
+    db.session.commit()
 
-        full_text = ""
-        with client.messages.stream(
-            model="claude-opus-4-20250514",
-            max_tokens=200,
-            system=MORNING_BRIEFING_PROMPT,
-            messages=[{"role": "user", "content": f"STATUS: {status}\nDATA: {data_summary}\nWORKOUT: {workout_name}\n\nGive me the morning briefing."}],
-        ) as stream:
-            for text in stream.text_stream:
-                full_text += text
-
-        return jsonify({
-            "status": status,
-            "message": full_text.strip(),
-            "workout": workout_name,
-            "readiness_score": score,
-            "needs_discussion": status == "RED",
-        })
-    except Exception:
-        return jsonify({"status": status, "message": f"{workout_name} today. Score: {score}.", "workout": workout_name})
+    return jsonify({
+        "status": status,
+        "message": response_text,
+        "workout": workout_name,
+        "readiness_score": score,
+        "needs_discussion": status == "RED",
+    })
 
 
 # ─── PLAN LOCKOUT ──────────────────────────────────────────────────────────

@@ -2444,8 +2444,11 @@ async function startPsychConversation() {
       if (convData.conversation && convData.conversation.length > 0) {
         _psychMessages = convData.conversation;
         _psychCompleted = convData.completed;
-        // Show welcome back message
-        _psychMessages.unshift({ role: 'coach', content: 'Welcome back. Picking up where we left off...' });
+        // Show welcome back message — different if returning from lockout
+        const welcomeMsg = status.lockout_expired
+          ? "You came back. Good. Let's pick up where we left off."
+          : "Welcome back. Picking up where we left off...";
+        _psychMessages.unshift({ role: 'coach', content: welcomeMsg });
         renderPsychMessages();
         updatePsychProgress();
         if (_psychCompleted) {
@@ -2544,6 +2547,19 @@ async function sendPsychMessage() {
     }
     if (data.completed) {
       _psychCompleted = true;
+      // Brief coach transition before constraints screen
+      const el = document.getElementById('baseline-overlay');
+      if (el) {
+        el.innerHTML = `<div class="baseline-overlay">
+          <div class="baseline-card" style="text-align:center;padding:2rem">
+            <div style="font-size:15px;color:var(--text);line-height:1.6">
+              Good. Now I need to know what we're working with.<br>
+              <span style="color:var(--muted);font-size:13px">A few quick questions about your setup.</span>
+            </div>
+          </div>
+        </div>`;
+        await new Promise(r => setTimeout(r, 1500));
+      }
       showConstraints();
     }
   } catch (e) {
@@ -4177,8 +4193,9 @@ function toggleDay(week, dayIdx, e) {
   apiPost('/api/completions/day', { week, day_idx: dayIdx });
   renderDayGrid();
 
-  // If day just marked complete, trigger coach feedback
-  if (_completionsCache.days[key]) {
+  // If day just marked complete (not uncompleting), trigger coach feedback — once per session
+  if (_completionsCache.days[key] && !sessionStorage.getItem('workout_sent_' + key)) {
+    sessionStorage.setItem('workout_sent_' + key, '1');
     const weekData = workoutData[String(week)];
     if (weekData && weekData.days[dayIdx]) {
       const d = weekData.days[dayIdx];
