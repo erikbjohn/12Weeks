@@ -1097,9 +1097,16 @@ function removeScheduledActivity(idx) {
   renderConstraints();
 }
 
-function constraintScheduleNext() {
+async function constraintScheduleNext() {
   _constraintData.schedule_notes = (document.getElementById('constraint-schedule-notes')?.value || '').trim();
-  apiPost('/api/constraints', { ..._constraintData, completed: true });
+  // Save constraints and WAIT for it to complete before moving on
+  await fetch('/api/constraints', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ ..._constraintData, completed: true }),
+  });
+  // Clear food catalog cache so it re-fetches with these restrictions
+  _foodCatalog = null;
   showPhysicalAssessment();
 }
 
