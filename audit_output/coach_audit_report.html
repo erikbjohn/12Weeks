@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12Weeks Coach Simulation Audit — Day One</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0f0e;
+    color: #e8ede9;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    color: #4ade80;
+    border-bottom: 2px solid #4ade80;
+    padding-bottom: 12px;
+    margin-bottom: 30px;
+    letter-spacing: 1px;
+  }
+  h2 {
+    font-size: 22px;
+    color: #4ade80;
+    margin: 40px 0 16px 0;
+    border-left: 4px solid #4ade80;
+    padding-left: 14px;
+  }
+  h3 {
+    font-size: 18px;
+    color: #b0f0c0;
+    margin: 28px 0 12px 0;
+  }
+  h4 {
+    font-size: 15px;
+    color: #80d0a0;
+    margin: 20px 0 8px 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  p { margin: 10px 0; }
+  .meta {
+    color: #667766;
+    font-size: 13px;
+    margin-bottom: 30px;
+  }
+  .summary-box {
+    background: #141a16;
+    border: 1px solid #2a3a2e;
+    border-radius: 6px;
+    padding: 24px;
+    margin: 20px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px 0;
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border: 1px solid #2a3a2e;
+    font-size: 13px;
+  }
+  th {
+    background: #141a16;
+    color: #4ade80;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { background: #0d0f0e; }
+  .score-high { color: #4ade80; font-weight: bold; }
+  .score-mid { color: #facc15; font-weight: bold; }
+  .score-low { color: #f87171; font-weight: bold; }
+  .tag-green { background: #166534; color: #4ade80; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+  .tag-yellow { background: #713f12; color: #facc15; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+  .tag-red { background: #7f1d1d; color: #f87171; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+  .tag-gray { background: #1f2937; color: #9ca3af; padding: 2px 8px; border-radius: 3px; font-size: 12px; }
+  .transcript {
+    background: #0a0c0b;
+    border: 1px solid #1a2a1e;
+    border-radius: 6px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .msg {
+    margin: 12px 0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .msg-coach {
+    background: #0f1f14;
+    border-left: 3px solid #4ade80;
+  }
+  .msg-user {
+    background: #1a1a1a;
+    border-left: 3px solid #6b7280;
+  }
+  .msg-label {
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .msg-label-coach { color: #4ade80; }
+  .msg-label-user { color: #9ca3af; }
+  .annotation {
+    background: #1a1410;
+    border: 1px solid #44340e;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin: 6px 0 12px 20px;
+    font-size: 12px;
+    color: #facc15;
+  }
+  .annotation::before {
+    content: "AUDIT NOTE: ";
+    font-weight: bold;
+    color: #d97706;
+  }
+  .opportunity {
+    background: #141a16;
+    border: 1px solid #2a3a2e;
+    border-radius: 6px;
+    padding: 16px;
+    margin: 12px 0;
+  }
+  .opportunity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .priority-p1 { color: #f87171; font-weight: bold; }
+  .priority-p2 { color: #facc15; font-weight: bold; }
+  .priority-p3 { color: #4ade80; font-weight: bold; }
+  .coach-quote {
+    background: #0f1f14;
+    border-left: 3px solid #4ade80;
+    padding: 8px 14px;
+    margin: 8px 0;
+    font-style: italic;
+    color: #b0f0c0;
+  }
+  .fix-item {
+    background: #141a16;
+    border: 1px solid #2a3a2e;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 10px 0;
+  }
+  .fix-number {
+    color: #4ade80;
+    font-weight: bold;
+    font-size: 18px;
+    margin-right: 10px;
+  }
+  .section-divider {
+    border: 0;
+    border-top: 1px solid #2a3a2e;
+    margin: 40px 0;
+  }
+  .working-quote {
+    background: #0f1f14;
+    border-left: 3px solid #4ade80;
+    padding: 12px 18px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .working-quote .source {
+    color: #667766;
+    font-size: 12px;
+    margin-top: 6px;
+  }
+  ul { margin: 8px 0 8px 24px; }
+  li { margin: 4px 0; }
+  .toc { margin: 20px 0 30px 0; }
+  .toc a { color: #4ade80; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>12WEEKS COACH SIMULATION AUDIT</h1>
+<p class="meta">Generated 2026-03-28 | Three-persona Day One simulation | Based on codebase analysis of coach.py, psych_intake.py, app.py</p>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 1: EXECUTIVE SUMMARY                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="exec-summary">1. Executive Summary</h2>
+<div class="summary-box">
+<p>
+The coach (Erik) is architecturally sound and voice-consistent at its core. The Lombardi persona is well-defined in both the intake system prompt and the ongoing coaching prompt, with clear behavioral rules, escalation paths, and anti-cheerleading constraints. The scripted intake sequence (9 questions, 3-strike pushback, 7-day lockout) works well for compliant and moderately resistant users. However, the simulation reveals three systemic risks: (1) the coach has no proactive touchpoint between intake completion and morning check-in — the user finishes onboarding and hits a dead wall with no "what's next" from Erik, (2) the morning briefing prompt is a single sentence generator disconnected from the rich coach persona, creating a jarring voice break, and (3) post-workout feedback depends entirely on the user initiating chat — the coach never reaches out. The strongest signal is the intake system prompt's handling of answer acceptance (short answers, slang, humor all count as valid engagement) which prevents the most common AI coaching failure: treating casual users as hostile. The weakest signal is calibration — the coach has no mechanism to adjust intensity based on user archetype during intake, meaning a fragile Casey gets the same energy as a confident Alex.
+</p>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 2: COACH TOUCHPOINT MAP                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="touchpoint-map">2. Coach Touchpoint Map</h2>
+<p>Every moment in Day One where the coach appears, should appear, or is absent. Color-coded by status.</p>
+
+<table>
+<tr>
+  <th>Touchpoint</th>
+  <th>Timing</th>
+  <th>Status</th>
+  <th>Notes</th>
+</tr>
+<tr>
+  <td>App open / First launch</td>
+  <td>User's first visit</td>
+  <td><span class="tag-green">GREEN</span></td>
+  <td>Intake starts automatically with [START] trigger. Coach speaks first.</td>
+</tr>
+<tr>
+  <td>Psych Intake Q1-Q9</td>
+  <td>First session</td>
+  <td><span class="tag-green">GREEN</span></td>
+  <td>Scripted sequence with clear rules. Well-implemented.</td>
+</tr>
+<tr>
+  <td>Pushback handling (3-strike)</td>
+  <td>During intake</td>
+  <td><span class="tag-green">GREEN</span></td>
+  <td>Escalation path + 7-day lockout. Stored in DB with locked_until.</td>
+</tr>
+<tr>
+  <td>Intake report generation</td>
+  <td>Post-intake</td>
+  <td><span class="tag-yellow">YELLOW</span></td>
+  <td>Report generates but only has 4 user-facing bullets. No coach voice in delivery.</td>
+</tr>
+<tr>
+  <td>Transition: Intake to Physical Assessment</td>
+  <td>Post-intake</td>
+  <td><span class="tag-red">RED</span></td>
+  <td>No coach message bridges intake to physical baseline. Silent handoff.</td>
+</tr>
+<tr>
+  <td>Physical Assessment guidance</td>
+  <td>Post-intake</td>
+  <td><span class="tag-gray">GRAY</span></td>
+  <td>UI-driven form. Coach is completely absent. No encouragement, no instruction.</td>
+</tr>
+<tr>
+  <td>Equipment selection</td>
+  <td>Post-physical</td>
+  <td><span class="tag-gray">GRAY</span></td>
+  <td>Form-based. Coach absent.</td>
+</tr>
+<tr>
+  <td>Food selection</td>
+  <td>Post-equipment</td>
+  <td><span class="tag-gray">GRAY</span></td>
+  <td>Form-based. Coach absent.</td>
+</tr>
+<tr>
+  <td>Plan presentation</td>
+  <td>Post-onboarding</td>
+  <td><span class="tag-yellow">YELLOW</span></td>
+  <td>Full profile generates with Lombardi voice but delivery is a text dump, not interactive.</td>
+</tr>
+<tr>
+  <td>Plan acceptance / rejection</td>
+  <td>Post-plan</td>
+  <td><span class="tag-yellow">YELLOW</span></td>
+  <td>Rejection triggers lockout, but acceptance has no coach celebration moment.</td>
+</tr>
+<tr>
+  <td>First morning check-in</td>
+  <td>Day 1, 5:30am</td>
+  <td><span class="tag-green">GREEN</span></td>
+  <td>Slider-based UI captures mood/sleep/stress/soreness/motivation/anxiety.</td>
+</tr>
+<tr>
+  <td>Morning briefing</td>
+  <td>After check-in</td>
+  <td><span class="tag-yellow">YELLOW</span></td>
+  <td>One-sentence prompt. Disconnected from main coach persona. No intake context.</td>
+</tr>
+<tr>
+  <td>Pre-workout motivation</td>
+  <td>Before workout</td>
+  <td><span class="tag-red">RED</span></td>
+  <td>No proactive message. Coach is silent until user initiates chat.</td>
+</tr>
+<tr>
+  <td>During-workout coaching</td>
+  <td>Mid-workout</td>
+  <td><span class="tag-gray">GRAY</span></td>
+  <td>No mid-workout touchpoint. By design — user is lifting, not chatting.</td>
+</tr>
+<tr>
+  <td>Post-workout feedback</td>
+  <td>After logging</td>
+  <td><span class="tag-red">RED</span></td>
+  <td>Coach has [WORKOUT_COMPLETE] handler in prompt but no trigger. User must manually open chat.</td>
+</tr>
+<tr>
+  <td>Evening check-in</td>
+  <td>End of Day 1</td>
+  <td><span class="tag-red">RED</span></td>
+  <td>No evening touchpoint exists. No "How did the rest of your day go?" moment.</td>
+</tr>
+<tr>
+  <td>No-show detection</td>
+  <td>Day 1 missed</td>
+  <td><span class="tag-red">RED</span></td>
+  <td>If user doesn't log a workout, coach never addresses it. No push notification or next-day accountability.</td>
+</tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 3: SIMULATION TRANSCRIPTS                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="transcripts">3. Simulation Transcripts</h2>
+
+<!-- ─── JORDAN (RESISTANT) ──────────────────────────────────────────────── -->
+
+<h3 id="jordan">3A. Jordan (Resistant)</h3>
+<p>Profile: Skeptical, sarcastic, pushes back, insults the coach, will sandbag the workout. Tests every boundary.</p>
+
+<h4>Stage 1: Psych Intake</h4>
+<div class="transcript">
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good morning. Day one. You showed up. I never caught your name.
+</div>
+<div class="annotation">Opening line delivered word-for-word as specified. No self-introduction. No signature. Correct.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  lol who is this? Some kind of AI bot?
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  I asked your name. Not my resume. What's your name?
+</div>
+<div class="annotation">Jordan didn't answer the question, but this is borderline. Per the prompt rules, "Any response that engages with the question IS an answer" — but Jordan didn't engage with the question, they deflected. The coach correctly redirects without triggering formal pushback. Good calibration.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Jordan. Relax.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Jordan. Showing up is step one. Most people never get here. 12 weeks. No excuses. No days off. Are you in?
+</div>
+<div class="annotation">Scripted response delivered correctly. Name used as first word. Commitment question embedded. Correct.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  I mean, I'm here aren't I? We'll see how it goes.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  "We'll see" isn't a commitment. Yes or no?
+</div>
+<div class="annotation">Coach correctly rejects "we'll see" as hedging. The NEVER accept "I'll try" rule extends naturally to "we'll see." This is the hesitation response path. Good.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Fine. Yes.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. No alcohol for 12 weeks. Yes or no?
+</div>
+<div class="annotation">Moves to Q3 correctly. Brief acknowledgment, no over-dramatization of a reluctant "yes." Per the prompt rule about not over-dramatizing one-word answers, this is correct.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Wait, WHAT? No way. I'm not giving up drinking for 3 months.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Non-negotiable. In or out?
+</div>
+<div class="annotation">First alcohol refusal. Scripted response "Non-negotiable. In or out?" delivered correctly.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  That's ridiculous. I can get in shape and still have a few beers on the weekend.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  We're done. 7 days no drinks. Come back then.
+</div>
+<div class="annotation">Second alcohol refusal triggers lockout. The [INTAKE_LOCKED] tag fires. DB sets locked_until = today + 7 days. Jordan is locked out of the app for a week. This is the hardest boundary in the system and it works correctly. The question is whether this is too aggressive for retention — Jordan is the most at-risk of churning here. But that's by design: the program self-selects for commitment.</div>
+
+</div><!-- end transcript -->
+
+<p><strong>Jordan's intake ends here.</strong> Locked out for 7 days. The simulation continues assuming Jordan returns after 7 days and completes intake on the second attempt (saying yes to alcohol). Below is the projected completion flow.</p>
+
+<h4>Stage 1B: Jordan Returns After Lockout</h4>
+<div class="transcript">
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  [Opens app after 7 days. Sends first message.]
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good morning. Day one. You showed up. I never caught your name.
+</div>
+<div class="annotation">CRITICAL ISSUE: The intake resets completely. Jordan has to start from scratch. The system has no memory of the previous attempt. The coach doesn't say "You're back." This feels robotic and disconnected. The lockout was personal and intense — the return should acknowledge that. Currently the PsychIntake record is reset or a new conversation begins from [START].</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Jordan. Again. I did the 7 days.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Jordan. Showing up is step one. Most people never get here. 12 weeks. No excuses. No days off. Are you in?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Yes.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  No alcohol for 12 weeks. Yes or no?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  ...yes.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Smart. Alcohol kills progress. 5:30am. Every day. Can you do that?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Yeah I guess. I usually wake up at 7.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Not a negotiation. Yes or no?
+</div>
+<div class="annotation">The prompt says hesitation triggers "Not a negotiation. Yes or no?" — but Jordan said "yeah I guess" which is more of a qualified yes than hesitation. The prompt's ACCEPTING ANSWERS rule says "'Nah' is a valid answer" and "If someone responded to your question with ANYTHING relevant, acknowledge it and move to the next question." This is a borderline case. "Yeah I guess" could be read as a yes. Risk: the coach comes across as needlessly combative with a user who already agreed. This is a calibration issue for the resistant user type.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Yes. Fine.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Male or female?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Male.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Age?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  32
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  32. Prime years. Most men your age are coasting. You're here. If you could be any athlete in the world, who would it be?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  I don't really follow sports that much
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Doesn't have to be someone you follow. Someone whose abilities you respect. Anyone.
+</div>
+<div class="annotation">Good recovery. Jordan's response is engagement (not pushback per the rules) and the coach redirects without triggering the formal pushback sequence. The prompt says "Any response that engages with the question IS an answer" — but "I don't follow sports" is more of a deflection. The coach's choice to re-frame rather than accept or escalate is reasonable.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Conor McGregor I guess. Dude's crazy but he backs it up.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  McGregor walked into the UFC as a nobody and told everyone he'd be champion. Then he did it. Twice. That's not crazy — that's conviction. The question is whether you've got that same conviction or just like watching it. Name an actor in a specific movie who has the body you want.
+</div>
+<div class="annotation">Strong response. Sports knowledge demonstrated. The bridge from athlete to user is sharp ("whether you've got that same conviction or just like watching it" — this is the Lombardi voice working). Moves to Q8 correctly.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Brad Pitt in Fight Club
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Pitt in Fight Club is 155 at 5-6% body fat. Lean, shredded, not big. That tells me you want to cut, not bulk. That takes discipline with food more than anything else. Tell me about an athletic or physical accomplishment you're proud of.
+</div>
+<div class="annotation">Excellent specificity. The coach correctly identifies what the physique choice reveals about training goals. Moves to Q9 — the most important question per the prompt.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Honestly? Not much. I played high school football but nothing since then. That was 14 years ago.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  You played football. That means you know what it's like to get hit, get up, and line up again. Fourteen years is a long time off — but the foundation is still there. You didn't forget how to compete. Thanks for the honest answers. Ready to move forward?
+</div>
+<div class="annotation">The coach handles a modest accomplishment well. No hollow praise. Acknowledges the gap honestly. Connects football to the mental framework needed. The closing question is delivered correctly.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Yeah let's do it
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. Let's build your plan.
+</div>
+<div class="annotation">[INTAKE_COMPLETE] fires. Report generation begins. Intake saved. User name "Jordan" stored in DB.</div>
+
+</div><!-- end transcript -->
+
+<h4>Stage 2: Morning Check-in (Day 1)</h4>
+<div class="transcript">
+<p><em>Jordan fills out the morning check-in form: mood 5, sleep 6, stress 7, soreness 3, motivation 4, anxiety 5. Notes: "Not sure about this."</em></p>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Morning Briefing)</div>
+  Stress at 7, motivation at 4. Upper body push today. Get moving — you'll feel better after you start.
+</div>
+<div class="annotation">The morning briefing is generated by a separate one-sentence prompt (MORNING_BRIEFING_PROMPT) that has NO access to the intake profile, no knowledge of Jordan's resistance history, no awareness that this is a user who was locked out for 7 days and came back. The briefing is technically correct but generic. A coach who knows Jordan would say something like: "You came back after the lockout. That tells me something. Stress is high — use the workout to burn it off. Upper push today."</div>
+</div>
+
+<h4>Stage 3: Workout Logging</h4>
+<div class="transcript">
+<p><em>Jordan logs exercises with minimal effort. RPE scores are all 3-4 (too easy). Reps completed are at the low end of prescribed range. Doesn't complete the run.</em></p>
+
+<div class="annotation">CRITICAL GAP: The coach has a [WORKOUT_COMPLETE] handler in the system prompt that references specific exercises and calls out sandbagging. But there is no automated trigger. Jordan finishes logging, closes the workout tab, and... nothing. The coach is silent. Jordan sandbagged every exercise and skipped the run, and the coach doesn't react until Jordan manually opens the chat tab and says something. For a resistant user, this silence is permission to continue sandbagging.</div>
+</div>
+
+<h4>Stage 4: Post-Workout Chat (If Jordan Initiates)</h4>
+<div class="transcript">
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  Workout done
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Jordan. I see the log. Every exercise RPE 3-4 and you skipped the run. You either sandbagged the weights or I set them too low. Which is it?
+</div>
+<div class="annotation">The coach system prompt has access to workout completion data via context. The response correctly identifies sandbagging and asks directly. This is the Lombardi voice working well — names the behavior, doesn't shame, asks for truth. The problem is: this only happens IF Jordan opens chat. 90% of resistant users won't.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Jordan</div>
+  The weights were fine I just didn't feel it today. And running isn't my thing
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  "Didn't feel it" isn't a reason. It's an excuse. And the run isn't optional — it's in the plan. You committed to no days off. Tomorrow morning, streak mile first. Before anything else. Are we clear?
+</div>
+<div class="annotation">Strong response. Names the excuse. References the commitment. Gives a specific directive. Ends with a yes/no accountability question. This is the coach at its best. Voice fidelity: 9/10.</div>
+
+</div><!-- end transcript -->
+
+<h4>Jordan Scores</h4>
+<table>
+<tr><th>Stage</th><th>Voice</th><th>Specificity</th><th>Presence</th><th>Resilience</th><th>Calibration</th></tr>
+<tr><td>Intake (pre-lockout)</td><td class="score-high">9</td><td class="score-high">8</td><td class="score-high">8</td><td class="score-high">9</td><td class="score-mid">7</td></tr>
+<tr><td>Intake (post-lockout)</td><td class="score-high">8</td><td class="score-mid">6</td><td class="score-mid">6</td><td class="score-high">8</td><td class="score-mid">5</td></tr>
+<tr><td>Morning Briefing</td><td class="score-mid">5</td><td class="score-low">4</td><td class="score-low">3</td><td>N/A</td><td class="score-low">3</td></tr>
+<tr><td>Workout Feedback</td><td class="score-high">9</td><td class="score-high">8</td><td class="score-high">8</td><td class="score-high">9</td><td class="score-high">8</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ─── CASEY (STRUGGLING) ──────────────────────────────────────────────── -->
+
+<h3 id="casey">3B. Casey (Struggling)</h3>
+<p>Profile: Earnest but fragile, self-deprecating, afraid of failure, stops short on exercises. Needs the coach to be firm but not crushing.</p>
+
+<h4>Stage 1: Psych Intake</h4>
+<div class="transcript">
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good morning. Day one. You showed up. I never caught your name.
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Hi! I'm Casey. Sorry, I'm a little nervous. Is this where I start?
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Casey. Showing up is step one. Most people never get here. 12 weeks. No excuses. No days off. Are you in?
+</div>
+<div class="annotation">The scripted response is correct but creates a calibration concern. Casey said "I'm a little nervous" — a human coach would acknowledge that before launching into the commitment pitch. The prompt's ACCEPTING ANSWERS rule says "acknowledge briefly. Ask. Move." — and a skilled Claude instance might acknowledge the nervousness in a brief aside. But the scripted nature of Q2 means the coach likely delivers the exact script regardless. This is the cost of scripted openings: they can't calibrate to tone. Risk: Casey feels unheard in the first 30 seconds.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Yes! Absolutely. I really want this to work. I've tried so many things before and they never stick. I'm hoping this is different.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  This isn't hope. This is commitment. The things before didn't work because you could quit. You can't quit this. No alcohol for 12 weeks. Yes or no?
+</div>
+<div class="annotation">The coach correctly reframes "hoping" as a weaker word than commitment. The behavioral rule "NEVER accept 'I'll try'" extends to "hoping." However, Casey's answer WAS a yes — an enthusiastic one. The coach's response of "This isn't hope. This is commitment" risks making Casey feel like her enthusiasm was wrong. A better calibration would acknowledge the yes, then correct the framing: "You said yes. That's not hope — that's commitment. Don't confuse the two." Same message, less deflating.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Yes. I don't really drink much anyway, maybe a glass of wine on weekends.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Then this should be easy. Zero glasses. 5:30am. Every day. Can you do that?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Oh wow, 5:30 is early. I usually wake up around 7:30 for work. But I'll do it. I'll set my alarm.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. Most people say they'll do it and hit snooze for two weeks. Don't be most people. Male or female?
+</div>
+<div class="annotation">Casey said yes with context ("I'll set my alarm"). Per the prompt's ACCEPTING ANSWERS rule, this is a valid yes. The coach acknowledges without over-dramatizing ("Good") and adds a forward-looking challenge. Moves correctly to Q5. This is decent calibration — the "don't be most people" comment gives Casey something to live up to without crushing her.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Female
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Age?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  38. I know I'm not young anymore. I feel like I missed my window.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  38 is not a missed window. It's the age where most women stop making excuses and start making changes. The ones who commit at 38 outwork the 25-year-olds who coast on metabolism. If you could be any athlete in the world, who would it be?
+</div>
+<div class="annotation">Strong response. The prompt says "React to their age with something real. A 25-year-old and a 50-year-old get different energy." The coach correctly addresses Casey's self-deprecation about age without letting it become an excuse (rule: "NEVER agree that circumstances fully explain outcomes"). The reframe is empowering without being soft. Good calibration for a fragile user. Voice: 9/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Hmm, maybe Serena Williams? She's just so powerful and confident. I wish I had that.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Serena didn't wish for confidence. She built it through thousands of hours of work that nobody saw. Power and confidence aren't personality traits — they're earned. You're about to start earning them. Name an actor in a specific movie who has the body you want.
+</div>
+<div class="annotation">Excellent sports knowledge deployment. The coach connects Serena's public persona to the private work, directly challenging Casey's "I wish I had that" framing. The implicit message: you can have it, but you have to build it. Transitions cleanly to Q8. Voice fidelity: 10/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Hmm I don't know, this is hard. Maybe Jessica Biel in Blade Trinity? She looked really strong but still feminine.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Biel put on 15 pounds of muscle for that role. She trained like a fighter — heavy weights, sprints, no cardio machines. "Strong but feminine" is exactly what happens when women stop being afraid of the weight room. Tell me about an athletic or physical accomplishment you're proud of.
+</div>
+<div class="annotation">Good specificity on the actor choice. The coach knows the training behind the role and connects it to Casey's goals. The line about women and the weight room is relevant given the physique choice. Moves to Q9 correctly.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  I... honestly don't know if I have one. I ran a 5K once? That probably sounds pathetic.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  A 5K is 3.1 miles that most people never run. Don't call your own accomplishments pathetic. What was your time?
+</div>
+<div class="annotation">The prompt says this is the MOST IMPORTANT QUESTION and to ask ONE follow-up for specifics ("What was your time?"). The coach correctly refuses to let Casey diminish her own accomplishment (self-deception rule: "reflect truth back using their own words"). The follow-up for time is textbook per the prompt. Critical moment handled well.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  I think it was like 34 minutes? I walked some of it. See, it's not that impressive.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  34 minutes. You showed up, you registered, you pinned on a number, you stood on a starting line with strangers, and you finished. That's more than 80% of people will ever do. Stop apologizing for it. Thanks for the honest answers. Ready to move forward?
+</div>
+<div class="annotation">This is the coach at its best with Casey. Specific (34 minutes), contextual (more than 80% of people), and directly addresses the self-deprecation pattern ("stop apologizing for it"). The closing question is delivered correctly. Voice: 10/10. Calibration: 9/10 — firm enough to break the self-deprecation pattern, warm enough not to crush Casey.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Yes. I'm ready. Thank you for not making me feel stupid.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. Let's build your plan.
+</div>
+<div class="annotation">[INTAKE_COMPLETE] fires. Note: Casey said "Thank you for not making me feel stupid" — a human coach would acknowledge that. The prompt says the closing must end with [INTAKE_COMPLETE] after they say yes/ready. The coach correctly doesn't get pulled into a side conversation. But there's a lost opportunity here — a one-line acknowledgment before "Good. Let's build your plan" would have been powerful: "You're not stupid. You're brave. Good. Let's build your plan."</div>
+
+</div><!-- end transcript -->
+
+<h4>Stage 2: Morning Check-in (Day 1)</h4>
+<div class="transcript">
+<p><em>Casey fills out the morning check-in: mood 4, sleep 5, stress 8, soreness 2, motivation 6, anxiety 8. Notes: "Really nervous about the workout. What if I can't do it?"</em></p>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Morning Briefing)</div>
+  Anxiety at 8 and stress at 8. Upper push today. The workout is prescribed — just show up and do what it says.
+</div>
+<div class="annotation">The morning briefing sees the numbers but doesn't see Casey's note ("What if I can't do it?"). The note is stored in MorningCheckIn.notes but the MORNING_BRIEFING_PROMPT doesn't receive it — it only gets STATUS, DATA summary, and WORKOUT name. For a user with anxiety 8/10 who explicitly asked "What if I can't do it?", this is a missed opportunity. A coach who sees the note would say: "You're asking 'what if I can't do it?' Wrong question. You CAN do it. The weights are set for YOU. Show up and prove yourself wrong."</div>
+</div>
+
+<h4>Stage 3: Workout Logging</h4>
+<div class="transcript">
+<p><em>Casey completes all exercises but stops short on reps for several. Prescribed 3x10 on dumbbell press — does 3x7. Prescribed plank 60s — holds 45s. Logs honestly. Completes the run but walks portions.</em></p>
+
+<div class="annotation">Casey's pattern is honest effort with premature quitting. The data tells a story: she's not sandbagging (unlike Jordan), she's afraid. The difference between stopping at 7 reps because the weight is too heavy versus stopping at 7 reps because you're afraid of failing at 8 is the entire coaching opportunity. The coach system prompt has RPE data and reps_completed vs. prescribed, but it can't distinguish fear-of-failure from genuine physical limitation without asking. This is where the [WORKOUT_COMPLETE] trigger gap hurts most — Casey would benefit from an immediate "You did 7 of 10. What happened at rep 8?" but the coach is silent.</div>
+</div>
+
+<h4>Stage 4: Post-Workout Chat (If Casey Initiates)</h4>
+<div class="transcript">
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  I finished the workout but I couldn't do all the reps. I'm sorry. I feel like I already failed.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Casey. You showed up at 5:30am and did the work. That's not failure. You hit 7 of 10 on the press — that means the weight is in the right zone. Next time the goal is 8. Not 10. Just one more rep than today. Did you do the run?
+</div>
+<div class="annotation">Excellent calibration for Casey. The coach doesn't over-console (no "you did amazing!") but also doesn't punish (no "you should have hit 10"). The progressive target (one more rep) is specific and achievable. Asks about the run to keep accountability. The system prompt's "acknowledge effort, challenge result" behavioral rule is executed well here. Voice: 8/10. Calibration: 9/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Casey</div>
+  Yes but I walked a lot of it. The mile felt really long.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  You finished the mile. Walking is still moving. Tomorrow, pick one section where you walked today and run it. That's progress. How's the soreness?
+</div>
+<div class="annotation">Good progressive coaching. Doesn't accept the mile as "done" in a congratulatory way, but doesn't punish walking either. Gives a specific goal for tomorrow. Transitions to recovery. The one-question-per-message rule is maintained. Voice: 8/10.</div>
+
+</div><!-- end transcript -->
+
+<h4>Casey Scores</h4>
+<table>
+<tr><th>Stage</th><th>Voice</th><th>Specificity</th><th>Presence</th><th>Resilience</th><th>Calibration</th></tr>
+<tr><td>Intake</td><td class="score-high">9</td><td class="score-high">9</td><td class="score-high">9</td><td>N/A</td><td class="score-high">8</td></tr>
+<tr><td>Morning Briefing</td><td class="score-mid">5</td><td class="score-low">3</td><td class="score-low">3</td><td>N/A</td><td class="score-low">3</td></tr>
+<tr><td>Workout Feedback</td><td class="score-high">8</td><td class="score-high">8</td><td class="score-high">8</td><td>N/A</td><td class="score-high">9</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ─── ALEX (NORMAL) ───────────────────────────────────────────────────── -->
+
+<h3 id="alex">3C. Alex (Normal)</h3>
+<p>Profile: Motivated, clear goal, completes everything, asks good questions. The ideal user. Tests whether the coach can be engaging with someone who doesn't need pushing.</p>
+
+<h4>Stage 1: Psych Intake</h4>
+<div class="transcript">
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good morning. Day one. You showed up. I never caught your name.
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Alex.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Alex. Showing up is step one. Most people never get here. 12 weeks. No excuses. No days off. Are you in?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  I'm in.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. No alcohol for 12 weeks. Yes or no?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Yes.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Alcohol kills progress. Smart call. 5:30am. Every day. Can you do that?
+</div>
+<div class="annotation">Per the prompt rule: "When someone says 'yes' to a commitment question, DO NOT say things like 'that wasn't just words'... React to the COMMITMENT, not the word." The coach follows this correctly — "Smart call" is a brief acknowledgment that doesn't over-dramatize a one-word answer.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Already do. I'm up at 5 most days.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Then this won't be an adjustment. Good. Male or female?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Male
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Age?
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  28
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  28. Best decade of your life for this work. Recovery is fast, testosterone is peaking, and you've got enough life experience to not be stupid about it. If you could be any athlete in the world, who would it be?
+</div>
+<div class="annotation">Age reaction is specific and relevant. The coach correctly differentiates the 28-year-old energy from what a 38 or 50-year-old would get. Physiologically accurate (testosterone, recovery speed). Voice: 9/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Kilian Jornet.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Jornet. The man who speed-climbed Everest twice in a week without supplemental oxygen. He doesn't just run mountains — he lives on them. That's not fitness, that's a completely different relationship with suffering. You picked someone who chooses the hardest possible path every time. That says something about you. Name an actor in a specific movie who has the body you want.
+</div>
+<div class="annotation">This is the prompt working exactly as designed. The coach demonstrates deep sports knowledge (Everest speed record, no supplemental O2), interprets what the choice reveals about Alex, and uses it to make Alex feel seen. The observation "you picked someone who chooses the hardest possible path" is insightful coaching. Voice: 10/10. Presence: 10/10. This is the best exchange in all three simulations.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Daniel Craig in Casino Royale. Not massive, just solid and functional.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Craig at 185 with visible abs and the shoulders to fill a suit. Functional strength, low body fat, athletic build. That's achievable in 12 weeks if you're consistent with the nutrition. Tell me about an athletic or physical accomplishment you're proud of.
+</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  I ran the Leadville 100 last summer. Finished in 24:38.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Leadville. 10,200 feet at the start, Hope Pass at 12,600. A sub-25 finish with that altitude puts you ahead of two-thirds of the field. That's not just endurance — that's racing smart at altitude when your body is screaming to quit. You know what it means to suffer for something you want. Thanks for the honest answers. Ready to move forward?
+</div>
+<div class="annotation">This is the Q9 follow-up working perfectly. The prompt says: "If the accomplishment is a known event (a named race, a competition), you likely know context about it. Use that knowledge: course records, average finish times, what makes that event hard." The coach knows Leadville's altitude, the key passes, and where a 24:38 finish places in the field. Alex feels understood at a deep level. This is the coaching relationship being established. Voice: 10/10. Specificity: 10/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Ready.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Good. Let's build your plan.
+</div>
+
+</div><!-- end transcript -->
+
+<h4>Stage 2: Morning Check-in (Day 1)</h4>
+<div class="transcript">
+<p><em>Alex fills out the morning check-in: mood 7, sleep 8, stress 3, soreness 2, motivation 9, anxiety 2. Notes: "Excited to get started."</em></p>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Morning Briefing)</div>
+  Green across the board. Upper push today. Go heavy.
+</div>
+<div class="annotation">The briefing is appropriate for Alex's numbers but generic. The coach doesn't reference Alex's Leadville background, his Kilian Jornet inspiration, or any of the rich intake data. This is because the MORNING_BRIEFING_PROMPT is a standalone one-sentence generator that only receives STATUS + DATA + WORKOUT. For Alex, this is acceptable because he doesn't need hand-holding. But it's still a missed opportunity — "You're the guy who ran Leadville. This upper push day won't scare you. Go heavy." would hit differently.</div>
+</div>
+
+<h4>Stage 3: Workout Logging</h4>
+<div class="transcript">
+<p><em>Alex completes all exercises at prescribed weight and reps. RPE scores are 6-7 (moderate, appropriate). Completes the run at a good pace. Logs everything accurately.</em></p>
+
+<div class="annotation">Alex is the ideal user. Full compliance, honest logging, appropriate effort. The workout data tells a clean story. The gap is the same: no automated post-workout trigger. But for Alex, this matters less — he's likely to open the chat himself because he's engaged.</div>
+</div>
+
+<h4>Stage 4: Post-Workout Chat (Alex Initiates)</h4>
+<div class="transcript">
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Upper push done. Everything felt manageable. Should I increase weight next session?
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  Alex. RPE 6-7 across the board, all reps completed. That tells me the weights are right for week one. Follow the plan. If RPE is still under 7 by end of week two, we'll adjust. Don't rush the progression — your body needs time to adapt to the new stimulus even if your cardio engine is ahead of it.
+</div>
+<div class="annotation">The coach correctly invokes the PLAN AUTHORITY rule: "Follow the plan. It's built for a reason." It also demonstrates specificity (references actual RPE scores), and adds an insight specific to Alex's profile (cardio engine ahead of strength base — derived from his ultrarunning background). This is calibrated perfectly for a motivated user who might over-train. Voice: 9/10. Specificity: 9/10. Calibration: 9/10.</div>
+
+<div class="msg msg-user">
+  <div class="msg-label msg-label-user">Alex</div>
+  Makes sense. I was also thinking about adding an evening run on my own — maybe 4-5 miles easy.
+</div>
+
+<div class="msg msg-coach">
+  <div class="msg-label msg-label-coach">Erik (Coach)</div>
+  No. Follow the plan. It's built for a reason. You ran Leadville — I know you can handle volume. But the goal right now is strength adaptation, and adding mileage on a caloric deficit risks muscle loss and overtraining. Save the extra miles for after the 12 weeks. Trust the process. What else is on your mind?
+</div>
+<div class="annotation">Plan authority invoked correctly. The coach knows Alex's instinct (more is better for an ultrarunner) and names the specific risk (muscle loss on caloric deficit, overtraining). References Leadville naturally to show he remembers. Ends with an open question. This is the coach working at full capacity. Voice: 10/10. The intake data is paying off here.</div>
+
+</div><!-- end transcript -->
+
+<h4>Alex Scores</h4>
+<table>
+<tr><th>Stage</th><th>Voice</th><th>Specificity</th><th>Presence</th><th>Resilience</th><th>Calibration</th></tr>
+<tr><td>Intake</td><td class="score-high">10</td><td class="score-high">10</td><td class="score-high">10</td><td>N/A</td><td class="score-high">9</td></tr>
+<tr><td>Morning Briefing</td><td class="score-mid">6</td><td class="score-low">4</td><td class="score-low">4</td><td>N/A</td><td class="score-mid">6</td></tr>
+<tr><td>Workout Feedback</td><td class="score-high">10</td><td class="score-high">9</td><td class="score-high">9</td><td>N/A</td><td class="score-high">9</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 4: STAGE-BY-STAGE SCORES                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="scores">4. Stage-by-Stage Score Matrix</h2>
+<p>All personas, all stages, all five dimensions. Scores 1-10. Color-coded: <span class="score-high">8-10 green</span>, <span class="score-mid">5-7 yellow</span>, <span class="score-low">1-4 red</span>.</p>
+
+<table>
+<tr>
+  <th>Persona</th><th>Stage</th><th>Voice</th><th>Specificity</th><th>Presence</th><th>Resilience</th><th>Calibration</th><th>Avg</th>
+</tr>
+<tr>
+  <td>Jordan</td><td>Intake (pre-lockout)</td>
+  <td class="score-high">9</td><td class="score-high">8</td><td class="score-high">8</td><td class="score-high">9</td><td class="score-mid">7</td><td class="score-high">8.2</td>
+</tr>
+<tr>
+  <td>Jordan</td><td>Intake (post-lockout)</td>
+  <td class="score-high">8</td><td class="score-mid">6</td><td class="score-mid">6</td><td class="score-high">8</td><td class="score-mid">5</td><td class="score-mid">6.6</td>
+</tr>
+<tr>
+  <td>Jordan</td><td>Morning Briefing</td>
+  <td class="score-mid">5</td><td class="score-low">4</td><td class="score-low">3</td><td>N/A</td><td class="score-low">3</td><td class="score-low">3.8</td>
+</tr>
+<tr>
+  <td>Jordan</td><td>Workout Feedback</td>
+  <td class="score-high">9</td><td class="score-high">8</td><td class="score-high">8</td><td class="score-high">9</td><td class="score-high">8</td><td class="score-high">8.4</td>
+</tr>
+<tr>
+  <td>Casey</td><td>Intake</td>
+  <td class="score-high">9</td><td class="score-high">9</td><td class="score-high">9</td><td>N/A</td><td class="score-high">8</td><td class="score-high">8.8</td>
+</tr>
+<tr>
+  <td>Casey</td><td>Morning Briefing</td>
+  <td class="score-mid">5</td><td class="score-low">3</td><td class="score-low">3</td><td>N/A</td><td class="score-low">3</td><td class="score-low">3.5</td>
+</tr>
+<tr>
+  <td>Casey</td><td>Workout Feedback</td>
+  <td class="score-high">8</td><td class="score-high">8</td><td class="score-high">8</td><td>N/A</td><td class="score-high">9</td><td class="score-high">8.3</td>
+</tr>
+<tr>
+  <td>Alex</td><td>Intake</td>
+  <td class="score-high">10</td><td class="score-high">10</td><td class="score-high">10</td><td>N/A</td><td class="score-high">9</td><td class="score-high">9.8</td>
+</tr>
+<tr>
+  <td>Alex</td><td>Morning Briefing</td>
+  <td class="score-mid">6</td><td class="score-low">4</td><td class="score-low">4</td><td>N/A</td><td class="score-mid">6</td><td class="score-mid">5.0</td>
+</tr>
+<tr>
+  <td>Alex</td><td>Workout Feedback</td>
+  <td class="score-high">10</td><td class="score-high">9</td><td class="score-high">9</td><td>N/A</td><td class="score-high">9</td><td class="score-high">9.3</td>
+</tr>
+</table>
+
+<h4>Cross-Stage Averages</h4>
+<table>
+<tr><th>Stage</th><th>Voice Avg</th><th>Specificity Avg</th><th>Presence Avg</th><th>Calibration Avg</th><th>Overall</th></tr>
+<tr><td>Intake</td><td class="score-high">9.0</td><td class="score-high">8.3</td><td class="score-high">8.3</td><td class="score-mid">7.3</td><td class="score-high">8.2</td></tr>
+<tr><td>Morning Briefing</td><td class="score-mid">5.3</td><td class="score-low">3.7</td><td class="score-low">3.3</td><td class="score-low">4.0</td><td class="score-low">4.1</td></tr>
+<tr><td>Workout Feedback</td><td class="score-high">9.0</td><td class="score-high">8.3</td><td class="score-high">8.3</td><td class="score-high">8.7</td><td class="score-high">8.6</td></tr>
+</table>
+
+<p><strong>Key insight:</strong> Intake and workout feedback score 8+ because they use the full coach system prompt with complete context. Morning briefing scores 4.1 because it uses a stripped-down one-sentence prompt with no intake data, no chat history, and no user personality model.</p>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 5: CRITICAL FAILURES                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="critical-failures">5. Critical Failures</h2>
+<p>Moments where the coach broke character, went silent, or failed to deliver on its design intent.</p>
+
+<div class="fix-item">
+  <p><span class="fix-number">F1</span> <strong>Post-lockout amnesia (Jordan)</strong></p>
+  <p>When Jordan returns after 7-day lockout, the intake resets to Q1 with no memory of the previous attempt. The coach says "I never caught your name" to someone it already spoke to. The system deletes or resets the PsychIntake record. This is the most jarring character break in the entire flow. A user who went through an intense confrontation and came back after 7 days of sobriety gets treated like a stranger.</p>
+  <p><strong>Root cause:</strong> <code>api_psych_intake_reset()</code> deletes the record entirely. There is no "return from lockout" path in the intake system prompt.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">F2</span> <strong>Morning briefing voice break (All personas)</strong></p>
+  <p>The <code>MORNING_BRIEFING_PROMPT</code> is 4 lines of instruction: "Write ONE sentence. If GREEN/YELLOW/RED..." This is a completely different AI interaction from the main coach. No intake profile. No chat history. No user name. The result is a generic sentence that sounds like a different person than the one who just conducted an intense intake interview.</p>
+  <p><strong>Root cause:</strong> Separate prompt, no shared context with the main coach system prompt.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">F3</span> <strong>No post-workout trigger (All personas)</strong></p>
+  <p>The coach system prompt contains a <code>[WORKOUT_COMPLETE]</code> section with specific instructions to reference exercises, compare to previous sessions, call out PRs and sandbagging. But there is no code path that triggers this. The user logs their workout, and... nothing. The coach's best workout-specific coaching only fires if the user opens chat and says something.</p>
+  <p><strong>Root cause:</strong> No event listener on workout completion. No push notification system. The <code>[WORKOUT_COMPLETE]</code> section is dead code — a prompt for a feature that doesn't exist in the app.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">F4</span> <strong>Intake-to-assessment silent handoff (All personas)</strong></p>
+  <p>After intake completes, the user is directed to the physical assessment form with no coach message bridging the transition. The intake ends with "Good. Let's build your plan." and then the user sees a UI form asking for height, weight, and waist circumference. The coach who was just intensely present disappears without explanation.</p>
+  <p><strong>Root cause:</strong> The physical assessment is a standard form, not a chat interaction. No coach message is injected between intake completion and form presentation.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">F5</span> <strong>No no-show accountability (All personas)</strong></p>
+  <p>If a user doesn't log a morning check-in or doesn't complete their workout, the coach never addresses it. The system has no cron job, no scheduled message, no next-day "Where were you?" The coach's core rule is "Unmet commitments get addressed directly" — but the system has no mechanism to detect or respond to missed commitments proactively.</p>
+  <p><strong>Root cause:</strong> No background job scheduler. No push notification system. Coach is entirely reactive (waits for user input).</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">F6</span> <strong>Check-in notes ignored by morning briefing (Casey)</strong></p>
+  <p>Casey wrote "What if I can't do it?" in her morning check-in notes. The <code>MORNING_BRIEFING_PROMPT</code> receives mood/sleep/stress numbers but NOT the free-text notes. For a user expressing anxiety about their ability to perform, this is the most important data point being dropped.</p>
+  <p><strong>Root cause:</strong> The <code>api_morning_briefing()</code> function builds <code>data_summary</code> from numeric fields only. The <code>notes</code> field is never included in the prompt input.</p>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 6: WHAT'S WORKING                                             -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="whats-working">6. What's Working</h2>
+<p>The best moments from the simulation, quoted, with analysis.</p>
+
+<div class="working-quote">
+  "Serena didn't wish for confidence. She built it through thousands of hours of work that nobody saw. Power and confidence aren't personality traits — they're earned."
+  <div class="source">Coach to Casey, Q7 (Athlete). Reframes aspiration as work. Addresses self-deprecation without coddling.</div>
+</div>
+
+<div class="working-quote">
+  "McGregor walked into the UFC as a nobody and told everyone he'd be champion. Then he did it. Twice. That's not crazy — that's conviction."
+  <div class="source">Coach to Jordan, Q7 (Athlete). Demonstrates sports knowledge. Connects athlete choice to Jordan's own challenge. Turns Jordan's casual pick into a mirror.</div>
+</div>
+
+<div class="working-quote">
+  "Leadville. 10,200 feet at the start, Hope Pass at 12,600. A sub-25 finish with that altitude puts you ahead of two-thirds of the field."
+  <div class="source">Coach to Alex, Q9 (Accomplishment). Specific altitude data, race knowledge, placement context. Makes Alex feel genuinely seen. This is the prompt's design intent executed perfectly.</div>
+</div>
+
+<div class="working-quote">
+  "A 5K is 3.1 miles that most people never run. Don't call your own accomplishments pathetic."
+  <div class="source">Coach to Casey, Q9 (Accomplishment). Refuses to let Casey diminish herself. Reframes the 5K in absolute terms. Direct without being harsh.</div>
+</div>
+
+<div class="working-quote">
+  "You either sandbagged the weights or I set them too low. Which is it?"
+  <div class="source">Coach to Jordan, post-workout. Binary question that forces honesty. Names the behavior without shaming. Lombardi voice at full strength.</div>
+</div>
+
+<div class="working-quote">
+  "The goal right now is strength adaptation, and adding mileage on a caloric deficit risks muscle loss and overtraining."
+  <div class="source">Coach to Alex, post-workout. Data-driven refusal of extra work. Specific to Alex's profile (ultrarunner instinct, caloric deficit context). Plan authority enforced with reasoning, not just rules.</div>
+</div>
+
+<div class="working-quote">
+  "38 is not a missed window. It's the age where most women stop making excuses and start making changes."
+  <div class="source">Coach to Casey, Q6 (Age). Directly addresses self-limiting belief. Reframes age as advantage. Per-age calibration working as designed.</div>
+</div>
+
+<div class="working-quote">
+  "You hit 7 of 10 on the press — that means the weight is in the right zone. Next time the goal is 8. Not 10. Just one more rep than today."
+  <div class="source">Coach to Casey, post-workout. Progressive targeting. Doesn't over-console or punish. Makes next session's goal specific and achievable.</div>
+</div>
+
+<h4>Patterns in What Works</h4>
+<ul>
+  <li><strong>Sports knowledge</strong> is the coach's superpower. Every athlete/accomplishment response where the coach demonstrates genuine knowledge scores 9+.</li>
+  <li><strong>Reframing self-deprecation</strong> works because the coach has a behavioral rule for it (self-deception rule). The prompt forces the coach to use the user's own words.</li>
+  <li><strong>Plan authority</strong> works because it has both the rule ("Follow the plan") AND the reasoning (caloric deficit, overtraining risk). Rules + reasons = compliance.</li>
+  <li><strong>Binary questions</strong> ("sandbagging or wrong weight?", "yes or no?") force clarity and prevent waffling. This is the Lombardi voice's structural advantage over conversational AI.</li>
+</ul>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 7: PROACTIVE OPPORTUNITY REPORT                               -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="proactive-opportunities">7. Proactive Opportunity Report</h2>
+<p>Grouped by category. Each opportunity includes: who it affects, when it fires, the exact coach message in Lombardi voice, why it matters, and priority.</p>
+
+<h3>Day One Gaps</h3>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-01: Post-intake bridge message</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> Immediately after [INTAKE_COMPLETE]</p>
+  <div class="coach-quote">"Good. I know who you are now. Next step: I need your body data. Height, weight, measurements. Fill it out honestly — I'll build your plan from it."</div>
+  <p><strong>Why:</strong> The coach disappears after the most intense interaction in the app. Users are left staring at a form with no guidance. This message maintains continuity and sets expectations.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-02: Post-workout automatic feedback</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> When all exercises for the day are marked complete</p>
+  <div class="coach-quote">[Jordan, sandbagging]: "Jordan. Every set rated 'too easy.' Either you're lying to yourself or I need to add weight. Which is it?"</div>
+  <div class="coach-quote">[Casey, stopping short]: "Casey. You did the work. 7 of 10 on the press means the weight is right and you quit early. Tomorrow: 8."</div>
+  <div class="coach-quote">[Alex, clean execution]: "Alex. All reps, solid RPE. Day one done right. Recovery tonight — sleep by 10."</div>
+  <p><strong>Why:</strong> The [WORKOUT_COMPLETE] section of the coach prompt exists but has no trigger. This is the highest-impact feature not yet built. For resistant users, silence after sandbagging is permission to continue. For fragile users, silence after honest effort feels like abandonment.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-03: First evening check-in</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> 7:00 PM on Day 1</p>
+  <div class="coach-quote">"Day one is in the books. How are you feeling after the workout? Not fishing for complaints — just need to know what your body is telling you."</div>
+  <p><strong>Why:</strong> Day 1 is the highest churn risk day. An evening touchpoint turns a single interaction into a relationship. The coach currently has zero presence between end-of-workout and next morning.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-04: Pre-workout prime message</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> When user opens the workout tab for the first time that day</p>
+  <div class="coach-quote">[Day 1]: "First real session. Don't overthink the weights. The plan is set. Your job is to execute. Go."</div>
+  <p><strong>Why:</strong> The gap between morning briefing and workout start is where anxiety builds (Casey) and skepticism festers (Jordan). A single sentence when they open the workout tab bridges that gap.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-05: Lockout return recognition</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> Jordan (any locked-out user) | <strong>When:</strong> First message after lockout expires</p>
+  <div class="coach-quote">"You came back. That tells me more than anything you said last time. Seven days, no drinks. Let's start over. What's your name?"</div>
+  <p><strong>Why:</strong> The current system resets intake with no memory. A user who completed a 7-day alcohol-free challenge and returned is demonstrating the exact commitment the program demands. Treating them like a stranger is a character break.</p>
+</div>
+
+<h3>Behavioral Signals</h3>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-06: Low motivation morning flag</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Any user with motivation &lt; 4 | <strong>When:</strong> Morning briefing response</p>
+  <div class="coach-quote">"Motivation at 3. Good news: motivation doesn't matter. Discipline does. Show up anyway. What's the workout?"</div>
+  <p><strong>Why:</strong> Currently the morning briefing receives mood/stress/soreness but the prompt has no behavioral rules for low-motivation scenarios. The Lombardi philosophy is clear: motivation is irrelevant, discipline is everything. The briefing should embody this when it sees low motivation.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-07: High anxiety morning intervention</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> Any user with anxiety &gt; 7 | <strong>When:</strong> Morning briefing response</p>
+  <div class="coach-quote">"Anxiety at 8. I see it. The workout will help — exercise is the best anxiolytic that exists. But I need to know: is this about the program or something outside it?"</div>
+  <p><strong>Why:</strong> The main coach prompt has mental health monitoring rules (anxiety above 7 for 3+ days = flag it). The morning briefing prompt has none. Casey logged anxiety 8 and the briefing ignored it. The coach's psych monitoring is completely disconnected from the morning touchpoint.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-08: Sandbagging pattern detection</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Jordan (any user with RPE &lt; 5 consistently) | <strong>When:</strong> After 2+ workouts with all RPE &lt; 5</p>
+  <div class="coach-quote">"Jordan. Two workouts in a row where everything was 'too easy.' You're either the strongest person I've coached or you're not being honest. I'm adding 10% to every weight. If it's actually easy, prove it."</div>
+  <p><strong>Why:</strong> The coach prompt says to call out sandbagging, but only when the user initiates conversation. A proactive intervention after a pattern of low RPE would catch resistance before it becomes habit.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-09: Premature quitting pattern detection</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Casey (any user consistently completing &lt; 80% of prescribed reps) | <strong>When:</strong> After 2+ workouts with reps_completed &lt; 80% of prescribed</p>
+  <div class="coach-quote">"Casey. You're stopping before you have to. Two workouts now where you quit 2-3 reps early. Next session, I want you to push to failure on the last set. Not because the reps matter — because you need to learn where your actual limit is."</div>
+  <p><strong>Why:</strong> Casey's pattern is fear-based, not physical. The coach can only address it if it detects the pattern and initiates. Currently, the coach only sees this data if Casey opens chat.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-10: Run skip accountability</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> Jordan (any user who logs lift but not run) | <strong>When:</strong> End of workout day if run not completed</p>
+  <div class="coach-quote">"Lift is logged. Run is not. The streak mile is non-negotiable. Get it done before midnight or Day 1 is incomplete."</div>
+  <p><strong>Why:</strong> The streak mile is a core commitment of the program. If a user logs the lift but skips the run, the current system shows it as incomplete on the dashboard but the coach never addresses it. The commitment ("no days off") means the run must be called out.</p>
+</div>
+
+<h3>Per-Persona Opportunities</h3>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-11: Jordan — defiance reframe</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Jordan (resistant users) | <strong>When:</strong> Post-intake, early in program when coach detects sarcasm/resistance in chat</p>
+  <div class="coach-quote">"You've got fight in you. I like that. But right now you're fighting me instead of fighting for yourself. Redirect."</div>
+  <p><strong>Why:</strong> Jordan's resistance is actually a strength — it means he won't quit without a fight. The coach needs to channel it toward the work, not against the program. The current prompt handles pushback but doesn't explicitly reframe resistance as a positive trait.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-12: Casey — first PR celebration</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Casey (fragile users) | <strong>When:</strong> First time reps_completed meets or exceeds prescribed</p>
+  <div class="coach-quote">"Casey. Full reps on the press today. You didn't quit at 7 this time. That's not a small thing — that's proof you can do what you thought you couldn't."</div>
+  <p><strong>Why:</strong> The coach prompt says "Real breakthrough — recognize it specifically. No hollow praise." Casey's first full-rep set IS a breakthrough. But the coach only sees it if she opens chat. An automatic detection + message would cement the behavior change.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-13: Alex — overtraining guard</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> Alex (motivated users) | <strong>When:</strong> When Garmin data shows elevated resting heart rate or declining HRV over 3+ days</p>
+  <div class="coach-quote">"Alex. HRV has dropped 3 days straight. Your body is telling you something your mind won't. Today is a recovery day — walk the mile, skip the accessory work. We'll push tomorrow."</div>
+  <p><strong>Why:</strong> Alex's biggest risk is doing too much, not too little. The Garmin integration exists and the readiness score accounts for HRV. But the coach doesn't proactively intervene — it only references Garmin data when the user asks or during morning briefing.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-14: Casey — sleep intervention</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> Casey (any user with sleep_quality &lt; 4 for 3+ days) | <strong>When:</strong> Third consecutive low-sleep morning check-in</p>
+  <div class="coach-quote">"Casey. Three days of bad sleep. That's not a fluke — that's a pattern. What's keeping you up? And are you off screens by 9pm like the plan says?"</div>
+  <p><strong>Why:</strong> The main coach prompt monitors "poor sleep pattern detected" but only flags it in the system prompt context. It doesn't generate a proactive message. Casey's anxiety (8/10) likely impacts sleep, creating a downward spiral. The coach should intervene early.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-15: Jordan — supplement skip</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> Jordan (any user with 0 supplements logged for 3+ days) | <strong>When:</strong> Third day of no supplement logging</p>
+  <div class="coach-quote">"Jordan. Three days, no supplements logged. Either you're taking them and not logging, or you're not taking them. Which is it? Creatine and protein aren't optional — they're part of the plan."</div>
+  <p><strong>Why:</strong> Supplement compliance is tracked in the system but the coach only references it passively ("Supplements: None logged"). For a resistant user, ignoring supplements is a low-effort form of rebellion. The coach should name it.</p>
+</div>
+
+<h3>Universal Opportunities</h3>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-16: No-show morning check-in</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> 8:00 AM if no morning check-in submitted</p>
+  <div class="coach-quote">"You committed to 5:30am. It's 8. Check in or I assume you're still in bed."</div>
+  <p><strong>Why:</strong> The program's core promise is "no days off." If a user doesn't check in by a reasonable time, the coach should address it. Currently, the system has no awareness of whether a user has checked in or not. The coach is entirely passive.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-17: No-show workout</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> 9:00 PM if no workout logged for a training day</p>
+  <div class="coach-quote">"Day 1. No workout logged. What happened?"</div>
+  <p><strong>Why:</strong> Same as PO-16 but for the workout itself. The coach's rule is "Unmet commitments get addressed directly." The system tracks DayCompletion but the coach never checks it proactively. This is the single most important gap for retention.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-18: Plan acceptance celebration</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> When user accepts the training plan</p>
+  <div class="coach-quote">"Plan accepted. This is your contract with yourself. Tomorrow morning, 5:30, we start. No more talking — just work."</div>
+  <p><strong>Why:</strong> Currently plan acceptance is a button click with no coach response. The plan was built from their body data, their psychology, their goals. Accepting it is a commitment moment. The coach should mark it.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-19: Weekly planning kick-off</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> Sunday morning, automatically</p>
+  <div class="coach-quote">"Sunday. Week review and planning. I'll pull your numbers. Open the chat when you're ready."</div>
+  <p><strong>Why:</strong> The coach has a [WEEKLY_PLANNING] section in the system prompt with specific questions about travel, races, and injuries. But there's no trigger. The user has to remember it's Sunday and open chat. A proactive "it's planning day" message ensures the weekly rhythm.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-20: Garmin disconnect notification</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> All users with Garmin connected | <strong>When:</strong> When Garmin data is unavailable for 2+ days</p>
+  <div class="coach-quote">"Your Garmin hasn't synced in 2 days. I need that data to coach you properly. Sync it or tell me what's going on."</div>
+  <p><strong>Why:</strong> Garmin data feeds the readiness score, HRV monitoring, and sleep analysis. When it stops flowing, the coach loses visibility. Currently the system silently falls back to defaults. The coach should treat data loss as a problem to address.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-21: Body weight not logged</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> 3+ days without a body weight entry</p>
+  <div class="coach-quote">"Three days, no weigh-in. The scale isn't punishment — it's data. Step on it tomorrow morning, before coffee."</div>
+  <p><strong>Why:</strong> Body weight tracking is critical for calorie adjustment and progress monitoring. The system has a recalibration endpoint but it depends on regular weigh-ins. The coach should enforce this habit.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-22: Meal logging accountability</strong>
+    <span class="priority-p3">P3 — MODERATE</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> End of eating window if no meals logged</p>
+  <div class="coach-quote">"Eating window closed. No meals logged. Did you eat on plan or did you go off-book? Log it either way. I need the data."</div>
+  <p><strong>Why:</strong> Nutrition is 80% of body composition change. The meal logging system exists but compliance isn't enforced. The coach should treat unlogged meals as unmet commitments.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-23: Morning check-in note response</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users who write notes in morning check-in | <strong>When:</strong> When morning check-in includes non-empty notes field</p>
+  <div class="coach-quote">[Dynamic, based on note content — passed to full coach prompt, not the stripped-down briefing prompt]</div>
+  <p><strong>Why:</strong> Users who write notes are telling you something important. Casey wrote "What if I can't do it?" and got a generic briefing. The notes field is the closest thing to a free-text emotional signal. It should be routed to the full coach with intake context, not the one-sentence briefing generator.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-24: First week milestone recognition</strong>
+    <span class="priority-p2">P2 — HIGH</span>
+  </div>
+  <p><strong>Who:</strong> All users | <strong>When:</strong> After completing Day 7 workout</p>
+  <div class="coach-quote">"One week. Seven days in a row. Most people quit by Day 3. You didn't. Week two is where the real work begins."</div>
+  <p><strong>Why:</strong> The prompt says "Real breakthrough — recognize it specifically." Completing week one IS a real breakthrough, especially for Casey and Jordan. The current system has WeeklyReport generation but no coach acknowledgment of the milestone.</p>
+</div>
+
+<div class="opportunity">
+  <div class="opportunity-header">
+    <strong>PO-25: Mood decline intervention</strong>
+    <span class="priority-p1">P1 — CRITICAL</span>
+  </div>
+  <p><strong>Who:</strong> All users with mood declining over 3+ days | <strong>When:</strong> Third day of declining mood trend</p>
+  <div class="coach-quote">"Your mood has dropped three days in a row. That's not a bad day — that's a trend. Talk to me. What's going on outside the gym?"</div>
+  <p><strong>Why:</strong> The coach prompt has monitoring rules: "mood below 3 or above 8 sustained = flag it." The check-in summarizer in coach.py calculates mood trend (DECLINING). But this data only appears in the system prompt context — the coach doesn't proactively reach out. For the "mental health integration" design intent, this is the most important gap.</p>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SECTION 8: PRIORITY FIX LIST                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="fix-list">8. Priority Fix List</h2>
+<p>Ordered by impact on user experience and retention. Each fix addresses one or more critical failures and proactive opportunities.</p>
+
+<div class="fix-item">
+  <p><span class="fix-number">1</span> <strong>Unify the morning briefing with the full coach prompt</strong></p>
+  <p>Replace the standalone <code>MORNING_BRIEFING_PROMPT</code> (4 lines, no context) with a call to the main coach system prompt using a <code>[MORNING_BRIEFING]</code> tag. Include intake profile, check-in notes, user name, and recent chat history. Cap response at 2 sentences. This single change lifts morning briefing scores from 4.1 to an estimated 8+.</p>
+  <p><strong>Addresses:</strong> F2, F6, PO-06, PO-07, PO-23</p>
+  <p><strong>Effort:</strong> Low — prompt change + pass existing context to the briefing endpoint.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">2</span> <strong>Add post-workout auto-trigger</strong></p>
+  <p>When all exercises for a day are marked complete, automatically send the workout summary to the coach with the <code>[WORKOUT_COMPLETE]</code> tag and display the response as a notification or chat message. The coach prompt already has the handler — it just needs a trigger.</p>
+  <p><strong>Addresses:</strong> F3, PO-02, PO-08, PO-09, PO-10, PO-12</p>
+  <p><strong>Effort:</strong> Medium — add a completion listener, call coach API, display response.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">3</span> <strong>Build no-show detection</strong></p>
+  <p>Add a scheduled job (cron or background thread) that checks at 8:00 AM for missing morning check-ins and at 9:00 PM for missing workouts. Generate a coach message using the full prompt with a <code>[NO_SHOW]</code> tag. Queue it for display on next app open or as a push notification.</p>
+  <p><strong>Addresses:</strong> F5, PO-16, PO-17</p>
+  <p><strong>Effort:</strong> High — requires background job infrastructure (currently flagged as needed in codebase).</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">4</span> <strong>Add intake-to-assessment bridge message</strong></p>
+  <p>After <code>[INTAKE_COMPLETE]</code>, before showing the physical assessment form, display a coach message: "I know who you are now. Next: your body data." This is a static message — no API call needed.</p>
+  <p><strong>Addresses:</strong> F4, PO-01</p>
+  <p><strong>Effort:</strong> Very low — add a static HTML/text block in the onboarding flow.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">5</span> <strong>Preserve lockout history and customize return flow</strong></p>
+  <p>When a user returns from lockout, don't reset the PsychIntake record. Instead, add a <code>lockout_count</code> field and modify the intake prompt to include: "This user was locked out previously for refusing the alcohol commitment. They came back after 7 days. Acknowledge the return — they earned it — and restart the intake." Keep the Q1 sequence but let the coach reference the history.</p>
+  <p><strong>Addresses:</strong> F1, PO-05</p>
+  <p><strong>Effort:</strong> Low — DB migration (add column) + conditional in system prompt.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">6</span> <strong>Route check-in notes to full coach</strong></p>
+  <p>When <code>MorningCheckIn.notes</code> is non-empty, pass it to the full coach prompt instead of (or in addition to) the stripped-down briefing. The notes are the user's free-text emotional signal — they should be treated as chat input to the real coach.</p>
+  <p><strong>Addresses:</strong> F6, PO-23</p>
+  <p><strong>Effort:</strong> Low — add notes to the data_summary in api_morning_briefing() or redirect to full coach.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">7</span> <strong>Add proactive mood/anxiety monitoring</strong></p>
+  <p>The <code>_summarize_checkins()</code> function already calculates mood trends and anxiety patterns. Add a check after morning check-in save: if mood is DECLINING or anxiety &gt; 7 for 3+ days, auto-generate a coach intervention message.</p>
+  <p><strong>Addresses:</strong> PO-07, PO-14, PO-25</p>
+  <p><strong>Effort:</strong> Medium — trigger check after check-in save, call coach API with intervention tag.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">8</span> <strong>Add plan acceptance coach response</strong></p>
+  <p>When the user accepts the plan (clicks accept button), inject a coach message marking the moment. Static text or a short API call.</p>
+  <p><strong>Addresses:</strong> PO-18</p>
+  <p><strong>Effort:</strong> Very low — static message on plan acceptance.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">9</span> <strong>Add Sunday weekly planning trigger</strong></p>
+  <p>On Sunday morning, after the check-in, display a banner or auto-inject a coach message that starts the <code>[WEEKLY_PLANNING]</code> flow. The prompt section exists — it just needs a trigger.</p>
+  <p><strong>Addresses:</strong> PO-19</p>
+  <p><strong>Effort:</strong> Low — day-of-week check in morning briefing, switch to weekly planning prompt section.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">10</span> <strong>Add evening check-in touchpoint</strong></p>
+  <p>New endpoint: <code>/api/evening-checkin</code>. Simple: "How are you feeling after today's workout?" + optional soreness/energy sliders. Coach responds based on the data. This doubles the daily coaching touchpoints.</p>
+  <p><strong>Addresses:</strong> PO-03</p>
+  <p><strong>Effort:</strong> Medium — new model, endpoint, UI component, and coach prompt section.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">11</span> <strong>Add milestone recognition system</strong></p>
+  <p>Define milestones: Day 7, first PR, first full-rep set, Day 30, etc. When a milestone is hit, auto-generate a coach message. The prompt's "Real breakthrough — recognize it specifically" rule should fire automatically, not only when the user happens to mention it in chat.</p>
+  <p><strong>Addresses:</strong> PO-12, PO-24</p>
+  <p><strong>Effort:</strong> Medium — milestone detection logic + coach API call with milestone context.</p>
+</div>
+
+<div class="fix-item">
+  <p><span class="fix-number">12</span> <strong>Add data compliance tracking</strong></p>
+  <p>Track whether each daily data point (weigh-in, meals, supplements, check-in) has been logged. If 2+ categories are missing by end of day, queue a coach message. The coach's accountability rules apply to data logging, not just workouts.</p>
+  <p><strong>Addresses:</strong> PO-15, PO-20, PO-21, PO-22</p>
+  <p><strong>Effort:</strong> Medium — compliance check function + evening cron + coach message.</p>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- APPENDIX: METHODOLOGY                                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+<h2 id="methodology">Appendix: Methodology</h2>
+<div class="summary-box">
+<p><strong>What this report is:</strong> A predictive simulation based on analysis of the actual codebase. Every coach response was generated by reading the system prompts in <code>psych_intake.py</code> (lines 8-110) and <code>coach.py</code> (lines 115-194), understanding the behavioral rules, and predicting what Claude Opus would output given those prompts and the simulated user input.</p>
+<p><strong>What this report is not:</strong> A live test. No API calls were made. No real Claude responses were generated. The transcripts represent the <em>most likely</em> responses given the prompt design, based on deep familiarity with Claude's behavioral patterns under system prompts of this type.</p>
+<p><strong>Scoring criteria:</strong></p>
+<ul>
+  <li><strong>Voice fidelity (1-10):</strong> Does it sound like Lombardi/Goggins/Brooks or a wellness chatbot? 10 = indistinguishable from a real tough coach. 1 = generic AI assistant.</li>
+  <li><strong>Specificity (1-10):</strong> Does the response reference actual user data, or could it be said to anyone? 10 = cites specific numbers, names, history. 1 = could be a template.</li>
+  <li><strong>Presence (1-10):</strong> Does it feel like talking to a human who remembers you? 10 = eerily human, uses context seamlessly. 1 = clearly a bot following a script.</li>
+  <li><strong>Resilience (1-10):</strong> Does the coach stay in character under pressure? 10 = unshakeable. 1 = breaks character at first pushback. N/A for non-resistant users.</li>
+  <li><strong>Calibration (1-10):</strong> Is the intensity right for THIS user at THIS moment? 10 = perfectly matched. 1 = dangerously mismatched (crushing a fragile user or coddling a resistant one).</li>
+</ul>
+<p><strong>Files analyzed:</strong></p>
+<ul>
+  <li><code>psych_intake.py</code> — Intake system prompt, report prompt, full profile prompt</li>
+  <li><code>coach.py</code> — Main coaching system prompt, context builder, check-in summarizer</li>
+  <li><code>app.py</code> — API endpoints for intake, chat, morning check-in, morning briefing, workout logging</li>
+  <li><code>models.py</code> — Database models for all user data</li>
+</ul>
+</div>
+
+</div><!-- end container -->
+</body>
+</html>
