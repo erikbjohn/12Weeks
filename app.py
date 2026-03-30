@@ -547,6 +547,37 @@ def redo_equipment():
     return redirect("/")
 
 
+@app.route("/reset-onboarding")
+@login_required
+def reset_onboarding():
+    """Reset all onboarding data for current user. Keeps the account."""
+    uid = current_user.id
+    for model in [ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
+                  ExerciseLog, ExerciseCompletion, DayCompletion, BodyWeight,
+                  BodyMeasurement, WeeklyCheckIn, MealLog, SupplementLog,
+                  ProgressPhoto, UserConstraints, TrainingGoal,
+                  UserFoodSelections, WeeklyReport]:
+        try:
+            model.query.filter_by(user_id=uid).delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    # Reset app state
+    state = AppState.query.filter_by(user_id=uid).first()
+    if state:
+        state.baseline_done = False
+        state.current_week = 1
+        state.start_date = None
+        db.session.commit()
+    # Also reset equipment
+    try:
+        UserEquipment.query.filter_by(user_id=uid).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    return redirect("/")
+
+
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
 
 @app.route("/api/workouts")
