@@ -2417,6 +2417,7 @@ function showSettingsMenu() {
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="regenerateProfile()">Regenerate Profile</button>
+    <button onclick="restartFromReveal()">Restart from Plan Review</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
     <button onclick="window.location='/logout'">Logout</button>
@@ -2491,6 +2492,18 @@ async function sendInvite() {
     } catch(e) {
         resultEl.innerHTML = '<div style="color:var(--red)">Failed to create invite</div>';
     }
+}
+
+async function restartFromReveal() {
+  closeSettingsMenu();
+  // Reset plan_accepted so onboarding gate reopens
+  await fetch('/api/goal', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ plan_accepted: false }),
+  });
+  // Go straight to the final reveal (recompute goal + profile)
+  showFinalReveal();
 }
 
 async function regenerateProfile() {
