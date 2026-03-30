@@ -46,7 +46,10 @@ class ExerciseLog(db.Model):
     exercise_name = db.Column(db.String(100), nullable=False, index=True)
     weight = db.Column(db.Float, nullable=False)
     sets_label = db.Column(db.String(50))
-    rpe = db.Column(db.String(20))
+    rpe = db.Column(db.String(20))  # legacy: "too_easy", "just_right", "too_hard"
+    rpe_score = db.Column(db.Integer, nullable=True)  # 1-10 RPE scale
+    reps_completed = db.Column(db.Integer, nullable=True)  # actual reps done (vs prescribed)
+    difficulty_notes = db.Column(db.Text, nullable=True)  # optional free text
     week = db.Column(db.Integer)
     day_idx = db.Column(db.Integer)
     logged_date = db.Column(db.Date, default=date.today)

@@ -99,6 +99,9 @@ with app.app_context():
         ("training_goal", "electrolyte_supplementation", "BOOLEAN"),
         ("training_goal", "weight_projection", "TEXT"),
         ("training_goal", "plan_accepted", "BOOLEAN"),
+        ("exercise_log", "rpe_score", "INTEGER"),
+        ("exercise_log", "reps_completed", "INTEGER"),
+        ("exercise_log", "difficulty_notes", "TEXT"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -623,6 +626,9 @@ def api_weights_record():
         weight=data["weight"],
         sets_label=data.get("sets_label"),
         rpe=data.get("rpe"),
+        rpe_score=data.get("rpe_score"),
+        reps_completed=data.get("reps_completed"),
+        difficulty_notes=data.get("difficulty_notes"),
         week=data.get("week"),
         day_idx=data.get("day_idx"),
         logged_date=date.today(),

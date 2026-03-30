@@ -337,7 +337,7 @@ function getExerciseData(exName) {
   return weights[exName] || null;
 }
 
-function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx) {
+function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, repsCompleted) {
   if (!_weightsCache) _weightsCache = {};
   if (!_weightsCache[exName]) {
     _weightsCache[exName] = { current: weight, history: [] };
@@ -347,11 +347,13 @@ function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx) {
     weight: weight,
     reps: setsLabel,
     rpe: rpe,
+    rpe_score: rpeScore,
+    reps_completed: repsCompleted,
     date: todayStr(),
     week: week,
     day: dayIdx,
   });
-  apiPost('/api/weights', { exercise: exName, weight, sets_label: setsLabel, rpe, week, day_idx: dayIdx });
+  apiPost('/api/weights', { exercise: exName, weight, sets_label: setsLabel, rpe, rpe_score: rpeScore, reps_completed: repsCompleted, week, day_idx: dayIdx });
 }
 
 function getLastRPEs(exName, count) {
@@ -2750,9 +2752,13 @@ function importData() {
 function submitRPE(week, dayIdx, exIdx, exName, rpe) {
   const weightInput = document.getElementById('wt-' + week + '-' + dayIdx + '-' + exIdx);
   const weight = weightInput ? parseFloat(weightInput.value) || 0 : 0;
+  const repsInput = document.getElementById('reps-' + week + '-' + dayIdx + '-' + exIdx);
+  const repsCompleted = repsInput ? parseInt(repsInput.value) || null : null;
   const weekData = workoutData[String(week)];
   const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
-  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx);
+  // Map 3-button RPE to numeric score for load progression
+  const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
+  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, repsCompleted);
   renderDetail();
 }
 
@@ -4896,6 +4902,9 @@ async function renderDetail() {
         ${suggestion.reason ? `<div class="weight-suggestion">${suggestion.reason}</div>` : ''}
       </div>
       <div class="ex-sets">${ex.sets}</div>
+      <div class="reps-input-wrap">
+        <input class="reps-input" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}" placeholder="reps done" min="0" max="100">
+      </div>
       ${rpeHtml ? `<div style="width:100%;padding-left:36px">${rpeHtml}</div>` : ''}
       <div style="width:100%;padding-left:36px">${swapHtml}</div>
     </div>`;
