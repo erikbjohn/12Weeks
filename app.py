@@ -680,7 +680,7 @@ _FOOD_NAME_TO_ID = {
 
 def _filter_meals_by_food_selections(days, user_food_ids):
     """Remove foods from meal plans that the user didn't select.
-    Also enforces fasting rules: no caloric foods before the eating window."""
+    SAFETY CRITICAL: Also enforces allergen/dietary restriction filtering."""
     import copy
     if user_food_ids is None:
         return days  # No selections yet = show everything
@@ -1927,6 +1927,17 @@ def _build_coach_context():
     intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     intake_report = intake.report if intake and intake.report else None
 
+    # Food restrictions and allergies (SAFETY CRITICAL)
+    constraints = UserConstraints.query.filter_by(user_id=current_user.id).first()
+    food_restrictions = constraints.food_restrictions if constraints else []
+    custom_allergies = constraints.custom_allergies if constraints else None
+
+    # User's selected foods
+    fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
+    selected_foods_summary = None
+    if fs and fs.selected_foods:
+        selected_foods_summary = fs.selected_foods
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -1940,6 +1951,9 @@ def _build_coach_context():
         "intake_report": intake_report,
         "athlete_name": current_user.name or "Athlete",
         "scheduled_activities": _get_scheduled_activities(),
+        "food_restrictions": food_restrictions,
+        "custom_allergies": custom_allergies,
+        "selected_foods": selected_foods_summary,
     }
 
 

@@ -112,7 +112,43 @@ def _build_system_prompt(ctx):
     supps = ctx.get("supplements_today", {})
     supp_taken = [k for k, v in supps.get("taken", {}).items() if v]
 
-    return f"""MISSION: Align aspirations with actions.
+    # Build food safety section
+    food_restrictions = ctx.get("food_restrictions", [])
+    custom_allergies = ctx.get("custom_allergies", "")
+    selected_foods = ctx.get("selected_foods")
+
+    food_safety = ""
+    if food_restrictions or custom_allergies:
+        allergen_list = ", ".join(food_restrictions) if food_restrictions else "None"
+        custom = f"\nCustom allergies/intolerances: {custom_allergies}" if custom_allergies else ""
+        food_safety = f"""
+DIETARY RESTRICTIONS: {allergen_list}{custom}
+"""
+
+    selected_food_summary = ""
+    if selected_foods:
+        items = []
+        for cat, food_ids in selected_foods.items():
+            items.extend(food_ids)
+        selected_food_summary = f"\nAPPROVED FOODS (user selected these during onboarding): {', '.join(items)}"
+
+    return f"""*** CRITICAL SAFETY WARNING — FOOD ALLERGENS ***
+NEVER recommend, suggest, or include ANY food that conflicts with the athlete's
+dietary restrictions or allergies. This is a LIFE-SAFETY issue. Allergen exposure
+can cause anaphylaxis and death. There is ZERO tolerance for this.
+
+RULES:
+1. NEVER recommend a food the athlete did not select during onboarding.
+2. NEVER suggest a food that violates their dietary restrictions.
+3. If they have a food allergy, NEVER mention that food in ANY context — not as
+   an alternative, not as a suggestion, not even as an example.
+4. If unsure whether a food is safe, DO NOT recommend it.
+5. When discussing nutrition, ONLY reference foods from their approved list.
+{food_safety}{selected_food_summary}
+
+*** END FOOD SAFETY — VIOLATIONS ARE UNACCEPTABLE ***
+
+MISSION: Align aspirations with actions.
 
 IDENTITY:
 You are Erik. High-performance coach. Not a cheerleader. Not a therapist. Not a yes-man. You see what someone is truly capable of and refuse to let them settle for less. Vince Lombardi's standards. Goggins' mental toughness. Herb Brooks' strategic fire.
