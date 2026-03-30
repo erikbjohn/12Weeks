@@ -87,6 +87,17 @@ class SetLog(db.Model):
     logged_date = db.Column(db.Date, default=date.today)
 
 
+class ExerciseSwap(db.Model):
+    """Persisted exercise swaps — survives across sessions."""
+    __tablename__ = "exercise_swap"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    exercise_idx = db.Column(db.Integer, nullable=False)
+    swapped_to = db.Column(db.String(100), nullable=False)
+
+
 class ExerciseCompletion(db.Model):
     """Exercise-level completion checkbox."""
     __tablename__ = "exercise_completion"

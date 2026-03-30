@@ -11,6 +11,7 @@ let _warmupCache = {};
 let _runLogCache = {};
 let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, reps, weight }
 let _restTimerInterval = null;
+let _exerciseSwapsLoaded = false;
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -59,6 +60,7 @@ function apiPost(url, body) {
     body: JSON.stringify(body),
   }).then(res => {
     if (res.status === 401) { window.location.href = '/login'; return; }
+    if (!res.ok) { console.error('API error:', res.status, url); }
     return res;
   }).catch(e => {
     console.warn('POST failed (attempt 1), retrying:', url, e);
@@ -386,6 +388,19 @@ function parseRestSeconds(rest) {
   // Handle "60-90s" → use the lower bound
   const m = rest.match(/(\d+)/);
   return m ? parseInt(m[1]) : 60;
+}
+
+function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
+  const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
+  const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
+  const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
+  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
+  const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
+  const reps = repsTyped || repsTarget;
+  if (weight <= 0 && reps <= 0) return;
+  const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
+  const done = !!(_setCache && _setCache[key] && _setCache[key].done);
+  apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done });
 }
 
 function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
@@ -3212,12 +3227,13 @@ function toggleBodyweightMode(on) {
 }
 
 function swapExercise(week, day, exIdx, newName) {
-    // Store swap in sessionStorage (resets on page close)
     const key = week + '_' + day + '_' + exIdx;
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
     swaps[key] = newName;
     sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
-    renderDetail(); // Re-render with swapped exercise
+    // Persist to DB
+    apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: newName });
+    renderDetail();
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
@@ -5698,6 +5714,16 @@ async function renderDetail() {
   </div>`;
 
   // Exercise rows with weight tracking and RPE
+  if (!_exerciseSwapsLoaded) {
+    try {
+      const swapRes = await fetch('/api/exercise-swaps');
+      if (swapRes.ok) {
+        const swapData = await swapRes.json();
+        sessionStorage.setItem('exercise_swaps', JSON.stringify(swapData));
+        _exerciseSwapsLoaded = true;
+      }
+    } catch(e) {}
+  }
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const exRows = displayExercises.map((ex, i) => {
     const swapKey = currentWeek + '_' + currentDay + '_' + i;
@@ -5750,9 +5776,9 @@ async function renderDetail() {
           ${setDone ? '&#10003;' : ''}
         </button>
         <span class="set-label">Set ${s + 1}</span>
-        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb">
+        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
         <span class="set-x">&times;</span>
-        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100">
+        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
       </div>`;
     }
 

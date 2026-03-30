@@ -22,7 +22,7 @@ from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
 from models import (
-    db, User, Invite, ExerciseLog, ExerciseCompletion, DayCompletion,
+    db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
@@ -856,7 +856,11 @@ def api_state_update():
         s.start_date = date.fromisoformat(data["start_date"]) if data["start_date"] else None
     if "traveling" in data:
         s.traveling = data["traveling"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True})
 
 
@@ -913,7 +917,11 @@ def api_weights_record():
         existing.rpe_score = data.get("rpe_score")
         existing.reps_completed = data.get("reps_completed")
         existing.logged_date = date.today()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": "Save failed"}), 500
         return jsonify({"ok": True, "id": existing.id, "updated": True})
 
     log = ExerciseLog(
@@ -930,7 +938,11 @@ def api_weights_record():
         user_id=current_user.id,
     )
     db.session.add(log)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True, "id": log.id})
 
 
@@ -968,7 +980,11 @@ def api_set_log():
             weight=weight, reps=reps, done=done, logged_date=date.today(),
         )
         db.session.add(existing)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True, "id": existing.id})
 
 
@@ -1068,8 +1084,58 @@ def api_toggle_exercise():
     else:
         ec = ExerciseCompletion(week=w, day_idx=d, exercise_idx=e, done=True, user_id=current_user.id)
         db.session.add(ec)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"done": ec.done})
+
+
+@app.route("/api/exercise-swaps")
+@login_required
+def api_exercise_swaps():
+    """Get all exercise swaps for current user."""
+    swaps = ExerciseSwap.query.filter_by(user_id=current_user.id).all()
+    result = {}
+    for s in swaps:
+        key = f"{s.week}_{s.day_idx}_{s.exercise_idx}"
+        result[key] = s.swapped_to
+    return jsonify(result)
+
+
+@app.route("/api/exercise-swap", methods=["POST"])
+@login_required
+def api_exercise_swap():
+    """Save an exercise swap."""
+    data = request.get_json()
+    week = data.get("week")
+    day_idx = data.get("day_idx")
+    exercise_idx = data.get("exercise_idx")
+    swapped_to = data.get("swapped_to", "").strip()
+
+    if week is None or day_idx is None or exercise_idx is None or not swapped_to:
+        return jsonify({"error": "Missing fields"}), 400
+
+    existing = ExerciseSwap.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=day_idx, exercise_idx=exercise_idx
+    ).first()
+
+    if existing:
+        existing.swapped_to = swapped_to
+    else:
+        existing = ExerciseSwap(
+            user_id=current_user.id, week=week, day_idx=day_idx,
+            exercise_idx=exercise_idx, swapped_to=swapped_to,
+        )
+        db.session.add(existing)
+
+    try:
+        db.session.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/completions/day", methods=["POST"])
@@ -1083,7 +1149,11 @@ def api_toggle_day():
     else:
         dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
         db.session.add(dc)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"done": dc.done})
 
 
@@ -1118,7 +1188,11 @@ def api_meals_update():
         ml.adjustments = data["adjustments"]
     if "fasting" in data:
         ml.fasting = data["fasting"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True})
 
 
@@ -1154,7 +1228,11 @@ def api_bodyweight_record():
     else:
         bw = BodyWeight(log_date=d, weight_lbs=weight, user_id=current_user.id)
         db.session.add(bw)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True})
 
 
@@ -1272,7 +1350,11 @@ def api_supplements_toggle():
     else:
         sl = SupplementLog(log_date=d, supplement_name=name, taken=True, user_id=current_user.id)
         db.session.add(sl)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"taken": sl.taken})
 
 
@@ -1486,7 +1568,11 @@ def api_morning_checkin_save():
             user_id=current_user.id,
         )
         db.session.add(ci)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True})
 
 
@@ -1825,7 +1911,11 @@ def api_chat():
     # Save user message
     user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id)
     db.session.add(user_chat)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
 
     # Build context for the AI coach
     context = _build_coach_context()
@@ -1836,7 +1926,11 @@ def api_chat():
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id)
     db.session.add(asst_chat)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
 
     # Extract and save memories (runs in background, non-blocking)
     uid = current_user.id
@@ -3491,7 +3585,11 @@ def api_warmup_toggle():
     else:
         wc = WarmupCompletion(week=w, day_idx=d, step_idx=s, done=True, user_id=current_user.id)
         db.session.add(wc)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"done": wc.done})
 
 
@@ -3516,7 +3614,11 @@ def api_run_log():
             notes=data.get("notes"), log_date=date.today(),
         )
         db.session.add(existing)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True, "id": existing.id})
 
 
