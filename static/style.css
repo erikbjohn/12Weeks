@@ -3441,3 +3441,8 @@ footer {
 .invite-result { margin-top: 10px; }
 .invite-link-box { margin-top: 8px; }
 .invite-link-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--accent); padding: 8px 10px; border-radius: 6px; font-size: 12px; font-family: 'DM Mono', monospace; cursor: pointer; }
+
+/* ─── PLAN BUILDING PROGRESS ─── */
+.plan-progress-bar { width: 100%; height: 8px; background: var(--surface2); border-radius: 4px; margin: 1.5rem 0 1rem; overflow: hidden; }
+.plan-progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 1.5s ease; }
+.plan-progress-step { font-size: 14px; color: var(--muted); font-family: 'DM Mono', monospace; min-height: 1.5em; transition: opacity 0.3s; }

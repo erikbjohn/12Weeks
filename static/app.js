@@ -1708,14 +1708,35 @@ function drawProjectionChart(projection) {
 async function showFinalReveal() {
     const el = document.getElementById('baseline-overlay');
 
-    // Step 1: Loading
+    // Step 1: Loading with animated progress
     el.innerHTML = `<div class="baseline-overlay">
         <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
             <h2 style="font-size:1.5rem;margin-bottom:16px">Building Your Plan</h2>
-            <div class="chat-typing" style="justify-content:center;margin:1.5rem 0"><span></span><span></span><span></span></div>
-            <div style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace">Analyzing everything you told me...</div>
+            <div class="plan-progress-bar"><div class="plan-progress-fill" id="plan-progress-fill" style="width:5%"></div></div>
+            <div class="plan-progress-step" id="plan-progress-step">Analyzing your intake conversation...</div>
         </div>
     </div>`;
+
+    const _planSteps = [
+        { text: 'Running psychological assessment...', pct: 15 },
+        { text: 'Examining current fitness level...', pct: 30 },
+        { text: 'Computing metabolic rate...', pct: 45 },
+        { text: 'Analyzing nutritional preferences...', pct: 55 },
+        { text: 'Building workout programming...', pct: 65 },
+        { text: 'Calculating calorie targets...', pct: 75 },
+        { text: 'Projecting your 12-week transformation...', pct: 85 },
+        { text: 'Finalizing your plan...', pct: 95 },
+    ];
+    let _planStepIdx = 0;
+    const _planInterval = setInterval(() => {
+        if (_planStepIdx < _planSteps.length) {
+            const fill = document.getElementById('plan-progress-fill');
+            const label = document.getElementById('plan-progress-step');
+            if (fill) fill.style.width = _planSteps[_planStepIdx].pct + '%';
+            if (label) label.textContent = _planSteps[_planStepIdx].text;
+            _planStepIdx++;
+        }
+    }, 2000);
 
     // Step 2: Compute goal + generate profile in parallel
     let goalData = window._goalData;
@@ -1746,6 +1767,14 @@ async function showFinalReveal() {
     } catch(e) {
         console.error('Final reveal error:', e);
     }
+
+    // Stop progress animation
+    clearInterval(_planInterval);
+    const fill = document.getElementById('plan-progress-fill');
+    if (fill) fill.style.width = '100%';
+
+    // Brief pause at 100% before transitioning
+    await new Promise(r => setTimeout(r, 500));
 
     // Step 3: Show Athlete Profile
     showRevealProfile(profileText, goalData);
