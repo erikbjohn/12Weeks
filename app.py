@@ -2421,58 +2421,10 @@ def api_physical_assessment_reset():
     return jsonify({"ok": True})
 
 
-@app.route("/api/my-data/reset", methods=["POST"])
-@login_required
-def api_user_reset():
-    """Reset current user's data only."""
-    tables = [
-        ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
-        ExerciseLog, ExerciseCompletion, DayCompletion,
-        BodyWeight, BodyMeasurement, WeeklyCheckIn,
-        MealLog, SupplementLog, ProgressPhoto, AppState,
-        UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    ]
-    errors = []
-    for t in tables:
-        try:
-            t.query.filter_by(user_id=current_user.id).delete()
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            errors.append(f"{t.__tablename__}: {e}")
-    return jsonify({"ok": True, "errors": errors})
+## User data reset endpoint removed — no data wipes allowed
 
 
-@app.route("/api/admin/full-reset", methods=["POST"])
-@admin_required
-def api_full_reset():
-    """Nuclear reset — wipe all user data, start fresh."""
-    try:
-        body = request.get_json(silent=True) or {}
-        secret = body.get("secret", "")
-    except Exception:
-        secret = ""
-    if secret != os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me"):
-        return jsonify({"error": "Unauthorized"}), 403
-    try:
-        db.create_all()
-    except Exception:
-        pass
-    tables = [
-        ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
-        ExerciseLog, ExerciseCompletion, DayCompletion,
-        BodyWeight, BodyMeasurement, WeeklyCheckIn,
-        MealLog, SupplementLog, ProgressPhoto, AppState,
-    ]
-    errors = []
-    for t in tables:
-        try:
-            t.query.delete()
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            errors.append(f"{t.__tablename__}: {e}")
-    return jsonify({"ok": True, "errors": errors, "message": "All data wiped."})
+## Full reset endpoint removed — no nuclear data wipes allowed
 
 
 @app.route("/admin")
