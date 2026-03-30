@@ -654,19 +654,30 @@ def get_filtered_catalog(restrictions):
 
     Returns filtered FOOD_CATALOG dict (same shape, fewer items).
     """
-    # Normalize restrictions into required tags
-    required_tags = set()
-    for r in restrictions:
-        r_lower = r.lower().strip()
-        if r_lower == "no_dairy":
-            required_tags.add("dairy_free")
-        elif r_lower == "pescatarian":
-            # Handled specially below
-            pass
-        else:
-            required_tags.add(r_lower)
+    if not restrictions:
+        return {cat: list(items) for cat, items in FOOD_CATALOG.items()}
 
-    is_pescatarian = any(r.lower().strip() == "pescatarian" for r in restrictions)
+    restrictions_lower = [r.lower().strip() for r in restrictions]
+
+    # Diet-type restrictions: only keep foods WITH these tags
+    diet_filters = []  # require item to have at least one of these tags
+    if "vegan" in restrictions_lower:
+        diet_filters.append("vegan")
+    elif "vegetarian" in restrictions_lower:
+        diet_filters.append("vegetarian")
+    elif "pescatarian" in restrictions_lower:
+        diet_filters.extend(["vegetarian", "pescatarian"])
+
+    # Exclusion restrictions: remove foods WITHOUT these tags
+    must_have = []
+    if "no_dairy" in restrictions_lower or "dairy_free" in restrictions_lower:
+        must_have.append("dairy_free")
+    if "no_gluten" in restrictions_lower or "gluten_free" in restrictions_lower:
+        must_have.append("gluten_free")
+    if "halal" in restrictions_lower:
+        must_have.append("halal")
+    if "kosher" in restrictions_lower:
+        must_have.append("kosher")
 
     filtered = {}
     for category, items in FOOD_CATALOG.items():
@@ -674,14 +685,13 @@ def get_filtered_catalog(restrictions):
         for item in items:
             tags = set(item["tags"])
 
-            # Check required tags
-            if not required_tags.issubset(tags):
+            # Diet filter: item must have at least one matching diet tag
+            if diet_filters and not any(d in tags for d in diet_filters):
                 continue
 
-            # Pescatarian: must be vegetarian or pescatarian
-            if is_pescatarian:
-                if "vegetarian" not in tags and "pescatarian" not in tags:
-                    continue
+            # Exclusion filter: item must have ALL required tags
+            if must_have and not all(t in tags for t in must_have):
+                continue
 
             kept.append(item)
         filtered[category] = kept
