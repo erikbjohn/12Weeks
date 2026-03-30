@@ -273,29 +273,7 @@ function renderMealSection(dayData) {
   const pctC = target.carbs > 0 ? Math.min(100, Math.round(totalEaten.carbs / target.carbs * 100)) : 0;
   const pctF = target.fat > 0 ? Math.min(100, Math.round(totalEaten.fat / target.fat * 100)) : 0;
 
-  const totalsHtml = `<div class="meal-totals">
-    <div class="meal-totals-title">Daily Totals${fasting && isRestDay ? ' (Fasting)' : ''}</div>
-    <div class="macro-bar-row">
-      <span class="macro-bar-label mbl-cal">Cal</span>
-      <div class="macro-bar"><div class="macro-bar-fill mbf-cal" style="width:${pctCal}%"></div></div>
-      <span class="macro-bar-nums">${totalEaten.cal} / ${target.cal}</span>
-    </div>
-    <div class="macro-bar-row">
-      <span class="macro-bar-label mbl-p">P</span>
-      <div class="macro-bar"><div class="macro-bar-fill mbf-p" style="width:${pctP}%"></div></div>
-      <span class="macro-bar-nums">${totalEaten.protein}g / ${target.protein}g</span>
-    </div>
-    <div class="macro-bar-row">
-      <span class="macro-bar-label mbl-c">C</span>
-      <div class="macro-bar"><div class="macro-bar-fill mbf-c" style="width:${pctC}%"></div></div>
-      <span class="macro-bar-nums">${totalEaten.carbs}g / ${target.carbs}g</span>
-    </div>
-    <div class="macro-bar-row">
-      <span class="macro-bar-label mbl-f">F</span>
-      <div class="macro-bar"><div class="macro-bar-fill mbf-f" style="width:${pctF}%"></div></div>
-      <span class="macro-bar-nums">${totalEaten.fat}g / ${target.fat}g</span>
-    </div>
-  </div>`;
+  const totalsHtml = ''; // Daily totals removed — eat the plan, check it off
 
   // Compact row: meal name checkboxes
   let compactChecks = '';
@@ -1990,7 +1968,7 @@ function renderBaselineAssessment(data) {
                     <span class="assess-lift-1rm">${s.estimated_1rm} lb 1RM</span>
                     <span class="assess-lift-ratio">${s.relative_strength}x BW</span>
                 </div>
-                <div class="assess-lift-pct-bar"><div class="assess-lift-pct-fill" style="width:${barWidth}%;background:var(--accent)"></div></div>
+                <div class="assess-lift-pct-bar"><div class="assess-lift-pct-fill" style="width:${barWidth}%;background:#4ade80"></div></div>
                 <div class="assess-lift-pct-label">${s.percentile}th percentile · ${s.rating}</div>
             </div>`;
         }).join('');

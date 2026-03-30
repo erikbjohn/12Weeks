@@ -3504,7 +3504,7 @@ footer {
 .assess-lift-data { display: flex; gap: 12px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .assess-lift-1rm { color: var(--text); font-weight: 600; }
 .assess-lift-pct-bar { height: 12px; background: var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
-.assess-lift-pct-fill { height: 100%; border-radius: 6px; transition: width 0.5s; min-width: 8px; }
+.assess-lift-pct-fill { height: 100%; border-radius: 6px; transition: width 0.5s; min-width: 8px; background: #4ade80; }
 .assess-lift-pct-label { font-family: 'DM Mono', monospace; font-size: 11px; }
 .assess-measure-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 .assess-measure-row:last-child { border-bottom: none; }
