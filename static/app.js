@@ -5002,6 +5002,8 @@ async function sendCoachTopMessage() {
 }
 
 function renderInlineCoach() {
+  // DEPRECATED — coach is now at the top via renderCoachTop()
+  return;
   const el = document.getElementById('coach-inline');
   if (!el) return;
 

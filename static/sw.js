@@ -1,4 +1,4 @@
-const CACHE_NAME = '12weeks-v2';
+const CACHE_NAME = '12weeks-v3';
 const STATIC_ASSETS = [
   '/',
   '/static/style.css',
