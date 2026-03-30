@@ -312,14 +312,17 @@ def build_baseline_assessment(physical_data, lifting_data, age, sex, body_weight
         baseline_match = None
 
         import re
-        baseline_match = re.search(r'(\d+)\s*lb\s*x\s*(\d+)', sets_label)
+        # Try multiple formats: "baseline: 95lb x 13", "95 lb x 13", "95lb x13", etc.
+        baseline_match = re.search(r'(\d+)\s*(?:lb|lbs?)?\s*x\s*(\d+)', sets_label, re.IGNORECASE)
         if baseline_match:
             test_weight = int(baseline_match.group(1))
             test_reps = int(baseline_match.group(2))
             one_rm = estimate_1rm(test_weight, test_reps)
+        elif info.get("current", 0) > 0:
+            # Fallback: estimate from working weight (working = 75% of 1RM)
+            one_rm = round(info.get("current", 0) / 0.75)
         else:
-            # Fallback: estimate from working weight
-            one_rm = round(info.get("current", 0) * 1.33)
+            one_rm = 0
 
         if one_rm <= 0:
             continue

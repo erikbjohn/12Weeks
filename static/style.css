@@ -868,10 +868,12 @@ footer {
   inset: 0;
   background: rgba(0,0,0,0.92);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 200;
   padding: 1rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: fadeIn .3s ease;
 }
 
@@ -885,6 +887,8 @@ footer {
   width: 100%;
   max-width: min(540px, 95vw);
   text-align: center;
+  margin: 2rem auto;
+  flex-shrink: 0;
 }
 
 .baseline-card h2 {
