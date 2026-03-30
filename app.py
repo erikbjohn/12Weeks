@@ -1792,7 +1792,7 @@ def api_chat():
     # Extract and save memories (runs in background, non-blocking)
     uid = current_user.id
     week = context.get("week", 1)
-    _app = app._get_current_object()
+    _app = app
 
     def _save_memories():
         with _app.app_context():
@@ -1806,8 +1806,8 @@ def api_chat():
                     db.session.add(cm)
                 if memories:
                     db.session.commit()
-            except Exception as e:
-                log.warning("Memory save failed: %s", e)
+            except Exception:
+                pass  # Memory extraction is best-effort
 
     import threading
     threading.Thread(target=_save_memories, daemon=True).start()
