@@ -1905,95 +1905,108 @@ function showRevealProfile(profileText, goalData) {
         <div class="baseline-card psych-intake-card">
             <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
             <div class="psych-report">${profileText ? renderMarkdown(profileText) : '<p style="color:var(--muted)">Profile generation in progress...</p>'}</div>
-            <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showRevealProjection()">See Your Projection →</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showBaselineAssessment()">See Your Baseline →</button>
         </div>
     </div>`;
 }
 
-function showRevealProjection() {
+async function showBaselineAssessment() {
     const el = document.getElementById('baseline-overlay');
-    const goalData = window._goalData;
-
-    if (!goalData) {
+    el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem"><div class="chat-typing" style="justify-content:center"><span></span><span></span><span></span></div><div style="margin-top:8px;color:var(--muted);font-size:13px">Analyzing your data...</div></div></div>`;
+    try {
+        const res = await fetch('/api/baseline-assessment');
+        const data = await res.json();
+        renderBaselineAssessment(data);
+    } catch(e) {
+        console.error('Assessment error:', e);
         showRevealPlan();
-        return;
     }
+}
 
-    // Weight projection
-    const proj = goalData.weight_projection || [];
-    const w4 = proj.find(p => p.week === 4);
-    const w8 = proj.find(p => p.week === 8);
-    const w12 = proj.find(p => p.week === 12);
+function renderBaselineAssessment(data) {
+    const el = document.getElementById('baseline-overlay');
+    const bc = data.body_comp || {};
+    const strength = data.strength || [];
+    const measurements = data.measurements || [];
+    const summary = data.summary || {};
 
-    let weightHtml = '';
-    if (proj.length > 0) {
-        weightHtml = `<div class="forecast-card">
-            <div class="forecast-label">Body Weight</div>
-            <div class="forecast-row">
-                <span class="forecast-now">${Math.round(proj[0].projected)} lbs</span>
-                <span class="forecast-arrow">→</span>
-                <span class="forecast-target">${w12 ? Math.round(w12.projected) : '?'} lbs</span>
+    let bodyCompHtml = '';
+    if (bc.body_fat_pct) {
+        bodyCompHtml = `<div class="assess-section">
+            <div class="assess-section-label">Body Composition</div>
+            <div class="assess-grid">
+                <div class="assess-stat"><span class="assess-stat-val">${bc.body_fat_pct}%</span><span class="assess-stat-label">Body Fat</span><span class="assess-stat-sub">${bc.category}</span></div>
+                <div class="assess-stat"><span class="assess-stat-val">${bc.body_weight}</span><span class="assess-stat-label">Weight (lbs)</span></div>
+                <div class="assess-stat"><span class="assess-stat-val">${bc.lean_mass || '?'}</span><span class="assess-stat-label">Lean Mass (lbs)</span></div>
+                <div class="assess-stat"><span class="assess-stat-val">${bc.fat_mass || '?'}</span><span class="assess-stat-label">Fat Mass (lbs)</span></div>
             </div>
-            <div class="forecast-detail">Wk 4: ${w4 ? Math.round(w4.projected) : '?'} · Wk 8: ${w8 ? Math.round(w8.projected) : '?'} · Wk 12: ${w12 ? Math.round(w12.projected) : '?'}</div>
+        </div>`;
+    } else {
+        bodyCompHtml = `<div class="assess-section">
+            <div class="assess-section-label">Body Composition</div>
+            <div class="assess-grid">
+                <div class="assess-stat"><span class="assess-stat-val">${bc.body_weight || '?'}</span><span class="assess-stat-label">Weight (lbs)</span></div>
+                <div class="assess-stat"><span class="assess-stat-val">?</span><span class="assess-stat-label">Body Fat</span><span class="assess-stat-sub">Need waist + neck measurements</span></div>
+            </div>
         </div>`;
     }
 
-    // 1RM projections from baseline data
-    // Phase 1 (wk 1-4): volume → ~10-15% 1RM gain for beginners
-    // Phase 2 (wk 5-8): strength 5x5 → ~15-20% gain
-    // Phase 3 (wk 9-12): power → ~5-10% gain
-    const weights = _weightsCache || {};
-    const keyLifts = [
-        { name: 'Barbell Bench Press', short: 'Bench' },
-        { name: 'Barbell Back Squat', short: 'Squat' },
-        { name: 'Conventional Deadlift', short: 'Deadlift' },
-        { name: 'Barbell Bent-Over Row', short: 'Row' },
-        { name: 'DB Overhead Press', short: 'OHP' },
-    ];
+    let strengthHtml = '';
+    if (strength.length > 0) {
+        const rows = strength.map(s => {
+            const pctColor = s.percentile >= 75 ? 'var(--accent)' : s.percentile >= 50 ? 'var(--text)' : s.percentile >= 25 ? 'var(--amber)' : 'var(--red)';
+            const barWidth = Math.min(100, s.percentile);
+            const shortName = s.exercise.replace('Barbell ', '').replace('Conventional ', '').replace('DB ', '');
+            return `<div class="assess-lift-row">
+                <div class="assess-lift-name">${shortName}</div>
+                <div class="assess-lift-data">
+                    <span class="assess-lift-1rm">${s.estimated_1rm} lb 1RM</span>
+                    <span class="assess-lift-ratio">${s.relative_strength}x BW</span>
+                </div>
+                <div class="assess-lift-pct-bar"><div class="assess-lift-pct-fill" style="width:${barWidth}%;background:${pctColor}"></div></div>
+                <div class="assess-lift-pct-label" style="color:${pctColor}">${s.percentile}th percentile · ${s.rating}</div>
+            </div>`;
+        }).join('');
+        strengthHtml = `<div class="assess-section"><div class="assess-section-label">Strength (Est. 1RM vs Population)</div>${rows}</div>`;
+    }
 
-    let liftRows = '';
-    for (const lift of keyLifts) {
-        const data = weights[lift.name];
-        if (!data || !data.history || data.history.length === 0) continue;
+    let measureHtml = '';
+    if (measurements.length > 0) {
+        const mRows = measurements.map(m => {
+            const waistLike = ['Waist', 'Hips'];
+            const goodDir = waistLike.includes(m.label) ? (m.diff < 0 ? 'var(--accent)' : 'var(--amber)') : (m.diff > 0 ? 'var(--accent)' : 'var(--amber)');
+            return `<div class="assess-measure-row">
+                <span class="assess-measure-label">${m.label}</span>
+                <span class="assess-measure-val">${m.value}"</span>
+                <span class="assess-measure-avg">avg: ${m.avg}"</span>
+                <span class="assess-measure-diff" style="color:${goodDir}">${m.status}</span>
+            </div>`;
+        }).join('');
+        measureHtml = `<div class="assess-section"><div class="assess-section-label">Measurements vs Population Average</div>${mRows}</div>`;
+    }
 
-        const last = data.history[data.history.length - 1];
-        const setsLabel = last.reps || '';
-        let current1RM = 0;
-
-        // Parse baseline reps to compute 1RM
-        const baselineMatch = String(setsLabel).match(/(\d+)lb\s*x\s*(\d+)/);
-        if (baselineMatch) {
-            const testWt = parseInt(baselineMatch[1]);
-            const reps = parseInt(baselineMatch[2]);
-            current1RM = Math.round(testWt * (1 + reps / 30));
-        } else {
-            current1RM = Math.round(data.current * 1.33); // rough estimate from working weight
-        }
-
-        if (current1RM <= 0) continue;
-
-        // Project 1RM gains: ~30-40% total over 12 weeks for intermediate
-        const wk4_1rm = Math.round(current1RM * 1.12);
-        const wk8_1rm = Math.round(current1RM * 1.25);
-        const wk12_1rm = Math.round(current1RM * 1.35);
-
-        liftRows += `<div class="forecast-card">
-            <div class="forecast-label">${lift.short} (Est. 1RM)</div>
-            <div class="forecast-row">
-                <span class="forecast-now">${current1RM} lbs</span>
-                <span class="forecast-arrow">→</span>
-                <span class="forecast-target">${wk12_1rm} lbs</span>
+    let summaryHtml = '';
+    if (summary.strongest) {
+        const strongShort = summary.strongest.replace('Barbell ', '').replace('Conventional ', '');
+        const weakShort = summary.weakest ? summary.weakest.replace('Barbell ', '').replace('Conventional ', '') : '?';
+        summaryHtml = `<div class="assess-section assess-summary">
+            <div class="assess-section-label">Analysis</div>
+            <div class="assess-summary-text">
+                Strongest: <strong>${strongShort}</strong> (${summary.strongest_percentile}th percentile).
+                Needs work: <strong>${weakShort}</strong> (${summary.weakest_percentile}th percentile).
+                ${bc.body_fat_pct ? 'Body fat: ' + bc.body_fat_pct + '% (' + bc.category + ').' : ''}
             </div>
-            <div class="forecast-detail">Wk 4: ${wk4_1rm} · Wk 8: ${wk8_1rm} · Wk 12: ${wk12_1rm}</div>
         </div>`;
     }
 
     el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card" style="text-align:left">
-            <h2 style="text-align:center;margin-bottom:1rem">Your 12-Week Forecast</h2>
-            <div class="baseline-desc" style="text-align:center;margin-bottom:1.5rem">Based on your baseline and the training plan</div>
-            ${weightHtml}
-            ${liftRows}
+        <div class="baseline-card" style="text-align:left;max-width:600px">
+            <h2 style="text-align:center;margin-bottom:0.5rem">Your Baseline Assessment</h2>
+            <div class="baseline-desc" style="text-align:center;margin-bottom:1.5rem">Here's where you stand. Every Sunday we remeasure.</div>
+            ${bodyCompHtml}
+            ${strengthHtml}
+            ${measureHtml}
+            ${summaryHtml}
             <button class="btn btn-primary" style="width:100%;margin-top:1.5rem;font-size:16px;padding:14px" onclick="showRevealPlan()">See Your Training Plan →</button>
         </div>
     </div>`;
@@ -2164,7 +2177,7 @@ async function submitMoreAggressive() {
         const newGoal = await res.json();
         window._goalData = newGoal;
 
-        showRevealProjection();
+        showBaselineAssessment();
     } catch(e) {
         showRevealPlan();
     }
