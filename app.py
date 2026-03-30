@@ -77,11 +77,14 @@ with app.app_context():
     from sqlalchemy import inspect as sa_inspect, text
     try:
         inspector = sa_inspect(db.engine)
-        if "psych_intake" in inspector.get_table_names():
-            cols = {c["name"] for c in inspector.get_columns("psych_intake")}
-            if "locked_until" not in cols:
-                db.session.execute(text("DROP TABLE psych_intake"))
-                db.session.commit()
+        tables = inspector.get_table_names()
+        # Drop and recreate tables missing critical columns
+        for tbl, required_col in [("psych_intake", "locked_until"), ("physical_assessment", "chest_inches")]:
+            if tbl in tables:
+                cols = {c["name"] for c in inspector.get_columns(tbl)}
+                if required_col not in cols:
+                    db.session.execute(text(f"DROP TABLE {tbl}"))
+                    db.session.commit()
     except Exception:
         pass
     db.create_all()
@@ -102,6 +105,7 @@ with app.app_context():
         ("exercise_log", "rpe_score", "INTEGER"),
         ("exercise_log", "reps_completed", "INTEGER"),
         ("exercise_log", "difficulty_notes", "TEXT"),
+        ("training_goal", "baseline_assessment", "TEXT"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -2130,6 +2134,51 @@ def api_food_selections_validate():
     return jsonify(result)
 
 
+# ─── BASELINE ASSESSMENT ──────────────────────────────────────────────────
+
+@app.route("/api/baseline-assessment")
+@login_required
+def api_baseline_assessment():
+    from body_stats import build_baseline_assessment
+
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+    body_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else 180)
+
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
+    sex = "male"
+    age = 30
+    if intake and intake.conversation:
+        for msg in intake.conversation:
+            content = msg.get("content", "").lower().strip()
+            if msg.get("role") == "user":
+                if content in ("male", "female", "m", "f"):
+                    sex = "female" if content in ("female", "f") else "male"
+                try:
+                    num = int(content)
+                    if 15 <= num <= 80:
+                        age = num
+                except ValueError:
+                    pass
+
+    physical_data = {}
+    if pa:
+        physical_data = {
+            "waist": pa.waist_inches,
+            "chest": pa.chest_inches,
+            "bicep": pa.bicep_inches,
+            "thigh": pa.thigh_inches,
+            "neck": pa.neck_inches,
+            "hips": pa.hips_inches,
+            "height": pa.height_inches,
+        }
+
+    lifting_data = _serialize_weights(user_id=current_user.id)
+
+    assessment = build_baseline_assessment(physical_data, lifting_data, age, sex, body_weight)
+    return jsonify(assessment)
+
+
 # ─── EQUIPMENT ─────────────────────────────────────────────────────────────
 
 @app.route("/api/equipment/catalog")
@@ -2432,8 +2481,13 @@ def api_physical_assessment_status():
         "has_gym": pa.has_gym,
         "has_measuring_tape": pa.has_measuring_tape,
         "bodyweight": latest_bw.weight_lbs if latest_bw else pa.bodyweight_lbs,
-        "waist": pa.waist_inches,
         "height": pa.height_inches,
+        "waist": pa.waist_inches,
+        "chest": pa.chest_inches,
+        "bicep": pa.bicep_inches,
+        "thigh": pa.thigh_inches,
+        "hips": pa.hips_inches,
+        "neck": pa.neck_inches,
     })
 
 

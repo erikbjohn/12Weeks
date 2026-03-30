@@ -268,6 +268,7 @@ class TrainingGoal(db.Model):
     electrolyte_supplementation = db.Column(db.Boolean, default=False)
     weight_projection = db.Column(db.JSON, nullable=True)
     plan_accepted = db.Column(db.Boolean, default=False)
+    baseline_assessment = db.Column(db.JSON, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 

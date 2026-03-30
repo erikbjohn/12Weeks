@@ -247,13 +247,15 @@ def get_alternatives(exercise_name, user_equipment):
 
     for alt in swap["alternatives"]:
         required = set(alt["requires"])
-        # Bodyweight exercises (empty requires) are always available
-        if not required or required.issubset(equipment_set):
-            alternatives.append({
-                "name": alt["name"],
-                "note": alt["note"],
-                "muscle_group": swap["muscle_group"],
-            })
+        available = not required or required.issubset(equipment_set)
+        missing = list(required - equipment_set) if required and not available else []
+        alternatives.append({
+            "name": alt["name"],
+            "note": alt["note"],
+            "muscle_group": swap["muscle_group"],
+            "available": available,
+            "missing_equipment": missing,
+        })
 
     return alternatives
 
