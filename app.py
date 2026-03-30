@@ -1253,7 +1253,7 @@ def api_psych_intake_result(job_id):
     is_complete = job.get("is_complete", False)
     del _intake_jobs[job_id]
 
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake:
         return jsonify({"status": "error", "response": "Intake not found"}), 500
 
@@ -1294,7 +1294,7 @@ def api_psych_intake_result(job_id):
 @app.route("/api/psych-intake/report")
 @login_required
 def api_psych_intake_report():
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake or not intake.report:
         return jsonify({"error": "No report available"}), 404
     return jsonify({"report": intake.report})
@@ -1303,7 +1303,7 @@ def api_psych_intake_report():
 @app.route("/api/psych-intake/reset", methods=["POST"])
 @login_required
 def api_psych_intake_reset():
-    PsychIntake.query.delete()
+    PsychIntake.query.filter_by(user_id=current_user.id).delete()
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -1312,11 +1312,11 @@ def api_psych_intake_reset():
 @login_required
 def api_generate_full_profile():
     """Generate the complete athlete profile after psych + physical are done."""
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake or not intake.conversation:
         return jsonify({"error": "No intake conversation"}), 400
 
-    pa = PhysicalAssessment.query.first()
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     physical_data = None
     if pa:
         physical_data = {
@@ -1368,7 +1368,7 @@ def api_full_profile_result(job_id):
     del _intake_jobs[job_id]
     if profile:
         # Save to intake record
-        intake = PsychIntake.query.first()
+        intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
         if intake:
             intake.report = profile
             db.session.commit()
@@ -1383,6 +1383,7 @@ def api_chat_history():
     days = request.args.get("days", 7, type=int)
     since = date.today() - timedelta(days=days)
     messages = ChatMessage.query.filter(
+        ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= since
     ).order_by(ChatMessage.created_at).all()
     return jsonify([{
@@ -1396,7 +1397,7 @@ def api_chat_history():
 @app.route("/api/chat/clear", methods=["POST"])
 @login_required
 def api_chat_clear():
-    ChatMessage.query.delete()
+    ChatMessage.query.filter_by(user_id=current_user.id).delete()
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -1410,7 +1411,7 @@ def api_chat():
         return jsonify({"error": "Message required"}), 400
 
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today())
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id)
     db.session.add(user_chat)
     db.session.commit()
 
@@ -1421,7 +1422,7 @@ def api_chat():
     response_text = get_coach_response(user_msg, context)
 
     # Save assistant message
-    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today())
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id)
     db.session.add(asst_chat)
     db.session.commit()
 
@@ -1441,9 +1442,11 @@ def api_chat_stream():
         return jsonify({"error": "Message required"}), 400
 
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today())
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id)
     db.session.add(user_chat)
     db.session.commit()
+
+    _current_user_id = current_user.id
 
     context = _build_coach_context()
 
@@ -1472,7 +1475,7 @@ def api_chat_stream():
                     yield f"data: {text}\n\n"
 
             # Save complete response
-            asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today())
+            asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
             db.session.add(asst_chat)
             db.session.commit()
 
@@ -1500,6 +1503,7 @@ def _build_coach_context():
         "anxiety": e.anxiety,
         "notes": e.notes,
     } for e in MorningCheckIn.query.filter(
+        MorningCheckIn.user_id == current_user.id,
         MorningCheckIn.log_date >= since
     ).order_by(MorningCheckIn.log_date).all()]
 
@@ -1508,11 +1512,12 @@ def _build_coach_context():
         "role": m.role,
         "content": m.content,
     } for m in ChatMessage.query.filter(
+        ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= since
     ).order_by(ChatMessage.created_at).all()]
 
     # Body weight
-    bw_entries = BodyWeight.query.order_by(BodyWeight.log_date).all()
+    bw_entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
     bodyweight = []
     for i, e in enumerate(bw_entries):
         window = bw_entries[max(0, i - 6):i + 1]
@@ -1543,11 +1548,11 @@ def _build_coach_context():
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
 
     # Supplements today
-    supps = SupplementLog.query.filter_by(log_date=date.today()).all()
+    supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=date.today()).all()
     supps_taken = {s.supplement_name: s.taken for s in supps}
 
     # Psych intake report (contains aspirational body type, goals, etc.)
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     intake_report = intake.report if intake and intake.report else None
 
     return {
@@ -1570,7 +1575,7 @@ def _build_coach_context():
 @login_required
 def api_photos():
     """Get all progress photos (metadata only, no image data)."""
-    photos = ProgressPhoto.query.order_by(ProgressPhoto.log_date).all()
+    photos = ProgressPhoto.query.filter_by(user_id=current_user.id).order_by(ProgressPhoto.log_date).all()
     return jsonify([{
         "id": p.id,
         "date": p.log_date.isoformat(),
@@ -1585,7 +1590,7 @@ def api_photos():
 @login_required
 def api_photo_image(photo_id):
     """Get a specific photo's image data."""
-    p = ProgressPhoto.query.get_or_404(photo_id)
+    p = ProgressPhoto.query.filter_by(id=photo_id, user_id=current_user.id).first_or_404()
     return jsonify({"photo_data": p.photo_data})
 
 
@@ -1606,6 +1611,7 @@ def api_photo_upload():
     photo = ProgressPhoto(
         log_date=date.today(),
         photo_data=photo_b64,
+        user_id=current_user.id,
         pose=pose,
         week=week,
     )
@@ -1639,6 +1645,7 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
 
     # Get previous photos for comparison
     prev_photos = ProgressPhoto.query.filter(
+        ProgressPhoto.user_id == current_user.id,
         ProgressPhoto.pose == pose,
         ProgressPhoto.log_date < date.today(),
     ).order_by(ProgressPhoto.log_date.desc()).limit(1).all()
@@ -1651,12 +1658,12 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
         comparison_image = p.photo_data
 
     # Get body weight context
-    bw = BodyWeight.query.order_by(BodyWeight.log_date.desc()).first()
+    bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
     bw_note = f"Current body weight: {bw.weight_lbs} lb." if bw else ""
 
     # Get aspirational body type from psych intake
     aspiration_note = ""
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if intake and intake.conversation:
         convo_text = " ".join(m.get("content", "") for m in intake.conversation)
         # The aspirational reference is in the conversation - pass it to Claude to extract and use
@@ -1871,7 +1878,7 @@ def api_push_test():
 @app.route("/api/constraints")
 @login_required
 def api_constraints():
-    c = UserConstraints.query.first()
+    c = UserConstraints.query.filter_by(user_id=current_user.id).first()
     if not c:
         return jsonify({"completed": False})
     return jsonify({
@@ -1886,9 +1893,9 @@ def api_constraints():
 @login_required
 def api_constraints_save():
     data = request.get_json()
-    c = UserConstraints.query.first()
+    c = UserConstraints.query.filter_by(user_id=current_user.id).first()
     if not c:
-        c = UserConstraints()
+        c = UserConstraints(user_id=current_user.id)
         db.session.add(c)
     if "food_restrictions" in data:
         c.food_restrictions = data["food_restrictions"]
@@ -1916,8 +1923,8 @@ def api_goal_compute():
         determine_fasting_protocol, project_weight_curve,
     )
 
-    intake = PsychIntake.query.first()
-    pa = PhysicalAssessment.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not intake or not pa:
         return jsonify({"error": "Intake and physical assessment required"}), 400
 
@@ -1976,9 +1983,9 @@ def api_goal_compute():
         cal_by_day[dt] = compute_day_calories(targets["calories"], goal_type, dt)
 
     # Save to DB
-    goal = TrainingGoal.query.first()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     if not goal:
-        goal = TrainingGoal(goal_type=goal_type)
+        goal = TrainingGoal(goal_type=goal_type, user_id=current_user.id)
         db.session.add(goal)
     goal.goal_type = goal_type
     goal.target_weight = round(target_weight, 1)
@@ -2012,7 +2019,7 @@ def api_goal_compute():
 @app.route("/api/goal")
 @login_required
 def api_goal():
-    goal = TrainingGoal.query.first()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     if not goal:
         return jsonify({"computed": False})
     return jsonify({
@@ -2038,7 +2045,7 @@ def api_goal():
 @login_required
 def api_food_catalog():
     from food_catalog import get_filtered_catalog
-    constraints = UserConstraints.query.first()
+    constraints = UserConstraints.query.filter_by(user_id=current_user.id).first()
     restrictions = constraints.food_restrictions if constraints else []
     catalog = get_filtered_catalog(restrictions)
     return jsonify(catalog)
@@ -2046,7 +2053,7 @@ def api_food_catalog():
 @app.route("/api/food-selections")
 @login_required
 def api_food_selections():
-    fs = UserFoodSelections.query.first()
+    fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
     if not fs:
         return jsonify({"completed": False, "selected_foods": {}})
     return jsonify({"completed": fs.completed, "selected_foods": fs.selected_foods or {}})
@@ -2055,9 +2062,9 @@ def api_food_selections():
 @login_required
 def api_food_selections_save():
     data = request.get_json()
-    fs = UserFoodSelections.query.first()
+    fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
     if not fs:
-        fs = UserFoodSelections()
+        fs = UserFoodSelections(user_id=current_user.id)
         db.session.add(fs)
     if "selected_foods" in data:
         fs.selected_foods = data["selected_foods"]
@@ -2072,7 +2079,7 @@ def api_food_selections_validate():
     from food_catalog import validate_selections
     data = request.get_json()
     selections = data.get("selected_foods", {})
-    goal = TrainingGoal.query.first()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     daily_cal = goal.daily_calories if goal else 1800
     daily_protein = goal.protein_grams if goal else 150
     result = validate_selections(selections, daily_cal, daily_protein)
@@ -2089,12 +2096,14 @@ def api_weekly_report_generate():
     s = _get_state()
     week = s.current_week
 
-    metrics = compute_weekly_metrics(week)
+    _current_user_id = current_user.id
+    metrics = compute_weekly_metrics(week, user_id=_current_user_id)
 
     # Save computed metrics immediately
-    report = WeeklyReport.query.filter_by(week=week).first()
+
+    report = WeeklyReport.query.filter_by(user_id=current_user.id, week=week).first()
     if not report:
-        report = WeeklyReport(week=week, report_date=date.today())
+        report = WeeklyReport(week=week, report_date=date.today(), user_id=current_user.id)
         db.session.add(report)
     report.workouts_completed = metrics["workouts_completed"]
     report.workouts_total = metrics["workouts_total"]
@@ -2117,7 +2126,7 @@ def api_weekly_report_generate():
             _intake_jobs[job_id] = {"status": "done", "narrative": narrative}
             # Save narrative to DB
             with app.app_context():
-                r = WeeklyReport.query.filter_by(week=week).first()
+                r = WeeklyReport.query.filter_by(user_id=_current_user_id, week=week).first()
                 if r and narrative:
                     r.narrative = narrative
                     db.session.commit()
@@ -2135,7 +2144,7 @@ def api_weekly_report_generate():
 @app.route("/api/weekly-report/<int:week>")
 @login_required
 def api_weekly_report(week):
-    report = WeeklyReport.query.filter_by(week=week).first()
+    report = WeeklyReport.query.filter_by(user_id=current_user.id, week=week).first()
     if not report:
         return jsonify({"error": "No report for this week"}), 404
     return jsonify({
@@ -2179,13 +2188,13 @@ def api_goal_recalibrate():
     if not actual_weight or not week:
         return jsonify({"error": "weight and week required"}), 400
 
-    goal = TrainingGoal.query.first()
-    pa = PhysicalAssessment.query.first()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not goal or not pa:
         return jsonify({"error": "Goal not computed yet"}), 400
 
     # Extract age/sex for TDEE recalc
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     sex = "male"
     age = 30
     if intake and intake.conversation:
@@ -2313,7 +2322,7 @@ def api_morning_briefing():
 @login_required
 def api_plan_lockout():
     """Lock user out for 1 week after rejecting the plan."""
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if intake:
         intake.locked_until = date.today() + timedelta(days=7)
         db.session.commit()
@@ -2325,7 +2334,7 @@ def api_plan_lockout():
 @app.route("/api/physical-assessment/status")
 @login_required
 def api_physical_assessment_status():
-    pa = PhysicalAssessment.query.first()
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not pa:
         return jsonify({"started": False, "completed": False})
     return jsonify({
@@ -2343,9 +2352,9 @@ def api_physical_assessment_status():
 @login_required
 def api_physical_assessment_save():
     data = request.get_json()
-    pa = PhysicalAssessment.query.first()
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not pa:
-        pa = PhysicalAssessment()
+        pa = PhysicalAssessment(user_id=current_user.id)
         db.session.add(pa)
 
     if "has_gym" in data:
@@ -2358,19 +2367,19 @@ def api_physical_assessment_save():
         pa.bodyweight_lbs = data["bodyweight"]
         # Also log to BodyWeight table
         d = date.today()
-        bw = BodyWeight.query.filter_by(log_date=d).first()
+        bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bw:
             bw.weight_lbs = data["bodyweight"]
         else:
-            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"]))
+            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
     if "waist" in data:
         pa.waist_inches = data["waist"]
         d = date.today()
-        bm = BodyMeasurement.query.filter_by(log_date=d).first()
+        bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bm:
             bm.waist_inches = data["waist"]
         else:
-            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"]))
+            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
     if "stomach" in data:
         pa.stomach_inches = data["stomach"]
     if "chest" in data:
@@ -2407,13 +2416,35 @@ def api_physical_assessment_save():
 @app.route("/api/physical-assessment/reset", methods=["POST"])
 @login_required
 def api_physical_assessment_reset():
-    PhysicalAssessment.query.delete()
+    PhysicalAssessment.query.filter_by(user_id=current_user.id).delete()
     db.session.commit()
     return jsonify({"ok": True})
 
 
-@app.route("/api/admin/full-reset", methods=["POST"])
+@app.route("/api/my-data/reset", methods=["POST"])
 @login_required
+def api_user_reset():
+    """Reset current user's data only."""
+    tables = [
+        ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
+        ExerciseLog, ExerciseCompletion, DayCompletion,
+        BodyWeight, BodyMeasurement, WeeklyCheckIn,
+        MealLog, SupplementLog, ProgressPhoto, AppState,
+        UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
+    ]
+    errors = []
+    for t in tables:
+        try:
+            t.query.filter_by(user_id=current_user.id).delete()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            errors.append(f"{t.__tablename__}: {e}")
+    return jsonify({"ok": True, "errors": errors})
+
+
+@app.route("/api/admin/full-reset", methods=["POST"])
+@admin_required
 def api_full_reset():
     """Nuclear reset — wipe all user data, start fresh."""
     try:

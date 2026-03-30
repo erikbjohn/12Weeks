@@ -17,7 +17,7 @@ Write a 3-5 sentence weekly review for your athlete. Address them as "you." Refe
 No fluff. No generic motivation. Use their actual numbers."""
 
 
-def compute_weekly_metrics(week_num):
+def compute_weekly_metrics(week_num, user_id=None):
     """Compute all metrics for a given week. Returns dict."""
     from models import (
         db, DayCompletion, ExerciseLog, BodyWeight,
@@ -31,16 +31,22 @@ def compute_weekly_metrics(week_num):
     week_start = today - timedelta(days=6)
 
     # Workouts completed
-    completions = DayCompletion.query.filter(
+    q = DayCompletion.query.filter(
         DayCompletion.done == True,
         DayCompletion.week == week_num,
-    ).count()
+    )
+    if user_id is not None:
+        q = q.filter(DayCompletion.user_id == user_id)
+    completions = q.count()
 
     # Weight trend
-    weights = BodyWeight.query.filter(
+    q = BodyWeight.query.filter(
         BodyWeight.log_date >= week_start,
         BodyWeight.log_date <= week_end,
-    ).order_by(BodyWeight.log_date).all()
+    )
+    if user_id is not None:
+        q = q.filter(BodyWeight.user_id == user_id)
+    weights = q.order_by(BodyWeight.log_date).all()
 
     weight_start = weights[0].weight_lbs if weights else None
     weight_end = weights[-1].weight_lbs if weights else None
@@ -49,7 +55,7 @@ def compute_weekly_metrics(week_num):
 
     # Weight vs projection
     weight_vs_projected = "on_track"
-    goal = TrainingGoal.query.first()
+    goal = TrainingGoal.query.filter_by(user_id=user_id).first() if user_id is not None else TrainingGoal.query.first()
     if goal and goal.weight_projection and weight_end:
         proj = goal.weight_projection
         week_proj = next((p for p in proj if p.get("week") == week_num), None)
@@ -67,17 +73,23 @@ def compute_weekly_metrics(week_num):
     ]
     lifts_summary = {}
     for name in key_lift_names:
-        logs = ExerciseLog.query.filter(
+        q = ExerciseLog.query.filter(
             ExerciseLog.exercise_name == name,
             ExerciseLog.week == week_num,
-        ).all()
+        )
+        if user_id is not None:
+            q = q.filter(ExerciseLog.user_id == user_id)
+        logs = q.all()
         if logs:
             max_weight = max(l.weight for l in logs)
             # Check if PR
-            all_time = ExerciseLog.query.filter(
+            q2 = ExerciseLog.query.filter(
                 ExerciseLog.exercise_name == name,
                 ExerciseLog.week < week_num,
-            ).all()
+            )
+            if user_id is not None:
+                q2 = q2.filter(ExerciseLog.user_id == user_id)
+            all_time = q2.all()
             prev_max = max((l.weight for l in all_time), default=0)
             lifts_summary[name] = {
                 "weight": max_weight,
@@ -85,10 +97,13 @@ def compute_weekly_metrics(week_num):
             }
 
     # Morning check-in averages
-    checkins = MorningCheckIn.query.filter(
+    q = MorningCheckIn.query.filter(
         MorningCheckIn.log_date >= week_start,
         MorningCheckIn.log_date <= week_end,
-    ).all()
+    )
+    if user_id is not None:
+        q = q.filter(MorningCheckIn.user_id == user_id)
+    checkins = q.all()
     checkin_avg = {}
     if checkins:
         for field in ["mood", "sleep_quality", "stress_level", "soreness", "motivation", "anxiety"]:
@@ -97,10 +112,13 @@ def compute_weekly_metrics(week_num):
                 checkin_avg[field] = round(sum(vals) / len(vals), 1)
 
     # Adherence (meals logged vs expected)
-    meals_logged = MealLog.query.filter(
+    q = MealLog.query.filter(
         MealLog.log_date >= week_start,
         MealLog.log_date <= week_end,
-    ).count()
+    )
+    if user_id is not None:
+        q = q.filter(MealLog.user_id == user_id)
+    meals_logged = q.count()
     adherence = round((completions / 6) * 100) if completions else 0
 
     return {
