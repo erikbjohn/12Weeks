@@ -152,6 +152,9 @@ Then: What's in your way -- real obstacle or story you're telling yourself?
 Then: What's the next hard thing and when exactly?
 End: Clear, specific, time-bound commitment. Not a vague intention.
 
+ATHLETE: {ctx.get('athlete_name', 'Athlete')}
+Use their name when addressing them directly.
+
 ATHLETE CONTEXT:
 - Week {week} of 12, Phase {phase.get('label', '?')}
 - Focus: {phase.get('focus', '?')}

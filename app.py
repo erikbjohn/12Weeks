@@ -1256,6 +1256,16 @@ def api_psych_intake_message():
         else:
             history_for_api = convo[:-1]
 
+        # Extract and save the user's name (response to Q1: "What's your name?")
+        # The first user message in the conversation is their name
+        user_messages = [m for m in convo if m.get("role") == "user"]
+        if len(user_messages) == 1 and not is_first:
+            # This is the first user response — their name
+            name = user_msg.strip().title()
+            if name and len(name) < 50:
+                current_user.name = name
+                db.session.commit()
+
         # Save user message to DB immediately so it's not lost
         intake.conversation = convo
         db.session.commit()
@@ -1627,6 +1637,7 @@ def _build_coach_context():
         "phase": phase_info,
         "supplements_today": {"taken": supps_taken},
         "intake_report": intake_report,
+        "athlete_name": current_user.name or "Athlete",
     }
 
 
