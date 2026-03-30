@@ -5340,7 +5340,7 @@ async function renderDetail() {
       </div>`;
     }
 
-    return `<div class="exercise-row" style="flex-wrap:wrap">
+    return `<div class="exercise-row">
       <button class="ex-check${done?' done':''}" onclick="toggleEx(${currentWeek},${currentDay},${i})">
         ${done ? '&#10003;' : ''}
       </button>
@@ -5357,8 +5357,8 @@ async function renderDetail() {
       <div class="reps-input-wrap">
         <input class="reps-input" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}" placeholder="reps done" min="0" max="100">
       </div>
-      ${rpeHtml ? `<div style="width:100%;padding-left:36px">${rpeHtml}</div>` : ''}
-      <div id="swap-container-${i}" style="width:100%;padding-left:36px"></div>
+      ${rpeHtml ? `<div style="grid-column:2/4">${rpeHtml}</div>` : ''}
+      <div id="swap-container-${i}" style="grid-column:2/4"></div>
     </div>`;
   }).join('');
 
