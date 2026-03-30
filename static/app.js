@@ -5876,6 +5876,10 @@ async function renderDetail() {
       </div>
     </div>
     ${sundaySectionHtml}
+    ${d.timing ? `<div class="detail-section">
+      <h3>Session Timing</h3>
+      ${timingRows.join('')}
+    </div>` : ''}
     <div class="detail-section">
       ${weightSummaryHtml}
       <h3>Today's Status</h3>
@@ -5915,10 +5919,6 @@ async function renderDetail() {
       </div>`; })()}
     </div>
     ${renderMealSection(d)}
-    ${d.timing ? `<div class="detail-section">
-      <h3>Session Timing</h3>
-      ${timingRows.join('')}
-    </div>` : ''}
     ${d.notes ? `
     <div class="detail-section">
       <div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div>
