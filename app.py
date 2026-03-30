@@ -737,6 +737,14 @@ def _filter_meals_by_food_selections(days, user_food_ids):
             # If a meal has no foods left, drop it entirely
             if filtered_foods:
                 meal["foods"] = filtered_foods
+                # Update meal name to reflect actual contents (don't say "Chicken + Rice" if rice was removed)
+                food_names = [f["item"] for f in filtered_foods if f["item"] not in always_allowed]
+                if food_names and len(food_names) <= 3:
+                    # Build a clean name from the actual foods
+                    short_names = [n.replace("Baked ", "").replace("Grilled ", "").replace("Steamed ", "").replace(", scrambled", "").replace(", omelette", "") for n in food_names]
+                    meal["name"] = " + ".join(short_names)
+                elif food_names:
+                    meal["name"] = food_names[0] + f" + {len(food_names) - 1} more"
                 filtered_meals.append(meal)
         mp["meals"] = filtered_meals
     return filtered_days
