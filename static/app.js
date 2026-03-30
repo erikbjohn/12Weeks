@@ -2414,6 +2414,7 @@ function showSettingsMenu() {
     <button onclick="if(confirm('This will reset your psych intake. Continue?'))redoPsychIntake()">Redo Psych Intake</button>
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
+    <button onclick="regenerateProfile()">Regenerate Profile</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
     <button onclick="window.location='/logout'">Logout</button>
@@ -2488,6 +2489,52 @@ async function sendInvite() {
     } catch(e) {
         resultEl.innerHTML = '<div style="color:var(--red)">Failed to create invite</div>';
     }
+}
+
+async function regenerateProfile() {
+  closeSettingsMenu();
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center;padding:3rem 2rem">
+      <h2 style="font-size:1.5rem;margin-bottom:16px">Rebuilding Your Profile</h2>
+      <div class="plan-progress-bar"><div class="plan-progress-fill" style="width:30%"></div></div>
+      <div class="plan-progress-step">Regenerating athlete profile...</div>
+    </div>
+  </div>`;
+
+  try {
+    const res = await fetch('/api/full-profile/generate', { method: 'POST' });
+    const startData = await res.json();
+    let profile = null;
+
+    if (startData.job_id) {
+      for (let i = 0; i < 120; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const pollRes = await fetch('/api/full-profile/result/' + startData.job_id);
+        const pollData = await pollRes.json();
+        if (pollData.status !== 'pending') {
+          profile = pollData.profile;
+          break;
+        }
+      }
+    }
+
+    if (profile) {
+      el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card psych-intake-card">
+          <h2 style="margin-bottom:0.75rem">Your Athlete Profile</h2>
+          <div class="psych-report">${renderMarkdown(profile)}</div>
+          <button class="btn btn-primary" style="width:100%;margin-top:1.5rem" onclick="document.getElementById('baseline-overlay').innerHTML=''">Close</button>
+        </div>
+      </div>`;
+    } else {
+      el.innerHTML = '';
+      showToast('Profile generation failed', 'error');
+    }
+  } catch(e) {
+    el.innerHTML = '';
+    showToast('Profile generation failed', 'error');
+  }
 }
 
 function closeSettingsMenu() {
