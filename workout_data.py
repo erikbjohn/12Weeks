@@ -12,7 +12,7 @@ MEAL_PLANS = {
         "targetProtein": 155,
         "targetCarbs": 100,
         "targetFat": 80,
-        "note": "High protein, moderate carbs. Fuel the recovery from heavy lifting + intense run.",
+        "note": "High protein, moderate carbs. Fuel recovery from heavy lifting.",
         "meals": [
             {
                 "time": "5:30am",
@@ -71,7 +71,7 @@ MEAL_PLANS = {
         "targetProtein": 160,
         "targetCarbs": 130,
         "targetFat": 75,
-        "note": "Slightly more carbs to fuel the long run and recovery. Break fast earlier if needed.",
+        "note": "More carbs to fuel the long run. Break fast earlier if needed.",
         "meals": [
             {
                 "time": "5:30am",
