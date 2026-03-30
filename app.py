@@ -2036,7 +2036,21 @@ def api_goal():
         "phase_plan": goal.phase_plan,
         "weight_projection": goal.weight_projection,
         "calorie_by_day_type": goal.calorie_by_day_type,
+        "plan_accepted": goal.plan_accepted or False,
     })
+
+
+@app.route("/api/goal", methods=["POST"])
+@login_required
+def api_goal_update():
+    data = request.get_json()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if not goal:
+        return jsonify({"error": "No goal computed yet"}), 400
+    if "plan_accepted" in data:
+        goal.plan_accepted = data["plan_accepted"]
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 # ─── FOOD CATALOG + SELECTIONS ────────────────────────────────────────────

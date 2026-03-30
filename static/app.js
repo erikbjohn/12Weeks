@@ -444,7 +444,9 @@ async function checkOnboardingComplete() {
     const goal = await goalRes.json();
     const food = await foodRes.json();
 
-    return intake.completed && con.completed && pa.completed && goal.computed && food.completed && _stateCache.baseline_done;
+    // plan_accepted is the FINAL gate — user must have reviewed and accepted the training plan
+    const planAccepted = goal.plan_accepted || false;
+    return intake.completed && con.completed && pa.completed && goal.computed && food.completed && planAccepted;
   } catch(e) {
     // If we can't check, fall back to baseline_done
     return _stateCache.baseline_done;
