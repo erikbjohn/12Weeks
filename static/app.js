@@ -393,7 +393,10 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
-  const reps = repsInput ? parseInt(repsInput.value) || 0 : 0;
+  // If user didn't type reps, use the target reps (placeholder) — they hit the target
+  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
+  const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
+  const reps = repsTyped || repsTarget;
 
   if (_setCache[key]) {
     // Un-check

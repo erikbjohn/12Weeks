@@ -172,6 +172,24 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # ONE-TIME FIX: Backfill 0-rep sets with target reps from workout data
+    try:
+        _zero_rep_sets = SetLog.query.filter_by(reps=0, done=True).all()
+        if _zero_rep_sets:
+            # Target reps by exercise from workout data
+            _target_reps = {
+                "Barbell Bench Press": 10, "Lat Pulldown": 8, "Incline DB Press": 10,
+                "Face Pull": 15, "Lateral Raise": 15, "EZ-Bar Curl": 12,
+                "Cable Tricep Pushdown": 12, "Barbell Bent-Over Row": 10,
+                "Cable Seated Row": 10, "Dumbbell Shoulder Press": 10,
+            }
+            for s in _zero_rep_sets:
+                target = _target_reps.get(s.exercise_name, 10)
+                s.reps = target
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
 
