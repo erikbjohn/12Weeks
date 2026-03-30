@@ -18,6 +18,7 @@ let garminData = null;
 let readinessData = null;
 let warmupTimerInterval = null;
 let _chatOverlayOpen = false;
+let _chatScrollPos = null;
 let _mealDetailExpanded = false;
 let _milestonesShownThisSession = new Set();
 
@@ -3635,7 +3636,7 @@ function renderCheckinSummaryBar() {
 // ─── AI COACH CHAT ─────────────────────────────────────────────────────────
 async function loadChatHistory() {
   try {
-    const res = await fetch('/api/chat/history?days=7');
+    const res = await fetch('/api/chat/history?days=7&limit=50');
     const data = await res.json();
     _chatHistory = Array.isArray(data) ? data : (data.messages || []);
   } catch(e) {
@@ -3657,11 +3658,17 @@ function updateChatFabPulse() {
 }
 
 function toggleChatOverlay() {
+  if (_chatOverlayOpen) {
+    const msgs = document.getElementById('chat-overlay-messages');
+    if (msgs) _chatScrollPos = msgs.scrollTop;
+  }
   _chatOverlayOpen = !_chatOverlayOpen;
   renderChatOverlay();
 }
 
 function closeChatOverlay() {
+  const msgs = document.getElementById('chat-overlay-messages');
+  if (msgs) _chatScrollPos = msgs.scrollTop;
   _chatOverlayOpen = false;
   renderChatOverlay();
 }
@@ -3710,7 +3717,12 @@ function renderChatMessages(containerId) {
     }
   }
   container.innerHTML = html;
-  container.scrollTop = container.scrollHeight;
+  if (_chatScrollPos !== null) {
+    container.scrollTop = _chatScrollPos;
+    _chatScrollPos = null;
+  } else {
+    container.scrollTop = container.scrollHeight;
+  }
 }
 
 function escapeHtml(str) {
@@ -4105,6 +4117,29 @@ function toggleDay(week, dayIdx, e) {
   }
   apiPost('/api/completions/day', { week, day_idx: dayIdx });
   renderDayGrid();
+
+  // If day just marked complete, trigger coach feedback
+  if (_completionsCache.days[key]) {
+    const weekData = workoutData[String(week)];
+    if (weekData && weekData.days[dayIdx]) {
+      const d = weekData.days[dayIdx];
+      const summary = `[WORKOUT_COMPLETE] Just finished ${d.liftName}. ` +
+          `${d.exercises ? d.exercises.length : 0} exercises completed.`;
+      // Send to coach via chat (don't open overlay, just send)
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ message: summary }),
+      }).then(r => r.json()).then(data => {
+        if (data.response) {
+          _chatHistory.push({ role: 'user', text: summary, time: new Date().toISOString() });
+          _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+          renderInlineCoach();
+          showToast('Coach feedback ready', 'success');
+        }
+      }).catch(() => {});
+    }
+  }
 }
 
 // ─── BODY WEIGHT / WEIGH-IN ────────────────────────────────────────────────

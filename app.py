@@ -1291,6 +1291,9 @@ def api_psych_intake_conversation():
 
 
 # In-memory job store for async intake (works for single-worker deploys)
+# NOTE: _intake_jobs is in-memory and per-worker. Multiple Gunicorn workers
+# or multiple tabs can cause job_id mismatches. For production, use Redis.
+# FLAG: Architecture change needed for distributed task queue.
 _intake_jobs = {}
 
 
@@ -1535,11 +1538,12 @@ def api_full_profile_result(job_id):
 @login_required
 def api_chat_history():
     days = request.args.get("days", 7, type=int)
+    limit = request.args.get("limit", 100, type=int)
     since = date.today() - timedelta(days=days)
     messages = ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= since
-    ).order_by(ChatMessage.created_at).all()
+    ).order_by(ChatMessage.created_at).limit(limit).all()
     return jsonify([{
         "role": m.role,
         "content": m.content,
