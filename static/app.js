@@ -81,7 +81,8 @@ async function queueForSync(url, body) {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 // ─── MEAL TRACKING ─────────────────────────────────────────────────────────
@@ -2154,8 +2155,8 @@ function showRevealPlan() {
             <h3 style="text-align:center;margin:1.5rem 0 1rem;color:var(--text)">Does this plan work for you?</h3>
             <div style="display:flex;flex-direction:column;gap:10px">
                 <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="acceptPlan()">Let's Do This</button>
-                <button class="btn btn-secondary" style="width:100%;font-size:14px;padding:12px" onclick="requestMoreAggressive()">I Want Bigger Results</button>
-                <button class="btn btn-secondary" style="width:100%;font-size:13px;padding:10px;opacity:0.6" onclick="handleDialBack()">This Is Too Much</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:16px;padding:14px" onclick="requestMoreAggressive()">I Want Bigger Results</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:14px;padding:12px;opacity:0.5" onclick="handleDialBack()">This Is Too Much</button>
             </div>
         </div>
     </div>`;
@@ -4265,13 +4266,13 @@ function renderWarmupSection(dayData) {
   if (!dayData.warmup) return '';
   const wu = dayData.warmup;
   return `<div class="detail-section warmup-section">
-    <button class="warmup-toggle" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
+    <button class="warmup-toggle open" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
       <h3 style="margin:0">Warm-Up${wu.time ? ' - ' + wu.time : ''}</h3>
       <span class="warmup-arrow">\u25BC</span>
     </button>
-    <div class="warmup-body" id="warmup-body">
+    <div class="warmup-body visible" id="warmup-body">
       ${(wu.steps || []).map((step, i) => `<div class="warmup-step">
-        <span class="warmup-step-name">${step.name}</span>
+        <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
         ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
         ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
       </div>`).join('')}
