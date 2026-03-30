@@ -2260,9 +2260,78 @@ function showSettingsMenu() {
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
+    <button onclick="window.location='/logout'">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
+}
+
+// ─── INVITE SYSTEM ────────────────────────────────────────────────────────
+async function toggleInviteDropdown() {
+    const el = document.getElementById('invite-dropdown');
+    if (el.classList.contains('visible')) {
+        el.classList.remove('visible');
+        el.innerHTML = '';
+        return;
+    }
+
+    // Fetch invite status
+    try {
+        const res = await fetch('/api/invite-status');
+        const status = await res.json();
+        const remaining = status.is_admin ? '∞' : status.remaining;
+
+        el.innerHTML = `<div class="invite-card">
+            <div class="invite-header">
+                <span>Invite a Friend</span>
+                <span class="invite-remaining">${remaining} remaining</span>
+            </div>
+            <input type="email" id="invite-email" placeholder="friend@email.com" class="invite-input">
+            <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="sendInvite()">Send Invite</button>
+            <div id="invite-result" class="invite-result"></div>
+        </div>`;
+        el.classList.add('visible');
+    } catch(e) {
+        console.error('Invite status error:', e);
+    }
+}
+
+async function sendInvite() {
+    const emailInput = document.getElementById('invite-email');
+    const email = (emailInput?.value || '').trim();
+    const resultEl = document.getElementById('invite-result');
+
+    try {
+        const res = await fetch('/api/invite', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ email: email || null }),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            resultEl.innerHTML = `<div style="color:var(--red)">${data.error}</div>`;
+            return;
+        }
+
+        let html = '';
+        if (data.email_sent) {
+            html = '<div style="color:var(--accent)">Invite sent!</div>';
+        }
+        html += `<div class="invite-link-box">
+            <input type="text" value="${data.invite_url}" readonly onclick="this.select();document.execCommand('copy')" class="invite-link-input">
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">Click to copy link</div>
+        </div>`;
+
+        if (!data.is_admin && data.remaining >= 0) {
+            const badge = document.querySelector('.invite-remaining');
+            if (badge) badge.textContent = data.remaining + ' remaining';
+        }
+
+        resultEl.innerHTML = html;
+    } catch(e) {
+        resultEl.innerHTML = '<div style="color:var(--red)">Failed to create invite</div>';
+    }
 }
 
 function closeSettingsMenu() {

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 Weeks — Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0d0f0e;
+            color: #e8ede9;
+            min-height: 100vh;
+            padding: 2rem 1.5rem;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1060px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #4ade80;
+            letter-spacing: -0.3px;
+        }
+        .header h1 span {
+            color: #9aaa9d;
+            font-weight: 400;
+        }
+        .header-links {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+        .header-links a {
+            color: #9aaa9d;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .header-links a:hover { color: #4ade80; }
+
+        /* Summary cards */
+        .summary-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        @media (max-width: 640px) {
+            .summary-row { grid-template-columns: repeat(2, 1fr); }
+        }
+        .summary-card {
+            background: #161918;
+            border: 1px solid #2a2e2c;
+            border-radius: 12px;
+            padding: 1.25rem;
+            text-align: center;
+        }
+        .summary-card .num {
+            font-family: 'DM Mono', monospace;
+            font-size: 2rem;
+            font-weight: 700;
+            color: #4ade80;
+        }
+        .summary-card .label {
+            font-size: 0.8rem;
+            color: #9aaa9d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 0.25rem;
+        }
+
+        /* Card */
+        .card {
+            background: #161918;
+            border: 1px solid #2a2e2c;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            overflow-x: auto;
+        }
+        .card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e8ede9;
+            margin-bottom: 1rem;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        thead th {
+            text-align: left;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #9aaa9d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0.6rem 0.75rem;
+            border-bottom: 1px solid #2a2e2c;
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+        }
+        thead th:hover { color: #4ade80; }
+        thead th .sort-arrow {
+            font-size: 0.65rem;
+            margin-left: 0.25rem;
+            color: #5a6a5d;
+        }
+        thead th.sorted .sort-arrow { color: #4ade80; }
+        tbody td {
+            padding: 0.7rem 0.75rem;
+            border-bottom: 1px solid rgba(42, 46, 44, 0.5);
+            vertical-align: middle;
+        }
+        tbody tr:last-child td { border-bottom: none; }
+        tbody tr:hover { background: rgba(74, 222, 128, 0.03); }
+
+        .user-email {
+            font-size: 0.8rem;
+            color: #5a6a5d;
+            font-family: 'DM Mono', monospace;
+        }
+        .date-cell {
+            color: #9aaa9d;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .num-cell {
+            font-family: 'DM Mono', monospace;
+            text-align: center;
+        }
+
+        /* Role badge */
+        .role-badge {
+            display: inline-block;
+            padding: 0.15rem 0.6rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        .role-badge.admin {
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+        }
+        .role-badge.user {
+            background: rgba(154, 170, 157, 0.15);
+            color: #9aaa9d;
+        }
+
+        /* Empty state */
+        .empty {
+            text-align: center;
+            color: #5a6a5d;
+            padding: 2rem 1rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>12 Weeks <span>— Admin</span></h1>
+            <div class="header-links">
+                <a href="/">Home</a>
+                <a href="/logout">Log Out</a>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="summary-row">
+            <div class="summary-card">
+                <div class="num">{{ totals.users }}</div>
+                <div class="label">Total Users</div>
+            </div>
+            <div class="summary-card">
+                <div class="num">{{ totals.active_this_week }}</div>
+                <div class="label">Active This Week</div>
+            </div>
+            <div class="summary-card">
+                <div class="num">{{ totals.invites_sent }}</div>
+                <div class="label">Invites Sent</div>
+            </div>
+            <div class="summary-card">
+                <div class="num">{{ totals.pending_invites }}</div>
+                <div class="label">Pending Invites</div>
+            </div>
+        </div>
+
+        <!-- Users Table -->
+        <div class="card">
+            <h3>Users</h3>
+            {% if users %}
+            <table id="usersTable">
+                <thead>
+                    <tr>
+                        <th data-col="0" data-type="text">Name <span class="sort-arrow"></span></th>
+                        <th data-col="1" data-type="text">Email <span class="sort-arrow"></span></th>
+                        <th data-col="2" data-type="text">Role <span class="sort-arrow"></span></th>
+                        <th data-col="3" data-type="date" class="sorted">Joined <span class="sort-arrow">&#9660;</span></th>
+                        <th data-col="4" data-type="date">Last Login <span class="sort-arrow"></span></th>
+                        <th data-col="5" data-type="text">Invites <span class="sort-arrow"></span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for user in users %}
+                    <tr data-name="{{ (user.name or user.email)|lower }}"
+                        data-email="{{ user.email|lower }}"
+                        data-role="{{ user.role }}"
+                        data-joined="{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}"
+                        data-login="{{ user.last_login_at.strftime('%Y-%m-%d') if user.last_login_at else '' }}"
+                        data-invites="{{ user.invites_sent }}">
+                        <td>
+                            <div style="font-weight:500;">{{ user.name or user.email.split('@')[0] }}</div>
+                        </td>
+                        <td>
+                            <span class="user-email">{{ user.email }}</span>
+                        </td>
+                        <td>
+                            <span class="role-badge {{ user.role }}">{{ user.role }}</span>
+                        </td>
+                        <td class="date-cell">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else '—' }}</td>
+                        <td class="date-cell">{{ user.last_login_at.strftime('%b %d, %Y') if user.last_login_at else '—' }}</td>
+                        <td class="num-cell">{{ user.invites_sent }} / {{ user.invites_remaining }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">No users found.</div>
+            {% endif %}
+        </div>
+
+        <!-- Pending Invites Table -->
+        <div class="card">
+            <h3>Pending Invites</h3>
+            {% if pending %}
+            <table id="pendingTable">
+                <thead>
+                    <tr>
+                        <th>Sent To</th>
+                        <th>Sent By</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for inv in pending %}
+                    <tr>
+                        <td>{{ inv.email_sent_to or 'No email (link only)' }}</td>
+                        <td>
+                            <div style="font-weight:500;">{{ inv.sent_by_name or inv.sent_by_email.split('@')[0] }}</div>
+                            <div class="user-email">{{ inv.sent_by_email }}</div>
+                        </td>
+                        <td class="date-cell">{{ inv.created_at.strftime('%b %d, %Y') if inv.created_at else '—' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">No pending invites.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        /* Simple column sorting for tables */
+        document.querySelectorAll('thead th[data-col]').forEach(function(th) {
+            th.addEventListener('click', function() {
+                var table = th.closest('table');
+                var tbody = table.querySelector('tbody');
+                var rows = Array.from(tbody.querySelectorAll('tr'));
+                var colIdx = parseInt(th.dataset.col);
+                var type = th.dataset.type || 'text';
+
+                // Determine sort direction
+                var isAsc = th.classList.contains('sorted-asc');
+                // Clear all sorted states in this table
+                table.querySelectorAll('thead th').forEach(function(h) {
+                    h.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
+                    var arrow = h.querySelector('.sort-arrow');
+                    if (arrow) arrow.innerHTML = '';
+                });
+
+                var dir = isAsc ? -1 : 1;
+                th.classList.add('sorted', dir === 1 ? 'sorted-asc' : 'sorted-desc');
+                var arrow = th.querySelector('.sort-arrow');
+                if (arrow) arrow.innerHTML = dir === 1 ? '&#9650;' : '&#9660;';
+
+                rows.sort(function(a, b) {
+                    var aVal = a.children[colIdx] ? a.children[colIdx].textContent.trim().toLowerCase() : '';
+                    var bVal = b.children[colIdx] ? b.children[colIdx].textContent.trim().toLowerCase() : '';
+
+                    if (type === 'date') {
+                        var aDate = Date.parse(aVal) || 0;
+                        var bDate = Date.parse(bVal) || 0;
+                        return (aDate - bDate) * dir;
+                    }
+                    if (type === 'num') {
+                        var aNum = parseFloat(aVal) || 0;
+                        var bNum = parseFloat(bVal) || 0;
+                        return (aNum - bNum) * dir;
+                    }
+                    return aVal.localeCompare(bVal) * dir;
+                });
+
+                rows.forEach(function(row) { tbody.appendChild(row); });
+            });
+        });
+    </script>
+</body>
+</html>

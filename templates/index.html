@@ -21,12 +21,14 @@
     <div class="header-actions">
       <button class="header-btn" onclick="showProgress()" title="Progress">&#128200;</button>
       <button class="header-btn" onclick="toggleChatOverlay()" title="Coach">&#128172;</button>
+      <button class="header-btn" onclick="toggleInviteDropdown()" title="Invite" id="invite-btn">&#9993;</button>
       <button class="header-btn" onclick="showSettingsMenu()" title="Settings">&#9881;</button>
     </div>
   </div>
   <div class="subtitle">Align aspirations with actions.</div>
 </header>
 
+<div id="invite-dropdown" class="invite-dropdown"></div>
 <div id="baseline-overlay"></div>
 <div id="morning-checkin-overlay"></div>
 <div class="readiness-alert" id="readiness-alert"></div>

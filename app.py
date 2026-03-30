@@ -1,10 +1,15 @@
 """Flask app for 12 Weeks Tracker with Garmin integration."""
 
 import os
+import secrets
 import threading
 import uuid
 from datetime import date, timedelta, datetime
-from flask import Flask, render_template, jsonify, request, session, Response
+from functools import wraps
+from flask import Flask, render_template, jsonify, request, session, Response, redirect, url_for, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer
 
 from workout_data import (
     get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS,
@@ -15,7 +20,7 @@ from overtraining import assess_readiness
 from coach import get_coach_response
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
 from models import (
-    db, ExerciseLog, ExerciseCompletion, DayCompletion,
+    db, User, Invite, ExerciseLog, ExerciseCompletion, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
@@ -31,6 +36,40 @@ db_url = db_url.replace("postgres://", "postgresql://")
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
+
+# Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "Login required"}), 401
+    return redirect(url_for('login', next=request.url))
+
+def admin_required(f):
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if not current_user.is_admin:
+            return jsonify({"error": "Admin required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+def _determine_role(email):
+    if email and email.lower().endswith("@gmail.com"):
+        return "admin"
+    return "user"
+
+def _safe_next_url(next_url):
+    if next_url and next_url.startswith('/') and not next_url.startswith('//'):
+        return next_url
+    return '/'
 
 with app.app_context():
     # Drop and recreate psych_intake if it's missing the locked_until column
@@ -71,6 +110,24 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # Add user_id to all existing tables
+    _user_id_tables = [
+        "exercise_log", "exercise_completion", "day_completion", "meal_log",
+        "app_state", "body_weight", "body_measurement", "weekly_checkin",
+        "supplement_log", "morning_checkin", "psych_intake", "garmin_tokens",
+        "physical_assessment", "chat_message", "progress_photo",
+        "user_constraints", "training_goal", "user_food_selections", "weekly_report",
+    ]
+    try:
+        for tbl in _user_id_tables:
+            if tbl in inspector.get_table_names():
+                existing = {c["name"] for c in inspector.get_columns(tbl)}
+                if "user_id" not in existing:
+                    db.session.execute(text(f'ALTER TABLE {tbl} ADD COLUMN user_id INTEGER REFERENCES "user"(id)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 garmin = GarminClient()
 
 # Try to restore Garmin session from saved tokens
@@ -78,9 +135,364 @@ with app.app_context():
     garmin.try_restore_tokens()
 
 
+# ─── AUTH ──────────────────────────────────────────────────────────────────
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect("/")
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        user = User.query.filter_by(email=email).first()
+        if not user or not user.password_hash:
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
+        if not check_password_hash(user.password_hash, password):
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
+        if not user.email_verified:
+            flash("Check your email for a verification link.", "error")
+            return render_template("login.html")
+
+        user.last_login_at = datetime.now()
+        db.session.commit()
+        login_user(user, remember=True)
+        return redirect(_safe_next_url(request.args.get("next")))
+
+    return render_template("login.html")
+
+
+@app.route("/signup", methods=["POST"])
+def signup():
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    name = request.form.get("name", "").strip()
+    invite_code = request.form.get("invite_code", "").strip() or session.pop("invite_code", "")
+
+    if not email or not password:
+        flash("Email and password required.", "error")
+        return redirect(url_for("login", mode="signup"))
+    if len(password) < 8:
+        flash("Password must be at least 8 characters.", "error")
+        return redirect(url_for("login", mode="signup"))
+    if User.query.filter_by(email=email).first():
+        flash("Email already registered.", "error")
+        return redirect(url_for("login", mode="signup"))
+
+    role = _determine_role(email)
+
+    # Require invite for non-admins
+    invite = None
+    if role != "admin":
+        if not invite_code:
+            flash("Invite code required.", "error")
+            return redirect(url_for("login", mode="signup"))
+        invite = Invite.query.filter_by(code=invite_code, used_by=None).first()
+        if not invite and not Invite.query.filter_by(code=invite_code, multi_use=True).first():
+            flash("Invalid or used invite code.", "error")
+            return redirect(url_for("login", mode="signup"))
+        if not invite:
+            invite = Invite.query.filter_by(code=invite_code, multi_use=True).first()
+
+    user = User(
+        email=email,
+        name=name or email.split("@")[0],
+        password_hash=generate_password_hash(password),
+        role=role,
+        email_verified=False,
+        invites_remaining=3,
+        invited_by=invite.created_by if invite else None,
+    )
+    db.session.add(user)
+    db.session.commit()
+
+    # Redeem invite
+    if invite and not invite.multi_use:
+        invite.used_by = user.id
+        invite.used_at = datetime.now()
+        db.session.commit()
+
+    # Send verification email
+    _send_verification_email(user)
+
+    flash("Account created! Check your email for a verification link.", "success")
+    return redirect(url_for("login"))
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
+@app.route("/verify/<token>")
+def verify_email(token):
+    s = URLSafeTimedSerializer(app.secret_key)
+    try:
+        data = s.loads(token, salt="email-verify", max_age=86400)
+        user = User.query.get(data.get("user_id"))
+        if user:
+            user.email_verified = True
+            db.session.commit()
+            flash("Email verified! You can now log in.", "success")
+    except Exception:
+        flash("Invalid or expired verification link.", "error")
+    return redirect(url_for("login"))
+
+
+@app.route("/invite/<code>")
+def accept_invite(code):
+    invite = Invite.query.filter_by(code=code).first()
+    if not invite:
+        flash("Invalid invite link.", "error")
+        return redirect(url_for("login"))
+    if invite.used_by and not invite.multi_use:
+        flash("This invite has already been used.", "error")
+        return redirect(url_for("login"))
+    session["invite_code"] = code
+    flash("You've been invited! Create your account.", "success")
+    return redirect(url_for("login", mode="signup"))
+
+
+@app.route("/api/invite", methods=["POST"])
+@login_required
+def api_create_invite():
+    data = request.get_json()
+    email = data.get("email", "").strip().lower() if data else ""
+
+    if not current_user.is_admin:
+        if current_user.invites_remaining <= 0:
+            return jsonify({"error": "No invites remaining"}), 400
+        current_user.invites_remaining -= 1
+
+    code = secrets.token_urlsafe(32)
+    invite = Invite(code=code, created_by=current_user.id, email_sent_to=email or None)
+    db.session.add(invite)
+    db.session.commit()
+
+    app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+    invite_url = f"{app_url}/invite/{code}"
+
+    email_sent = False
+    if email:
+        email_sent = _send_invite_email(current_user.name or current_user.email, email, invite_url)
+
+    return jsonify({
+        "invite_url": invite_url,
+        "remaining": current_user.invites_remaining if not current_user.is_admin else -1,
+        "email_sent": email_sent,
+        "is_admin": current_user.is_admin,
+    })
+
+
+@app.route("/api/request-invite", methods=["POST"])
+def api_request_invite():
+    data = request.get_json()
+    name = data.get("name", "")
+    email = data.get("email", "")
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+    # Email admin about the request
+    _send_invite_request_email(name, email)
+    return jsonify({"success": True})
+
+
+@app.route("/api/invite-status")
+@login_required
+def api_invite_status():
+    return jsonify({
+        "remaining": current_user.invites_remaining,
+        "is_admin": current_user.is_admin,
+    })
+
+
+# Google OAuth
+try:
+    from authlib.integrations.flask_client import OAuth
+    oauth = OAuth(app)
+    _google_client_id = os.environ.get("GOOGLE_CLIENT_ID")
+    _google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+    if _google_client_id and _google_client_secret:
+        oauth.register(
+            name="google",
+            client_id=_google_client_id,
+            client_secret=_google_client_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
+        _google_enabled = True
+    else:
+        _google_enabled = False
+except ImportError:
+    _google_enabled = False
+
+
+@app.route("/auth/google")
+def google_login():
+    if not _google_enabled:
+        flash("Google login not configured.", "error")
+        return redirect(url_for("login"))
+    app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+    redirect_uri = f"{app_url}/auth/google/callback"
+    return oauth.google.authorize_redirect(redirect_uri)
+
+
+@app.route("/auth/google/callback")
+def google_callback():
+    if not _google_enabled:
+        return redirect(url_for("login"))
+    try:
+        token = oauth.google.authorize_access_token()
+        userinfo = token.get("userinfo") or oauth.google.parse_id_token(token, None)
+
+        google_id = userinfo.get("sub")
+        email = userinfo.get("email", "").lower()
+        name = userinfo.get("name", "")
+        picture = userinfo.get("picture", "")
+
+        # Check if user exists by google_id or email
+        user = User.query.filter_by(google_id=google_id).first()
+        if not user:
+            user = User.query.filter_by(email=email).first()
+
+        if user:
+            # Link Google to existing account
+            if not user.google_id:
+                user.google_id = google_id
+            if picture:
+                user.avatar_url = picture
+            user.email_verified = True
+            user.last_login_at = datetime.now()
+            db.session.commit()
+            login_user(user, remember=True)
+            return redirect("/")
+
+        # New user — check invite requirement
+        role = _determine_role(email)
+        invite_code = session.pop("invite_code", None)
+        invite = None
+
+        if role != "admin":
+            if not invite_code:
+                flash("You need an invite to sign up.", "error")
+                return redirect(url_for("login"))
+            invite = Invite.query.filter_by(code=invite_code).first()
+            if not invite or (invite.used_by and not invite.multi_use):
+                flash("Invalid or used invite.", "error")
+                return redirect(url_for("login"))
+
+        user = User(
+            email=email, name=name, google_id=google_id,
+            role=role, email_verified=True, avatar_url=picture,
+            invites_remaining=3,
+            invited_by=invite.created_by if invite else None,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        if invite and not invite.multi_use:
+            invite.used_by = user.id
+            invite.used_at = datetime.now()
+            db.session.commit()
+
+        user.last_login_at = datetime.now()
+        db.session.commit()
+        login_user(user, remember=True)
+        return redirect("/")
+    except Exception as e:
+        flash(f"Google login failed: {str(e)[:100]}", "error")
+        return redirect(url_for("login"))
+
+
+# ─── EMAIL HELPERS ─────────────────────────────────────────────────────────
+
+def _send_verification_email(user):
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if not api_key:
+        return False
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+
+        s = URLSafeTimedSerializer(app.secret_key)
+        token = s.dumps({"user_id": user.id, "email": user.email}, salt="email-verify")
+        app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+        verify_url = f"{app_url}/verify/{token}"
+
+        from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@12weeks.app")
+        msg = Mail(
+            from_email=from_email,
+            to_emails=user.email,
+            subject="Verify your 12 Weeks account",
+            html_content=f"""<h2>Verify Your Email</h2>
+            <p>Click the link below to verify your email and start your 12-week program.</p>
+            <p><a href="{verify_url}" style="background:#4ade80;color:#0d0f0e;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Verify Email</a></p>
+            <p>This link expires in 24 hours.</p>""",
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(msg)
+        return True
+    except Exception as e:
+        import logging
+        logging.warning("Failed to send verification email: %s", e)
+        return False
+
+
+def _send_invite_email(inviter_name, recipient_email, invite_url):
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if not api_key:
+        return False
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+
+        from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@12weeks.app")
+        msg = Mail(
+            from_email=from_email,
+            to_emails=recipient_email,
+            subject=f"{inviter_name} invited you to 12 Weeks",
+            html_content=f"""<h2>You're Invited to 12 Weeks</h2>
+            <p>{inviter_name} has invited you to join 12 Weeks — an AI-powered fitness coaching program.</p>
+            <p><a href="{invite_url}" style="background:#4ade80;color:#0d0f0e;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Accept Invite</a></p>
+            <p>This invite is single-use.</p>""",
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(msg)
+        return True
+    except Exception:
+        return False
+
+
+def _send_invite_request_email(name, email):
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if not api_key:
+        return
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+
+        admin_email = os.environ.get("ADMIN_EMAIL", "erik@placemetry.com")
+        from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@12weeks.app")
+        msg = Mail(
+            from_email=from_email,
+            to_emails=admin_email,
+            subject="New 12 Weeks Invite Request",
+            html_content=f"<p><strong>Name:</strong> {name}</p><p><strong>Email:</strong> {email}</p>",
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(msg)
+    except Exception:
+        pass
+
+
 # ─── PAGES ──────────────────────────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
@@ -88,6 +500,7 @@ def index():
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
 
 @app.route("/api/workouts")
+@login_required
 def api_workouts():
     all_weeks = {}
     for week in range(1, 13):
@@ -102,6 +515,7 @@ def api_workouts():
 
 
 @app.route("/api/workouts/<int:week>")
+@login_required
 def api_week(week):
     if week < 1 or week > 12:
         return jsonify({"error": "Week must be 1-12"}), 400
@@ -114,6 +528,7 @@ def api_week(week):
 
 
 @app.route("/api/warmups")
+@login_required
 def api_warmups():
     return jsonify(WARMUPS)
 
@@ -121,15 +536,16 @@ def api_warmups():
 # ─── APP STATE ──────────────────────────────────────────────────────────────
 
 def _get_state():
-    s = AppState.query.first()
+    s = AppState.query.filter_by(user_id=current_user.id).first()
     if not s:
-        s = AppState(current_week=1, baseline_done=False)
+        s = AppState(current_week=1, baseline_done=False, user_id=current_user.id)
         db.session.add(s)
         db.session.commit()
     return s
 
 
 @app.route("/api/state")
+@login_required
 def api_state():
     s = _get_state()
     return jsonify({
@@ -141,6 +557,7 @@ def api_state():
 
 
 @app.route("/api/state", methods=["POST"])
+@login_required
 def api_state_update():
     data = request.get_json()
     s = _get_state()
@@ -159,8 +576,9 @@ def api_state_update():
 # ─── EXERCISE WEIGHTS ───────────────────────────────────────────────────────
 
 @app.route("/api/weights")
+@login_required
 def api_weights():
-    logs = ExerciseLog.query.order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
+    logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
     result = {}
     for log in logs:
         name = log.exercise_name
@@ -184,6 +602,7 @@ def api_weights():
 
 
 @app.route("/api/weights", methods=["POST"])
+@login_required
 def api_weights_record():
     data = request.get_json()
     log = ExerciseLog(
@@ -194,6 +613,7 @@ def api_weights_record():
         week=data.get("week"),
         day_idx=data.get("day_idx"),
         logged_date=date.today(),
+        user_id=current_user.id,
     )
     db.session.add(log)
     db.session.commit()
@@ -201,6 +621,7 @@ def api_weights_record():
 
 
 @app.route("/api/weights/baseline", methods=["POST"])
+@login_required
 def api_weights_baseline():
     data = request.get_json()
     for entry in data.get("exercises", []):
@@ -215,6 +636,7 @@ def api_weights_baseline():
             test_weight=entry.get("test_weight"),
             test_reps=entry.get("test_reps"),
             estimated_1rm=entry.get("estimated_1rm"),
+            user_id=current_user.id,
         )
         db.session.add(log)
     db.session.commit()
@@ -224,10 +646,11 @@ def api_weights_baseline():
 # ─── COMPLETIONS ────────────────────────────────────────────────────────────
 
 @app.route("/api/completions")
+@login_required
 def api_completions():
     week = request.args.get("week", type=int)
-    ex_q = ExerciseCompletion.query
-    day_q = DayCompletion.query
+    ex_q = ExerciseCompletion.query.filter_by(user_id=current_user.id)
+    day_q = DayCompletion.query.filter_by(user_id=current_user.id)
     if week is not None:
         ex_q = ex_q.filter_by(week=week)
         day_q = day_q.filter_by(week=week)
@@ -246,28 +669,30 @@ def api_completions():
 
 
 @app.route("/api/completions/exercise", methods=["POST"])
+@login_required
 def api_toggle_exercise():
     data = request.get_json()
     w, d, e = data["week"], data["day_idx"], data["exercise_idx"]
-    ec = ExerciseCompletion.query.filter_by(week=w, day_idx=d, exercise_idx=e).first()
+    ec = ExerciseCompletion.query.filter_by(user_id=current_user.id, week=w, day_idx=d, exercise_idx=e).first()
     if ec:
         ec.done = not ec.done
     else:
-        ec = ExerciseCompletion(week=w, day_idx=d, exercise_idx=e, done=True)
+        ec = ExerciseCompletion(week=w, day_idx=d, exercise_idx=e, done=True, user_id=current_user.id)
         db.session.add(ec)
     db.session.commit()
     return jsonify({"done": ec.done})
 
 
 @app.route("/api/completions/day", methods=["POST"])
+@login_required
 def api_toggle_day():
     data = request.get_json()
     w, d = data["week"], data["day_idx"]
-    dc = DayCompletion.query.filter_by(week=w, day_idx=d).first()
+    dc = DayCompletion.query.filter_by(user_id=current_user.id, week=w, day_idx=d).first()
     if dc:
         dc.done = not dc.done
     else:
-        dc = DayCompletion(week=w, day_idx=d, done=True)
+        dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
         db.session.add(dc)
     db.session.commit()
     return jsonify({"done": dc.done})
@@ -276,9 +701,10 @@ def api_toggle_day():
 # ─── MEALS ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/meals")
+@login_required
 def api_meals():
     d = request.args.get("date", date.today().isoformat())
-    ml = MealLog.query.filter_by(log_date=date.fromisoformat(d)).first()
+    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ml:
         return jsonify({"eaten": [], "adjustments": {}, "fasting": False})
     return jsonify({
@@ -289,12 +715,13 @@ def api_meals():
 
 
 @app.route("/api/meals", methods=["POST"])
+@login_required
 def api_meals_update():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
-    ml = MealLog.query.filter_by(log_date=d).first()
+    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=d).first()
     if not ml:
-        ml = MealLog(log_date=d)
+        ml = MealLog(log_date=d, user_id=current_user.id)
         db.session.add(ml)
     if "eaten" in data:
         ml.eaten = data["eaten"]
@@ -309,8 +736,9 @@ def api_meals_update():
 # ─── BODY WEIGHT ────────────────────────────────────────────────────────────
 
 @app.route("/api/bodyweight")
+@login_required
 def api_bodyweight():
-    entries = BodyWeight.query.order_by(BodyWeight.log_date).all()
+    entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
     result = []
     for i, e in enumerate(entries):
         window = entries[max(0, i - 6):i + 1]
@@ -324,22 +752,24 @@ def api_bodyweight():
 
 
 @app.route("/api/bodyweight", methods=["POST"])
+@login_required
 def api_bodyweight_record():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
-    bw = BodyWeight.query.filter_by(log_date=d).first()
+    bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bw:
         bw.weight_lbs = data["weight"]
     else:
-        bw = BodyWeight(log_date=d, weight_lbs=data["weight"])
+        bw = BodyWeight(log_date=d, weight_lbs=data["weight"], user_id=current_user.id)
         db.session.add(bw)
     db.session.commit()
     return jsonify({"ok": True})
 
 
 @app.route("/api/bodyweight/<log_date>", methods=["DELETE"])
+@login_required
 def api_bodyweight_delete(log_date):
-    bw = BodyWeight.query.filter_by(log_date=date.fromisoformat(log_date)).first()
+    bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(log_date)).first()
     if bw:
         db.session.delete(bw)
         db.session.commit()
@@ -349,8 +779,9 @@ def api_bodyweight_delete(log_date):
 # ─── BODY MEASUREMENTS ─────────────────────────────────────────────────────
 
 @app.route("/api/measurements")
+@login_required
 def api_measurements():
-    entries = BodyMeasurement.query.order_by(BodyMeasurement.log_date).all()
+    entries = BodyMeasurement.query.filter_by(user_id=current_user.id).order_by(BodyMeasurement.log_date).all()
     return jsonify([{
         "date": e.log_date.isoformat(),
         "waist": e.waist_inches,
@@ -359,10 +790,11 @@ def api_measurements():
 
 
 @app.route("/api/measurements", methods=["POST"])
+@login_required
 def api_measurements_record():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
-    bm = BodyMeasurement.query.filter_by(log_date=d).first()
+    bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bm:
         if "waist" in data:
             bm.waist_inches = data["waist"]
@@ -373,6 +805,7 @@ def api_measurements_record():
             log_date=d,
             waist_inches=data.get("waist"),
             notes=data.get("notes"),
+            user_id=current_user.id,
         )
         db.session.add(bm)
     db.session.commit()
@@ -382,8 +815,9 @@ def api_measurements_record():
 # ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
 
 @app.route("/api/checkins")
+@login_required
 def api_checkins():
-    entries = WeeklyCheckIn.query.order_by(WeeklyCheckIn.week).all()
+    entries = WeeklyCheckIn.query.filter_by(user_id=current_user.id).order_by(WeeklyCheckIn.week).all()
     return jsonify([{
         "week": e.week,
         "energy": e.energy_level,
@@ -396,10 +830,11 @@ def api_checkins():
 
 
 @app.route("/api/checkins", methods=["POST"])
+@login_required
 def api_checkins_record():
     data = request.get_json()
     week = data["week"]
-    ci = WeeklyCheckIn.query.filter_by(week=week).first()
+    ci = WeeklyCheckIn.query.filter_by(user_id=current_user.id, week=week).first()
     if ci:
         ci.energy_level = data.get("energy", ci.energy_level)
         ci.sleep_quality = data.get("sleep", ci.sleep_quality)
@@ -415,6 +850,7 @@ def api_checkins_record():
             adherence_pct=data.get("adherence"),
             notes=data.get("notes"),
             check_in_date=date.today(),
+            user_id=current_user.id,
         )
         db.session.add(ci)
     db.session.commit()
@@ -424,23 +860,25 @@ def api_checkins_record():
 # ─── SUPPLEMENTS ────────────────────────────────────────────────────────────
 
 @app.route("/api/supplements")
+@login_required
 def api_supplements():
     d = request.args.get("date", date.today().isoformat())
-    logs = SupplementLog.query.filter_by(log_date=date.fromisoformat(d)).all()
+    logs = SupplementLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).all()
     taken = {s.supplement_name: s.taken for s in logs}
     return jsonify({"date": d, "taken": taken, "list": SUPPLEMENTS})
 
 
 @app.route("/api/supplements", methods=["POST"])
+@login_required
 def api_supplements_toggle():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
     name = data["name"]
-    sl = SupplementLog.query.filter_by(log_date=d, supplement_name=name).first()
+    sl = SupplementLog.query.filter_by(user_id=current_user.id, log_date=d, supplement_name=name).first()
     if sl:
         sl.taken = not sl.taken
     else:
-        sl = SupplementLog(log_date=d, supplement_name=name, taken=True)
+        sl = SupplementLog(log_date=d, supplement_name=name, taken=True, user_id=current_user.id)
         db.session.add(sl)
     db.session.commit()
     return jsonify({"taken": sl.taken})
@@ -449,6 +887,7 @@ def api_supplements_toggle():
 # ─── DATA EXPORT/IMPORT ────────────────────────────────────────────────────
 
 @app.route("/api/export")
+@login_required
 def api_export():
     """Export all data as JSON for backup."""
     return jsonify({
@@ -457,18 +896,18 @@ def api_export():
         "completions": _serialize_completions(),
         "bodyweight": [{
             "date": e.log_date.isoformat(), "weight": e.weight_lbs,
-        } for e in BodyWeight.query.order_by(BodyWeight.log_date).all()],
+        } for e in BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()],
         "measurements": [{
             "date": e.log_date.isoformat(), "waist": e.waist_inches, "notes": e.notes,
-        } for e in BodyMeasurement.query.order_by(BodyMeasurement.log_date).all()],
+        } for e in BodyMeasurement.query.filter_by(user_id=current_user.id).order_by(BodyMeasurement.log_date).all()],
         "checkins": [{
             "week": e.week, "energy": e.energy_level, "sleep": e.sleep_quality,
             "soreness": e.soreness_level, "adherence": e.adherence_pct, "notes": e.notes,
-        } for e in WeeklyCheckIn.query.order_by(WeeklyCheckIn.week).all()],
+        } for e in WeeklyCheckIn.query.filter_by(user_id=current_user.id).order_by(WeeklyCheckIn.week).all()],
         "meals": [{
             "date": e.log_date.isoformat(), "eaten": e.eaten,
             "adjustments": e.adjustments, "fasting": e.fasting,
-        } for e in MealLog.query.order_by(MealLog.log_date).all()],
+        } for e in MealLog.query.filter_by(user_id=current_user.id).order_by(MealLog.log_date).all()],
         "state": {
             "current_week": _get_state().current_week,
             "baseline_done": _get_state().baseline_done,
@@ -477,8 +916,9 @@ def api_export():
     })
 
 
-def _serialize_weights():
-    logs = ExerciseLog.query.order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
+def _serialize_weights(user_id=None):
+    uid = user_id or current_user.id
+    logs = ExerciseLog.query.filter_by(user_id=uid).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
     result = {}
     for log in logs:
         name = log.exercise_name
@@ -493,17 +933,19 @@ def _serialize_weights():
     return result
 
 
-def _serialize_completions():
+def _serialize_completions(user_id=None):
+    uid = user_id or current_user.id
     exercises = {}
-    for ec in ExerciseCompletion.query.filter_by(done=True).all():
+    for ec in ExerciseCompletion.query.filter_by(user_id=uid, done=True).all():
         exercises[f"{ec.week}_{ec.day_idx}_{ec.exercise_idx}"] = True
     days = {}
-    for dc in DayCompletion.query.filter_by(done=True).all():
+    for dc in DayCompletion.query.filter_by(user_id=uid, done=True).all():
         days[f"{dc.week}_{dc.day_idx}"] = True
     return {"exercises": exercises, "days": days}
 
 
 @app.route("/api/import", methods=["POST"])
+@login_required
 def api_import():
     """Import data from a backup JSON (from localStorage migration or backup restore)."""
     data = request.get_json()
@@ -519,6 +961,7 @@ def api_import():
                     logged_date=date.fromisoformat(h["date"]) if h.get("date") else date.today(),
                     test_weight=h.get("testWeight"), test_reps=h.get("testReps"),
                     estimated_1rm=h.get("estimated1RM"),
+                    user_id=current_user.id,
                 )
                 db.session.add(log)
 
@@ -526,9 +969,9 @@ def api_import():
     if "bodyweight" in data:
         for entry in data["bodyweight"]:
             d = date.fromisoformat(entry["date"])
-            existing = BodyWeight.query.filter_by(log_date=d).first()
+            existing = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
             if not existing:
-                db.session.add(BodyWeight(log_date=d, weight_lbs=entry["weight"]))
+                db.session.add(BodyWeight(log_date=d, weight_lbs=entry["weight"], user_id=current_user.id))
 
     # Import state
     if "state" in data:
@@ -545,10 +988,11 @@ def api_import():
 # ─── PROGRESS CHARTS DATA ──────────────────────────────────────────────────
 
 @app.route("/api/progress")
+@login_required
 def api_progress():
     """Return all progress data for charts."""
     # Body weight trend
-    bw_entries = BodyWeight.query.order_by(BodyWeight.log_date).all()
+    bw_entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
     bodyweight = []
     for i, e in enumerate(bw_entries):
         window = bw_entries[max(0, i - 6):i + 1]
@@ -566,19 +1010,19 @@ def api_progress():
     ]
     lifts = {}
     for name in key_lifts:
-        logs = ExerciseLog.query.filter_by(exercise_name=name).order_by(ExerciseLog.logged_date).all()
+        logs = ExerciseLog.query.filter_by(user_id=current_user.id, exercise_name=name).order_by(ExerciseLog.logged_date).all()
         lifts[name] = [{"date": l.logged_date.isoformat(), "weight": l.weight, "week": l.week} for l in logs]
 
     # Waist measurements
     measurements = [{
         "date": e.log_date.isoformat(), "waist": e.waist_inches,
-    } for e in BodyMeasurement.query.order_by(BodyMeasurement.log_date).all()]
+    } for e in BodyMeasurement.query.filter_by(user_id=current_user.id).order_by(BodyMeasurement.log_date).all()]
 
     # Check-ins
     checkins = [{
         "week": e.week, "energy": e.energy_level, "sleep": e.sleep_quality,
         "soreness": e.soreness_level, "adherence": e.adherence_pct,
-    } for e in WeeklyCheckIn.query.order_by(WeeklyCheckIn.week).all()]
+    } for e in WeeklyCheckIn.query.filter_by(user_id=current_user.id).order_by(WeeklyCheckIn.week).all()]
 
     return jsonify({
         "bodyweight": bodyweight,
@@ -591,6 +1035,7 @@ def api_progress():
 # ─── TRAVEL MODE ────────────────────────────────────────────────────────────
 
 @app.route("/api/travel/workout")
+@login_required
 def api_travel_workout():
     """Get bodyweight workout for a given day."""
     day = request.args.get("day", "Mon")
@@ -603,9 +1048,10 @@ def api_travel_workout():
 # ─── MORNING CHECK-IN ──────────────────────────────────────────────────────
 
 @app.route("/api/morning-checkin")
+@login_required
 def api_morning_checkin():
     d = request.args.get("date", date.today().isoformat())
-    ci = MorningCheckIn.query.filter_by(log_date=date.fromisoformat(d)).first()
+    ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ci:
         return jsonify({"exists": False})
     return jsonify({
@@ -622,10 +1068,11 @@ def api_morning_checkin():
 
 
 @app.route("/api/morning-checkin", methods=["POST"])
+@login_required
 def api_morning_checkin_save():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", date.today().isoformat()))
-    ci = MorningCheckIn.query.filter_by(log_date=d).first()
+    ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
     if ci:
         ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
         ci.stress_level = data.get("stress_level", ci.stress_level)
@@ -644,6 +1091,7 @@ def api_morning_checkin_save():
             motivation=data.get("motivation"),
             anxiety=data.get("anxiety"),
             notes=data.get("notes"),
+            user_id=current_user.id,
         )
         db.session.add(ci)
     db.session.commit()
@@ -651,10 +1099,12 @@ def api_morning_checkin_save():
 
 
 @app.route("/api/morning-checkin/history")
+@login_required
 def api_morning_checkin_history():
     days = request.args.get("days", 30, type=int)
     since = date.today() - timedelta(days=days)
     entries = MorningCheckIn.query.filter(
+        MorningCheckIn.user_id == current_user.id,
         MorningCheckIn.log_date >= since
     ).order_by(MorningCheckIn.log_date).all()
     return jsonify([{
@@ -672,8 +1122,9 @@ def api_morning_checkin_history():
 # ─── PSYCHOLOGICAL INTAKE ───────────────────────────────────────────────────
 
 @app.route("/api/psych-intake/status")
+@login_required
 def api_psych_intake_status():
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake:
         return jsonify({"started": False, "completed": False, "has_report": False, "locked": False})
     locked = intake.locked_until and date.today() < intake.locked_until
@@ -688,8 +1139,9 @@ def api_psych_intake_status():
 
 
 @app.route("/api/psych-intake/conversation")
+@login_required
 def api_psych_intake_conversation():
-    intake = PsychIntake.query.first()
+    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake:
         return jsonify({"conversation": [], "completed": False})
     return jsonify({
@@ -703,14 +1155,15 @@ _intake_jobs = {}
 
 
 @app.route("/api/psych-intake/message", methods=["POST"])
+@login_required
 def api_psych_intake_message():
     try:
         data = request.get_json()
         user_msg = data.get("message", "").strip()
 
-        intake = PsychIntake.query.first()
+        intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
         if not intake:
-            intake = PsychIntake(conversation=[], completed=False)
+            intake = PsychIntake(conversation=[], completed=False, user_id=current_user.id)
             db.session.add(intake)
             db.session.commit()
 
@@ -787,6 +1240,7 @@ def api_psych_intake_message():
 
 
 @app.route("/api/psych-intake/result/<job_id>")
+@login_required
 def api_psych_intake_result(job_id):
     job = _intake_jobs.get(job_id)
     if not job:
@@ -838,6 +1292,7 @@ def api_psych_intake_result(job_id):
 
 
 @app.route("/api/psych-intake/report")
+@login_required
 def api_psych_intake_report():
     intake = PsychIntake.query.first()
     if not intake or not intake.report:
@@ -846,6 +1301,7 @@ def api_psych_intake_report():
 
 
 @app.route("/api/psych-intake/reset", methods=["POST"])
+@login_required
 def api_psych_intake_reset():
     PsychIntake.query.delete()
     db.session.commit()
@@ -853,6 +1309,7 @@ def api_psych_intake_reset():
 
 
 @app.route("/api/full-profile/generate", methods=["POST"])
+@login_required
 def api_generate_full_profile():
     """Generate the complete athlete profile after psych + physical are done."""
     intake = PsychIntake.query.first()
@@ -900,6 +1357,7 @@ def api_generate_full_profile():
 
 
 @app.route("/api/full-profile/result/<job_id>")
+@login_required
 def api_full_profile_result(job_id):
     job = _intake_jobs.get(job_id)
     if not job:
@@ -920,6 +1378,7 @@ def api_full_profile_result(job_id):
 # ─── AI COACH CHAT ──────────────────────────────────────────────────────────
 
 @app.route("/api/chat/history")
+@login_required
 def api_chat_history():
     days = request.args.get("days", 7, type=int)
     since = date.today() - timedelta(days=days)
@@ -935,6 +1394,7 @@ def api_chat_history():
 
 
 @app.route("/api/chat/clear", methods=["POST"])
+@login_required
 def api_chat_clear():
     ChatMessage.query.delete()
     db.session.commit()
@@ -942,6 +1402,7 @@ def api_chat_clear():
 
 
 @app.route("/api/chat", methods=["POST"])
+@login_required
 def api_chat():
     data = request.get_json()
     user_msg = data.get("message", "").strip()
@@ -971,6 +1432,7 @@ def api_chat():
 
 
 @app.route("/api/chat/stream", methods=["POST"])
+@login_required
 def api_chat_stream():
     """Streaming coach response via SSE."""
     data = request.get_json()
@@ -1105,6 +1567,7 @@ def _build_coach_context():
 # ─── PROGRESS PHOTOS ────────────────────────────────────────────────────────
 
 @app.route("/api/photos")
+@login_required
 def api_photos():
     """Get all progress photos (metadata only, no image data)."""
     photos = ProgressPhoto.query.order_by(ProgressPhoto.log_date).all()
@@ -1119,6 +1582,7 @@ def api_photos():
 
 
 @app.route("/api/photos/<int:photo_id>/image")
+@login_required
 def api_photo_image(photo_id):
     """Get a specific photo's image data."""
     p = ProgressPhoto.query.get_or_404(photo_id)
@@ -1126,6 +1590,7 @@ def api_photo_image(photo_id):
 
 
 @app.route("/api/photos", methods=["POST"])
+@login_required
 def api_photo_upload():
     """Upload a progress photo and get AI analysis."""
     data = request.get_json()
@@ -1265,6 +1730,7 @@ Be direct and honest. This person wants real feedback, not flattery. They're usi
 # ─── GARMIN ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/garmin/login", methods=["POST"])
+@login_required
 def garmin_login():
     data = request.get_json()
     mfa_code = data.get("mfa_code") if data else None
@@ -1288,11 +1754,13 @@ def garmin_login():
 
 
 @app.route("/api/garmin/status")
+@login_required
 def garmin_status():
     return jsonify({"connected": garmin.connected})
 
 
 @app.route("/api/garmin/today")
+@login_required
 def garmin_today():
     if not garmin.connected:
         return jsonify({"error": "Not connected to Garmin"}), 401
@@ -1303,6 +1771,7 @@ def garmin_today():
 
 
 @app.route("/api/garmin/readiness")
+@login_required
 def garmin_readiness():
     if not garmin.connected:
         return jsonify(assess_readiness(None))
@@ -1311,6 +1780,7 @@ def garmin_readiness():
 
 
 @app.route("/api/garmin/hrv-trend")
+@login_required
 def garmin_hrv_trend():
     if not garmin.connected:
         return jsonify({"error": "Not connected"}), 401
@@ -1318,6 +1788,7 @@ def garmin_hrv_trend():
 
 
 @app.route("/api/garmin/save-tokens", methods=["POST"])
+@login_required
 def garmin_save_tokens():
     """Save Garmin tokens from an external login (e.g. local CLI)."""
     data = request.get_json()
@@ -1337,6 +1808,7 @@ def garmin_save_tokens():
 
 
 @app.route("/api/garmin/logout", methods=["POST"])
+@login_required
 def garmin_logout():
     garmin.api = None
     garmin._connected = False
@@ -1350,6 +1822,7 @@ def garmin_logout():
 _push_subscriptions = []  # In-memory for now; could be stored in DB
 
 @app.route("/api/push/vapid-key")
+@login_required
 def api_vapid_key():
     key = os.environ.get("VAPID_PUBLIC_KEY")
     if not key:
@@ -1358,6 +1831,7 @@ def api_vapid_key():
 
 
 @app.route("/api/push/subscribe", methods=["POST"])
+@login_required
 def api_push_subscribe():
     data = request.get_json()
     sub = data.get("subscription")
@@ -1370,6 +1844,7 @@ def api_push_subscribe():
 
 
 @app.route("/api/push/test", methods=["POST"])
+@login_required
 def api_push_test():
     """Send a test push notification."""
     vapid_private = os.environ.get("VAPID_PRIVATE_KEY")
@@ -1394,6 +1869,7 @@ def api_push_test():
 # ─── CONSTRAINTS ───────────────────────────────────────────────────────────
 
 @app.route("/api/constraints")
+@login_required
 def api_constraints():
     c = UserConstraints.query.first()
     if not c:
@@ -1407,6 +1883,7 @@ def api_constraints():
     })
 
 @app.route("/api/constraints", methods=["POST"])
+@login_required
 def api_constraints_save():
     data = request.get_json()
     c = UserConstraints.query.first()
@@ -1430,6 +1907,7 @@ def api_constraints_save():
 # ─── GOAL COMPUTATION ─────────────────────────────────────────────────────
 
 @app.route("/api/goal/compute", methods=["POST"])
+@login_required
 def api_goal_compute():
     """Compute training goal from intake + physical data."""
     from goal_engine import (
@@ -1532,6 +2010,7 @@ def api_goal_compute():
     })
 
 @app.route("/api/goal")
+@login_required
 def api_goal():
     goal = TrainingGoal.query.first()
     if not goal:
@@ -1556,6 +2035,7 @@ def api_goal():
 # ─── FOOD CATALOG + SELECTIONS ────────────────────────────────────────────
 
 @app.route("/api/food-catalog")
+@login_required
 def api_food_catalog():
     from food_catalog import get_filtered_catalog
     constraints = UserConstraints.query.first()
@@ -1564,6 +2044,7 @@ def api_food_catalog():
     return jsonify(catalog)
 
 @app.route("/api/food-selections")
+@login_required
 def api_food_selections():
     fs = UserFoodSelections.query.first()
     if not fs:
@@ -1571,6 +2052,7 @@ def api_food_selections():
     return jsonify({"completed": fs.completed, "selected_foods": fs.selected_foods or {}})
 
 @app.route("/api/food-selections", methods=["POST"])
+@login_required
 def api_food_selections_save():
     data = request.get_json()
     fs = UserFoodSelections.query.first()
@@ -1585,6 +2067,7 @@ def api_food_selections_save():
     return jsonify({"ok": True})
 
 @app.route("/api/food-selections/validate", methods=["POST"])
+@login_required
 def api_food_selections_validate():
     from food_catalog import validate_selections
     data = request.get_json()
@@ -1599,6 +2082,7 @@ def api_food_selections_validate():
 # ─── WEEKLY REPORT ─────────────────────────────────────────────────────────
 
 @app.route("/api/weekly-report/generate", methods=["POST"])
+@login_required
 def api_weekly_report_generate():
     from weekly_report import compute_weekly_metrics, generate_report_narrative
 
@@ -1649,6 +2133,7 @@ def api_weekly_report_generate():
     })
 
 @app.route("/api/weekly-report/<int:week>")
+@login_required
 def api_weekly_report(week):
     report = WeeklyReport.query.filter_by(week=week).first()
     if not report:
@@ -1668,6 +2153,7 @@ def api_weekly_report(week):
     })
 
 @app.route("/api/weekly-report/result/<job_id>")
+@login_required
 def api_weekly_report_result(job_id):
     job = _intake_jobs.get(job_id)
     if not job:
@@ -1682,6 +2168,7 @@ def api_weekly_report_result(job_id):
 # ─── GOAL RECALIBRATION ───────────────────────────────────────────────────
 
 @app.route("/api/goal/recalibrate", methods=["POST"])
+@login_required
 def api_goal_recalibrate():
     from goal_engine import recalibrate_projection, compute_tdee
 
@@ -1747,6 +2234,7 @@ Write ONE sentence. If GREEN: acknowledge the data, name today's workout, get th
 No motivational speeches. Facts + orders. End with the workout name or a question (never a dead statement)."""
 
 @app.route("/api/morning-briefing", methods=["POST"])
+@login_required
 def api_morning_briefing():
     data = request.get_json()
 
@@ -1822,6 +2310,7 @@ def api_morning_briefing():
 # ─── PLAN LOCKOUT ──────────────────────────────────────────────────────────
 
 @app.route("/api/plan/lockout", methods=["POST"])
+@login_required
 def api_plan_lockout():
     """Lock user out for 1 week after rejecting the plan."""
     intake = PsychIntake.query.first()
@@ -1834,6 +2323,7 @@ def api_plan_lockout():
 # ─── PHYSICAL ASSESSMENT ───────────────────────────────────────────────────
 
 @app.route("/api/physical-assessment/status")
+@login_required
 def api_physical_assessment_status():
     pa = PhysicalAssessment.query.first()
     if not pa:
@@ -1850,6 +2340,7 @@ def api_physical_assessment_status():
 
 
 @app.route("/api/physical-assessment", methods=["POST"])
+@login_required
 def api_physical_assessment_save():
     data = request.get_json()
     pa = PhysicalAssessment.query.first()
@@ -1914,6 +2405,7 @@ def api_physical_assessment_save():
 
 
 @app.route("/api/physical-assessment/reset", methods=["POST"])
+@login_required
 def api_physical_assessment_reset():
     PhysicalAssessment.query.delete()
     db.session.commit()
@@ -1921,6 +2413,7 @@ def api_physical_assessment_reset():
 
 
 @app.route("/api/admin/full-reset", methods=["POST"])
+@login_required
 def api_full_reset():
     """Nuclear reset — wipe all user data, start fresh."""
     try:
@@ -1949,6 +2442,15 @@ def api_full_reset():
             db.session.rollback()
             errors.append(f"{t.__tablename__}: {e}")
     return jsonify({"ok": True, "errors": errors, "message": "All data wiped."})
+
+
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    users = User.query.order_by(User.created_at.desc()).all()
+    invites = Invite.query.order_by(Invite.created_at.desc()).all()
+    pending = Invite.query.filter_by(used_by=None, multi_use=False).all()
+    return render_template("admin.html", users=users, invites=invites, pending=pending)
 
 
 if __name__ == "__main__":
