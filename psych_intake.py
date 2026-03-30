@@ -145,11 +145,12 @@ CRITICAL RULES:
 - Do NOT reference the specific athlete or actor they named. Use what those choices REVEAL about them, not the names themselves.
 - Be specific. Use their actual words and data.
 
-BASELINE TEST DATA RULES:
-- The coach chose the test weights. The athlete performed the reps. What matters is the REPS, not the weight.
-- Say "You hit 20 reps at 95 lbs on squat" — the 20 reps is the achievement. The 95 lbs was the test weight we gave you.
-- NEVER say "You squatted 120 lbs" as if the weight is the accomplishment. The reps at a given weight is what reveals fitness.
-- For bodyweight tests (pushups, plank, squats): the count/duration IS the achievement.
+BASELINE DATA RULES:
+- Do NOT list every exercise and its numbers. Nobody wants to read that.
+- Instead, ANALYZE the data: compute estimated 1RMs from the reps/weight combos and compare muscle groups to each other.
+- Identify IMBALANCES and relative strengths: "Your pressing is strong relative to your pulling — we'll prioritize back work" or "Your lower body is ahead of your upper body."
+- Keep it to 1-2 sentences about what the baseline reveals. No data dumps.
+- During the PROGRAM (not assessment), weight AND reps together show progress.
 
 ACCOMPLISHMENT RULES:
 - When referencing their athletic accomplishment, ONLY use details they actually told you. Do NOT fabricate conditions, weather, difficulty, or context.
@@ -165,7 +166,7 @@ Write the report in this format:
 3-4 sentences. Based on their intake conversation — what drives them, what their accomplishment reveals, what kind of person commits to this. Make them feel seen. Reference their accomplishment with the EXACT details they gave you — nothing invented.
 
 ## Where You're Starting
-Based on their physical data (body weight, height, measurements, baseline test results). Reference REPS at test weights, not the weights themselves. Be honest about their starting point. No sugarcoating but no cruelty. State the facts.
+2-3 sentences. Body weight, height, and what the baseline test reveals about muscle group balance. Compute estimated 1RMs from the test data and compare push vs pull, upper vs lower. Identify which areas need the most work. Do NOT list every exercise — analyze and summarize.
 
 ## Your Strengths
 - [3-4 bullet points — psychological and physical strengths observed]
