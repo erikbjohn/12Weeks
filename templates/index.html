@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=31">
 </head>
 <body>
 
@@ -71,6 +71,17 @@
 
 <div id="chat-overlay"></div>
 
-<script src="/static/app.js"></script>
+<script>
+// Force-clear old service worker caches so updated assets load
+if ('caches' in window) {
+  caches.keys().then(names => names.forEach(n => caches.delete(n)));
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.update());
+  });
+}
+</script>
+<script src="/static/app.js?v=31"></script>
 </body>
 </html>
