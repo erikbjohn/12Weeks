@@ -428,6 +428,68 @@ function getWeightTrend(exName) {
 
 // ─── WELCOME & ONBOARDING ──────────────────────────────────────────────────
 
+async function resumeOnboarding() {
+  // Check each onboarding step and resume where the user left off
+  try {
+    // Step 1: Check food selections
+    const foodRes = await fetch('/api/food-selections');
+    const foodData = await foodRes.json();
+    if (foodData.completed) {
+      // Food done — show final reveal (profile + projection + plan)
+      showFinalReveal();
+      return;
+    }
+
+    // Step 2: Check goal
+    const goalRes = await fetch('/api/goal');
+    const goalData = await goalRes.json();
+    if (goalData.computed) {
+      // Goal computed but food not done — go to food selection
+      window._goalData = goalData;
+      showFoodSelection();
+      return;
+    }
+
+    // Step 3: Check physical assessment
+    const paRes = await fetch('/api/physical-assessment/status');
+    const paData = await paRes.json();
+    if (paData.completed) {
+      // Physical done but goal not computed — compute goal then food
+      computeGoal();
+      return;
+    }
+
+    // Step 4: Check constraints
+    const conRes = await fetch('/api/constraints');
+    const conData = await conRes.json();
+    if (conData.completed) {
+      // Constraints done but physical not — go to physical assessment
+      showPhysicalAssessment();
+      return;
+    }
+
+    // Step 5: Check psych intake
+    const intakeRes = await fetch('/api/psych-intake/status');
+    const intakeData = await intakeRes.json();
+    if (intakeData.completed) {
+      // Intake done but constraints not — go to constraints
+      showConstraints();
+      return;
+    }
+    if (intakeData.started && intakeData.message_count > 0) {
+      // Intake in progress — resume chat
+      showPsychIntake();
+      return;
+    }
+
+    // Nothing started — show welcome
+    showWelcome();
+  } catch(e) {
+    console.error('Resume onboarding error:', e);
+    showWelcome();
+  }
+}
+
 function showWelcome() {
   const el = document.getElementById('baseline-overlay');
   el.innerHTML = `<div class="baseline-overlay">
@@ -2511,13 +2573,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
-    // Only show onboarding if truly not done AND no weights in DB
-    const hasWeights = _weightsCache && Object.keys(_weightsCache).length > 0;
-    if (!_stateCache.baseline_done && !hasWeights) {
-      showWelcome();
-    } else if (!_stateCache.baseline_done && hasWeights) {
-      _stateCache.baseline_done = true;
-      apiPost('/api/state', { baseline_done: true });
+    // Resume onboarding at the right step
+    if (!_stateCache.baseline_done) {
+      await resumeOnboarding();
     }
 
     // Travel banner
