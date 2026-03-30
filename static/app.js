@@ -4186,6 +4186,18 @@ function renderWeighInBar() {
 
   const bwData = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
   const today = todayStr();
+  const isSunday = new Date().getDay() === 0;
+
+  if (!isSunday) {
+    // Only weigh in on Sundays
+    const lastEntry = bwData.length > 0 ? bwData[bwData.length - 1] : null;
+    el.innerHTML = `<div class="weighin-row">
+      <div class="weighin-label">Weight</div>
+      <div class="weighin-controls"><span class="weighin-today-val">${lastEntry ? lastEntry.weight + ' lb' : '--'}</span></div>
+      <div class="weighin-stats"><span style="font-size:12px;color:var(--muted)">Weigh-in is on Sundays</span></div>
+    </div>`;
+    return;
+  }
 
   if (bwData.length === 0) {
     el.innerHTML = `
