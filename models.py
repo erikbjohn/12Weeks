@@ -86,7 +86,7 @@ class MealLog(db.Model):
     """Daily meal tracking."""
     __tablename__ = "meal_log"
     id = db.Column(db.Integer, primary_key=True)
-    log_date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    log_date = db.Column(db.Date, nullable=False, index=True)
     eaten = db.Column(db.JSON, default=list)
     adjustments = db.Column(db.JSON, default=dict)
     fasting = db.Column(db.Boolean, default=False)
@@ -108,7 +108,7 @@ class BodyWeight(db.Model):
     """Morning weigh-ins."""
     __tablename__ = "body_weight"
     id = db.Column(db.Integer, primary_key=True)
-    log_date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    log_date = db.Column(db.Date, nullable=False, index=True)
     weight_lbs = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
@@ -118,7 +118,7 @@ class BodyMeasurement(db.Model):
     """Weekly body measurements."""
     __tablename__ = "body_measurement"
     id = db.Column(db.Integer, primary_key=True)
-    log_date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    log_date = db.Column(db.Date, nullable=False, index=True)
     waist_inches = db.Column(db.Float, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
@@ -141,7 +141,7 @@ class WeeklyCheckIn(db.Model):
     """Weekly subjective check-in."""
     __tablename__ = "weekly_checkin"
     id = db.Column(db.Integer, primary_key=True)
-    week = db.Column(db.Integer, nullable=False, unique=True)
+    week = db.Column(db.Integer, nullable=False)
     energy_level = db.Column(db.Integer)
     sleep_quality = db.Column(db.Integer)
     soreness_level = db.Column(db.Integer)
@@ -166,7 +166,7 @@ class MorningCheckIn(db.Model):
     """Daily psychological check-in."""
     __tablename__ = "morning_checkin"
     id = db.Column(db.Integer, primary_key=True)
-    log_date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    log_date = db.Column(db.Date, nullable=False, index=True)
     sleep_quality = db.Column(db.Integer)       # 1-10
     stress_level = db.Column(db.Integer)        # 1-10
     soreness = db.Column(db.Integer)            # 1-10
@@ -287,7 +287,7 @@ class WeeklyReport(db.Model):
     """Sunday weekly progress report."""
     __tablename__ = "weekly_report"
     id = db.Column(db.Integer, primary_key=True)
-    week = db.Column(db.Integer, nullable=False, unique=True)
+    week = db.Column(db.Integer, nullable=False)
     report_date = db.Column(db.Date, nullable=False)
     workouts_completed = db.Column(db.Integer, default=0)
     workouts_total = db.Column(db.Integer, default=6)

@@ -1472,15 +1472,21 @@ async function showEquipmentSelection() {
     }
 
     _equipStep = 0;
-    const categories = Object.keys(_equipCatalog);
-    renderEquipmentSelection(categories);
+    _equipCategories = Object.keys(_equipCatalog);
+    renderEquipmentSelection();
 }
 
-function renderEquipmentSelection(categories) {
+let _equipCategories = [];
+
+function equipNext() { _equipStep++; renderEquipmentSelection(); }
+function equipBack() { _equipStep--; renderEquipmentSelection(); }
+function equipRestart() { _equipStep = 0; renderEquipmentSelection(); }
+
+function renderEquipmentSelection() {
     const el = document.getElementById('baseline-overlay');
+    const categories = _equipCategories;
 
     if (_equipStep >= categories.length) {
-        // Confirm screen
         const selectedNames = _equipSelections.map(id => {
             for (const cat of Object.values(_equipCatalog)) {
                 const item = cat.items.find(i => i.id === id);
@@ -1495,7 +1501,7 @@ function renderEquipmentSelection(categories) {
                 <div class="baseline-desc" style="margin-bottom:1rem">This is what we'll program for. You can swap exercises anytime during workouts.</div>
                 <div class="equip-confirm-list">${selectedNames.length > 0 ? selectedNames.map(n => '<div class="equip-confirm-item">' + n + '</div>').join('') : '<div style="color:var(--muted)">No equipment selected — bodyweight only</div>'}</div>
                 <div style="display:flex;gap:8px;margin-top:1.5rem">
-                    <button class="btn btn-secondary" onclick="_equipStep=0;renderEquipmentSelection(${JSON.stringify(categories)})">Change</button>
+                    <button class="btn btn-secondary" onclick="equipRestart()">Change</button>
                     <button class="btn btn-primary" style="flex:1" onclick="saveEquipmentSelections()">Confirm Equipment</button>
                 </div>
             </div>
@@ -1525,8 +1531,8 @@ function renderEquipmentSelection(categories) {
             <div class="baseline-desc">Tap everything your gym has.</div>
             <div class="food-grid">${items}</div>
             <div style="display:flex;gap:8px;margin-top:1rem">
-                ${_equipStep > 0 ? '<button class="btn btn-secondary" onclick="_equipStep--;renderEquipmentSelection(' + JSON.stringify(categories) + ')">Back</button>' : ''}
-                <button class="btn btn-primary" style="flex:1" onclick="_equipStep++;renderEquipmentSelection(${JSON.stringify(categories)})">${_equipStep === categories.length - 1 ? 'Review' : 'Next'}</button>
+                ${_equipStep > 0 ? '<button class="btn btn-secondary" onclick="equipBack()">Back</button>' : ''}
+                <button class="btn btn-primary" style="flex:1" onclick="equipNext()">${_equipStep === categories.length - 1 ? 'Review' : 'Next'}</button>
             </div>
         </div>
     </div>`;
