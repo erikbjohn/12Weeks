@@ -1972,8 +1972,12 @@ def api_goal_compute():
             except ValueError:
                 pass
 
-    weight = pa.bodyweight_lbs or 180
-    height = pa.height_inches or 70
+    # Get weight from physical assessment, or latest weigh-in, or default
+    weight = pa.bodyweight_lbs if pa and pa.bodyweight_lbs else None
+    if not weight:
+        latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+        weight = latest_bw.weight_lbs if latest_bw else 180
+    height = (pa.height_inches if pa else None) or 70
 
     goal_info = detect_goal(actor_answer)
     goal_type = goal_info["goal_type"]
