@@ -631,12 +631,101 @@ def reset_onboarding():
 
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
 
+def _get_user_food_ids():
+    """Get the set of food catalog IDs the user selected during onboarding."""
+    fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
+    if not fs or not fs.selected_foods:
+        return None  # No selections = show everything (onboarding not done)
+    ids = set()
+    for cat_foods in fs.selected_foods.values():
+        ids.update(cat_foods)
+    return ids
+
+
+# Map meal plan food names → food catalog IDs
+_FOOD_NAME_TO_ID = {
+    "Whey protein shake": "whey_protein",
+    "Grilled chicken breast": "chicken_breast",
+    "Baked chicken breast": "chicken_breast",
+    "Eggs, scrambled": "eggs",
+    "Eggs, omelette": "eggs",
+    "Hard boiled egg": "eggs",
+    "Hard boiled eggs": "eggs",
+    "Greek yogurt": "greek_yogurt",
+    "Cheddar cheese": "cheddar_cheese",
+    "Cottage cheese": "cottage_cheese",
+    "White rice": "white_rice",
+    "Brown rice": "brown_rice",
+    "Sweet potato": "sweet_potato",
+    "Quinoa": "quinoa",
+    "Oats": "oats",
+    "Whole wheat toast": "whole_wheat_bread",
+    "Banana": "banana",
+    "Blueberries": "blueberries",
+    "Mixed greens": "mixed_greens",
+    "Spinach": "spinach",
+    "Spinach (in omelette)": "spinach",
+    "Spinach side salad": "spinach",
+    "Side salad (mixed greens)": "mixed_greens",
+    "Steamed broccoli": "broccoli",
+    "Steamed asparagus": "asparagus",
+    "Cherry tomatoes": "cherry_tomatoes",
+    "Avocado": "avocado",
+    "Almonds": "almonds",
+    "Olive oil + lemon dressing": "olive_oil",
+    "Olive oil dressing": "olive_oil",
+    "Olive oil": "olive_oil",
+}
+
+
+def _filter_meals_by_food_selections(days, user_food_ids):
+    """Remove foods from meal plans that the user didn't select.
+    Also enforces fasting rules: no caloric foods before the eating window."""
+    import copy
+    if user_food_ids is None:
+        return days  # No selections yet = show everything
+
+    # Always-allowed items (zero-cal condiments, basics, beverages — don't break fast)
+    always_allowed = {"Black coffee", "Water", "Salsa", "Electrolytes (salt, potassium)",
+                      "Lemon juice"}
+
+    filtered_days = copy.deepcopy(days)
+    for day in filtered_days:
+        mp = day.get("mealPlan")
+        if not mp or not mp.get("meals"):
+            continue
+        filtered_meals = []
+        for meal in mp["meals"]:
+            filtered_foods = []
+            for food in meal.get("foods", []):
+                name = food["item"]
+                if name in always_allowed:
+                    filtered_foods.append(food)
+                    continue
+                food_id = _FOOD_NAME_TO_ID.get(name)
+                if food_id is None:
+                    # Unknown mapping — keep it (don't remove unrecognized items)
+                    filtered_foods.append(food)
+                elif food_id in user_food_ids:
+                    filtered_foods.append(food)
+                # else: user didn't select this food — remove it
+
+            # If a meal has only zero-cal items, keep it (pre-workout coffee is fine)
+            # If a meal has no foods left, drop it entirely
+            if filtered_foods:
+                meal["foods"] = filtered_foods
+                filtered_meals.append(meal)
+        mp["meals"] = filtered_meals
+    return filtered_days
+
+
 @app.route("/api/workouts")
 @login_required
 def api_workouts():
     from equipment_swaps import auto_swap_workout
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
+    user_food_ids = _get_user_food_ids()
     all_weeks = {}
     for week in range(1, 13):
         phase = get_phase(week)
@@ -644,6 +733,7 @@ def api_workouts():
         for day in days:
             if "exercises" in day:
                 day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+        days = _filter_meals_by_food_selections(days, user_food_ids)
         all_weeks[str(week)] = {
             "week": week,
             "phase": phase,
@@ -661,11 +751,13 @@ def api_week(week):
     from equipment_swaps import auto_swap_workout
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
+    user_food_ids = _get_user_food_ids()
     phase = get_phase(week)
     days = get_workouts(week)
     for day in days:
         if "exercises" in day:
             day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+    days = _filter_meals_by_food_selections(days, user_food_ids)
     return jsonify({
         "week": week, "phase": phase,
         "phaseInfo": PHASES[phase],
@@ -2536,6 +2628,10 @@ def api_shopping_list():
     s = _get_state()
     week = s.current_week
     workouts = get_workouts(week)
+
+    # Filter by user's food selections
+    user_food_ids = _get_user_food_ids()
+    workouts = _filter_meals_by_food_selections(workouts, user_food_ids)
 
     # Map recipe names → raw grocery item + unit normalization
     INGREDIENT_MAP = {
