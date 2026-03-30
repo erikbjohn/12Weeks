@@ -2953,39 +2953,61 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
     }
 }
 
+// Hotel room bodyweight workouts — no equipment, no excuses
+const BW_WORKOUTS = {
+    upper: [
+        {name: 'Push-Ups', sets: '4x15-20', rest: '60s', note: 'Slow eccentric, chest to floor'},
+        {name: 'Diamond Push-Ups', sets: '3x10-12', rest: '60s', note: 'Hands together, tricep focus'},
+        {name: 'Pike Push-Ups', sets: '3x10', rest: '60s', note: 'Hips high, shoulders are the prime mover'},
+        {name: 'Inverted Row (table edge)', sets: '3x12', rest: '60s', note: 'Grab table edge, pull chest to it'},
+        {name: 'Tricep Dips (chair)', sets: '3x12-15', rest: '45s', note: 'Hands on chair edge, feet forward'},
+        {name: 'Plank Shoulder Taps', sets: '3x20', rest: '45s', note: 'Plank position, tap opposite shoulder'},
+    ],
+    lower: [
+        {name: 'Bodyweight Squats', sets: '4x20', rest: '60s', note: 'Full depth, heels down'},
+        {name: 'Bulgarian Split Squats', sets: '3x12 each', rest: '60s', note: 'Rear foot on bed or chair'},
+        {name: 'Walking Lunges', sets: '3x12 each', rest: '60s', note: 'Long stride, knee just off floor'},
+        {name: 'Single Leg Glute Bridge', sets: '3x15 each', rest: '45s', note: 'One leg, squeeze at top'},
+        {name: 'Jump Squats', sets: '3x10', rest: '60s', note: 'Explode up, soft landing'},
+        {name: 'Wall Sit', sets: '3x45s', rest: '30s', note: 'Back flat, thighs parallel'},
+    ],
+    full: [
+        {name: 'Burpees', sets: '4x10', rest: '60s', note: 'Full burpee — chest to floor, jump up'},
+        {name: 'Push-Ups', sets: '3x15', rest: '60s', note: 'Strict form, full ROM'},
+        {name: 'Bodyweight Squats', sets: '3x20', rest: '60s', note: 'Full depth'},
+        {name: 'Mountain Climbers', sets: '3x30s', rest: '30s', note: 'Fast, drive knees to chest'},
+        {name: 'Plank', sets: '3x60s', rest: '30s', note: 'Tight core, neutral spine'},
+        {name: 'Lunges', sets: '3x12 each', rest: '45s', note: 'Alternating, controlled'},
+    ],
+};
+
 function toggleBodyweightMode(on) {
     sessionStorage.setItem('bw_only_mode', on ? 'true' : 'false');
-    // Auto-swap all exercises to bodyweight alternatives
     if (on) {
+        // Determine workout type from today's lift name
         const weekData = workoutData[String(currentWeek)];
         if (weekData && weekData.days[currentDay]) {
-            const exercises = weekData.days[currentDay].exercises || [];
-            const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-            exercises.forEach((ex, i) => {
-                const key = currentWeek + '_' + currentDay + '_' + i;
-                // Find a bodyweight alternative (requires empty equipment list)
-                fetch('/api/exercise/alternatives/' + encodeURIComponent(ex.name))
-                    .then(r => r.json())
-                    .then(data => {
-                        const bwAlt = (data.alternatives || []).find(a => !a.missing_equipment || a.missing_equipment.length === 0);
-                        if (bwAlt && bwAlt.name !== ex.name) {
-                            swaps[key] = bwAlt.name;
-                            sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
-                        }
-                    })
-                    .catch(() => {});
+            const liftName = (weekData.days[currentDay].liftName || '').toLowerCase();
+            let bwType = 'full';
+            if (liftName.includes('upper') || liftName.includes('chest') || liftName.includes('push') || liftName.includes('pull') || liftName.includes('shoulder')) bwType = 'upper';
+            else if (liftName.includes('lower') || liftName.includes('squat') || liftName.includes('leg') || liftName.includes('hinge')) bwType = 'lower';
+
+            const bwExercises = BW_WORKOUTS[bwType];
+            const swaps = {};
+            bwExercises.forEach((ex, i) => {
+                swaps[currentWeek + '_' + currentDay + '_' + i] = ex.name;
             });
-            // Re-render after a brief delay for fetches to complete
-            setTimeout(() => renderDetail(), 1500);
+            sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+            sessionStorage.setItem('bw_exercises', JSON.stringify(bwExercises));
         }
     } else {
-        // Clear all swaps for today
         const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
         const prefix = currentWeek + '_' + currentDay + '_';
         Object.keys(swaps).filter(k => k.startsWith(prefix)).forEach(k => delete swaps[k]);
         sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
-        renderDetail();
+        sessionStorage.removeItem('bw_exercises');
     }
+    renderDetail();
 }
 
 function swapExercise(week, day, exIdx, newName) {
@@ -5140,7 +5162,9 @@ async function renderDetail() {
   }
 
   const travelExercises = isTraveling && d._travelWorkout && d._travelWorkout.exercises ? d._travelWorkout.exercises : null;
-  const displayExercises = travelExercises || d.exercises;
+  const bwMode = sessionStorage.getItem('bw_only_mode') === 'true';
+  const bwExercises = bwMode ? JSON.parse(sessionStorage.getItem('bw_exercises') || 'null') : null;
+  const displayExercises = bwExercises || travelExercises || d.exercises;
 
   // Bodyweight-only toggle
   const bwOnly = sessionStorage.getItem('bw_only_mode') === 'true';
