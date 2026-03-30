@@ -1336,10 +1336,11 @@ def api_generate_full_profile():
         return jsonify({"error": "No intake conversation"}), 400
 
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
     physical_data = None
     if pa:
         physical_data = {
-            "bodyweight": pa.bodyweight_lbs,
+            "bodyweight": latest_bw.weight_lbs if latest_bw else pa.bodyweight_lbs,
             "height": pa.height_inches,
             "waist": pa.waist_inches,
             "has_gym": pa.has_gym,
@@ -1972,11 +1973,9 @@ def api_goal_compute():
             except ValueError:
                 pass
 
-    # Get weight from physical assessment, or latest weigh-in, or default
-    weight = pa.bodyweight_lbs if pa and pa.bodyweight_lbs else None
-    if not weight:
-        latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-        weight = latest_bw.weight_lbs if latest_bw else 180
+    # BodyWeight table is the single source of truth for weight
+    latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+    weight = latest_bw.weight_lbs if latest_bw else 180
     height = (pa.height_inches if pa else None) or 70
 
     goal_info = detect_goal(actor_answer)
@@ -2418,12 +2417,13 @@ def api_physical_assessment_status():
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     if not pa:
         return jsonify({"started": False, "completed": False})
+    latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
     return jsonify({
         "started": True,
         "completed": pa.completed,
         "has_gym": pa.has_gym,
         "has_measuring_tape": pa.has_measuring_tape,
-        "bodyweight": pa.bodyweight_lbs,
+        "bodyweight": latest_bw.weight_lbs if latest_bw else pa.bodyweight_lbs,
         "waist": pa.waist_inches,
         "height": pa.height_inches,
     })
