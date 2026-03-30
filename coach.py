@@ -28,12 +28,18 @@ def _format_goal(goal):
 def _format_exercise_history(history):
     if not history:
         return "EXERCISE HISTORY: No lifts logged yet."
-    lines = ["EXERCISE HISTORY (latest per exercise):"]
-    for name, data in sorted(history.items()):
-        rpe_str = f" RPE:{data['rpe']}" if data.get('rpe') else ""
-        rm_str = f" est1RM:{data['estimated_1rm']}" if data.get('estimated_1rm') else ""
-        lines.append(f"  {name}: {data['weight']}lb{rpe_str}{rm_str} (wk{data.get('week','?')})")
-    return '\n'.join(lines[:25])  # Cap to prevent prompt bloat
+    lines = ["EXERCISE HISTORY (last 3 sessions per exercise — shows progression):"]
+    for name, entries in sorted(history.items()):
+        if isinstance(entries, dict):
+            entries = [entries]  # Legacy single-entry format
+        session_strs = []
+        for e in reversed(entries):  # Oldest first
+            rpe_str = f"({e['rpe']})" if e.get('rpe') else ""
+            wt = e.get('weight', 0)
+            reps = e.get('reps_completed', '')
+            session_strs.append(f"wk{e.get('week','?')}:{wt}lb{'x'+str(reps) if reps else ''}{rpe_str}")
+        lines.append(f"  {name}: {' → '.join(session_strs)}")
+    return '\n'.join(lines[:30])  # Cap to prevent prompt bloat
 
 
 def _format_today_sets(sets):
@@ -96,16 +102,25 @@ def _format_measurements(m):
     return f"LATEST MEASUREMENTS ({m.get('date', '?')}): waist {m.get('waist', '?')}\""
 
 
-def _format_meals_today(meals):
+def _format_meals_today(meals, meal_plan=None):
+    parts = []
+    if meal_plan:
+        parts.append(f"TODAY'S MEAL PLAN ({meal_plan.get('type', '?')}, target {meal_plan.get('target_cal', '?')} cal, {meal_plan.get('target_protein', '?')}g protein):")
+        for m in meal_plan.get("meals", []):
+            foods = ", ".join(m.get("foods", []))
+            parts.append(f"  {m.get('time', '?')} {m.get('name', '')}: {foods}")
     if not meals:
-        return "Meals today: Not tracked"
-    eaten = meals.get('eaten', [])
-    fasting = meals.get('fasting', False)
-    if fasting:
-        return "Meals today: FASTING DAY"
-    if eaten:
-        return f"Meals today: {len(eaten)} meals logged"
-    return "Meals today: None eaten yet"
+        parts.append("Meal tracking: Not logged today")
+    else:
+        eaten = meals.get('eaten', [])
+        fasting = meals.get('fasting', False)
+        if fasting:
+            parts.append("Status: FASTING DAY")
+        elif eaten:
+            parts.append(f"Meals eaten: {len(eaten)} of {len(meal_plan.get('meals', [])) if meal_plan else '?'}")
+        else:
+            parts.append("Meals eaten: None yet")
+    return '\n'.join(parts) if parts else "Meals today: Not tracked"
 
 
 def _format_memories(memories):
@@ -418,7 +433,7 @@ Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
 
 Equipment available: {', '.join(ctx.get('equipment', [])) or 'Not specified'}
 
-{_format_meals_today(ctx.get('meals_today'))}
+{_format_meals_today(ctx.get('meals_today'), ctx.get('meal_plan_today'))}
 
 Days completed this week: {ctx.get('completed_days_this_week', []) or 'None yet'}
 {f"Schedule notes: {ctx.get('schedule_notes')}" if ctx.get('schedule_notes') else ''}

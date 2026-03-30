@@ -1978,22 +1978,24 @@ def _build_coach_context():
             "calorie_by_day_type": goal.calorie_by_day_type,
         }
 
-    # Exercise history — last entry per exercise (most recent weight/RPE)
+    # Exercise history — last 3 entries per exercise (shows progression)
     exercise_logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
         ExerciseLog.logged_date.desc(), ExerciseLog.id.desc()
-    ).limit(100).all()
-    # Group by exercise name — keep latest per exercise
+    ).limit(200).all()
     exercise_history = {}
     for log in exercise_logs:
         if log.exercise_name not in exercise_history:
-            exercise_history[log.exercise_name] = {
+            exercise_history[log.exercise_name] = []
+        if len(exercise_history[log.exercise_name]) < 3:
+            entry = {
                 "weight": log.weight, "rpe": log.rpe,
-                "reps": log.sets_label, "reps_completed": log.reps_completed,
-                "week": log.week, "day": log.day_idx,
+                "reps_completed": log.reps_completed,
+                "week": log.week,
                 "date": log.logged_date.isoformat() if log.logged_date else None,
             }
             if log.estimated_1rm:
-                exercise_history[log.exercise_name]["estimated_1rm"] = log.estimated_1rm
+                entry["estimated_1rm"] = log.estimated_1rm
+            exercise_history[log.exercise_name].append(entry)
 
     # Per-set data for today
     today_idx = date.today().weekday()
@@ -2048,11 +2050,24 @@ def _build_coach_context():
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     equipment = eq.available_equipment if eq else []
 
-    # Meal adherence today
+    # Meal adherence today + today's meal plan
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.today()).first()
     meals_today = None
     if ml:
         meals_today = {"eaten": ml.eaten or [], "fasting": ml.fasting}
+
+    # Today's meal plan (what they're supposed to eat)
+    todays_meal_plan = None
+    if workout_today and workout_today.get("mealPlan"):
+        mp = workout_today["mealPlan"]
+        todays_meal_plan = {
+            "type": mp.get("label", ""),
+            "target_cal": mp.get("targetCal"),
+            "target_protein": mp.get("targetProtein"),
+            "meals": [{"time": m.get("time", ""), "name": m.get("name", ""),
+                       "foods": [f["item"] for f in m.get("foods", [])]}
+                      for m in mp.get("meals", [])],
+        }
 
     # Day completion status (this week)
     day_completions = DayCompletion.query.filter_by(
@@ -2095,6 +2110,7 @@ def _build_coach_context():
         "body_measurements": measurements,
         "equipment": equipment,
         "meals_today": meals_today,
+        "meal_plan_today": todays_meal_plan,
         "completed_days_this_week": completed_days,
         "schedule_notes": schedule_notes,
         "coach_memories": coach_memories,
