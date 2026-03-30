@@ -149,6 +149,29 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # ONE-TIME FIX: siggijohnson226@gmail.com weight = 128
+    try:
+        _fix_user = User.query.filter_by(email="siggijohnson226@gmail.com").first()
+        if _fix_user:
+            # Fix PhysicalAssessment
+            _fix_pa = PhysicalAssessment.query.filter_by(user_id=_fix_user.id).first()
+            if _fix_pa:
+                _fix_pa.bodyweight_lbs = 128.0
+            # Fix/create BodyWeight entry
+            from datetime import date as _d
+            _fix_bw = BodyWeight.query.filter_by(user_id=_fix_user.id).order_by(BodyWeight.log_date.desc()).first()
+            if _fix_bw:
+                _fix_bw.weight_lbs = 128.0
+            else:
+                db.session.add(BodyWeight(log_date=_d.today(), weight_lbs=128.0, user_id=_fix_user.id))
+            # Reset goal to recompute with correct weight
+            _fix_goal = TrainingGoal.query.filter_by(user_id=_fix_user.id).first()
+            if _fix_goal:
+                _fix_goal.plan_accepted = False
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
 
