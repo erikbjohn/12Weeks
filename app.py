@@ -1938,9 +1938,107 @@ def _build_coach_context():
     if fs and fs.selected_foods:
         selected_foods_summary = fs.selected_foods
 
-    # Fasting protocol
+    # Training goal (full record)
     goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     fasting_protocol = goal.fasting_protocol if goal else None
+    goal_data = None
+    if goal:
+        goal_data = {
+            "goal_type": goal.goal_type,
+            "target_weight": goal.target_weight,
+            "target_bf_pct": goal.target_bf_pct,
+            "daily_calories": goal.daily_calories,
+            "protein_grams": goal.protein_grams,
+            "carb_grams": goal.carb_grams,
+            "fat_grams": goal.fat_grams,
+            "fasting_protocol": goal.fasting_protocol,
+            "calorie_by_day_type": goal.calorie_by_day_type,
+        }
+
+    # Exercise history — last entry per exercise (most recent weight/RPE)
+    exercise_logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
+        ExerciseLog.logged_date.desc(), ExerciseLog.id.desc()
+    ).limit(100).all()
+    # Group by exercise name — keep latest per exercise
+    exercise_history = {}
+    for log in exercise_logs:
+        if log.exercise_name not in exercise_history:
+            exercise_history[log.exercise_name] = {
+                "weight": log.weight, "rpe": log.rpe,
+                "reps": log.sets_label, "reps_completed": log.reps_completed,
+                "week": log.week, "day": log.day_idx,
+                "date": log.logged_date.isoformat() if log.logged_date else None,
+            }
+            if log.estimated_1rm:
+                exercise_history[log.exercise_name]["estimated_1rm"] = log.estimated_1rm
+
+    # Per-set data for today
+    today_idx = date.today().weekday()
+    today_sets = SetLog.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=today_idx
+    ).order_by(SetLog.exercise_name, SetLog.set_number).all()
+    set_data = {}
+    for s in today_sets:
+        if s.exercise_name not in set_data:
+            set_data[s.exercise_name] = []
+        set_data[s.exercise_name].append({
+            "set": s.set_number + 1, "weight": s.weight,
+            "reps": s.reps, "done": s.done,
+        })
+
+    # Run logs (last 14 days)
+    run_logs = RunLog.query.filter_by(user_id=current_user.id).order_by(
+        RunLog.log_date.desc()
+    ).limit(14).all()
+    runs = [{
+        "date": r.log_date.isoformat() if r.log_date else None,
+        "distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
+        "elevation_ft": r.elevation_ft, "week": r.week,
+    } for r in run_logs]
+
+    # Physical assessment (baseline)
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    physical = None
+    if pa:
+        physical = {
+            "height_inches": pa.height_inches,
+            "bodyweight_lbs": pa.bodyweight_lbs,
+            "waist": pa.waist_inches, "chest": pa.chest_inches,
+            "bicep": pa.bicep_inches, "thigh": pa.thigh_inches,
+            "neck": pa.neck_inches, "hips": pa.hips_inches,
+            "pushups": pa.pushup_count, "plank_sec": pa.plank_seconds,
+            "squats": pa.squat_count, "pullups": pa.pullup_count,
+        }
+
+    # Body measurements (latest)
+    latest_measure = BodyMeasurement.query.filter_by(
+        user_id=current_user.id
+    ).order_by(BodyMeasurement.log_date.desc()).first()
+    measurements = None
+    if latest_measure:
+        measurements = {
+            "date": latest_measure.log_date.isoformat(),
+            "waist": latest_measure.waist_inches,
+        }
+
+    # Equipment
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    equipment = eq.available_equipment if eq else []
+
+    # Meal adherence today
+    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.today()).first()
+    meals_today = None
+    if ml:
+        meals_today = {"eaten": ml.eaten or [], "fasting": ml.fasting}
+
+    # Day completion status (this week)
+    day_completions = DayCompletion.query.filter_by(
+        user_id=current_user.id, week=week
+    ).all()
+    completed_days = [dc.day_idx for dc in day_completions if dc.done]
+
+    # Schedule notes
+    schedule_notes = constraints.schedule_notes if constraints else None
 
     return {
         "checkins": checkins,
@@ -1959,6 +2057,17 @@ def _build_coach_context():
         "custom_allergies": custom_allergies,
         "selected_foods": selected_foods_summary,
         "fasting_protocol": fasting_protocol,
+        # NEW — full athlete profile
+        "goal": goal_data,
+        "exercise_history": exercise_history,
+        "today_sets": set_data,
+        "run_history": runs,
+        "physical_assessment": physical,
+        "body_measurements": measurements,
+        "equipment": equipment,
+        "meals_today": meals_today,
+        "completed_days_this_week": completed_days,
+        "schedule_notes": schedule_notes,
     }
 
 

@@ -7,6 +7,107 @@ from datetime import date, timedelta
 log = logging.getLogger(__name__)
 
 
+def _format_goal(goal):
+    if not goal:
+        return ""
+    parts = [f"TRAINING GOAL: {goal.get('goal_type', '?')}"]
+    if goal.get('target_weight'):
+        parts.append(f"Target weight: {goal['target_weight']} lbs")
+    if goal.get('daily_calories'):
+        parts.append(f"Daily calories: {goal['daily_calories']} kcal")
+    if goal.get('protein_grams'):
+        parts.append(f"Macros: {goal['protein_grams']}P / {goal.get('carb_grams', '?')}C / {goal.get('fat_grams', '?')}F")
+    if goal.get('fasting_protocol'):
+        parts.append(f"Fasting: {goal['fasting_protocol']}")
+    if goal.get('calorie_by_day_type'):
+        cals = goal['calorie_by_day_type']
+        parts.append(f"Cals by day type: {', '.join(f'{k}={v}' for k,v in cals.items())}")
+    return '\n'.join(parts)
+
+
+def _format_exercise_history(history):
+    if not history:
+        return "EXERCISE HISTORY: No lifts logged yet."
+    lines = ["EXERCISE HISTORY (latest per exercise):"]
+    for name, data in sorted(history.items()):
+        rpe_str = f" RPE:{data['rpe']}" if data.get('rpe') else ""
+        rm_str = f" est1RM:{data['estimated_1rm']}" if data.get('estimated_1rm') else ""
+        lines.append(f"  {name}: {data['weight']}lb{rpe_str}{rm_str} (wk{data.get('week','?')})")
+    return '\n'.join(lines[:25])  # Cap to prevent prompt bloat
+
+
+def _format_today_sets(sets):
+    if not sets:
+        return ""
+    lines = ["TODAY'S SETS (per-set detail):"]
+    for ex_name, set_list in sets.items():
+        set_strs = [f"S{s['set']}:{s['weight']}x{s['reps']}{'✓' if s['done'] else ''}" for s in set_list]
+        lines.append(f"  {ex_name}: {' | '.join(set_strs)}")
+    return '\n'.join(lines)
+
+
+def _format_runs(runs):
+    if not runs:
+        return ""
+    lines = ["RUN HISTORY (recent):"]
+    for r in runs[:7]:
+        parts = []
+        if r.get('distance_miles'):
+            parts.append(f"{r['distance_miles']}mi")
+        if r.get('avg_hr'):
+            parts.append(f"HR:{r['avg_hr']}")
+        if r.get('elevation_ft'):
+            parts.append(f"elev:{r['elevation_ft']}ft")
+        lines.append(f"  {r.get('date','?')}: {' '.join(parts) or 'logged'}")
+    return '\n'.join(lines)
+
+
+def _format_physical(pa):
+    if not pa:
+        return ""
+    lines = ["BASELINE PHYSICAL ASSESSMENT:"]
+    if pa.get('height_inches'):
+        ft = pa['height_inches'] // 12
+        inch = pa['height_inches'] % 12
+        lines.append(f"  Height: {ft}'{inch}\"  Weight: {pa.get('bodyweight_lbs', '?')} lbs")
+    measures = []
+    for k in ['waist', 'chest', 'bicep', 'thigh', 'neck', 'hips']:
+        if pa.get(k):
+            measures.append(f"{k}:{pa[k]}\"")
+    if measures:
+        lines.append(f"  Measurements: {', '.join(measures)}")
+    tests = []
+    if pa.get('pushups'):
+        tests.append(f"pushups:{pa['pushups']}")
+    if pa.get('plank_sec'):
+        tests.append(f"plank:{pa['plank_sec']}s")
+    if pa.get('squats'):
+        tests.append(f"squats:{pa['squats']}")
+    if pa.get('pullups') is not None:
+        tests.append(f"pullups:{pa['pullups']}")
+    if tests:
+        lines.append(f"  Fitness tests: {', '.join(tests)}")
+    return '\n'.join(lines)
+
+
+def _format_measurements(m):
+    if not m:
+        return ""
+    return f"LATEST MEASUREMENTS ({m.get('date', '?')}): waist {m.get('waist', '?')}\""
+
+
+def _format_meals_today(meals):
+    if not meals:
+        return "Meals today: Not tracked"
+    eaten = meals.get('eaten', [])
+    fasting = meals.get('fasting', False)
+    if fasting:
+        return "Meals today: FASTING DAY"
+    if eaten:
+        return f"Meals today: {len(eaten)} meals logged"
+    return "Meals today: None eaten yet"
+
+
 def get_coach_response(user_message, context):
     """
     Send a message to Claude with full training context.
@@ -224,6 +325,25 @@ CURRENT STATE:
 {readiness_summary}
 {checkin_summary}
 Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
+
+{_format_goal(ctx.get('goal'))}
+
+{_format_exercise_history(ctx.get('exercise_history', {}))}
+
+{_format_today_sets(ctx.get('today_sets', {}))}
+
+{_format_runs(ctx.get('run_history', []))}
+
+{_format_physical(ctx.get('physical_assessment'))}
+
+{_format_measurements(ctx.get('body_measurements'))}
+
+Equipment available: {', '.join(ctx.get('equipment', [])) or 'Not specified'}
+
+{_format_meals_today(ctx.get('meals_today'))}
+
+Days completed this week: {ctx.get('completed_days_this_week', []) or 'None yet'}
+{f"Schedule notes: {ctx.get('schedule_notes')}" if ctx.get('schedule_notes') else ''}
 
 INTAKE PROFILE:
 {ctx.get('intake_report', 'No intake completed yet.') or 'No intake completed yet.'}
