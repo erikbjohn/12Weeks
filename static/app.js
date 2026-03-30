@@ -4194,7 +4194,7 @@ function renderWeighInBar() {
     el.innerHTML = `<div class="weighin-row">
       <div class="weighin-label">Weight</div>
       <div class="weighin-controls"><span class="weighin-today-val">${lastEntry ? lastEntry.weight + ' lb' : '--'}</span></div>
-      <div class="weighin-stats"><span style="font-size:12px;color:var(--muted)">Weigh-in is on Sundays</span></div>
+      <div class="weighin-stats"><span style="font-size:12px;color:var(--muted)">Next weigh-in: ${(7 - new Date().getDay()) % 7 || 7} day${(7 - new Date().getDay()) % 7 === 1 ? '' : 's'}</span></div>
     </div>`;
     return;
   }
