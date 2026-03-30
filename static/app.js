@@ -1466,7 +1466,22 @@ function toggleFood(category, foodId) {
   } else if (sel.length < FOOD_MAX) {
     sel.push(foodId);
   }
-  renderFoodSelection();
+  // Update in-place — no re-render, no flicker
+  document.querySelectorAll('.food-item').forEach(item => {
+    const oc = item.getAttribute('onclick') || '';
+    const m = oc.match(/toggleFood\('([^']+)','([^']+)'\)/);
+    if (m && m[1] === category) {
+      item.classList.toggle('selected', sel.includes(m[2]));
+    }
+  });
+  const count = sel.length;
+  const statusEl = document.querySelector('.food-status');
+  if (statusEl) {
+    statusEl.textContent = count < FOOD_MIN ? 'Pick at least ' + (FOOD_MIN - count) + ' more' : count >= FOOD_MAX ? 'Maximum reached' : count + ' selected';
+    statusEl.className = 'food-status ' + (count < FOOD_MIN ? 'food-status-warning' : 'food-status-good');
+  }
+  const btn = document.querySelector('.baseline-card .btn-primary');
+  if (btn) btn.disabled = count < FOOD_MIN;
 }
 
 function foodCategoryNext() {

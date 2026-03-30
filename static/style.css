@@ -883,7 +883,7 @@ footer {
   border-radius: 14px;
   padding: 2rem 1.5rem;
   width: 100%;
-  max-width: 400px;
+  max-width: 540px;
   text-align: center;
 }
 
@@ -1018,10 +1018,11 @@ footer {
 
 .baseline-summary-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: baseline;
   padding: 10px 0;
+  gap: 8px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
   gap: 2px 8px;
@@ -1030,7 +1031,8 @@ footer {
 .baseline-summary-row .bsr-name {
   color: var(--text);
   font-weight: 500;
-  width: 100%;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .baseline-summary-row .bsr-weight {
