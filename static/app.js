@@ -4898,18 +4898,41 @@ async function renderCoachTop() {
         m.time && m.time.startsWith(today)
     );
 
-    if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
-        // Coach hasn't spoken today — send morning greeting
-        el.innerHTML = renderCoachTopShell(`<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is checking in...</div></div>`);
+    // Build bubbles from recent messages (skip internal triggers)
+    let bubblesHtml = '';
+    const recentMsgs = _chatHistory.slice(-6);
+    for (const m of recentMsgs) {
+        const text = m.text || m.content || '';
+        if (text.startsWith('[MORNING_CHECKIN]') || text.startsWith('[WORKOUT_COMPLETE]') || text.startsWith('[WEEKLY_PLANNING]')) continue;
+        const isUser = m.role === 'user';
+        const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
+        bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
+    }
 
+    if (!bubblesHtml) {
+        const coachMsgs = recentMsgs.filter(m => (m.role === 'coach' || m.role === 'assistant'));
+        if (coachMsgs.length > 0) {
+            const last = coachMsgs[coachMsgs.length - 1];
+            bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
+        }
+    }
+
+    // Render the shell immediately (with or without bubbles)
+    el.innerHTML = renderCoachTopShell(bubblesHtml);
+
+    // If coach hasn't spoken today, fire off a morning greeting in the background
+    if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
         const weekData = workoutData[String(currentWeek)];
         const todayDayIdx = new Date().getDay();
         const mappedIdx = todayDayIdx === 0 ? 6 : todayDayIdx - 1;
         const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
         const workoutName = dayData ? dayData.liftName : 'Rest';
 
-        // Send as internal trigger — NOT shown to user
         const triggerMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Greet the athlete and ask how they're feeling.`;
+
+        // Show loading state
+        const msgsEl = document.getElementById('coach-top-messages');
+        if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is checking in...</div></div>`;
 
         try {
             const res = await fetch('/api/chat', {
@@ -4919,39 +4942,16 @@ async function renderCoachTop() {
             });
             const data = await res.json();
             if (data.response) {
-                // Only push the COACH response to visible history, not the trigger
                 _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
                 localStorage.setItem(morningKey, '1');
+                // Re-render with the new message
+                if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
             }
         } catch(e) {
             console.error('Morning message failed:', e);
-        }
-
-        renderCoachTop();
-        return;
-    }
-
-    // Build bubbles from recent messages (skip internal triggers)
-    const recentMsgs = _chatHistory.slice(-6);
-    for (const m of recentMsgs) {
-        const text = m.text || m.content || '';
-        // Skip internal trigger messages
-        if (text.startsWith('[MORNING_CHECKIN]') || text.startsWith('[WORKOUT_COMPLETE]') || text.startsWith('[WEEKLY_PLANNING]')) continue;
-        const isUser = m.role === 'user';
-        const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
-        bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
-    }
-
-    if (!bubblesHtml) {
-        // Only internal messages exist, show the coach's response
-        const coachMsgs = recentMsgs.filter(m => m.role === 'coach' || m.role === 'assistant');
-        if (coachMsgs.length > 0) {
-            const last = coachMsgs[coachMsgs.length - 1];
-            bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
+            if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Tap below to talk to Erik.</div>`;
         }
     }
-
-    el.innerHTML = renderCoachTopShell(bubblesHtml);
 }
 
 function renderCoachTopShell(bubblesHtml) {
