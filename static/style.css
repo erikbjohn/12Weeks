@@ -3601,3 +3601,18 @@ footer {
 /* ─── SCROLL SNAP FOR DAY NAVIGATION ─── */
 .tn-days { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
 .tn-day { scroll-snap-align: center; min-width: 48px; }
+
+/* ─── COACH TOP WIDGET ─── */
+.coach-top-widget { padding: 0 1rem 8px; }
+.coach-top-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.coach-top-label { font-family: 'DM Mono', monospace; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); padding: 12px 16px 0; }
+.coach-top-messages { padding: 8px 16px; max-height: 250px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.coach-top-bubble { padding: 10px 14px; border-radius: 12px; margin-bottom: 8px; font-size: 15px; line-height: 1.5; max-width: 85%; }
+.coach-top-bubble.coach { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+.coach-top-bubble.user { background: var(--lift-bg); border: 1px solid var(--lift-border); color: var(--accent); margin-left: auto; border-bottom-right-radius: 4px; }
+.coach-top-input-bar { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.coach-top-input-bar input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; font-size: 15px; }
+.coach-top-input-bar button { background: var(--lift-bg); border: 1px solid var(--lift-border); color: var(--accent); padding: 10px 16px; border-radius: 8px; font-family: 'DM Mono', monospace; font-size: 14px; cursor: pointer; }
+.coach-top-expand { display: block; width: 100%; background: none; border: none; border-top: 1px solid var(--border); color: var(--muted); padding: 8px; font-size: 13px; font-family: 'DM Mono', monospace; cursor: pointer; text-align: center; }
+.coach-top-expand:hover { color: var(--text); }
+.coach-top-loading { padding: 8px 0; }

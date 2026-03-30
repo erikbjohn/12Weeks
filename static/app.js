@@ -3128,10 +3128,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     renderAll();
 
-    // Morning check-in (only if onboarding fully complete)
-    if (onboardingDone) {
-      await checkMorningCheckin();
-    }
+    // Morning check-in now handled by coach-top chat widget
+    // (checkMorningCheckin removed from init)
 
     // Load chat history
     await loadChatHistory();
@@ -3899,7 +3897,7 @@ async function sendChatMessage(inputId, containerId) {
     renderChatMessages(containerId);
     syncChatContainers(containerId);
     updateChatFabPulse();
-    renderInlineCoach();
+    renderCoachTop();
 }
 
 function syncChatContainers(sourceId) {
@@ -4210,7 +4208,7 @@ function toggleDay(week, dayIdx, e) {
         if (data.response) {
           _chatHistory.push({ role: 'user', text: summary, time: new Date().toISOString() });
           _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-          renderInlineCoach();
+          renderCoachTop();
           showToast('Coach feedback ready', 'success');
         }
       }).catch(() => {});
@@ -4874,7 +4872,7 @@ function renderAll() {
   renderWeekTabs();
   renderDayGrid();
   renderDetail();
-  renderInlineCoach();
+  renderCoachTop();
   checkMilestones();
 
   // Auto-select today if no day is currently selected
@@ -4884,6 +4882,124 @@ function renderAll() {
     const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
     setDay(mappedIdx);
   }
+}
+
+async function renderCoachTop() {
+    const el = document.getElementById('coach-top');
+    if (!el) return;
+
+    // Check if we need to send a morning message
+    const today = todayStr();
+    const morningKey = '12w_morning_' + today;
+    const hasMorningMessage = localStorage.getItem(morningKey);
+
+    // Get recent chat messages
+    const recentMsgs = _chatHistory.slice(-6); // Last 6 messages
+
+    // Build message bubbles
+    let bubblesHtml = '';
+    if (recentMsgs.length === 0 && !hasMorningMessage) {
+        // No messages today — coach needs to speak first
+        bubblesHtml = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
+        el.innerHTML = renderCoachTopShell(bubblesHtml);
+
+        // Auto-send morning check-in message
+        const weekData = workoutData[String(currentWeek)];
+        const todayIdx = new Date().getDay();
+        const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+        const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
+        const workoutName = dayData ? dayData.liftName : 'Rest';
+
+        const morningMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Greet the athlete and ask how they're feeling. This is their daily check-in conversation.`;
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ message: morningMsg }),
+            });
+            const data = await res.json();
+            if (data.response) {
+                _chatHistory.push({ role: 'user', text: morningMsg, time: new Date().toISOString() });
+                _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+                localStorage.setItem(morningKey, '1');
+            }
+        } catch(e) {
+            console.error('Morning message failed:', e);
+        }
+
+        // Re-render with the new messages
+        renderCoachTop();
+        return;
+    }
+
+    // Build bubbles from recent messages (skip internal triggers)
+    for (const m of recentMsgs) {
+        const text = m.text || m.content || '';
+        // Skip internal trigger messages
+        if (text.startsWith('[MORNING_CHECKIN]') || text.startsWith('[WORKOUT_COMPLETE]') || text.startsWith('[WEEKLY_PLANNING]')) continue;
+        const isUser = m.role === 'user';
+        const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
+        bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
+    }
+
+    if (!bubblesHtml) {
+        // Only internal messages exist, show the coach's response
+        const coachMsgs = recentMsgs.filter(m => m.role === 'coach' || m.role === 'assistant');
+        if (coachMsgs.length > 0) {
+            const last = coachMsgs[coachMsgs.length - 1];
+            bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
+        }
+    }
+
+    el.innerHTML = renderCoachTopShell(bubblesHtml);
+}
+
+function renderCoachTopShell(bubblesHtml) {
+    return `<div class="coach-top-card">
+        <div class="coach-top-label">COACH ERIK</div>
+        <div class="coach-top-messages" id="coach-top-messages">${bubblesHtml}</div>
+        <div class="coach-top-input-bar">
+            <input type="text" id="coach-top-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendCoachTopMessage()">
+            <button onclick="sendCoachTopMessage()">Send</button>
+        </div>
+        <button class="coach-top-expand" onclick="toggleChatOverlay()">View full conversation</button>
+    </div>`;
+}
+
+async function sendCoachTopMessage() {
+    const input = document.getElementById('coach-top-input');
+    if (!input) return;
+    const text = (input.value || '').trim();
+    if (!text) return;
+    input.value = '';
+
+    // Add user message bubble immediately
+    const msgsEl = document.getElementById('coach-top-messages');
+    if (msgsEl) {
+        msgsEl.innerHTML += `<div class="coach-top-bubble user">${escapeHtml(text)}</div>`;
+        msgsEl.innerHTML += `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+
+    _chatHistory.push({ role: 'user', text: text, time: new Date().toISOString() });
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: text }),
+        });
+        const data = await res.json();
+
+        if (data.response) {
+            _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+        }
+    } catch(e) {
+        _chatHistory.push({ role: 'coach', text: 'Connection issue. Try again.', time: new Date().toISOString() });
+    }
+
+    renderCoachTop();
 }
 
 function renderInlineCoach() {
