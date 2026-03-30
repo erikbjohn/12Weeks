@@ -2393,6 +2393,40 @@ def api_exercise_alternatives(exercise_name):
     return jsonify({"exercise": exercise_name, "alternatives": alts})
 
 
+# ─── SHOPPING LIST ──────────────────────────────────────────────────────────
+
+@app.route("/api/shopping-list")
+@login_required
+def api_shopping_list():
+    """Generate a weekly shopping list from the meal plans."""
+    s = _get_state()
+    week = s.current_week
+    workouts = get_workouts(week)
+
+    # Aggregate all foods across the week
+    grocery = {}  # item → {"portion": str, "count": int}
+    for day_data in workouts:
+        mp = day_data.get("mealPlan")
+        if not mp or not mp.get("meals"):
+            continue
+        for meal in mp["meals"]:
+            for food in meal.get("foods", []):
+                item = food["item"]
+                portion = food.get("portion", "")
+                if item in grocery:
+                    grocery[item]["count"] += 1
+                else:
+                    grocery[item] = {"portion": portion, "count": 1}
+
+    # Sort by category (proteins first, then produce, then pantry)
+    items = []
+    for name, info in sorted(grocery.items()):
+        qty = f"{info['portion']} x{info['count']}" if info['count'] > 1 else info['portion']
+        items.append({"item": name, "quantity": qty, "count": info["count"]})
+
+    return jsonify({"week": week, "items": items})
+
+
 # ─── WEEKLY REPORT ─────────────────────────────────────────────────────────
 
 @app.route("/api/weekly-report/generate", methods=["POST"])

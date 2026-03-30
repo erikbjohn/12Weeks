@@ -3545,9 +3545,26 @@ async function showSundayFlow() {
           <div class="report-stat"><span class="report-stat-label">Adherence</span><span class="report-stat-val">${m.adherence_pct || 0}%</span></div>
         </div>
         ${narrative ? '<div class="report-narrative">' + narrative + '</div>' : ''}
+        <div id="shopping-list-section"></div>
         <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="document.getElementById('morning-checkin-overlay').innerHTML='';triggerWeeklyPlanning()">Continue to Weekly Planning</button>
       </div>
     </div>`;
+    // Load shopping list
+    try {
+      const shopRes = await fetch('/api/shopping-list');
+      const shopData = await shopRes.json();
+      const shopEl = document.getElementById('shopping-list-section');
+      if (shopEl && shopData.items && shopData.items.length > 0) {
+        const shopItems = shopData.items.map(i =>
+          `<div class="shop-item"><span class="shop-item-name">${i.item}</span><span class="shop-item-qty">${i.quantity}</span></div>`
+        ).join('');
+        shopEl.innerHTML = `<div class="plan-section" style="margin-top:1rem">
+          <div class="plan-section-label">Shopping List (Week ${shopData.week})</div>
+          <div class="shop-list">${shopItems}</div>
+        </div>`;
+      }
+    } catch(e) {}
+
   } catch(e) {
     triggerWeeklyPlanning();
   }

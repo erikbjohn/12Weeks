@@ -3416,6 +3416,13 @@ footer {
 .report-stat-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 2px; }
 .report-narrative { padding: 14px 16px; background: var(--surface); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 15px; line-height: 1.6; }
 
+/* ─── SHOPPING LIST ─── */
+.shop-list { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-height: 300px; overflow-y: auto; }
+.shop-item { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.shop-item:last-child { border-bottom: none; }
+.shop-item-name { color: var(--text); }
+.shop-item-qty { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px; }
+
 /* ─── MORNING BRIEFING ─── */
 .morning-briefing-card { padding: 14px 16px; }
 .briefing-status { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
