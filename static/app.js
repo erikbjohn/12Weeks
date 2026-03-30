@@ -120,6 +120,35 @@ function toggleMealEaten(mealIdx) {
   renderDetail();
 }
 
+function _isFoodItemEaten(foodKey) {
+  const data = loadMealData();
+  return (data.foodItems || []).includes(foodKey);
+}
+
+function toggleFoodItem(foodKey) {
+  const data = loadMealData();
+  if (!data.foodItems) data.foodItems = [];
+  const idx = data.foodItems.indexOf(foodKey);
+  if (idx >= 0) {
+    data.foodItems.splice(idx, 1);
+  } else {
+    data.foodItems.push(foodKey);
+  }
+  saveMealData(data);
+  // Update in-place — no re-render
+  const btn = event.target;
+  const row = btn.closest('.meal-food-row');
+  if (btn.classList.contains('checked')) {
+    btn.classList.remove('checked');
+    btn.innerHTML = '';
+    if (row) row.classList.remove('food-eaten');
+  } else {
+    btn.classList.add('checked');
+    btn.innerHTML = '&#10003;';
+    if (row) row.classList.add('food-eaten');
+  }
+}
+
 function getMealMultiplier(mealIdx) {
   const data = loadMealData();
   if (data.adjustments && data.adjustments[String(mealIdx)]) {
@@ -202,18 +231,15 @@ function renderMealSection(dayData) {
       totalEaten.fat += macros.fat;
     }
 
-    const showAdjust = !(isRestDay && fasting);
-    const foodRows = meal.foods.map(f => {
+    const foodRows = meal.foods.map((f, fIdx) => {
       const adjCal = Math.round((f.cal || 0) * multiplier);
-      const adjBtns = showAdjust ? `<span class="meal-food-adjust-inline">
-        <button onclick="adjustMealPortion(${idx}, -0.25)" title="Less">-</button>
-        <button onclick="adjustMealPortion(${idx}, 0.25)" title="More">+</button>
-      </span>` : '';
-      return `<div class="meal-food-row">
+      const foodKey = idx + '_' + fIdx;
+      const foodEaten = _isFoodItemEaten(foodKey);
+      return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
+        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}')">${foodEaten ? '&#10003;' : ''}</button>
         <span class="meal-food-name">${f.item}</span>
-        <span class="meal-food-portion">${f.portion}${multiplier !== 1 ? '<span class="meal-multiplier">x' + multiplier.toFixed(2).replace(/\.?0+$/, '') + '</span>' : ''}</span>
+        <span class="meal-food-portion">${f.portion}</span>
         <span class="meal-food-portion">${adjCal}cal</span>
-        ${adjBtns}
       </div>`;
     }).join('');
 

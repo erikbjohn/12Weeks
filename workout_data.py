@@ -25,7 +25,7 @@ MEAL_PLANS = {
             {
                 "time": "9:00am",
                 "name": "Post-Workout Shake",
-                "optional": True,
+                "optional": False,
                 "foods": [
                     {"item": "Whey protein shake", "portion": "1 scoop + water", "cal": 130, "protein": 25, "carbs": 3, "fat": 2},
                 ],
@@ -84,7 +84,7 @@ MEAL_PLANS = {
             {
                 "time": "9:00am",
                 "name": "Post-Workout Shake + Banana",
-                "optional": True,
+                "optional": False,
                 "foods": [
                     {"item": "Whey protein shake", "portion": "1 scoop + water", "cal": 130, "protein": 25, "carbs": 3, "fat": 2},
                     {"item": "Banana", "portion": "1 medium", "cal": 105, "protein": 1, "carbs": 27, "fat": 0},
