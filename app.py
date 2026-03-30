@@ -1727,7 +1727,22 @@ def _build_coach_context():
         "supplements_today": {"taken": supps_taken},
         "intake_report": intake_report,
         "athlete_name": current_user.name or "Athlete",
+        "scheduled_activities": _get_scheduled_activities(),
     }
+
+
+def _get_scheduled_activities():
+    """Get user's scheduled activities for coach context."""
+    constraints = UserConstraints.query.filter_by(user_id=current_user.id).first()
+    if not constraints or not constraints.scheduled_activities:
+        return ""
+    activities = constraints.scheduled_activities
+    if not activities:
+        return ""
+    lines = ["Scheduled activities this athlete has committed to:"]
+    for a in activities:
+        lines.append(f"  - {a.get('day', '?')}: {a.get('activity', '?')} ({a.get('duration_min', '?')} min)")
+    return "\n".join(lines)
 
 
 # ─── PROGRESS PHOTOS ────────────────────────────────────────────────────────

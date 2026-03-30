@@ -3541,7 +3541,7 @@ async function triggerWeeklyPlanning() {
   // Send the weekly planning trigger to Coach
   const weekNum = currentWeek;
   const nextWeek = Math.min(weekNum + 1, 12);
-  const msg = `[WEEKLY_PLANNING] It's Sunday - time for our weekly planning session. I just finished week ${weekNum}. The coming week is week ${nextWeek}. Let's review how this week went and plan for next week. Ask me what I need to know for the week ahead.`;
+  const msg = `[WEEKLY_PLANNING] It's Sunday. Week ${weekNum} is done, week ${nextWeek} starts tomorrow. Review my week, then let's plan. Ask me about any travel, races, schedule changes, or injuries for the coming week. Adjust the plan based on what I tell you.`;
 
   // Find the chat input and programmatically send
   const inputEl = document.getElementById('chat-overlay-input') || document.getElementById('chat-input-field');
