@@ -4726,25 +4726,20 @@ function renderPostWorkoutCoach() {
   const hasRun = _runLogCache && _runLogCache[runKey];
   if (!hasRun) return '';
 
-  // Get today's coach messages (post-workout feedback)
-  const today = todayStr();
-  const postWorkoutMsgs = _chatHistory.filter(m => {
-    const text = m.text || m.content || '';
-    // Show all non-trigger messages from today's session
-    return !text.startsWith('[MORNING_CHECKIN]') && !text.startsWith('[WORKOUT_COMPLETE]') && !text.startsWith('[WEEKLY_PLANNING]');
-  }).slice(-8);
-
+  // Show only Erik's last post-workout message
+  const coachMsgs = _chatHistory.filter(m =>
+    (m.role === 'coach' || m.role === 'assistant') &&
+    !(m.text || m.content || '').startsWith('[')
+  );
   let bubblesHtml = '';
-  for (const m of postWorkoutMsgs) {
-    const text = m.text || m.content || '';
-    const isUser = m.role === 'user';
-    const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
-    bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
+  if (coachMsgs.length > 0) {
+    const last = coachMsgs[coachMsgs.length - 1];
+    bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
   }
 
   return `<div class="detail-section">
     <div class="coach-top-card">
-      <div class="coach-top-label">COACH ERIK — POST-WORKOUT</div>
+      <div class="coach-top-label">ERIK</div>
       <div class="coach-top-messages" id="post-workout-messages" style="max-height:300px">${bubblesHtml || '<div style="color:var(--muted);font-size:13px;padding:8px 0">Coach feedback will appear here after you log your run.</div>'}</div>
       <div class="coach-top-input-bar">
         <input type="text" id="post-workout-input" placeholder="Talk to Erik about your workout..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendPostWorkoutMessage()">
@@ -4763,9 +4758,7 @@ async function sendPostWorkoutMessage() {
 
   const msgsEl = document.getElementById('post-workout-messages');
   if (msgsEl) {
-    msgsEl.innerHTML += `<div class="coach-top-bubble user">${escapeHtml(text)}</div>`;
-    msgsEl.innerHTML += `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
-    msgsEl.scrollTop = msgsEl.scrollHeight;
+    msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
   }
 
   _chatHistory.push({ role: 'user', text, time: new Date().toISOString() });
@@ -4779,24 +4772,12 @@ async function sendPostWorkoutMessage() {
     const data = await res.json();
     if (data.response) {
       _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-      // Update the messages area
-      if (msgsEl) {
-        // Remove loading indicator and add response
-        const loading = msgsEl.querySelector('.coach-top-loading');
-        if (loading) loading.remove();
-        msgsEl.innerHTML += `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-      // Also update the top coach widget
+      if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
       renderCoachTop();
     }
   } catch(e) {
     _chatHistory.push({ role: 'coach', text: 'Connection issue. Try again.', time: new Date().toISOString() });
-    if (msgsEl) {
-      const loading = msgsEl.querySelector('.coach-top-loading');
-      if (loading) loading.remove();
-      msgsEl.innerHTML += `<div class="coach-top-bubble coach" style="color:var(--muted)">Connection issue. Try again.</div>`;
-    }
+    if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Connection issue. Try again.</div>`;
   }
 }
 
@@ -5283,23 +5264,15 @@ async function renderCoachTop() {
         ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
 
-    // Build bubbles from recent messages (skip internal triggers)
+    // Show only Erik's last message — coach voice, not chat log
     let bubblesHtml = '';
-    const recentMsgs = _chatHistory.slice(-6);
-    for (const m of recentMsgs) {
-        const text = m.text || m.content || '';
-        if (text.startsWith('[MORNING_CHECKIN]') || text.startsWith('[WORKOUT_COMPLETE]') || text.startsWith('[WEEKLY_PLANNING]')) continue;
-        const isUser = m.role === 'user';
-        const cls = isUser ? 'coach-top-bubble user' : 'coach-top-bubble coach';
-        bubblesHtml += `<div class="${cls}">${escapeHtml(text)}</div>`;
-    }
-
-    if (!bubblesHtml) {
-        const coachMsgs = recentMsgs.filter(m => (m.role === 'coach' || m.role === 'assistant'));
-        if (coachMsgs.length > 0) {
-            const last = coachMsgs[coachMsgs.length - 1];
-            bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
-        }
+    const coachMsgs = _chatHistory.filter(m =>
+        (m.role === 'coach' || m.role === 'assistant') &&
+        !(m.text || m.content || '').startsWith('[')
+    );
+    if (coachMsgs.length > 0) {
+        const last = coachMsgs[coachMsgs.length - 1];
+        bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
     }
 
     // Render the shell immediately (with or without bubbles)
@@ -5341,13 +5314,12 @@ async function renderCoachTop() {
 
 function renderCoachTopShell(bubblesHtml) {
     return `<div class="coach-top-card">
-        <div class="coach-top-label">COACH ERIK</div>
+        <div class="coach-top-label">ERIK</div>
         <div class="coach-top-messages" id="coach-top-messages">${bubblesHtml}</div>
         <div class="coach-top-input-bar">
-            <input type="text" id="coach-top-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendCoachTopMessage()">
+            <input type="text" id="coach-top-input" placeholder="Talk to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendCoachTopMessage()">
             <button onclick="sendCoachTopMessage()">Send</button>
         </div>
-        <button class="coach-top-expand" onclick="toggleChatOverlay()">View full conversation</button>
     </div>`;
 }
 
@@ -5358,12 +5330,10 @@ async function sendCoachTopMessage() {
     if (!text) return;
     input.value = '';
 
-    // Add user message bubble immediately
+    // Show typing indicator — no user bubble
     const msgsEl = document.getElementById('coach-top-messages');
     if (msgsEl) {
-        msgsEl.innerHTML += `<div class="coach-top-bubble user">${escapeHtml(text)}</div>`;
-        msgsEl.innerHTML += `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
-        msgsEl.scrollTop = msgsEl.scrollHeight;
+        msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
     }
 
     _chatHistory.push({ role: 'user', text: text, time: new Date().toISOString() });
@@ -5378,12 +5348,13 @@ async function sendCoachTopMessage() {
 
         if (data.response) {
             _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+            // Show only Erik's response — coach voice
+            if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
         }
     } catch(e) {
         _chatHistory.push({ role: 'coach', text: 'Connection issue. Try again.', time: new Date().toISOString() });
+        if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Connection issue. Try again.</div>`;
     }
-
-    renderCoachTop();
 }
 
 function renderInlineCoach() {
