@@ -1460,13 +1460,22 @@ const FOOD_MAX = 5;
 async function showFoodSelection() {
   const el = document.getElementById('baseline-overlay');
 
-  if (!_foodCatalog) {
-    el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem"><div class="chat-typing" style="justify-content:center"><span></span><span></span><span></span></div></div></div>`;
+  if (!_foodCatalog || !_foodCatalog.proteins) {
+    el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem"><div class="chat-typing" style="justify-content:center"><span></span><span></span><span></span></div><div style="margin-top:8px;color:var(--muted);font-size:13px">Loading food catalog...</div></div></div>`;
     try {
       const res = await fetch('/api/food-catalog');
-      _foodCatalog = await res.json();
+      if (!res.ok) throw new Error('Food catalog returned ' + res.status);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.proteins || data.proteins.length === 0) throw new Error('Empty catalog');
+      _foodCatalog = data;
     } catch(e) {
-      showFullProfile();
+      console.error('Food catalog error:', e);
+      el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem">
+        <h2 style="color:var(--amber)">Food Catalog Error</h2>
+        <p style="color:var(--muted)">${e.message}</p>
+        <button class="btn btn-primary" style="margin-top:1rem" onclick="_foodCatalog=null;showFoodSelection()">Retry</button>
+      </div></div>`;
       return;
     }
   }
