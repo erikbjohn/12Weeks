@@ -347,8 +347,7 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
         dict: {"calories": int, "protein": int, "carbs": int, "fat": int}
     """
     if weight_lbs is None:
-        # Rough estimate if weight not provided
-        weight_lbs = 180
+        raise ValueError("weight_lbs is required — never default to a hardcoded value")
 
     if goal_type == "cut":
         protein = round(1.2 * weight_lbs)

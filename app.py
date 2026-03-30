@@ -2532,7 +2532,7 @@ def api_goal_compute():
                 if 13 <= num <= 80:
                     age = num
 
-    # BodyWeight is primary, PhysicalAssessment is fallback
+    # BodyWeight is primary, PhysicalAssessment is fallback — NEVER default to 180
     latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
     if latest_bw:
         weight = latest_bw.weight_lbs
@@ -2542,7 +2542,7 @@ def api_goal_compute():
         db.session.add(BodyWeight(log_date=date.today(), weight_lbs=weight, user_id=current_user.id))
         db.session.commit()
     else:
-        weight = 180
+        return jsonify({"error": "No weight data found. Complete physical assessment first."}), 400
     height = (pa.height_inches if pa else None) or 70
 
     goal_info = detect_goal(actor_answer)
@@ -2707,7 +2707,9 @@ def api_baseline_assessment():
 
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-    body_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else 180)
+    body_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa and pa.bodyweight_lbs else None)
+    if not body_weight:
+        return jsonify({"error": "No weight data found. Complete physical assessment first."}), 400
 
     intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     sex = "male"
@@ -3244,15 +3246,24 @@ def api_physical_assessment_save():
         pa.has_measuring_tape = data["has_measuring_tape"]
     if "height" in data:
         pa.height_inches = data["height"]
-    if "bodyweight" in data:
-        pa.bodyweight_lbs = data["bodyweight"]
-        # Also log to BodyWeight table
+    if "bodyweight" in data and data["bodyweight"]:
+        pa.bodyweight_lbs = float(data["bodyweight"])
+        # CRITICAL: Also log to BodyWeight table — this is the primary weight source
         d = date.today()
         bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bw:
-            bw.weight_lbs = data["bodyweight"]
+            bw.weight_lbs = float(data["bodyweight"])
         else:
-            db.session.add(BodyWeight(log_date=d, weight_lbs=data["bodyweight"], user_id=current_user.id))
+            db.session.add(BodyWeight(log_date=d, weight_lbs=float(data["bodyweight"]), user_id=current_user.id))
+        # Flush immediately to ensure BodyWeight entry is created
+        try:
+            db.session.flush()
+        except Exception:
+            db.session.rollback()
+            # Re-add the physical assessment
+            pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+            if pa:
+                pa.bodyweight_lbs = float(data["bodyweight"])
     if "waist" in data:
         pa.waist_inches = data["waist"]
         d = date.today()
