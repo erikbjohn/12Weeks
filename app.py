@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import threading
+import time
 import uuid
 from datetime import date, timedelta, datetime
 from functools import wraps
@@ -31,6 +32,16 @@ from models import (
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+
+
+# CSRF token helper
+def _generate_csrf_token():
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = secrets.token_hex(32)
+    return session['_csrf_token']
+
+
+app.jinja_env.globals['csrf_token'] = _generate_csrf_token
 
 # Database
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
@@ -151,6 +162,10 @@ def login():
         return redirect("/")
 
     if request.method == "POST":
+        if request.form.get('csrf_token') != session.get('_csrf_token'):
+            flash("Invalid request. Please try again.", "error")
+            return redirect(url_for("login"))
+
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
@@ -175,6 +190,10 @@ def login():
 
 @app.route("/signup", methods=["POST"])
 def signup():
+    if request.form.get('csrf_token') != session.get('_csrf_token'):
+        flash("Invalid request. Please try again.", "error")
+        return redirect(url_for("login", mode="signup"))
+
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     name = request.form.get("name", "").strip()
@@ -252,8 +271,19 @@ def verify_email(token):
     return redirect(url_for("login"))
 
 
+_invite_attempts = {}  # IP -> (count, timestamp)
+
+
 @app.route("/invite/<code>")
 def accept_invite(code):
+    ip = request.remote_addr
+    now = time.time()
+    attempts = _invite_attempts.get(ip, (0, 0))
+    if attempts[0] >= 10 and now - attempts[1] < 300:
+        flash("Too many attempts. Try again in 5 minutes.", "error")
+        return redirect(url_for("login"))
+    _invite_attempts[ip] = (attempts[0] + 1, now)
+
     invite = Invite.query.filter_by(code=code).first()
     if not invite:
         flash("Invalid invite link.", "error")
@@ -688,6 +718,27 @@ def api_weights_record():
     weight = data.get("weight", 0)
     if weight < 0 or weight > 1500:
         return jsonify({"error": "Invalid weight"}), 400
+
+    # Upsert: update existing entry for same exercise/week/day/user
+    existing = None
+    if data.get("week") is not None and data.get("day_idx") is not None:
+        existing = ExerciseLog.query.filter_by(
+            exercise_name=data["exercise"],
+            week=data.get("week"),
+            day_idx=data.get("day_idx"),
+            user_id=current_user.id,
+        ).first()
+
+    if existing:
+        existing.weight = weight
+        existing.sets_label = data.get("sets_label")
+        existing.rpe = data.get("rpe")
+        existing.rpe_score = data.get("rpe_score")
+        existing.reps_completed = data.get("reps_completed")
+        existing.logged_date = date.today()
+        db.session.commit()
+        return jsonify({"ok": True, "id": existing.id, "updated": True})
+
     log = ExerciseLog(
         exercise_name=data["exercise"],
         weight=weight,

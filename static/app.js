@@ -4093,6 +4093,20 @@ function renderWeighInBar() {
 
   const bwData = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
   const today = todayStr();
+
+  if (bwData.length === 0) {
+    el.innerHTML = `
+      <div class="weighin-row">
+        <div class="weighin-label">Weigh-In</div>
+        <div class="weighin-controls">
+          <input type="number" inputmode="decimal" id="weighin-input" class="weighin-input" placeholder="lbs" step="0.1">
+          <button class="btn btn-primary weighin-log-btn" onclick="logWeighIn()">Log</button>
+        </div>
+        <div class="weighin-stats"><span class="weighin-avg" style="opacity:0.5">No weigh-ins yet</span></div>
+      </div>`;
+    return;
+  }
+
   const todayEntry = bwData.find(e => e.date === today);
 
   // Calculate 7-day rolling average
@@ -4455,16 +4469,25 @@ function renderProgressDashboard(data) {
   // Draw body weight chart
   if (data.bodyweight && data.bodyweight.length > 1) {
     drawProgressChart('progress-bw-chart', data.bodyweight.map(e => e.weight), data.bodyweight.map(e => e.date), '#4ade80');
+  } else {
+    const bwCanvas = document.getElementById('progress-bw-chart');
+    if (bwCanvas) bwCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
   }
 
   // Draw lifts chart (multiple lines)
   if (data.lifts) {
     drawLiftsChart('progress-lifts-chart', data.lifts);
+  } else {
+    const liftsCanvas = document.getElementById('progress-lifts-chart');
+    if (liftsCanvas) liftsCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
   }
 
   // Draw waist chart
   if (data.measurements && data.measurements.length > 1) {
     drawProgressChart('progress-waist-chart', data.measurements.map(e => e.waist), data.measurements.map(e => e.date), '#f59e0b');
+  } else {
+    const waistCanvas = document.getElementById('progress-waist-chart');
+    if (waistCanvas) waistCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
   }
 
   // Render checkins

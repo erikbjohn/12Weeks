@@ -197,7 +197,7 @@ EXERCISE_SWAPS = {
     },
 
     # ─── MISC ──────────────────────────────────────────────
-    "Cable Fly": {
+    "Incline Cable Fly": {
         "muscle_group": "chest",
         "requires": ["cable_machine"],
         "alternatives": [
@@ -215,7 +215,7 @@ EXERCISE_SWAPS = {
             {"name": "Wall Sit", "requires": [], "note": "Isometric, burn city"},
         ],
     },
-    "Leg Curl": {
+    "Lying Leg Curl": {
         "muscle_group": "hamstrings",
         "requires": ["leg_curl_ext"],
         "alternatives": [

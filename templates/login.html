@@ -271,6 +271,7 @@
             {% endif %}
 
             <form id="authForm" method="post" action="/login">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="invite_code" id="inviteCodeField" value="{{ invite_code or '' }}">
 
                 <div class="signup-fields" id="signupFields">
