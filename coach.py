@@ -312,12 +312,40 @@ def _build_system_prompt(ctx):
 DIETARY RESTRICTIONS: {allergen_list}{custom}
 """
 
+    # Resolve food IDs to human-readable names
+    _FOOD_ID_TO_NAME = {
+        "chicken_breast": "Chicken Breast", "ground_turkey_93": "Ground Turkey", "ground_beef_90": "Ground Beef",
+        "salmon": "Salmon", "tilapia": "Tilapia", "shrimp": "Shrimp", "tuna_canned": "Canned Tuna",
+        "eggs": "Eggs", "egg_whites": "Egg Whites", "greek_yogurt": "Greek Yogurt",
+        "cottage_cheese": "Cottage Cheese", "tofu_firm": "Tofu", "tempeh": "Tempeh",
+        "whey_protein": "Whey Protein", "plant_protein": "Plant Protein",
+        "white_rice": "White Rice", "brown_rice": "Brown Rice", "oats": "Oats",
+        "sweet_potato": "Sweet Potato", "white_potato": "White Potato", "quinoa": "Quinoa",
+        "whole_wheat_bread": "Whole Wheat Bread", "whole_wheat_pasta": "Whole Wheat Pasta",
+        "black_beans": "Black Beans", "lentils": "Lentils", "banana": "Banana", "blueberries": "Blueberries",
+        "broccoli": "Broccoli", "spinach": "Spinach", "kale": "Kale", "asparagus": "Asparagus",
+        "green_beans": "Green Beans", "bell_pepper": "Bell Pepper", "zucchini": "Zucchini",
+        "cauliflower": "Cauliflower", "mixed_greens": "Mixed Greens", "cherry_tomatoes": "Cherry Tomatoes",
+        "olive_oil": "Olive Oil", "coconut_oil": "Coconut Oil", "avocado": "Avocado",
+        "almonds": "Almonds", "walnuts": "Walnuts", "peanut_butter": "Peanut Butter",
+        "almond_butter": "Almond Butter", "chia_seeds": "Chia Seeds", "flax_seeds": "Flax Seeds",
+        "cheddar_cheese": "Cheddar Cheese",
+    }
+
     selected_food_summary = ""
     if selected_foods:
-        items = []
+        names = []
         for cat, food_ids in selected_foods.items():
-            items.extend(food_ids)
-        selected_food_summary = f"\nAPPROVED FOODS (user selected these during onboarding): {', '.join(items)}"
+            for fid in food_ids:
+                names.append(_FOOD_ID_TO_NAME.get(fid, fid))
+        selected_food_summary = f"""
+THIS IS THE COMPLETE LIST OF APPROVED FOODS. There are NO other approved foods:
+{', '.join(sorted(names))}
+
+If a food is NOT on this list, it DOES NOT EXIST for this athlete. Do not mention it.
+Do not suggest it. Do not reference it. Not corn tortillas, not bread (unless Whole Wheat Bread
+is listed), not pasta (unless Whole Wheat Pasta is listed), not any food not explicitly named above.
+"""
 
     fasting_section = ""
     if fasting_protocol:
