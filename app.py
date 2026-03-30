@@ -517,6 +517,36 @@ def restart_plan():
     return redirect("/?action=restart-plan")
 
 
+@app.route("/redo-measurements")
+@login_required
+def redo_measurements():
+    """Reset physical assessment so user can re-enter measurements."""
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    if pa:
+        pa.completed = False
+        db.session.commit()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if goal:
+        goal.plan_accepted = False
+        db.session.commit()
+    return redirect("/")
+
+
+@app.route("/redo-equipment")
+@login_required
+def redo_equipment():
+    """Reset equipment inventory so user can re-select."""
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    if eq:
+        eq.completed = False
+        db.session.commit()
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if goal:
+        goal.plan_accepted = False
+        db.session.commit()
+    return redirect("/")
+
+
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
 
 @app.route("/api/workouts")
