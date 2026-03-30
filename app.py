@@ -2633,6 +2633,24 @@ def api_test_create_user():
     )
     db.session.add(user)
     db.session.commit()
+
+    # Seed minimal psych intake so goal compute works
+    intake = PsychIntake(
+        user_id=user.id,
+        completed=True,
+        conversation=[
+            {"role": "assistant", "content": "What sex were you assigned at birth?"},
+            {"role": "user", "content": "male"},
+            {"role": "assistant", "content": "How old are you?"},
+            {"role": "user", "content": "35"},
+            {"role": "assistant", "content": "What actor or movie character has the body you want?"},
+            {"role": "user", "content": "Brad Pitt in Fight Club"},
+        ],
+        report="Test user psych intake. Goal: lean physique, cut body fat.",
+    )
+    db.session.add(intake)
+    db.session.commit()
+
     return jsonify({"ok": True, "user_id": user.id})
 
 
