@@ -1749,7 +1749,7 @@ async function showWeightProjection() {
         <div class="proj-milestone"><span class="proj-week">Week 8</span><span class="proj-weight">${w8 ? w8.projected : '?'} lbs</span></div>
         <div class="proj-milestone highlight"><span class="proj-week">Week 12</span><span class="proj-weight">${w12 ? w12.projected : '?'} lbs</span></div>
       </div>
-      <canvas id="projection-chart" width="320" height="180" style="margin:1rem auto;display:block"></canvas>
+      <canvas id="projection-chart" height="180" style="width:100%;margin:1rem auto;display:block"></canvas>
       <div style="font-size:13px;color:var(--muted);margin-top:0.5rem">
         ${goalData.goal_type === 'cut' ? 'Deficit: ' + goalData.calories + ' cal/day' : goalData.goal_type === 'bulk' ? 'Surplus: ' + goalData.calories + ' cal/day' : goalData.calories + ' cal/day'}
         ${goalData.fasting_protocol !== 'none' ? ' · Fasting: ' + goalData.fasting_protocol.replace('_',':') : ''}
@@ -1766,6 +1766,7 @@ async function showWeightProjection() {
 function drawProjectionChart(projection) {
   const canvas = document.getElementById('projection-chart');
   if (!canvas || projection.length < 2) return;
+  canvas.width = canvas.offsetWidth;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height, pad = 20;
   ctx.clearRect(0, 0, W, H);
@@ -4038,7 +4039,7 @@ function renderWeighInBar() {
         ${trendHtml}
       </div>
     </div>
-    <div class="weighin-chart"><canvas id="weighin-canvas" width="200" height="60"></canvas></div>
+    <div class="weighin-chart"><canvas id="weighin-canvas" height="60" style="width:100%"></canvas></div>
   `;
 
   // Draw sparkline
@@ -4088,6 +4089,7 @@ function editWeighIn() {
 function drawWeighInSparkline(bwData) {
   const canvas = document.getElementById('weighin-canvas');
   if (!canvas || bwData.length < 2) return;
+  canvas.width = canvas.parentElement.offsetWidth;
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
@@ -4341,15 +4343,15 @@ function renderProgressDashboard(data) {
     <div class="progress-content">
       <div class="progress-chart-section">
         <h3>Body Weight</h3>
-        <canvas id="progress-bw-chart" width="340" height="180"></canvas>
+        <canvas id="progress-bw-chart" height="180" style="width:100%"></canvas>
       </div>
       <div class="progress-chart-section">
         <h3>Key Lifts</h3>
-        <canvas id="progress-lifts-chart" width="340" height="180"></canvas>
+        <canvas id="progress-lifts-chart" height="180" style="width:100%"></canvas>
       </div>
       <div class="progress-chart-section">
         <h3>Waist Measurement</h3>
-        <canvas id="progress-waist-chart" width="340" height="120"></canvas>
+        <canvas id="progress-waist-chart" height="120" style="width:100%"></canvas>
       </div>
       <div class="progress-chart-section">
         <h3>Weekly Check-Ins</h3>
@@ -4388,6 +4390,7 @@ function renderProgressDashboard(data) {
 function drawProgressChart(canvasId, values, labels, color) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || values.length < 2) return;
+  canvas.width = canvas.offsetWidth;
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
@@ -4424,6 +4427,7 @@ function drawProgressChart(canvasId, values, labels, color) {
 function drawLiftsChart(canvasId, liftsData) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
+  canvas.width = canvas.offsetWidth;
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
