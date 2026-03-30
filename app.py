@@ -27,7 +27,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    UserEquipment, WarmupCompletion, RunLog,
+    UserEquipment, WarmupCompletion, RunLog, SetLog,
 )
 
 app = Flask(__name__)
@@ -791,6 +791,81 @@ def api_weights_record():
     db.session.add(log)
     db.session.commit()
     return jsonify({"ok": True, "id": log.id})
+
+
+@app.route("/api/sets", methods=["POST"])
+@login_required
+def api_set_log():
+    """Save individual set data — one row per set."""
+    data = request.get_json()
+    exercise = data.get("exercise")
+    week = data.get("week")
+    day_idx = data.get("day_idx")
+    set_number = data.get("set_number")
+    weight = data.get("weight", 0)
+    reps = data.get("reps", 0)
+    done = data.get("done", True)
+
+    if not exercise or week is None or day_idx is None or set_number is None:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    # Upsert: update if exists, create if not
+    existing = SetLog.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise,
+        week=week, day_idx=day_idx, set_number=set_number
+    ).first()
+
+    if existing:
+        existing.weight = weight
+        existing.reps = reps
+        existing.done = done
+        existing.logged_date = date.today()
+    else:
+        existing = SetLog(
+            user_id=current_user.id, exercise_name=exercise,
+            week=week, day_idx=day_idx, set_number=set_number,
+            weight=weight, reps=reps, done=done, logged_date=date.today(),
+        )
+        db.session.add(existing)
+    db.session.commit()
+    return jsonify({"ok": True, "id": existing.id})
+
+
+@app.route("/api/sets")
+@login_required
+def api_get_sets():
+    """Get all set logs for current user."""
+    sets = SetLog.query.filter_by(user_id=current_user.id).order_by(
+        SetLog.week, SetLog.day_idx, SetLog.set_number
+    ).all()
+    result = {}
+    for s in sets:
+        key = f"{s.week}_{s.day_idx}_{s.exercise_name}"
+        if key not in result:
+            result[key] = []
+        result[key].append({
+            "set": s.set_number, "weight": s.weight,
+            "reps": s.reps, "done": s.done,
+        })
+    return jsonify(result)
+
+
+@app.route("/api/sets/<int:week>/<int:day_idx>")
+@login_required
+def api_get_day_sets(week, day_idx):
+    """Get set logs for a specific day — used by frontend to populate set rows."""
+    sets = SetLog.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=day_idx
+    ).order_by(SetLog.exercise_name, SetLog.set_number).all()
+    result = {}
+    for s in sets:
+        key = f"{week}_{day_idx}_{s.exercise_name}"
+        if key not in result:
+            result[key] = {}
+        result[key][str(s.set_number)] = {
+            "weight": s.weight, "reps": s.reps, "done": s.done,
+        }
+    return jsonify(result)
 
 
 @app.route("/api/weights/baseline", methods=["POST"])

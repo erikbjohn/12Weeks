@@ -59,6 +59,21 @@ class ExerciseLog(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
 
+class SetLog(db.Model):
+    """Per-set weight/reps tracking — one row per set per exercise per day."""
+    __tablename__ = "set_log"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    exercise_name = db.Column(db.String(100), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    set_number = db.Column(db.Integer, nullable=False)  # 0-indexed
+    weight = db.Column(db.Float, default=0)
+    reps = db.Column(db.Integer, default=0)
+    done = db.Column(db.Boolean, default=False)
+    logged_date = db.Column(db.Date, default=date.today)
+
+
 class ExerciseCompletion(db.Model):
     """Exercise-level completion checkbox."""
     __tablename__ = "exercise_completion"

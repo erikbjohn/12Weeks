@@ -410,6 +410,8 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     btn.classList.remove('done');
     btn.innerHTML = '';
     btn.closest('.set-row').classList.remove('set-done');
+    // Save un-done state to DB
+    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: false });
   } else {
     // Check — mark set done
     _setCache[key] = { done: true, weight, reps };
@@ -417,12 +419,14 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     btn.innerHTML = '&#10003;';
     btn.closest('.set-row').classList.add('set-done');
 
-    // Save weight to backend
+    // Save set to DB (every set, every rep, every weight)
+    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true });
+
+    // Also update the exercise-level weight cache
     if (weight > 0) {
       if (!_weightsCache) _weightsCache = {};
       if (!_weightsCache[exName]) _weightsCache[exName] = { current: 0, history: [] };
       _weightsCache[exName].current = weight;
-      apiPost('/api/weights', { exercise: exName, weight, week, day_idx: dayIdx, sets_label: `set ${setIdx + 1}`, reps_completed: reps || null });
     }
 
     // Start rest timer
@@ -444,8 +448,6 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
       renderDetail();
     }
   }
-  // Persist set cache to sessionStorage
-  sessionStorage.setItem('set_cache', JSON.stringify(_setCache));
 }
 
 function startRestTimer(exIdx, seconds) {
@@ -3232,8 +3234,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Run logs
     try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
 
-    // Per-set completion cache (session-based)
-    try { _setCache = JSON.parse(sessionStorage.getItem('set_cache') || '{}'); } catch(e) { _setCache = {}; }
+    // Per-set completion cache — loaded per-day in renderDetail()
+    _setCache = {};
 
     // Set state from cache
     currentWeek = _stateCache.current_week || 1;
@@ -5600,6 +5602,37 @@ async function renderDetail() {
   const runClass = `run-${d.run.type}`;
   const isTraveling = _stateCache && _stateCache.traveling;
 
+  // Load per-set data from DB for this day (if not already loaded)
+  const setDayKey = `${currentWeek}_${currentDay}`;
+  if (!_setCache._loadedDay || _setCache._loadedDay !== setDayKey) {
+    try {
+      const setRes = await fetch(`/api/sets/${currentWeek}/${currentDay}`);
+      if (setRes.ok) {
+        const setData = await setRes.json();
+        // Convert DB format to _setCache format
+        // DB: { "1_0_Barbell Bench Press": { "0": {weight, reps, done}, "1": {...} } }
+        // Cache: { "1_0_0_0": {done, weight, reps}, "1_0_0_1": {...} }
+        const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+        const displayExercises = d.exercises || [];
+        for (let i = 0; i < displayExercises.length; i++) {
+          const swapKey = currentWeek + '_' + currentDay + '_' + i;
+          const exName = swaps[swapKey] || displayExercises[i].name;
+          const dbKey = `${currentWeek}_${currentDay}_${exName}`;
+          if (setData[dbKey]) {
+            for (const [setNum, setInfo] of Object.entries(setData[dbKey])) {
+              if (setInfo.done) {
+                _setCache[`${currentWeek}_${currentDay}_${i}_${setNum}`] = {
+                  done: true, weight: setInfo.weight, reps: setInfo.reps,
+                };
+              }
+            }
+          }
+        }
+        _setCache._loadedDay = setDayKey;
+      }
+    } catch(e) { /* Continue with empty cache */ }
+  }
+
   // If traveling, try to load travel workout
   if (isTraveling && !d._travelLoaded) {
     fetch('/api/travel/workout?day=' + encodeURIComponent(d.day))
@@ -5675,15 +5708,18 @@ async function renderDetail() {
     let setRowsHtml = '';
     for (let s = 0; s < setCount; s++) {
       const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
-      const setDone = !!(_setCache && _setCache[setKey]);
+      const setData = _setCache && _setCache[setKey];
+      const setDone = !!(setData && setData.done);
+      const setWeight = setData && setData.weight ? setData.weight : weightVal;
+      const setReps = setData && setData.reps ? setData.reps : '';
       setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
         <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
           ${setDone ? '&#10003;' : ''}
         </button>
         <span class="set-label">Set ${s + 1}</span>
-        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${weightVal}" placeholder="lb">
+        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb">
         <span class="set-x">&times;</span>
-        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setDone && _setCache[setKey].reps ? _setCache[setKey].reps : ''}" placeholder="${targetReps}" min="0" max="100">
+        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100">
       </div>`;
     }
 
