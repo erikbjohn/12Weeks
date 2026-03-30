@@ -62,7 +62,7 @@ def admin_required(f):
     return decorated
 
 def _determine_role(email):
-    if email and email.lower().endswith("@gmail.com"):
+    if email and email.lower().endswith("@placemetry.com"):
         return "admin"
     return "user"
 
