@@ -431,22 +431,24 @@ function getWeightTrend(exName) {
 async function checkOnboardingComplete() {
   // Onboarding is only truly complete when ALL steps are done
   try {
-    const [intakeRes, conRes, paRes, goalRes, foodRes] = await Promise.all([
+    const [intakeRes, conRes, paRes, goalRes, foodRes, eqRes] = await Promise.all([
       fetch('/api/psych-intake/status'),
       fetch('/api/constraints'),
       fetch('/api/physical-assessment/status'),
       fetch('/api/goal'),
       fetch('/api/food-selections'),
+      fetch('/api/equipment'),
     ]);
     const intake = await intakeRes.json();
     const con = await conRes.json();
     const pa = await paRes.json();
     const goal = await goalRes.json();
     const food = await foodRes.json();
+    const eq = await eqRes.json();
 
     // plan_accepted is the FINAL gate — user must have reviewed and accepted the training plan
     const planAccepted = goal.plan_accepted || false;
-    return intake.completed && con.completed && pa.completed && goal.computed && food.completed && planAccepted;
+    return intake.completed && con.completed && pa.completed && eq.completed && goal.computed && food.completed && planAccepted;
   } catch(e) {
     // If we can't check, fall back to baseline_done
     return _stateCache.baseline_done;
@@ -501,7 +503,15 @@ async function resumeOnboarding() {
       return;
     }
 
-    // Physical done, constraints done — check goal
+    // Physical done — check equipment
+    const eqRes = await fetch('/api/equipment');
+    const eqData = await eqRes.json();
+    if (!eqData.completed) {
+      showEquipmentSelection();
+      return;
+    }
+
+    // Equipment done, constraints done — check goal
     const gRes = await fetch('/api/goal');
     const gData = await gRes.json();
     if (!gData.computed) {
@@ -739,7 +749,7 @@ function saveBaseline() {
   apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
-  computeGoal();
+  showEquipmentSelection();
 }
 
 // ─── BASELINE MEASUREMENTS & PHOTOS STEP ────────────────────────────────────
@@ -1397,7 +1407,7 @@ function saveBwBaseline() {
   apiPost('/api/physical-assessment', { completed: true });
   _stateCache.baseline_done = true;
   apiPost('/api/state', { baseline_done: true });
-  computeGoal();
+  showEquipmentSelection();
 }
 
 // ─── FULL ATHLETE PROFILE ──────────────────────────────────────────────────
@@ -1445,6 +1455,113 @@ async function showFullProfile() {
     console.error('Full profile error:', e);
     finishOnboarding();
   }
+}
+
+// ─── EQUIPMENT SELECTION ──────────────────────────────────────────────────
+let _equipCatalog = null;
+let _equipSelections = [];
+let _equipStep = 0;
+
+async function showEquipmentSelection() {
+    const el = document.getElementById('baseline-overlay');
+
+    if (!_equipCatalog) {
+        el.innerHTML = `<div class="baseline-overlay"><div class="baseline-card" style="text-align:center;padding:2rem"><div class="chat-typing" style="justify-content:center"><span></span><span></span><span></span></div><div style="margin-top:8px;color:var(--muted);font-size:13px">Loading equipment list...</div></div></div>`;
+        try {
+            const res = await fetch('/api/equipment/catalog');
+            if (!res.ok) throw new Error('Failed');
+            _equipCatalog = await res.json();
+        } catch(e) {
+            computeGoal(); // Skip on error
+            return;
+        }
+    }
+
+    _equipStep = 0;
+    const categories = Object.keys(_equipCatalog);
+    renderEquipmentSelection(categories);
+}
+
+function renderEquipmentSelection(categories) {
+    const el = document.getElementById('baseline-overlay');
+
+    if (_equipStep >= categories.length) {
+        // Confirm screen
+        const selectedNames = _equipSelections.map(id => {
+            for (const cat of Object.values(_equipCatalog)) {
+                const item = cat.items.find(i => i.id === id);
+                if (item) return item.name;
+            }
+            return id;
+        });
+
+        el.innerHTML = `<div class="baseline-overlay">
+            <div class="baseline-card">
+                <h2>Your Equipment</h2>
+                <div class="baseline-desc" style="margin-bottom:1rem">This is what we'll program for. You can swap exercises anytime during workouts.</div>
+                <div class="equip-confirm-list">${selectedNames.length > 0 ? selectedNames.map(n => '<div class="equip-confirm-item">' + n + '</div>').join('') : '<div style="color:var(--muted)">No equipment selected — bodyweight only</div>'}</div>
+                <div style="display:flex;gap:8px;margin-top:1.5rem">
+                    <button class="btn btn-secondary" onclick="_equipStep=0;renderEquipmentSelection(${JSON.stringify(categories)})">Change</button>
+                    <button class="btn btn-primary" style="flex:1" onclick="saveEquipmentSelections()">Confirm Equipment</button>
+                </div>
+            </div>
+        </div>`;
+        return;
+    }
+
+    const catKey = categories[_equipStep];
+    const cat = _equipCatalog[catKey];
+
+    let dots = '';
+    for (let i = 0; i < categories.length; i++) {
+        dots += '<div class="bp-dot ' + (i < _equipStep ? 'done' : i === _equipStep ? 'active' : '') + '"></div>';
+    }
+
+    const items = cat.items.map(item => {
+        const isSelected = _equipSelections.includes(item.id);
+        return '<div class="food-item' + (isSelected ? ' selected' : '') + '" onclick="toggleEquip(\'' + item.id + '\')">' +
+            '<div class="food-item-name">' + item.name + '</div>' +
+        '</div>';
+    }).join('');
+
+    el.innerHTML = `<div class="baseline-overlay">
+        <div class="baseline-card">
+            <div class="baseline-progress">${dots}</div>
+            <h2>${cat.label}</h2>
+            <div class="baseline-desc">Tap everything your gym has.</div>
+            <div class="food-grid">${items}</div>
+            <div style="display:flex;gap:8px;margin-top:1rem">
+                ${_equipStep > 0 ? '<button class="btn btn-secondary" onclick="_equipStep--;renderEquipmentSelection(' + JSON.stringify(categories) + ')">Back</button>' : ''}
+                <button class="btn btn-primary" style="flex:1" onclick="_equipStep++;renderEquipmentSelection(${JSON.stringify(categories)})">${_equipStep === categories.length - 1 ? 'Review' : 'Next'}</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function toggleEquip(id) {
+    const idx = _equipSelections.indexOf(id);
+    if (idx >= 0) {
+        _equipSelections.splice(idx, 1);
+    } else {
+        _equipSelections.push(id);
+    }
+    // Update in-place
+    document.querySelectorAll('.food-item').forEach(item => {
+        const oc = item.getAttribute('onclick') || '';
+        const m = oc.match(/toggleEquip\('([^']+)'\)/);
+        if (m) {
+            item.classList.toggle('selected', _equipSelections.includes(m[1]));
+        }
+    });
+}
+
+async function saveEquipmentSelections() {
+    await fetch('/api/equipment', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ available_equipment: _equipSelections, completed: true }),
+    });
+    computeGoal();
 }
 
 // ─── COMPUTE GOAL ──────────────────────────────────────────────────────────
@@ -2638,6 +2755,42 @@ function submitRPE(week, dayIdx, exIdx, exName, rpe) {
   const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
   recordWeight(exName, weight, setsLabel, rpe, week, dayIdx);
   renderDetail();
+}
+
+async function showExerciseSwap(exIdx, exerciseName, event) {
+    if (event) event.stopPropagation();
+    const swapContainer = event.target.parentElement;
+    swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading alternatives...</div>';
+
+    try {
+        const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(exerciseName));
+        const data = await res.json();
+
+        if (!data.alternatives || data.alternatives.length === 0) {
+            swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">No alternatives available</div>';
+            return;
+        }
+
+        const altsHtml = data.alternatives.map(alt =>
+            `<div class="swap-option" onclick="swapExercise(${currentWeek},${currentDay},${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
+                <span class="swap-name">${alt.name}</span>
+                <span class="swap-note">${alt.note}</span>
+            </div>`
+        ).join('');
+
+        swapContainer.innerHTML = `<div class="swap-options">${altsHtml}</div>`;
+    } catch(e) {
+        swapContainer.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load alternatives</div>';
+    }
+}
+
+function swapExercise(week, day, exIdx, newName) {
+    // Store swap in sessionStorage (resets on page close)
+    const key = week + '_' + day + '_' + exIdx;
+    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+    swaps[key] = newName;
+    sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+    renderDetail(); // Re-render with swapped exercise
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
@@ -4695,13 +4848,17 @@ async function renderDetail() {
   const displayExercises = travelExercises || d.exercises;
 
   // Exercise rows with weight tracking and RPE
+  const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const exRows = displayExercises.map((ex, i) => {
+    const swapKey = currentWeek + '_' + currentDay + '_' + i;
+    const displayName = swaps[swapKey] || ex.name;
+    const isSwapped = !!swaps[swapKey];
     const done = isExDone(currentWeek, currentDay, i);
-    const suggestion = getWeightForExercise(ex.name, currentWeek);
-    const lastWt = getLastWeight(ex.name);
+    const suggestion = getWeightForExercise(displayName, currentWeek);
+    const lastWt = getLastWeight(displayName);
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
-    const exData = getExerciseData(ex.name);
+    const exData = getExerciseData(displayName);
     const hasRPE = exData && exData.history && exData.history.length > 0 &&
       exData.history[exData.history.length - 1].week === currentWeek &&
       exData.history[exData.history.length - 1].day === currentDay;
@@ -4711,9 +4868,9 @@ async function renderDetail() {
     if (done && !hasRPE) {
       rpeHtml = `<div class="rpe-feedback">
         <span class="rpe-label">How was it?</span>
-        <button class="rpe-btn rpe-easy" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','too_easy')">Too Easy</button>
-        <button class="rpe-btn rpe-right" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','just_right')">Just Right</button>
-        <button class="rpe-btn rpe-hard" onclick="submitRPE(${currentWeek},${currentDay},${i},'${ex.name.replace(/'/g, "\\'")}','too_hard')">Too Hard</button>
+        <button class="rpe-btn rpe-easy" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','too_easy')">Too Easy</button>
+        <button class="rpe-btn rpe-right" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','just_right')">Just Right</button>
+        <button class="rpe-btn rpe-hard" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','too_hard')">Too Hard</button>
       </div>`;
     } else if (hasRPE) {
       const rpeLabels = { too_easy: 'Too Easy', just_right: 'Just Right', too_hard: 'Too Hard' };
@@ -4724,12 +4881,14 @@ async function renderDetail() {
       </div>`;
     }
 
+    const swapHtml = `<div class="exercise-swap-link" onclick="showExerciseSwap(${i},'${ex.name.replace(/'/g, "\\'")}',event)">Don't have this? Tap for alternatives</div>`;
+
     return `<div class="exercise-row" style="flex-wrap:wrap">
       <button class="ex-check${done?' done':''}" onclick="toggleEx(${currentWeek},${currentDay},${i})">
         ${done ? '&#10003;' : ''}
       </button>
       <div class="ex-info">
-        <div class="ex-name">${ex.name}${ex.video ? ` <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(ex.video)}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>` : ''}</div>
+        <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}${ex.video ? ` <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName)}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>` : ''}</div>
         ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       </div>
       <div class="weight-input-wrap">
@@ -4739,6 +4898,7 @@ async function renderDetail() {
       </div>
       <div class="ex-sets">${ex.sets}</div>
       ${rpeHtml ? `<div style="width:100%;padding-left:36px">${rpeHtml}</div>` : ''}
+      <div style="width:100%;padding-left:36px">${swapHtml}</div>
     </div>`;
   }).join('');
 

@@ -25,6 +25,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
+    UserEquipment,
 )
 
 app = Flask(__name__)
@@ -117,6 +118,7 @@ with app.app_context():
         "supplement_log", "morning_checkin", "psych_intake", "garmin_tokens",
         "physical_assessment", "chat_message", "progress_photo",
         "user_constraints", "training_goal", "user_food_selections", "weekly_report",
+        "user_equipment",
     ]
     try:
         for tbl in _user_id_tables:
@@ -2109,6 +2111,50 @@ def api_food_selections_validate():
     daily_protein = goal.protein_grams if goal else 150
     result = validate_selections(selections, daily_cal, daily_protein)
     return jsonify(result)
+
+
+# ─── EQUIPMENT ─────────────────────────────────────────────────────────────
+
+@app.route("/api/equipment/catalog")
+@login_required
+def api_equipment_catalog():
+    from equipment_swaps import EQUIPMENT_CATALOG
+    return jsonify(EQUIPMENT_CATALOG)
+
+
+@app.route("/api/equipment")
+@login_required
+def api_equipment():
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    if not eq:
+        return jsonify({"completed": False, "available_equipment": []})
+    return jsonify({"completed": eq.completed, "available_equipment": eq.available_equipment or []})
+
+
+@app.route("/api/equipment", methods=["POST"])
+@login_required
+def api_equipment_save():
+    data = request.get_json()
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    if not eq:
+        eq = UserEquipment(user_id=current_user.id)
+        db.session.add(eq)
+    if "available_equipment" in data:
+        eq.available_equipment = data["available_equipment"]
+    if "completed" in data:
+        eq.completed = data["completed"]
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/exercise/alternatives/<path:exercise_name>")
+@login_required
+def api_exercise_alternatives(exercise_name):
+    from equipment_swaps import get_alternatives
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    user_equipment = eq.available_equipment if eq else []
+    alts = get_alternatives(exercise_name, user_equipment)
+    return jsonify({"exercise": exercise_name, "alternatives": alts})
 
 
 # ─── WEEKLY REPORT ─────────────────────────────────────────────────────────
