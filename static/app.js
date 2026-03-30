@@ -2159,9 +2159,9 @@ function showRevealPlan() {
 
             <h3 style="text-align:center;margin:1.5rem 0 1rem;color:var(--text)">Does this plan work for you?</h3>
             <div style="display:flex;flex-direction:column;gap:10px">
-                <button class="btn btn-primary" style="width:100%;font-size:16px;padding:14px" onclick="acceptPlan()">Let's Do This</button>
-                <button class="btn btn-secondary" style="width:100%;font-size:16px;padding:14px" onclick="requestMoreAggressive()">I Want Bigger Results</button>
-                <button class="btn btn-secondary" style="width:100%;font-size:14px;padding:12px;opacity:0.5" onclick="handleDialBack()">This Is Too Much</button>
+                <button class="btn btn-primary" style="width:100%;font-size:15px;padding:14px;font-family:'DM Mono',monospace" onclick="acceptPlan()">Let's Do This</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:14px;font-family:'DM Mono',monospace;color:var(--text)" onclick="requestMoreAggressive()">I Want Bigger Results</button>
+                <button class="btn btn-secondary" style="width:100%;font-size:15px;padding:14px;font-family:'DM Mono',monospace;opacity:0.4" onclick="handleDialBack()">This Is Too Much</button>
             </div>
         </div>
     </div>`;
