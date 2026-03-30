@@ -2124,11 +2124,20 @@ def api_goal_compute():
     goal.weight_projection = projection
     db.session.commit()
 
+    daily_deficit = tdee_info["tdee"] - targets["calories"]
+    weekly_loss = round(daily_deficit * 7 / 3500, 1) if daily_deficit > 0 else 0
+    total_loss = round(weight - target_weight, 1)
+
     return jsonify({
         "goal_type": goal_type,
+        "starting_weight": weight,
         "target_weight": round(target_weight, 1),
         "target_bf_pct": target_bf,
+        "tdee": tdee_info["tdee"],
         "calories": targets["calories"],
+        "daily_deficit": daily_deficit,
+        "weekly_loss_lbs": weekly_loss,
+        "total_loss_lbs": total_loss,
         "protein": targets["protein"],
         "carbs": targets["carbs"],
         "fat": targets["fat"],

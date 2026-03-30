@@ -3432,6 +3432,11 @@ footer {
 .plan-cal-row:last-child { border-bottom: none; }
 .plan-value { font-size: 15px; color: var(--text); }
 .plan-nonneg { font-size: 14px; color: var(--amber); font-weight: 600; }
+.plan-outcomes { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.plan-outcome-row { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.plan-outcome-row:last-child { border-bottom: none; }
+.plan-outcome-row span:first-child { color: var(--muted); }
+.plan-outcome-row span:last-child { color: var(--text); text-align: right; }
 .plan-note { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 6px; }
 .plan-note-warn { background: var(--run-tempo-bg); border: 1px solid var(--run-tempo-border); color: var(--run-tempo); }
 

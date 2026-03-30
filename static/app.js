@@ -2019,6 +2019,44 @@ function showRevealPlan() {
     const goalLabel = (g.goal_type || 'cut').toUpperCase();
     const goalColor = g.goal_type === 'bulk' ? 'var(--blue)' : g.goal_type === 'recomp' ? 'var(--amber)' : 'var(--accent)';
 
+    // Projected outcomes
+    const proj = g.weight_projection || [];
+    const w4 = proj.find(p => p.week === 4);
+    const w8 = proj.find(p => p.week === 8);
+    const w12 = proj.find(p => p.week === 12);
+    const startWt = g.starting_weight || (proj.length > 0 ? Math.round(proj[0].projected) : '?');
+    const endWt = w12 ? Math.round(w12.projected) : g.target_weight || '?';
+    const deficit = g.daily_deficit || 0;
+    const weeklyLoss = g.weekly_loss_lbs || 0;
+    const totalLoss = g.total_loss_lbs || 0;
+    const tdee = g.tdee || '?';
+    const targetBf = g.target_bf_pct ? Math.round(g.target_bf_pct * 100) : '?';
+
+    // Strength projections from baseline (same as assessment but projected forward)
+    const weights = _weightsCache || {};
+    let strengthProjections = '';
+    const keyLifts = [
+        { name: 'Barbell Bench Press', short: 'Bench' },
+        { name: 'Barbell Back Squat', short: 'Squat' },
+        { name: 'Conventional Deadlift', short: 'Deadlift' },
+    ];
+    for (const lift of keyLifts) {
+        const data = weights[lift.name];
+        if (!data || !data.history || data.history.length === 0) continue;
+        const last = data.history[data.history.length - 1];
+        const setsLabel = String(last.reps || '');
+        let current1RM = 0;
+        const m = setsLabel.match(/(\d+)\s*(?:lb)?\s*x\s*(\d+)/i);
+        if (m) current1RM = Math.round(parseInt(m[1]) * (1 + parseInt(m[2]) / 30));
+        else current1RM = Math.round(data.current / 0.75);
+        if (current1RM <= 0) continue;
+        const wk12_1rm = Math.round(current1RM * 1.35);
+        strengthProjections += `<div class="plan-outcome-row">
+            <span>${lift.short} 1RM</span>
+            <span>${current1RM} → <strong>${wk12_1rm} lbs</strong></span>
+        </div>`;
+    }
+
     // Day type calorie table
     const dayTypes = g.calorie_by_day_type || {};
     let calRows = '';
@@ -2032,14 +2070,55 @@ function showRevealPlan() {
     const electrolyteNote = g.electrolytes ? '<div class="plan-note plan-note-warn">Electrolyte supplementation required (sodium, potassium, magnesium)</div>' : '';
 
     el.innerHTML = `<div class="baseline-overlay">
-        <div class="baseline-card">
+        <div class="baseline-card" style="text-align:left">
             <div style="text-align:center;margin-bottom:1rem">
                 <span class="plan-goal-badge" style="background:${goalColor}">${goalLabel}</span>
             </div>
             <h2 style="text-align:center;margin-bottom:1.5rem">Your Training Plan</h2>
 
             <div class="plan-section">
-                <div class="plan-section-label">Daily Targets</div>
+                <div class="plan-section-label">Projected Results (12 Weeks)</div>
+                <div class="plan-outcomes">
+                    <div class="plan-outcome-row">
+                        <span>Body Weight</span>
+                        <span>${startWt} → <strong>${endWt} lbs</strong> (−${totalLoss} lbs)</span>
+                    </div>
+                    <div class="plan-outcome-row">
+                        <span>Target Body Fat</span>
+                        <span><strong>${targetBf}%</strong></span>
+                    </div>
+                    <div class="plan-outcome-row">
+                        <span>Wk 4 / Wk 8 / Wk 12</span>
+                        <span>${w4 ? Math.round(w4.projected) : '?'} / ${w8 ? Math.round(w8.projected) : '?'} / ${endWt} lbs</span>
+                    </div>
+                    ${strengthProjections}
+                </div>
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">The Math</div>
+                <div class="plan-outcomes">
+                    <div class="plan-outcome-row">
+                        <span>Your TDEE</span>
+                        <span><strong>${tdee}</strong> cal/day</span>
+                    </div>
+                    <div class="plan-outcome-row">
+                        <span>Daily Intake</span>
+                        <span><strong>${g.calories || '?'}</strong> cal/day</span>
+                    </div>
+                    <div class="plan-outcome-row" style="color:var(--accent)">
+                        <span>Daily Deficit</span>
+                        <span><strong>${deficit}</strong> cal/day</span>
+                    </div>
+                    <div class="plan-outcome-row" style="color:var(--accent)">
+                        <span>Weekly Loss</span>
+                        <span><strong>${weeklyLoss}</strong> lbs/week</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="plan-section">
+                <div class="plan-section-label">Daily Macros</div>
                 <div class="plan-macros">
                     <div class="plan-macro"><span class="plan-macro-val">${g.calories || '?'}</span><span class="plan-macro-label">Calories</span></div>
                     <div class="plan-macro"><span class="plan-macro-val">${g.protein || '?'}g</span><span class="plan-macro-label">Protein</span></div>
