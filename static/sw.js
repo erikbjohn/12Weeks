@@ -1,8 +1,8 @@
 const CACHE_NAME = '12weeks-v4';
 const STATIC_ASSETS = [
   '/',
-  '/static/style.css?v=31',
-  '/static/app.js?v=31',
+  '/static/style.css?v=32',
+  '/static/app.js?v=32',
   '/static/manifest.json',
 ];
 const DATA_CACHE = '12weeks-data-v3';
@@ -31,6 +31,18 @@ self.addEventListener('fetch', (e) => {
 
   // Skip non-GET requests
   if (e.request.method !== 'GET') return;
+
+  // HTML pages — ALWAYS network first so updates show immediately
+  if (e.request.mode === 'navigate' || url.pathname === '/') {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
 
   // Static workout data — cache with long TTL
   if (url.pathname === '/api/workouts' || url.pathname === '/api/warmups') {

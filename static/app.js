@@ -5505,16 +5505,6 @@ async function renderDetail() {
       <div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div>
     </div>` : ''}
     ${renderCheckinSection(d, currentDay)}
-    <div class="detail-section">
-      <h3>Coach</h3>
-      <div class="coach-chat">
-        <div class="chat-messages" id="coach-messages" style="max-height:300px">${chatMessagesHtml}</div>
-        <div class="chat-input-bar" style="border-top:none;padding:8px 0 0 0;background:none">
-          <input type="text" id="coach-input-field" placeholder="Ask Erik anything..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('coach-input-field','coach-messages')">
-          <button onclick="sendChatMessage('coach-input-field','coach-messages')">Send</button>
-        </div>
-      </div>
-    </div>
   </div>`;
 
   panel.classList.add('visible');

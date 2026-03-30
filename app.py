@@ -545,6 +545,18 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/static/sw.js")
+def service_worker():
+    """Serve service worker with no-cache headers so updates propagate immediately."""
+    import flask
+    response = flask.send_from_directory(app.static_folder, 'sw.js')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
+
 @app.route("/restart-plan")
 @login_required
 def restart_plan():
