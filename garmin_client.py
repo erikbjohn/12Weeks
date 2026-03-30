@@ -105,14 +105,22 @@ class GarminClient:
             return True, None, False
         except Exception as e:
             err = str(e)
-            log.exception("Garmin login failed")
-            if "429" in err or "Too Many Requests" in err:
+            log.exception("Garmin login failed (user_id=%s): %s", self._user_id, err)
+            if "429" in err or "Too Many Requests" in err or "rate" in err.lower():
+                # Garmin rate limit — cooldown 15 minutes
                 self._rate_limited_until = time.time() + 900
-                return False, "Garmin rate limited. Wait 15 minutes before trying again.", False
+                wait = 900
+                return False, f"Garmin rate limited. Try again in {wait // 60}m.", False
+            if "401" in err or "Unauthorized" in err or "credentials" in err.lower():
+                self.api = None
+                self._connected = False
+                return False, "Invalid Garmin credentials. Check your email and password.", False
+            if "MFA" in err or "verification" in err.lower():
+                return False, "MFA verification required. Check your authenticator app.", False
             self.api = None
             self._connected = False
             self._mfa_client_state = None
-            return False, err, False
+            return False, f"Garmin login error: {err[:200]}", False
 
     def _cached(self, key, fetcher):
         """Return cached value or call fetcher."""
