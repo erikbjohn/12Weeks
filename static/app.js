@@ -473,40 +473,51 @@ async function resumeOnboarding() {
       return;
     }
 
-    // Step 3: Check physical assessment
-    const paRes = await fetch('/api/physical-assessment/status');
-    const paData = await paRes.json();
-    if (paData.completed) {
-      // Physical done but goal not computed — compute goal then food
-      computeGoal();
+    // Check remaining steps in FORWARD order — find the first incomplete one
+    const intakeRes = await fetch('/api/psych-intake/status');
+    const intakeData = await intakeRes.json();
+    if (!intakeData.completed) {
+      if (intakeData.started && intakeData.message_count > 0) {
+        showPsychIntake(); // resume in-progress chat
+      } else {
+        showWelcome(); // not started
+      }
       return;
     }
 
-    // Step 4: Check constraints
     const conRes = await fetch('/api/constraints');
     const conData = await conRes.json();
-    if (conData.completed) {
-      // Constraints done but physical not — go to physical assessment
+    if (!conData.completed) {
+      showConstraints();
+      return;
+    }
+
+    const paRes = await fetch('/api/physical-assessment/status');
+    const paData = await paRes.json();
+    if (!paData.completed) {
       showPhysicalAssessment();
       return;
     }
 
-    // Step 5: Check psych intake
-    const intakeRes = await fetch('/api/psych-intake/status');
-    const intakeData = await intakeRes.json();
-    if (intakeData.completed) {
-      // Intake done but constraints not — go to constraints
-      showConstraints();
+    // Physical done, constraints done — check goal
+    const gRes = await fetch('/api/goal');
+    const gData = await gRes.json();
+    if (!gData.computed) {
+      computeGoal();
       return;
     }
-    if (intakeData.started && intakeData.message_count > 0) {
-      // Intake in progress — resume chat
-      showPsychIntake();
+    window._goalData = gData;
+
+    // Goal computed — check food
+    const fRes = await fetch('/api/food-selections');
+    const fData = await fRes.json();
+    if (!fData.completed) {
+      showFoodSelection();
       return;
     }
 
-    // Nothing started — show welcome
-    showWelcome();
+    // Everything done but baseline_done not set — show final reveal
+    showFinalReveal();
   } catch(e) {
     console.error('Resume onboarding error:', e);
     showWelcome();
