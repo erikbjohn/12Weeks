@@ -428,6 +428,29 @@ function getWeightTrend(exName) {
 
 // ─── WELCOME & ONBOARDING ──────────────────────────────────────────────────
 
+async function checkOnboardingComplete() {
+  // Onboarding is only truly complete when ALL steps are done
+  try {
+    const [intakeRes, conRes, paRes, goalRes, foodRes] = await Promise.all([
+      fetch('/api/psych-intake/status'),
+      fetch('/api/constraints'),
+      fetch('/api/physical-assessment/status'),
+      fetch('/api/goal'),
+      fetch('/api/food-selections'),
+    ]);
+    const intake = await intakeRes.json();
+    const con = await conRes.json();
+    const pa = await paRes.json();
+    const goal = await goalRes.json();
+    const food = await foodRes.json();
+
+    return intake.completed && con.completed && pa.completed && goal.computed && food.completed && _stateCache.baseline_done;
+  } catch(e) {
+    // If we can't check, fall back to baseline_done
+    return _stateCache.baseline_done;
+  }
+}
+
 async function resumeOnboarding() {
   // Check each onboarding step and resume where the user left off
   try {
@@ -2573,8 +2596,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
-    // Resume onboarding at the right step
-    if (!_stateCache.baseline_done) {
+    // Always check if onboarding is truly complete
+    const onboardingDone = await checkOnboardingComplete();
+    if (!onboardingDone) {
       await resumeOnboarding();
     }
 
@@ -2583,8 +2607,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     renderAll();
 
-    // Morning check-in (after baseline, before workout)
-    if (_stateCache.baseline_done) {
+    // Morning check-in (only if onboarding fully complete)
+    if (onboardingDone) {
       await checkMorningCheckin();
     }
 
