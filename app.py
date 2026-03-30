@@ -46,6 +46,31 @@ with app.app_context():
         pass
     db.create_all()
 
+    # Add missing columns to existing tables (db.create_all doesn't ALTER)
+    _migrations = [
+        ("physical_assessment", "stomach_inches", "FLOAT"),
+        ("physical_assessment", "chest_inches", "FLOAT"),
+        ("physical_assessment", "bicep_inches", "FLOAT"),
+        ("physical_assessment", "thigh_inches", "FLOAT"),
+        ("physical_assessment", "hips_inches", "FLOAT"),
+        ("physical_assessment", "neck_inches", "FLOAT"),
+        ("training_goal", "target_bf_pct", "FLOAT"),
+        ("training_goal", "fasting_protocol", "VARCHAR(20)"),
+        ("training_goal", "electrolyte_supplementation", "BOOLEAN"),
+        ("training_goal", "weight_projection", "TEXT"),
+        ("training_goal", "plan_accepted", "BOOLEAN"),
+    ]
+    try:
+        inspector = sa_inspect(db.engine)
+        for table, col, col_type in _migrations:
+            if table in inspector.get_table_names():
+                existing = {c["name"] for c in inspector.get_columns(table)}
+                if col not in existing:
+                    db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 garmin = GarminClient()
 
 # Try to restore Garmin session from saved tokens
