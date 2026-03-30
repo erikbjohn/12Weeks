@@ -155,8 +155,12 @@ def generate_report_narrative(metrics):
 
     if metrics.get("weight_change") is not None:
         direction = "lost" if metrics["weight_change"] < 0 else "gained"
-        data_lines.append(f"Weight: {direction} {abs(metrics['weight_change'])} lbs ({metrics['weight_end']} lbs)")
-        data_lines.append(f"vs projection: {metrics['weight_vs_projected']}")
+        weight_line = f"Weight: {direction} {abs(metrics['weight_change'])} lbs"
+        if metrics.get("weight_end") is not None:
+            weight_line += f" ({metrics['weight_end']} lbs)"
+        data_lines.append(weight_line)
+        if metrics.get("weight_vs_projected") is not None:
+            data_lines.append(f"vs projection: {metrics['weight_vs_projected']}")
 
     if metrics.get("key_lifts"):
         for name, info in metrics["key_lifts"].items():

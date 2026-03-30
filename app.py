@@ -1,6 +1,7 @@
 """Flask app for 12 Weeks Tracker with Garmin integration."""
 
 import os
+import re
 import secrets
 import threading
 import uuid
@@ -139,9 +140,7 @@ with app.app_context():
 
 garmin = GarminClient()
 
-# Try to restore Garmin session from saved tokens
-with app.app_context():
-    garmin.try_restore_tokens()
+# Garmin tokens are restored lazily per-user on first request (see garmin_status, garmin_today)
 
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────
@@ -1572,13 +1571,19 @@ def api_chat_stream():
                     full_text += text
                     yield f"data: {text}\n\n"
 
-            # Save complete response
-            asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
-            db.session.add(asst_chat)
-            db.session.commit()
+            # Only save if stream completed fully with content
+            if full_text.strip():
+                asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
+                db.session.add(asst_chat)
+                db.session.commit()
 
             yield f"data: [DONE]\n\n"
+        except GeneratorExit:
+            # Client disconnected mid-stream — don't save partial response
+            import logging
+            logging.warning("Client disconnected mid-stream, discarding partial response")
         except Exception as e:
+            # Don't save partial response on error
             import logging
             logging.error("Stream error: %s", e)
             yield f"data: [ERROR]\n\n"
@@ -1862,12 +1867,16 @@ def garmin_login():
 @app.route("/api/garmin/status")
 @login_required
 def garmin_status():
+    if not garmin.connected:
+        garmin.try_restore_tokens(current_user.id)
     return jsonify({"connected": garmin.connected})
 
 
 @app.route("/api/garmin/today")
 @login_required
 def garmin_today():
+    if not garmin.connected:
+        garmin.try_restore_tokens(current_user.id)
     if not garmin.connected:
         return jsonify({"error": "Not connected to Garmin"}), 401
     summary = garmin.get_today_summary()
@@ -2033,7 +2042,8 @@ def api_goal_compute():
     for i, msg in enumerate(convo):
         if msg.get("role") == "user" and i > 0:
             prev = convo[i-1].get("content", "")
-            if "actor" in prev.lower() or "movie" in prev.lower() or "body you want" in prev.lower():
+            actor_keywords = ["actor", "movie", "body you want", "physique", "look like", "film", "body goal"]
+            if any(kw in prev.lower() for kw in actor_keywords):
                 actor_answer = msg["content"]
                 break
 
@@ -2043,14 +2053,18 @@ def api_goal_compute():
     for msg in convo:
         content = msg.get("content", "").lower().strip()
         if msg.get("role") == "user":
-            if content in ("male", "female", "m", "f"):
-                sex = "female" if content in ("female", "f") else "male"
-            try:
-                num = int(content)
-                if 15 <= num <= 80:
+            # Sex detection
+            content_words = content.split()
+            if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
+                sex = "male"
+            elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
+                sex = "female"
+            # Age detection — extract number from text like "I'm 32 years old"
+            age_match = re.search(r'\b(\d{1,2})\b', content)
+            if age_match:
+                num = int(age_match.group(1))
+                if 13 <= num <= 80:
                     age = num
-            except ValueError:
-                pass
 
     # BodyWeight is primary, PhysicalAssessment is fallback
     latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
@@ -2446,10 +2460,6 @@ def api_goal_recalibrate():
 
 MORNING_BRIEFING_PROMPT = """You are Erik — high-performance coach. Lombardi voice. Direct. Invested. No fluff.
 
-STATUS: {status}
-DATA: {data}
-WORKOUT: {workout}
-
 Write ONE sentence. If GREEN: acknowledge the data, name today's workout, get them out the door. If YELLOW: name the adjustment needed. If RED: say "We need to talk" and ask what's going on.
 
 No motivational speeches. Facts + orders. End with the workout name or a question (never a dead statement)."""
@@ -2503,16 +2513,12 @@ def api_morning_briefing():
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
 
-        prompt = MORNING_BRIEFING_PROMPT.format(
-            status=status, data=data_summary, workout=workout_name
-        )
-
         full_text = ""
         with client.messages.stream(
             model="claude-opus-4-20250514",
             max_tokens=200,
-            system=prompt,
-            messages=[{"role": "user", "content": "Give me the morning briefing."}],
+            system=MORNING_BRIEFING_PROMPT,
+            messages=[{"role": "user", "content": f"STATUS: {status}\nDATA: {data_summary}\nWORKOUT: {workout_name}\n\nGive me the morning briefing."}],
         ) as stream:
             for text in stream.text_stream:
                 full_text += text

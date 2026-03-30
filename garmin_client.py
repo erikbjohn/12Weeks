@@ -21,12 +21,15 @@ class GarminClient:
     def connected(self):
         return self._connected and self.api is not None
 
-    def try_restore_tokens(self):
-        """Try to restore a session from saved tokens. Call on app startup."""
+    def try_restore_tokens(self, user_id=None):
+        """Try to restore a session from saved tokens."""
         try:
             from models import GarminTokens, db
             from garminconnect import Garmin
-            tokens = GarminTokens.query.first()
+            query = GarminTokens.query
+            if user_id:
+                query = query.filter_by(user_id=user_id)
+            tokens = query.first()
             if not tokens:
                 return False
             self.api = Garmin()
@@ -41,16 +44,16 @@ class GarminClient:
             self._connected = False
             return False
 
-    def _save_tokens(self):
+    def _save_tokens(self, user_id=None):
         """Save current tokens to DB for persistence across deploys."""
         try:
             from models import GarminTokens, db
             token_data = self.api.garth.dumps()
-            existing = GarminTokens.query.first()
+            existing = GarminTokens.query.filter_by(user_id=user_id).first() if user_id else GarminTokens.query.first()
             if existing:
                 existing.token_data = token_data
             else:
-                db.session.add(GarminTokens(token_data=token_data))
+                db.session.add(GarminTokens(token_data=token_data, user_id=user_id))
             db.session.commit()
             log.info("Garmin tokens saved to DB")
         except Exception as e:
