@@ -225,6 +225,16 @@ class PhysicalAssessment(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
 
+class UserEquipment(db.Model):
+    """User's available gym equipment."""
+    __tablename__ = "user_equipment"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    available_equipment = db.Column(db.JSON, default=list)
+    completed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
 class UserConstraints(db.Model):
     """User dietary and schedule constraints."""
     __tablename__ = "user_constraints"
