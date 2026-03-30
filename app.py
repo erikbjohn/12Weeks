@@ -2579,6 +2579,43 @@ def admin_dashboard():
     return render_template("admin.html", users=users, invites=invites, pending=pending)
 
 
+@app.route("/api/test/create-user", methods=["POST"])
+def api_test_create_user():
+    """Create test user for e2e testing. Only works for test@12weeks.com."""
+    data = request.get_json(silent=True) or {}
+    email = data.get("email", "test@12weeks.com")
+    if email != "test@12weeks.com":
+        return jsonify({"error": "Only test user allowed"}), 403
+
+    existing = User.query.filter_by(email=email).first()
+    if existing:
+        # Delete existing test user and all their data
+        for model in [ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
+                      ExerciseLog, ExerciseCompletion, DayCompletion, BodyWeight,
+                      BodyMeasurement, WeeklyCheckIn, MealLog, SupplementLog,
+                      ProgressPhoto, AppState, UserConstraints, TrainingGoal,
+                      UserFoodSelections, WeeklyReport, Invite]:
+            try:
+                model.query.filter_by(user_id=existing.id).delete()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        User.query.filter_by(id=existing.id).delete()
+        db.session.commit()
+
+    user = User(
+        email=email,
+        name="Test User",
+        password_hash=generate_password_hash("testtest1"),
+        role="user",
+        email_verified=True,
+        invites_remaining=3,
+    )
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({"ok": True, "user_id": user.id})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
