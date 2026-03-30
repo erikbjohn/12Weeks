@@ -2,7 +2,7 @@
 
 import time
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 log = logging.getLogger(__name__)
 
@@ -10,12 +10,13 @@ log = logging.getLogger(__name__)
 class GarminClient:
     CACHE_TTL = 900  # 15 minutes
 
-    def __init__(self):
+    def __init__(self, user_id=None):
         self.api = None
         self._cache = {}
         self._connected = False
         self._mfa_client_state = None
         self._rate_limited_until = 0
+        self._user_id = user_id
 
     @property
     def connected(self):
@@ -23,20 +24,25 @@ class GarminClient:
 
     def try_restore_tokens(self, user_id=None):
         """Try to restore a session from saved tokens."""
+        uid = user_id or self._user_id
+        log.info("DEBUG: Garmin token restore for user_id=%s", uid)  # DEBUG: remove after fix confirmed
         try:
             from models import GarminTokens, db
             from garminconnect import Garmin
             query = GarminTokens.query
-            if user_id:
-                query = query.filter_by(user_id=user_id)
+            if uid:
+                query = query.filter_by(user_id=uid)
             tokens = query.first()
+            log.info("DEBUG: Garmin token restore for user_id=%s, found=%s", uid, bool(tokens))  # DEBUG: remove after fix confirmed
             if not tokens:
                 return False
             self.api = Garmin()
             self.api.login(tokenstore=tokens.token_data)
             self._connected = True
             self._cache = {}
-            log.info("Garmin session restored from saved tokens")
+            if uid:
+                self._user_id = uid
+            log.info("Garmin session restored from saved tokens (user_id=%s)", uid)
             return True
         except Exception as e:
             log.warning("Failed to restore Garmin tokens: %s", e)
@@ -44,27 +50,34 @@ class GarminClient:
             self._connected = False
             return False
 
-    def _save_tokens(self, user_id=None):
+    def _save_tokens(self):
         """Save current tokens to DB for persistence across deploys."""
         try:
             from models import GarminTokens, db
             token_data = self.api.garth.dumps()
-            existing = GarminTokens.query.filter_by(user_id=user_id).first() if user_id else GarminTokens.query.first()
+            uid = self._user_id
+            existing = GarminTokens.query.filter_by(user_id=uid).first() if uid else GarminTokens.query.first()
             if existing:
                 existing.token_data = token_data
+                existing.updated_at = datetime.now()
             else:
-                db.session.add(GarminTokens(token_data=token_data, user_id=user_id))
+                db.session.add(GarminTokens(token_data=token_data, user_id=uid))
             db.session.commit()
-            log.info("Garmin tokens saved to DB")
+            log.info("Garmin tokens saved to DB (user_id=%s)", uid)
         except Exception as e:
             log.warning("Failed to save Garmin tokens: %s", e)
 
-    def login(self, email, password, mfa_code=None):
+    def login(self, email, password, user_id=None, mfa_code=None):
         """Authenticate with Garmin Connect. Returns (success, error_msg, needs_mfa)."""
+        if user_id:
+            self._user_id = user_id
+        log.info("DEBUG: Garmin login attempt for user_id=%s", self._user_id)  # DEBUG: remove after fix confirmed
         now = time.time()
         if now < self._rate_limited_until:
             wait = int(self._rate_limited_until - now)
-            return False, f"Garmin rate limited. Try again in {wait // 60} min {wait % 60} sec.", False
+            mins = wait // 60
+            secs = wait % 60
+            return False, f"Garmin rate limited. Try again in {mins}m {secs}s.", False
 
         try:
             from garminconnect import Garmin
@@ -103,6 +116,7 @@ class GarminClient:
 
     def _cached(self, key, fetcher):
         """Return cached value or call fetcher."""
+        log.info("DEBUG: Garmin fetch %s (user_id=%s)", key, self._user_id)  # DEBUG: remove after fix confirmed
         now = time.time()
         if key in self._cache:
             val, ts = self._cache[key]
@@ -113,7 +127,12 @@ class GarminClient:
             self._cache[key] = (val, now)
             return val
         except Exception as e:
-            log.warning("Garmin fetch %s failed: %s", key, e)
+            err_str = str(e)
+            if "429" in err_str or "Too Many" in err_str:
+                self._rate_limited_until = time.time() + 900
+                log.warning("Garmin rate limited during fetch: %s", key)
+            else:
+                log.warning("Garmin fetch %s failed: %s", key, e)
             # Return stale cache if available
             if key in self._cache:
                 return self._cache[key][0]

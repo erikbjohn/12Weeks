@@ -149,9 +149,19 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-garmin = GarminClient()
+# Per-user Garmin clients (keyed by user_id)
+_garmin_clients = {}
 
-# Garmin tokens are restored lazily per-user on first request (see garmin_status, garmin_today)
+
+def _get_garmin(user_id=None):
+    """Get or create a Garmin client for the current user."""
+    uid = user_id or (current_user.id if current_user and current_user.is_authenticated else None)
+    if not uid:
+        return GarminClient()
+    if uid not in _garmin_clients:
+        client = GarminClient(user_id=uid)
+        _garmin_clients[uid] = client
+    return _garmin_clients[uid]
 
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────
@@ -1697,8 +1707,11 @@ def _build_coach_context():
     # Garmin data
     garmin_data = None
     readiness_data = None
-    if garmin.connected:
-        garmin_data = garmin.get_today_summary()
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if gc.connected:
+        garmin_data = gc.get_today_summary()
         readiness_data = assess_readiness(garmin_data)
 
     # Current state
@@ -1921,21 +1934,20 @@ Be direct and honest. This person wants real feedback, not flattery. They're usi
 @app.route("/api/garmin/login", methods=["POST"])
 @login_required
 def garmin_login():
+    gc = _get_garmin()
     data = request.get_json()
     mfa_code = data.get("mfa_code") if data else None
     if mfa_code:
-        success, error, needs_mfa = garmin.login(None, None, mfa_code=mfa_code)
+        success, error, needs_mfa = gc.login(None, None, user_id=current_user.id, mfa_code=mfa_code)
         if success:
-            session["garmin_connected"] = True
             return jsonify({"connected": True})
         return jsonify({"connected": False, "error": error}), 401
 
     if not data or not data.get("email") or not data.get("password"):
         return jsonify({"error": "Email and password required"}), 400
 
-    success, error, needs_mfa = garmin.login(data["email"], data["password"])
+    success, error, needs_mfa = gc.login(data["email"], data["password"], user_id=current_user.id)
     if success:
-        session["garmin_connected"] = True
         return jsonify({"connected": True})
     if needs_mfa:
         return jsonify({"connected": False, "needs_mfa": True, "error": "Enter the verification code from your authenticator app"})
@@ -1945,19 +1957,21 @@ def garmin_login():
 @app.route("/api/garmin/status")
 @login_required
 def garmin_status():
-    if not garmin.connected:
-        garmin.try_restore_tokens(current_user.id)
-    return jsonify({"connected": garmin.connected})
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    return jsonify({"connected": gc.connected})
 
 
 @app.route("/api/garmin/today")
 @login_required
 def garmin_today():
-    if not garmin.connected:
-        garmin.try_restore_tokens(current_user.id)
-    if not garmin.connected:
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if not gc.connected:
         return jsonify({"error": "Not connected to Garmin"}), 401
-    summary = garmin.get_today_summary()
+    summary = gc.get_today_summary()
     if summary is None:
         return jsonify({"error": "Failed to fetch Garmin data"}), 500
     return jsonify(summary)
@@ -1966,18 +1980,24 @@ def garmin_today():
 @app.route("/api/garmin/readiness")
 @login_required
 def garmin_readiness():
-    if not garmin.connected:
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if not gc.connected:
         return jsonify(assess_readiness(None))
-    summary = garmin.get_today_summary()
+    summary = gc.get_today_summary()
     return jsonify(assess_readiness(summary))
 
 
 @app.route("/api/garmin/hrv-trend")
 @login_required
 def garmin_hrv_trend():
-    if not garmin.connected:
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if not gc.connected:
         return jsonify({"error": "Not connected"}), 401
-    return jsonify(garmin.get_weekly_hrv() or [])
+    return jsonify(gc.get_weekly_hrv() or [])
 
 
 @app.route("/api/garmin/save-tokens", methods=["POST"])
@@ -1990,11 +2010,13 @@ def garmin_save_tokens():
         return jsonify({"error": "tokens required"}), 400
     try:
         from garminconnect import Garmin as G
-        garmin.api = G()
-        garmin.api.login(tokenstore=tokens)
-        garmin._connected = True
-        garmin._cache = {}
-        garmin._save_tokens()
+        gc = _get_garmin()
+        gc.api = G()
+        gc.api.login(tokenstore=tokens)
+        gc._connected = True
+        gc._cache = {}
+        gc._user_id = current_user.id
+        gc._save_tokens()
         return jsonify({"connected": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2003,9 +2025,13 @@ def garmin_save_tokens():
 @app.route("/api/garmin/logout", methods=["POST"])
 @login_required
 def garmin_logout():
-    garmin.api = None
-    garmin._connected = False
-    garmin._cache = {}
+    gc = _get_garmin()
+    gc.api = None
+    gc._connected = False
+    gc._cache = {}
+    uid = current_user.id
+    if uid in _garmin_clients:
+        del _garmin_clients[uid]
     session.pop("garmin_connected", None)
     return jsonify({"connected": False})
 
@@ -2585,7 +2611,10 @@ def api_morning_briefing():
     data = request.get_json() or {}
 
     # Build the morning briefing as a coach message with full context
-    garmin_data = garmin.get_today_summary() if garmin.connected else None
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    garmin_data = gc.get_today_summary() if gc.connected else None
     readiness = assess_readiness(garmin_data)
     score = readiness.get("score") or 70
 
