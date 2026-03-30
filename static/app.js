@@ -2862,12 +2862,44 @@ function showSettingsMenu() {
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="regenerateProfile()">Regenerate Profile</button>
     <button onclick="restartFromReveal()">Restart from Plan Review</button>
+    <button onclick="showGroceryList()">Grocery List</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
     <button onclick="window.location='/logout'">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
+}
+
+async function showGroceryList() {
+  closeSettingsMenu();
+  const overlay = document.getElementById('morning-checkin-overlay');
+  overlay.innerHTML = `<div class="morning-checkin-overlay"><div class="morning-checkin-card" style="max-width:500px"><h2>Loading...</h2></div></div>`;
+
+  try {
+    const res = await fetch('/api/shopping-list');
+    const data = await res.json();
+
+    let html = '';
+    for (const cat of (data.categories || [])) {
+      html += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
+      for (const item of cat.items) {
+        html += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total}</span></div>`;
+      }
+      html += `</div>`;
+    }
+
+    overlay.innerHTML = `<div class="morning-checkin-overlay">
+      <div class="morning-checkin-card" style="max-width:500px">
+        <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('morning-checkin-overlay').innerHTML=''">&times;</button>
+        <h2>Grocery List — Week ${data.week}</h2>
+        <div class="shop-list">${html || '<div style="color:var(--muted)">No meal plan data for this week.</div>'}</div>
+      </div>
+    </div>`;
+  } catch(e) {
+    overlay.innerHTML = '';
+    showToast('Failed to load grocery list', 'error');
+  }
 }
 
 // ─── INVITE SYSTEM ────────────────────────────────────────────────────────
@@ -3771,13 +3803,18 @@ async function showSundayFlow() {
       const shopRes = await fetch('/api/shopping-list');
       const shopData = await shopRes.json();
       const shopEl = document.getElementById('shopping-list-section');
-      if (shopEl && shopData.items && shopData.items.length > 0) {
-        const shopItems = shopData.items.map(i =>
-          `<div class="shop-item"><span class="shop-item-name">${i.item}</span><span class="shop-item-qty">${i.quantity}</span></div>`
-        ).join('');
+      if (shopEl && shopData.categories && shopData.categories.length > 0) {
+        let shopHtml = '';
+        for (const cat of shopData.categories) {
+          shopHtml += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
+          for (const item of cat.items) {
+            shopHtml += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total} (${item.times_used}x)</span></div>`;
+          }
+          shopHtml += `</div>`;
+        }
         shopEl.innerHTML = `<div class="plan-section" style="margin-top:1rem">
-          <div class="plan-section-label">Shopping List (Week ${shopData.week})</div>
-          <div class="shop-list">${shopItems}</div>
+          <div class="plan-section-label">Grocery List — Week ${shopData.week}</div>
+          <div class="shop-list">${shopHtml}</div>
         </div>`;
       }
     } catch(e) {}

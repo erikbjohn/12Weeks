@@ -3519,11 +3519,14 @@ footer {
 .report-narrative { padding: 14px 16px; background: var(--surface); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 15px; line-height: 1.6; }
 
 /* ─── SHOPPING LIST ─── */
-.shop-list { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-height: 300px; overflow-y: auto; }
+.shop-list { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-height: 60vh; overflow-y: auto; }
+.shop-category { border-bottom: 2px solid var(--border); }
+.shop-category:last-child { border-bottom: none; }
+.shop-cat-label { font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); padding: 10px 12px 4px; background: var(--surface); }
 .shop-item { display: flex; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
 .shop-item:last-child { border-bottom: none; }
 .shop-item-name { color: var(--text); }
-.shop-item-qty { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px; }
+.shop-item-qty { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px; white-space: nowrap; margin-left: 8px; }
 
 /* ─── MORNING BRIEFING ─── */
 .morning-briefing-card { padding: 14px 16px; }

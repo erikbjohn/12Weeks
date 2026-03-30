@@ -2531,13 +2531,66 @@ def api_exercise_alternatives(exercise_name):
 @app.route("/api/shopping-list")
 @login_required
 def api_shopping_list():
-    """Generate a weekly shopping list from the meal plans."""
+    """Generate a weekly shopping list from the meal plans with total amounts."""
+    import re
     s = _get_state()
     week = s.current_week
     workouts = get_workouts(week)
 
-    # Aggregate all foods across the week
-    grocery = {}  # item → {"portion": str, "count": int}
+    # Aggregate all foods across the week with parsed amounts
+    grocery = {}  # item → {"unit": str, "total_amount": float, "count": int, "category": str}
+
+    # Simple category detection
+    proteins = {"chicken", "turkey", "beef", "salmon", "tilapia", "shrimp", "tuna", "egg",
+                "yogurt", "cottage", "tofu", "tempeh", "whey", "protein", "jerky", "steak"}
+    carbs = {"rice", "oat", "potato", "quinoa", "bread", "pasta", "bean", "lentil",
+             "banana", "blueberr", "apple", "orange", "toast"}
+    veggies = {"broccoli", "spinach", "kale", "asparagus", "green bean", "pepper",
+               "zucchini", "cauliflower", "greens", "tomato", "salad", "lettuce", "salsa"}
+    fats = {"olive oil", "coconut oil", "avocado", "almond", "walnut", "peanut",
+            "chia", "flax", "cheese", "butter"}
+
+    def categorize(name):
+        nl = name.lower()
+        for p in proteins:
+            if p in nl:
+                return "Proteins"
+        for v in veggies:
+            if v in nl:
+                return "Produce"
+        for c in carbs:
+            if c in nl:
+                return "Carbs & Grains"
+        for f in fats:
+            if f in nl:
+                return "Fats & Oils"
+        return "Other"
+
+    def parse_amount(portion):
+        """Parse portion string like '6 oz', '1 cup', '1/2', '1 scoop' into (amount, unit)."""
+        if not portion:
+            return (1, "serving")
+        p = portion.strip().lower()
+        # Handle fractions
+        p = p.replace("½", "0.5").replace("¼", "0.25").replace("¾", "0.75")
+        m = re.match(r'^(\d+(?:\.\d+)?(?:/\d+)?)\s*(.*)', p)
+        if m:
+            num_str = m.group(1)
+            unit = m.group(2).strip() or "serving"
+            if '/' in num_str:
+                parts = num_str.split('/')
+                try:
+                    num = float(parts[0]) / float(parts[1])
+                except (ValueError, ZeroDivisionError):
+                    num = 1
+            else:
+                try:
+                    num = float(num_str)
+                except ValueError:
+                    num = 1
+            return (num, unit)
+        return (1, portion)
+
     for day_data in workouts:
         mp = day_data.get("mealPlan")
         if not mp or not mp.get("meals"):
@@ -2546,18 +2599,47 @@ def api_shopping_list():
             for food in meal.get("foods", []):
                 item = food["item"]
                 portion = food.get("portion", "")
+                amount, unit = parse_amount(portion)
+
                 if item in grocery:
+                    if grocery[item]["unit"] == unit:
+                        grocery[item]["total_amount"] += amount
                     grocery[item]["count"] += 1
                 else:
-                    grocery[item] = {"portion": portion, "count": 1}
+                    grocery[item] = {
+                        "unit": unit,
+                        "total_amount": amount,
+                        "count": 1,
+                        "category": categorize(item),
+                    }
 
-    # Sort by category (proteins first, then produce, then pantry)
-    items = []
+    # Build categorized list
+    categories = {}
     for name, info in sorted(grocery.items()):
-        qty = f"{info['portion']} x{info['count']}" if info['count'] > 1 else info['portion']
-        items.append({"item": name, "quantity": qty, "count": info["count"]})
+        cat = info["category"]
+        if cat not in categories:
+            categories[cat] = []
+        total = info["total_amount"]
+        unit = info["unit"]
+        # Format nicely
+        if total == int(total):
+            total_str = str(int(total))
+        else:
+            total_str = f"{total:.1f}"
+        categories[cat].append({
+            "item": name,
+            "total": f"{total_str} {unit}",
+            "times_used": info["count"],
+        })
 
-    return jsonify({"week": week, "items": items})
+    # Order categories
+    cat_order = ["Proteins", "Produce", "Carbs & Grains", "Fats & Oils", "Other"]
+    ordered = []
+    for cat in cat_order:
+        if cat in categories:
+            ordered.append({"category": cat, "items": categories[cat]})
+
+    return jsonify({"week": week, "categories": ordered})
 
 
 # ─── WEEKLY REPORT ─────────────────────────────────────────────────────────
