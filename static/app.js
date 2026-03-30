@@ -1274,9 +1274,9 @@ async function paNextFromMeasurements() {
   if (_paData.neck) payload.neck = _paData.neck;
   apiPost('/api/physical-assessment', payload);
 
-  // Also save body weight to bodyweight tracker
+  // Save body weight to bodyweight tracker — AWAIT to ensure it's stored
   if (_paData.weight) {
-    apiPost('/api/bodyweight', { date: todayStr(), weight: _paData.weight });
+    await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
     if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
     _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
   }

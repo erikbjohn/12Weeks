@@ -1973,9 +1973,17 @@ def api_goal_compute():
             except ValueError:
                 pass
 
-    # BodyWeight table is the single source of truth for weight
+    # BodyWeight is primary, PhysicalAssessment is fallback
     latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-    weight = latest_bw.weight_lbs if latest_bw else 180
+    if latest_bw:
+        weight = latest_bw.weight_lbs
+    elif pa and pa.bodyweight_lbs:
+        weight = pa.bodyweight_lbs
+        # Sync to BodyWeight table so it's there for next time
+        db.session.add(BodyWeight(log_date=date.today(), weight_lbs=weight, user_id=current_user.id))
+        db.session.commit()
+    else:
+        weight = 180
     height = (pa.height_inches if pa else None) or 70
 
     goal_info = detect_goal(actor_answer)
