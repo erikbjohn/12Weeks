@@ -2926,8 +2926,10 @@ function submitRPE(week, dayIdx, exIdx, exName, rpe) {
 
 async function showExerciseSwap(exIdx, exerciseName, event) {
     if (event) event.stopPropagation();
-    const swapContainer = event.target.parentElement;
-    swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading alternatives...</div>';
+    const swapContainer = document.getElementById('swap-container-' + exIdx);
+    if (!swapContainer) return;
+    if (swapContainer.innerHTML.trim()) { swapContainer.innerHTML = ''; return; } // Toggle off
+    swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading...</div>';
 
     try {
         const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(exerciseName));
@@ -2948,6 +2950,41 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
         swapContainer.innerHTML = `<div class="swap-options">${altsHtml}</div>`;
     } catch(e) {
         swapContainer.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load alternatives</div>';
+    }
+}
+
+function toggleBodyweightMode(on) {
+    sessionStorage.setItem('bw_only_mode', on ? 'true' : 'false');
+    // Auto-swap all exercises to bodyweight alternatives
+    if (on) {
+        const weekData = workoutData[String(currentWeek)];
+        if (weekData && weekData.days[currentDay]) {
+            const exercises = weekData.days[currentDay].exercises || [];
+            const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+            exercises.forEach((ex, i) => {
+                const key = currentWeek + '_' + currentDay + '_' + i;
+                // Find a bodyweight alternative (requires empty equipment list)
+                fetch('/api/exercise/alternatives/' + encodeURIComponent(ex.name))
+                    .then(r => r.json())
+                    .then(data => {
+                        const bwAlt = (data.alternatives || []).find(a => !a.missing_equipment || a.missing_equipment.length === 0);
+                        if (bwAlt && bwAlt.name !== ex.name) {
+                            swaps[key] = bwAlt.name;
+                            sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+                        }
+                    })
+                    .catch(() => {});
+            });
+            // Re-render after a brief delay for fetches to complete
+            setTimeout(() => renderDetail(), 1500);
+        }
+    } else {
+        // Clear all swaps for today
+        const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+        const prefix = currentWeek + '_' + currentDay + '_';
+        Object.keys(swaps).filter(k => k.startsWith(prefix)).forEach(k => delete swaps[k]);
+        sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+        renderDetail();
     }
 }
 
@@ -4342,6 +4379,8 @@ function renderWarmupSection(dayData) {
     </button>
     <div class="warmup-body visible" id="warmup-body">
       ${(wu.steps || []).map((step, i) => `<div class="warmup-step">
+        <button class="wu-check" onclick="this.classList.toggle('done');this.innerHTML=this.classList.contains('done')?'&#10003;':''">
+        </button>
         <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
         ${step.duration ? `<span class="warmup-step-duration">${step.duration}</span>` : ''}
         ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
@@ -5091,6 +5130,15 @@ async function renderDetail() {
   const travelExercises = isTraveling && d._travelWorkout && d._travelWorkout.exercises ? d._travelWorkout.exercises : null;
   const displayExercises = travelExercises || d.exercises;
 
+  // Bodyweight-only toggle
+  const bwOnly = sessionStorage.getItem('bw_only_mode') === 'true';
+  const bwToggleHtml = `<div class="bw-toggle-bar">
+    <label class="bw-toggle-label">
+      <input type="checkbox" ${bwOnly ? 'checked' : ''} onchange="toggleBodyweightMode(this.checked)">
+      <span>Bodyweight Only</span>
+    </label>
+  </div>`;
+
   // Exercise rows with weight tracking and RPE
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const exRows = displayExercises.map((ex, i) => {
@@ -5125,14 +5173,12 @@ async function renderDetail() {
       </div>`;
     }
 
-    const swapHtml = `<div class="exercise-swap-link" onclick="showExerciseSwap(${i},'${ex.name.replace(/'/g, "\\'")}',event)">Don't have this? Tap for alternatives</div>`;
-
     return `<div class="exercise-row" style="flex-wrap:wrap">
       <button class="ex-check${done?' done':''}" onclick="toggleEx(${currentWeek},${currentDay},${i})">
         ${done ? '&#10003;' : ''}
       </button>
       <div class="ex-info">
-        <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}${ex.video ? ` <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName)}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>` : ''}</div>
+        <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form tutorial')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${displayName.replace(/'/g, "\\'")}',event)" title="Swap exercise">&#128260;</span></div>
         ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       </div>
       <div class="weight-input-wrap">
@@ -5140,12 +5186,12 @@ async function renderDetail() {
         ${lastWt != null ? `<div class="weight-last">Last: ${lastWt} lb</div>` : ''}
         ${suggestion.reason ? `<div class="weight-suggestion">${suggestion.reason}</div>` : ''}
       </div>
-      <div class="ex-sets">${ex.sets}</div>
+      <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}</div>
       <div class="reps-input-wrap">
         <input class="reps-input" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}" placeholder="reps done" min="0" max="100">
       </div>
       ${rpeHtml ? `<div style="width:100%;padding-left:36px">${rpeHtml}</div>` : ''}
-      <div style="width:100%;padding-left:36px">${swapHtml}</div>
+      <div id="swap-container-${i}" style="width:100%;padding-left:36px"></div>
     </div>`;
   }).join('');
 
@@ -5268,6 +5314,7 @@ async function renderDetail() {
     ${displayExercises.length > 0 ? `
     <div class="detail-section">
       <h3>${isTraveling ? 'Travel Workout' : 'Exercises'}</h3>
+      ${bwToggleHtml}
       ${exRows}
     </div>` : ''}
     <div class="detail-section">
