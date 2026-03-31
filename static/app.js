@@ -2566,13 +2566,20 @@ function showStartDatePicker() {
     </div>`;
 }
 
-function pickStartDate(dateStr) {
+async function pickStartDate(dateStr) {
     const wakeTime = document.getElementById('wake-time-select')?.value || '5:30';
-    apiPost('/api/goal', { plan_accepted: true });
-    apiPost('/api/state', { baseline_done: true, start_date: dateStr });
+    await apiPost('/api/goal', { plan_accepted: true });
+    await apiPost('/api/state', { baseline_done: true, start_date: dateStr });
     _stateCache.baseline_done = true;
     _stateCache.start_date = dateStr;
     document.getElementById('baseline-overlay').innerHTML = '';
+
+    // Check if start date is in the future → show lockout
+    const start = new Date(dateStr + 'T00:00:00');
+    if (start > new Date()) {
+        showPreStartLockout(dateStr);
+        return;
+    }
     renderAll();
 }
 
@@ -3561,6 +3568,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bodyweightCache = _bodyweightCache || [];
     renderAll();
   }
+  // Hide loading spinner
+  const appLoading = document.getElementById('app-loading');
+  if (appLoading) appLoading.style.display = 'none';
 });
 
 function saveState() {
@@ -4264,8 +4274,11 @@ async function sendChatMessage(inputId, containerId) {
     }
 
     try {
+        const _chatAbort = new AbortController();
+        const _chatTimeout = setTimeout(() => _chatAbort.abort(), 60000); // 60s timeout
         const res = await fetch('/api/chat/stream', {
             method: 'POST',
+            signal: _chatAbort.signal,
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: text }),
         });
@@ -4310,11 +4323,13 @@ async function sendChatMessage(inputId, containerId) {
         }
 
         // Finalize
+        clearTimeout(_chatTimeout);
         _chatHistory.push({ role: 'coach', text: fullText || 'No response', time: new Date().toISOString() });
     } catch(e) {
         const typingEl = document.getElementById('chat-typing-' + containerId);
         if (typingEl) typingEl.remove();
-        _chatHistory.push({ role: 'coach', text: 'Connection error. Try again.', time: new Date().toISOString() });
+        const errMsg = e.name === 'AbortError' ? 'Response took too long. Try again.' : 'Connection error. Try again.';
+        _chatHistory.push({ role: 'coach', text: errMsg, time: new Date().toISOString() });
     }
 
     renderChatMessages(containerId);
@@ -5849,9 +5864,11 @@ async function renderDetail() {
             }
           }
         }
-        _setCache._loadedDay = setDayKey;
       }
-    } catch(e) { /* Continue with empty cache */ }
+      _setCache._loadedDay = setDayKey;
+    } catch(e) {
+      _setCache._loadedDay = setDayKey; // Mark loaded even on failure to prevent retry loops
+    }
   }
 
   // If traveling, try to load travel workout
@@ -5873,7 +5890,7 @@ async function renderDetail() {
   const travelExercises = isTraveling && d._travelWorkout && d._travelWorkout.exercises ? d._travelWorkout.exercises : null;
   const bwMode = sessionStorage.getItem('bw_only_mode') === 'true';
   const bwExercises = bwMode ? JSON.parse(sessionStorage.getItem('bw_exercises') || 'null') : null;
-  const displayExercises = bwExercises || travelExercises || d.exercises;
+  const displayExercises = bwExercises || travelExercises || d.exercises || [];
 
   // Bodyweight-only toggle
   const bwOnly = sessionStorage.getItem('bw_only_mode') === 'true';

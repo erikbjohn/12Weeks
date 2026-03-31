@@ -11,9 +11,16 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=62">
+  <link rel="stylesheet" href="/static/style.css?v=63">
 </head>
 <body>
+
+<div id="app-loading" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#0d0f0e;z-index:99999">
+  <div style="text-align:center">
+    <div style="font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin-bottom:8px">12 WEEKS</div>
+    <div style="color:#6b7280;font-size:13px">Loading your program...</div>
+  </div>
+</div>
 
 <header>
   <div class="header-row">
@@ -86,6 +93,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
-<script src="/static/app.js?v=62"></script>
+<script src="/static/app.js?v=63"></script>
 </body>
 </html>
