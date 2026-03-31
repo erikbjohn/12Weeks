@@ -117,7 +117,7 @@ function loadMealData() {
 function saveMealData(data) {
   const key = getMealDateKey();
   _mealsCache[key] = data;
-  apiPost('/api/meals', { date: key, eaten: data.eaten || [], adjustments: data.adjustments || {}, fasting: data.fasting || false });
+  apiPost('/api/meals', { date: key, eaten: data.eaten || [], adjustments: data.adjustments || {}, foodItems: data.foodItems || [], fasting: data.fasting || false });
 }
 
 function isMealEaten(mealIdx) {
@@ -128,14 +128,39 @@ function isMealEaten(mealIdx) {
 function toggleMealEaten(mealIdx) {
   const data = loadMealData();
   if (!data.eaten) data.eaten = [];
+  if (!data.foodItems) data.foodItems = [];
   const idx = data.eaten.indexOf(mealIdx);
-  if (idx >= 0) {
-    data.eaten.splice(idx, 1);
-  } else {
+  const marking = idx < 0; // true if checking, false if unchecking
+
+  if (marking) {
     data.eaten.push(mealIdx);
+    // Auto-check all food items in this meal
+    const weekData = workoutData[String(currentWeek)];
+    const dayData = weekData ? weekData.days[currentDay] : null;
+    const mp = dayData ? dayData.mealPlan : null;
+    if (mp && mp.meals && mp.meals[mealIdx]) {
+      const meal = mp.meals[mealIdx];
+      (meal.foods || []).forEach((f, fi) => {
+        const foodKey = `${mealIdx}_${fi}`;
+        if (!data.foodItems.includes(foodKey)) data.foodItems.push(foodKey);
+      });
+    }
+  } else {
+    data.eaten.splice(idx, 1);
+    // Uncheck all food items in this meal
+    data.foodItems = data.foodItems.filter(k => !k.startsWith(mealIdx + '_'));
   }
+
   saveMealData(data);
   renderDetail();
+
+  // Check if all meals are done → coach closes the kitchen
+  if (marking) {
+    const totalMeals = _getTotalMealCount();
+    if (totalMeals > 0 && data.eaten.length >= totalMeals) {
+      _triggerKitchenClosed();
+    }
+  }
 }
 
 function _isFoodItemEaten(foodKey) {
@@ -143,28 +168,70 @@ function _isFoodItemEaten(foodKey) {
   return (data.foodItems || []).includes(foodKey);
 }
 
-function toggleFoodItem(foodKey) {
+function toggleFoodItem(foodKey, mealIdx, totalFoodsInMeal) {
   const data = loadMealData();
   if (!data.foodItems) data.foodItems = [];
+  if (!data.eaten) data.eaten = [];
   const idx = data.foodItems.indexOf(foodKey);
-  if (idx >= 0) {
-    data.foodItems.splice(idx, 1);
-  } else {
+  const checking = idx < 0;
+
+  if (checking) {
     data.foodItems.push(foodKey);
+  } else {
+    data.foodItems.splice(idx, 1);
   }
+
+  // Auto-check meal if all foods in it are checked
+  const mealFoodsChecked = data.foodItems.filter(k => k.startsWith(mealIdx + '_')).length;
+  if (checking && mealFoodsChecked >= totalFoodsInMeal && !data.eaten.includes(mealIdx)) {
+    data.eaten.push(mealIdx);
+  } else if (!checking && data.eaten.includes(mealIdx)) {
+    data.eaten.splice(data.eaten.indexOf(mealIdx), 1);
+  }
+
   saveMealData(data);
-  // Update in-place — no re-render
+
+  // Update in-place
   const btn = event.target;
   const row = btn.closest('.meal-food-row');
-  if (btn.classList.contains('checked')) {
-    btn.classList.remove('checked');
-    btn.innerHTML = '';
-    if (row) row.classList.remove('food-eaten');
-  } else {
+  if (checking) {
     btn.classList.add('checked');
     btn.innerHTML = '&#10003;';
     if (row) row.classList.add('food-eaten');
+  } else {
+    btn.classList.remove('checked');
+    btn.innerHTML = '';
+    if (row) row.classList.remove('food-eaten');
   }
+
+  // Check if all meals done → coach closes kitchen
+  const totalMeals = _getTotalMealCount();
+  if (checking && totalMeals > 0 && data.eaten.length >= totalMeals) {
+    _triggerKitchenClosed();
+  }
+}
+
+function _getTotalMealCount() {
+  const weekData = workoutData[String(currentWeek)];
+  const dayData = weekData && currentDay !== null ? weekData.days[currentDay] : null;
+  const mp = dayData ? dayData.mealPlan : null;
+  return mp && mp.meals ? mp.meals.length : 0;
+}
+
+async function _triggerKitchenClosed() {
+  // All meals eaten — coach closes the kitchen
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: '[MEALS_COMPLETE] All meals eaten for the day. Acknowledge and close the kitchen. Lombardi style — brief, no fluff.' }),
+    });
+    const data = await res.json();
+    if (data.response) {
+      _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
+      renderCoachTop();
+    }
+  } catch(e) {}
 }
 
 function getMealMultiplier(mealIdx) {
@@ -245,7 +312,7 @@ function renderMealSection(dayData) {
       const foodKey = idx + '_' + fIdx;
       const foodEaten = _isFoodItemEaten(foodKey);
       return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
-        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}')">${foodEaten ? '&#10003;' : ''}</button>
+        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length})">${foodEaten ? '&#10003;' : ''}</button>
         <span class="meal-food-name">${f.item}</span>
         <span class="meal-food-portion">${f.portion}</span>
         <span class="meal-food-portion">${adjCal}cal</span>

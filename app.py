@@ -118,6 +118,7 @@ with app.app_context():
         ("exercise_log", "reps_completed", "INTEGER"),
         ("exercise_log", "difficulty_notes", "TEXT"),
         ("training_goal", "baseline_assessment", "TEXT"),
+        ("meal_log", "food_items", "TEXT"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -1165,10 +1166,11 @@ def api_meals():
     d = request.args.get("date", date.today().isoformat())
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ml:
-        return jsonify({"eaten": [], "adjustments": {}, "fasting": False})
+        return jsonify({"eaten": [], "adjustments": {}, "foodItems": [], "fasting": False})
     return jsonify({
         "eaten": ml.eaten or [],
         "adjustments": ml.adjustments or {},
+        "foodItems": ml.food_items or [],
         "fasting": ml.fasting,
     })
 
@@ -1186,6 +1188,8 @@ def api_meals_update():
         ml.eaten = data["eaten"]
     if "adjustments" in data:
         ml.adjustments = data["adjustments"]
+    if "foodItems" in data:
+        ml.food_items = data["foodItems"]
     if "fasting" in data:
         ml.fasting = data["fasting"]
     try:

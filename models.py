@@ -152,6 +152,7 @@ class MealLog(db.Model):
     log_date = db.Column(db.Date, nullable=False, index=True)
     eaten = db.Column(db.JSON, default=list)
     adjustments = db.Column(db.JSON, default=dict)
+    food_items = db.Column(db.JSON, default=list)  # Individual food checkboxes
     fasting = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
