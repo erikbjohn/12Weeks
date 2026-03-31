@@ -581,6 +581,15 @@ const WEIGHT_ESTIMATES = {
   "Dumbbell Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.4) : null; },
   "Hammer Curl": () => 25,
   "Overhead Tricep Extension": () => 25,
+  "Walking Lunge": () => 20,
+  "Standing Calf Raise": () => 25,
+  "Nordic Hamstring Curl": () => 0,
+  "Bulgarian Split Squat": () => 20,
+  "Glute Bridge": () => 0,
+  "Hip Thrust": (cache) => { const sq = cache["Barbell Back Squat"]; return sq ? Math.round(sq.current * 0.6) : 95; },
+  "Seated Calf Raise": () => 45,
+  "Goblet Squat": () => 35,
+  "Step-Up": () => 20,
 };
 
 function getSuggestedWeight(exName, currentWeekNum) {
