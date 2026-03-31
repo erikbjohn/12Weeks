@@ -53,6 +53,62 @@ function showToast(msg, type) {
     setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
+// ─── COACH POPUP (one-way notifications) ──────────────────────────────────
+let _coachPopupTimeout = null;
+let _coachPopupQueue = [];
+
+function showCoachPopup(message) {
+  // If a popup is already showing, queue this one
+  const existing = document.getElementById('coach-popup-overlay');
+  if (existing) {
+    _coachPopupQueue.push(message);
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'coach-popup-overlay';
+  overlay.className = 'coach-popup-overlay';
+  overlay.innerHTML = `<div class="coach-popup-card">
+    <div class="coach-popup-label">ERIK</div>
+    <button class="coach-popup-dismiss" onclick="dismissCoachPopup()">&times;</button>
+    <div class="coach-popup-message">${escapeHtml(message)}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // Tap card to dismiss
+  overlay.querySelector('.coach-popup-card').addEventListener('click', dismissCoachPopup);
+
+  // Auto-dismiss after 12 seconds
+  _coachPopupTimeout = setTimeout(() => dismissCoachPopup(), 12000);
+
+  // Push to chat history so it appears in the full chat overlay
+  _chatHistory.push({ role: 'coach', text: message, time: new Date().toISOString(), date: todayStr() });
+}
+
+function dismissCoachPopup() {
+  if (_coachPopupTimeout) { clearTimeout(_coachPopupTimeout); _coachPopupTimeout = null; }
+  const overlay = document.getElementById('coach-popup-overlay');
+  if (overlay) {
+    const card = overlay.querySelector('.coach-popup-card');
+    if (card) card.classList.add('fade-out');
+    setTimeout(() => {
+      overlay.remove();
+      // Show next queued popup
+      if (_coachPopupQueue.length > 0) {
+        showCoachPopup(_coachPopupQueue.shift());
+      }
+    }, 300);
+  }
+}
+
+// Dedup: prevent duplicate popups per day
+function hasPopupFired(key) {
+  return localStorage.getItem('popup_' + key + '_' + todayStr()) === '1';
+}
+function markPopupFired(key) {
+  localStorage.setItem('popup_' + key + '_' + todayStr(), '1');
+}
+
 function apiPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -219,18 +275,16 @@ function _getTotalMealCount() {
 }
 
 async function _triggerKitchenClosed() {
-  // All meals eaten — coach closes the kitchen
+  if (hasPopupFired('meals')) return;
+  markPopupFired('meals');
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ message: '[MEALS_COMPLETE] All meals eaten for the day. Acknowledge and close the kitchen. Lombardi style — brief, no fluff.' }),
+      body: JSON.stringify({ message: '[MEALS_COMPLETE] All meals eaten for the day. 1-2 sentences. Popup — no questions.' }),
     });
     const data = await res.json();
-    if (data.response) {
-      _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-      renderCoachTop();
-    }
+    if (data.response) showCoachPopup(data.response);
   } catch(e) {}
 }
 
@@ -4517,10 +4571,7 @@ function toggleDay(week, dayIdx, e) {
         body: JSON.stringify({ message: summary }),
       }).then(r => r.json()).then(data => {
         if (data.response) {
-          _chatHistory.push({ role: 'user', text: summary, time: new Date().toISOString() });
-          _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-          renderCoachTop();
-          showToast('Coach feedback ready', 'success');
+          showCoachPopup(data.response);
         }
       }).catch(() => {});
     }
@@ -4829,10 +4880,7 @@ function formatWuTimer(sec) {
 }
 
 function renderPostWorkoutCoach() {
-  // Only show on today — not past or future days
-  const todayJsDay = new Date().getDay();
-  const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
-  if (currentDay !== todayMon) return '';
+  return ''; // Replaced by popup system
 
   // Only visible after the run is logged (workout complete)
   const runKey = currentWeek + '_' + currentDay;
@@ -4862,7 +4910,7 @@ function renderPostWorkoutCoach() {
   </div>`;
 }
 
-async function sendPostWorkoutMessage() {
+async function sendPostWorkoutMessage() { return; // Replaced by popup system
   const input = document.getElementById('post-workout-input');
   if (!input) return;
   const text = (input.value || '').trim();
@@ -4934,12 +4982,6 @@ async function saveRunLog() {
 
   const triggerMsg = `[WORKOUT_COMPLETE] ${workoutName} done. ${exerciseSummary}Run: ${dist || '?'} mi, HR ${hr || '?'}, elev ${elev || '?'} ft. Give post-workout feedback.`;
 
-  // Show loading in the post-workout coach area
-  const msgsEl = document.getElementById('post-workout-messages');
-  if (msgsEl) {
-    msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is reviewing your workout...</div></div>`;
-  }
-
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -4948,16 +4990,11 @@ async function saveRunLog() {
     });
     const data = await res.json();
     if (data.response) {
-      _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-      if (msgsEl) {
-        msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-      renderCoachTop();
+      showCoachPopup(data.response);
     }
   } catch(e) {
     console.error('Post-workout feedback failed:', e);
-    if (msgsEl) {
+    if (false) {
       msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Couldn't reach Erik. Tap below to try again.</div>`;
     }
   }
@@ -5351,7 +5388,8 @@ function renderAll() {
   renderWeekTabs();
   renderDayGrid();
   renderDetail();
-  renderCoachTop();
+  triggerMorningPopup();
+  triggerEndOfDayPopup();
   checkMilestones();
 
   // Auto-select today if no day is currently selected
@@ -5363,122 +5401,82 @@ function renderAll() {
   }
 }
 
-async function renderCoachTop() {
-    const el = document.getElementById('coach-top');
-    if (!el) return;
+// renderCoachTop — replaced by popup system
+function renderCoachTop() { /* no-op — coach uses popups now */ }
 
-    // Only show coach chat when viewing today — not past or future days
-    const todayJsDay = new Date().getDay();
-    const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
-    if (currentDay !== null && currentDay !== todayMon) {
-        el.innerHTML = '';
-        return;
-    }
-
+async function triggerMorningPopup() {
+    if (hasPopupFired('morning')) return;
     const today = todayStr();
-    const morningKey = '12w_morning_' + today;
-    const hasMorningMessage = localStorage.getItem(morningKey);
-
-    // Check if coach has spoken today
     const todayCoachMsgs = _chatHistory.filter(m =>
         (m.role === 'coach' || m.role === 'assistant') &&
         ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
+    if (todayCoachMsgs.length > 0) return; // Coach already spoke today
 
-    // Show only Erik's last message FROM TODAY
-    let bubblesHtml = '';
-    const todayCoachVisible = _chatHistory.filter(m =>
-        (m.role === 'coach' || m.role === 'assistant') &&
-        !(m.text || m.content || '').startsWith('[') &&
-        ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
-    );
-    if (todayCoachVisible.length > 0) {
-        const last = todayCoachVisible[todayCoachVisible.length - 1];
-        bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
-    }
+    const weekData = workoutData[String(currentWeek)];
+    const todayJsDay = new Date().getDay();
+    const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+    const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
+    const workoutName = dayData ? dayData.liftName : 'Rest';
+    const timing = dayData && dayData.timing ? dayData.timing[0] : '6:00';
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayName = dayNames[todayMon];
+    const isRest = dayData ? dayData.isRest : false;
 
-    el.innerHTML = renderCoachTopShell(bubblesHtml);
+    const triggerMsg = `[MORNING_CHECKIN] Today is ${dayName}, ${today}. ${isRest ? 'Rest day.' : `Workout: ${workoutName}. Session starts at ${timing}.`} Week ${currentWeek}. Greet the athlete and state the schedule. 1-2 sentences max — this is a popup, not a conversation.`;
 
-    // If coach hasn't spoken today, fire off a morning greeting
-    if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
-        const weekData = workoutData[String(currentWeek)];
-        const mappedIdx = todayMon;
-        const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
-        const workoutName = dayData ? dayData.liftName : 'Rest';
-        const timing = dayData && dayData.timing ? dayData.timing[0] : '6:00';
-        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-        const dayName = dayNames[todayMon];
-        const isRest = dayData ? dayData.isRest : false;
-
-        const triggerMsg = `[MORNING_CHECKIN] Today is ${dayName}, ${today}. ${isRest ? 'Rest day.' : `Workout: ${workoutName}. Session starts at ${timing}.`} Week ${currentWeek}. Greet the athlete, state the schedule, and tell them to check in on how they feel.`;
-
-        // Show loading state
-        const msgsEl = document.getElementById('coach-top-messages');
-        if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:6px;color:var(--muted);font-size:13px">Erik is checking in...</div></div>`;
-
-        try {
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: triggerMsg }),
-            });
-            const data = await res.json();
-            if (data.response) {
-                _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-                localStorage.setItem(morningKey, '1');
-                // Re-render with the new message
-                if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
-            }
-        } catch(e) {
-            console.error('Morning message failed:', e);
-            if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Tap below to talk to Erik.</div>`;
-        }
-    }
-}
-
-function renderCoachTopShell(bubblesHtml) {
-    return `<div class="coach-top-card">
-        <div class="coach-top-label">ERIK</div>
-        <div class="coach-top-messages" id="coach-top-messages">${bubblesHtml}</div>
-        <div class="coach-top-input-bar">
-            <input type="text" id="coach-top-input" placeholder="Talk to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendCoachTopMessage()">
-            <button onclick="sendCoachTopMessage()">Send</button>
-        </div>
-    </div>`;
-}
-
-async function sendCoachTopMessage() {
-    const input = document.getElementById('coach-top-input');
-    if (!input) return;
-    const text = (input.value || '').trim();
-    if (!text) return;
-    input.value = '';
-
-    // Show typing indicator — no user bubble
-    const msgsEl = document.getElementById('coach-top-messages');
-    if (msgsEl) {
-        msgsEl.innerHTML = `<div class="coach-top-loading"><div class="chat-typing"><span></span><span></span><span></span></div></div>`;
-    }
-
-    _chatHistory.push({ role: 'user', text: text, time: new Date().toISOString() });
+    markPopupFired('morning');
 
     try {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ message: text }),
+            body: JSON.stringify({ message: triggerMsg }),
         });
         const data = await res.json();
-
         if (data.response) {
-            _chatHistory.push({ role: 'coach', text: data.response, time: data.time || new Date().toISOString() });
-            // Show only Erik's response — coach voice
-            if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach">${escapeHtml(data.response)}</div>`;
+            showCoachPopup(data.response);
         }
     } catch(e) {
-        _chatHistory.push({ role: 'coach', text: 'Connection issue. Try again.', time: new Date().toISOString() });
-        if (msgsEl) msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Connection issue. Try again.</div>`;
+        console.error('Morning popup failed:', e);
     }
+}
+
+async function triggerEndOfDayPopup() {
+    const hour = new Date().getHours();
+    if (hour < 20) return; // Only after 8pm
+    if (hasPopupFired('eod')) return;
+
+    // Check if workout was done today
+    const todayJsDay = new Date().getDay();
+    const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+    const dayKey = `${currentWeek}_${todayMon}`;
+    const dayDone = _completionsCache && _completionsCache.days && _completionsCache.days[dayKey];
+    if (!dayDone) return; // Only fire if workout is complete
+
+    markPopupFired('eod');
+
+    const weekData = workoutData[String(currentWeek)];
+    const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
+    const workoutName = dayData ? dayData.liftName : 'workout';
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const tomorrowMon = (todayMon + 1) % 7;
+    const tomorrowData = weekData && weekData.days ? weekData.days[tomorrowMon] : null;
+    const tomorrowName = tomorrowData ? tomorrowData.liftName : 'Rest';
+
+    const triggerMsg = `[END_OF_DAY] Today's workout (${workoutName}) is done. Tomorrow is ${dayNames[tomorrowMon]}: ${tomorrowName}. Give a brief end-of-day summary. 1-2 sentences. This is a popup — no questions.`;
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: triggerMsg }),
+        });
+        const data = await res.json();
+        if (data.response) {
+            showCoachPopup(data.response);
+        }
+    } catch(e) {}
 }
 
 function renderInlineCoach() {
