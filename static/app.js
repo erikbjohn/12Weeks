@@ -4492,7 +4492,9 @@ function closeModal() {
   const mfa = document.getElementById('garmin-mfa');
   mfa.value = '';
   mfa.style.display = 'none';
-  document.getElementById('garmin-error').style.display = 'none';
+  const errEl = document.getElementById('garmin-error');
+  errEl.style.display = 'none';
+  errEl.textContent = '';
   document.getElementById('garmin-error').style.color = '';
 }
 
@@ -5526,7 +5528,13 @@ function quickCoachReply(msg) {
 function renderGarminBar() {
   const el = document.getElementById('garmin-bar');
   if (!garminConnected) {
-    el.innerHTML = `<button class="garmin-connect-btn" onclick="showModal()">Connect Garmin \u2014 unlock HRV, sleep &amp; readiness</button>`;
+    // Don't nag — show a subtle link, not a big button
+    const dismissed = localStorage.getItem('garmin_dismissed');
+    if (dismissed) {
+      el.innerHTML = '';
+    } else {
+      el.innerHTML = `<div style="text-align:center;padding:8px"><span style="font-size:12px;color:var(--muted);cursor:pointer" onclick="showModal()">Connect Garmin for HRV &amp; sleep data</span> <span style="font-size:12px;color:var(--dim);cursor:pointer;margin-left:8px" onclick="localStorage.setItem('garmin_dismissed','1');this.parentElement.parentElement.innerHTML=''">&times;</span></div>`;
+    }
     return;
   }
 
