@@ -14,68 +14,35 @@ import math
 # ---------------------------------------------------------------------------
 
 _ACTOR_GOALS = {
-    # CUT targets (~6-10% BF male, ~14-18% female)
-    "brad pitt": "cut",
-    "brad pitt fight club": "cut",
-    "fight club": "cut",
-    "bruce lee": "cut",
-    "ryan gosling": "cut",
-    "ryan gosling crazy stupid love": "cut",
-    "crazy stupid love": "cut",
-    "christian bale": "cut",
-    "christian bale american psycho": "cut",
-    "american psycho": "cut",
-    "daniel craig": "cut",
-    "daniel craig casino royale": "cut",
-    "casino royale": "cut",
-    "zac efron": "cut",
-    "zac efron baywatch": "cut",
-    "baywatch": "cut",
-    "matthew mcconaughey": "cut",
-    "tom hardy warrior": "cut",
-    "tom hardy lightweight": "cut",
-    "halle berry": "cut",
-    "jessica biel": "cut",
-
-    # BULK targets (~12-15% BF male)
-    "jason momoa": "bulk",
-    "jason momoa aquaman": "bulk",
-    "aquaman": "bulk",
-    "chris hemsworth": "bulk",
-    "chris hemsworth thor": "bulk",
-    "thor": "bulk",
-    "dwayne johnson": "bulk",
-    "the rock": "bulk",
-    "henry cavill": "bulk",
-    "henry cavill superman": "bulk",
-    "superman": "bulk",
-    "arnold schwarzenegger": "bulk",
-    "arnold": "bulk",
-    "terry crews": "bulk",
-    "dave bautista": "bulk",
-    "brock lesnar": "bulk",
-
-    # RECOMP targets (~10-12% BF male)
-    "chris evans": "recomp",
-    "chris evans captain america": "recomp",
-    "captain america": "recomp",
-    "ryan reynolds": "recomp",
-    "ryan reynolds blade trinity": "recomp",
-    "blade trinity": "recomp",
-    "michael b jordan": "recomp",
-    "michael b jordan creed": "recomp",
-    "creed": "recomp",
-    "mark wahlberg": "recomp",
-    "will smith": "recomp",
-    "will smith ali": "recomp",
-    "ali": "recomp",
-    "gal gadot": "recomp",
-    "gal gadot wonder woman": "recomp",
-    "wonder woman": "recomp",
-    "scarlett johansson": "recomp",
-    "scarlett johansson black widow": "recomp",
-    "black widow": "recomp",
+    # Generic descriptions as fallback — AI classification is primary
+    "athletic": "recomp", "lean": "recomp", "fit": "recomp", "toned": "recomp",
+    "muscular": "bulk", "jacked": "bulk", "huge": "bulk", "big": "bulk",
+    "shredded": "cut", "ripped": "cut", "six pack": "cut", "abs": "cut",
 }
+
+
+def classify_physique_goal(actor_answer):
+    """Use AI to classify a physique reference into cut/bulk/recomp.
+    Called during intake when the user names their goal physique."""
+    import os
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=10,
+            system="Classify the physique goal into exactly one word: cut, bulk, or recomp.\n\ncut = lean, low body fat, defined muscles, visible abs (Brad Pitt Fight Club, Bruce Lee, Daniel Craig)\nbulk = big, massive, powerful, heavy muscle (The Rock, Thor, Arnold, Hulk)\nrecomp = athletic, balanced, functional muscle without extreme leanness or mass (Captain America, Iron Man, Spider-Man, Batman)\n\nRespond with ONLY one word: cut, bulk, or recomp",
+            messages=[{"role": "user", "content": f"Physique goal: {actor_answer}"}],
+        )
+        result = response.content[0].text.strip().lower()
+        if result in ("cut", "bulk", "recomp"):
+            return result
+    except Exception:
+        pass
+    return None
 
 # Target body fat percentages by goal and sex
 _TARGET_BF = {
@@ -106,14 +73,17 @@ def detect_goal(actor_answer, sex="male", current_weight=None, current_bf_estima
     """
     normalized = actor_answer.strip().lower()
 
-    # Try progressively shorter matches
+    # Try generic keyword matches first (athletic, muscular, shredded, etc.)
     goal_type = _ACTOR_GOALS.get(normalized)
     if goal_type is None:
-        # Try matching just the first/last name
         for key, val in _ACTOR_GOALS.items():
             if key in normalized or normalized in key:
                 goal_type = val
                 break
+
+    # If no keyword match, classify on the fly with AI
+    if goal_type is None and normalized:
+        goal_type = classify_physique_goal(actor_answer)
 
     # Default to recomp — safest when we don't know the user's intent
     if goal_type is None:
