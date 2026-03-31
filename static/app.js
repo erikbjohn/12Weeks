@@ -600,7 +600,25 @@ function getSuggestedWeight(exName, currentWeekNum) {
     if (estimator) {
       const cache = _weightsCache || {};
       const est = estimator(cache);
-      if (est != null && est > 0) return { weight: est, reason: 'estimated' };
+      if (est != null) return { weight: est, reason: est > 0 ? 'estimated' : 'bodyweight' };
+    }
+    // Generic fallback: guess based on exercise name keywords
+    const nl = exName.toLowerCase();
+    const cache = _weightsCache || {};
+    const bench = cache["Barbell Bench Press"];
+    const squat = cache["Barbell Back Squat"];
+    const dl = cache["Conventional Deadlift"];
+    if (nl.includes('curl') || nl.includes('raise') || nl.includes('fly') || nl.includes('extension')) {
+      return { weight: bench ? Math.round(bench.current * 0.25) : 20, reason: 'estimated' };
+    }
+    if (nl.includes('press') || nl.includes('row')) {
+      return { weight: bench ? Math.round(bench.current * 0.5) : 50, reason: 'estimated' };
+    }
+    if (nl.includes('squat') || nl.includes('lunge') || nl.includes('step')) {
+      return { weight: squat ? Math.round(squat.current * 0.3) : 25, reason: 'estimated' };
+    }
+    if (nl.includes('deadlift') || nl.includes('hip') || nl.includes('thrust')) {
+      return { weight: dl ? Math.round(dl.current * 0.5) : 65, reason: 'estimated' };
     }
     return { weight: null, reason: '' };
   }
