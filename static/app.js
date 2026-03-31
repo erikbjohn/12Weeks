@@ -6119,20 +6119,31 @@ async function renderDetail() {
         <div class="rdt"><span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span></div>
         <div class="rdd" style="margin-top:8px">${d.run.detail}</div>
       </div>
-      ${(() => { const runKey = currentWeek + '_' + currentDay; const existingRun = _runLogCache ? _runLogCache[runKey] : null; return `<div class="run-log-form" style="margin-top:10px">
+      ${(() => { const runKey = currentWeek + '_' + currentDay; const existingRun = _runLogCache ? _runLogCache[runKey] : null;
+        if (existingRun && (existingRun.distance_miles || existingRun.avg_hr || existingRun.elevation_ft)) {
+          return `<div class="run-log-form" style="margin-top:10px">
+            <div style="display:flex;gap:12px;align-items:center;padding:8px 0;color:var(--accent);font-family:'DM Mono',monospace;font-size:13px">
+              <span>&#10003; Logged</span>
+              ${existingRun.distance_miles ? `<span>${existingRun.distance_miles} mi</span>` : ''}
+              ${existingRun.avg_hr ? `<span>HR ${existingRun.avg_hr}</span>` : ''}
+              ${existingRun.elevation_ft ? `<span>${existingRun.elevation_ft} ft</span>` : ''}
+            </div>
+            <button class="btn btn-secondary" style="width:100%;font-size:13px;padding:6px" onclick="document.getElementById('run-edit-form').style.display='block';this.style.display='none'">Edit</button>
+            <div id="run-edit-form" style="display:none;margin-top:8px">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" value="${existingRun.distance_miles || ''}" placeholder="mi"></div>
+                <div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" value="${existingRun.avg_hr || ''}" placeholder="bpm"></div>
+                <div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" value="${existingRun.elevation_ft || ''}" placeholder="ft"></div>
+              </div>
+              <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Update Run</button>
+            </div>
+          </div>`;
+        }
+        return `<div class="run-log-form" style="margin-top:10px">
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-          <div>
-            <label style="font-size:12px;color:var(--muted)">Distance (mi)</label>
-            <input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" value="${existingRun ? existingRun.distance_miles || '' : ''}" placeholder="mi">
-          </div>
-          <div>
-            <label style="font-size:12px;color:var(--muted)">Avg HR</label>
-            <input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" value="${existingRun ? existingRun.avg_hr || '' : ''}" placeholder="bpm">
-          </div>
-          <div>
-            <label style="font-size:12px;color:var(--muted)">Elevation (ft)</label>
-            <input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" value="${existingRun ? existingRun.elevation_ft || '' : ''}" placeholder="ft">
-          </div>
+          <div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" placeholder="mi"></div>
+          <div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" placeholder="bpm"></div>
+          <div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" placeholder="ft"></div>
         </div>
         <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Log Run</button>
       </div>`; })()}
