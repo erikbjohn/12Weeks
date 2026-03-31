@@ -75,11 +75,7 @@ function showCoachPopup(message) {
   </div>`;
   document.body.appendChild(overlay);
 
-  // Tap card to dismiss
-  overlay.querySelector('.coach-popup-card').addEventListener('click', dismissCoachPopup);
-
-  // Auto-dismiss after 12 seconds
-  _coachPopupTimeout = setTimeout(() => dismissCoachPopup(), 12000);
+  // Only dismiss via X button — no auto-dismiss, no tap-card-to-dismiss
 
   // Push to chat history so it appears in the full chat overlay
   _chatHistory.push({ role: 'coach', text: message, time: new Date().toISOString(), date: todayStr() });
