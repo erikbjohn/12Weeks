@@ -722,14 +722,34 @@ _FOOD_NAME_TO_ID = {
 
 def _filter_meals_by_food_selections(days, user_food_ids):
     """Remove foods from meal plans that the user didn't select.
-    SAFETY CRITICAL: Also enforces allergen/dietary restriction filtering."""
-    import copy
+    SAFETY CRITICAL: Also enforces allergen/dietary restriction filtering.
+    Also enforces 16:8 fasting window — no caloric foods before 11am or after 7pm."""
+    import copy, re
     if user_food_ids is None:
         return days  # No selections yet = show everything
 
     # Always-allowed items (zero-cal condiments, basics, beverages — don't break fast)
     always_allowed = {"Black coffee", "Water", "Salsa", "Electrolytes (salt, potassium)",
                       "Lemon juice"}
+
+    # Get user's fasting protocol
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    fasting = goal.fasting_protocol if goal else None
+    is_16_8 = fasting and ("16:8" in fasting or "16_8" in fasting)
+
+    def _parse_meal_hour(time_str):
+        """Parse '9:00am' → 9, '2:30pm' → 14, '11:00am' → 11."""
+        if not time_str:
+            return 12  # Default to in-window
+        m = re.match(r'(\d+):?\d*\s*(am|pm)', time_str.lower())
+        if not m:
+            return 12
+        hour = int(m.group(1))
+        if m.group(2) == 'pm' and hour != 12:
+            hour += 12
+        if m.group(2) == 'am' and hour == 12:
+            hour = 0
+        return hour
 
     filtered_days = copy.deepcopy(days)
     for day in filtered_days:
@@ -738,6 +758,18 @@ def _filter_meals_by_food_selections(days, user_food_ids):
             continue
         filtered_meals = []
         for meal in mp["meals"]:
+            # 16:8 enforcement: remove caloric foods outside 11am-7pm window
+            if is_16_8:
+                meal_hour = _parse_meal_hour(meal.get("time", ""))
+                if meal_hour < 11 or meal_hour >= 19:
+                    # Outside eating window — only keep zero-cal items
+                    fasting_foods = [f for f in meal.get("foods", []) if f["item"] in always_allowed]
+                    if fasting_foods:
+                        meal["foods"] = fasting_foods
+                        meal["name"] = fasting_foods[0]["item"]  # e.g., "Black coffee"
+                        filtered_meals.append(meal)
+                    continue  # Skip food selection filtering — entire meal is outside window
+
             filtered_foods = []
             for food in meal.get("foods", []):
                 name = food["item"]
