@@ -605,10 +605,19 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   }
 }
 
+let _activeTimerEl = null;
+
 function startRestTimer(exIdx, seconds) {
   const el = document.getElementById('rest-timer-' + exIdx);
   if (!el) return;
+
+  // Kill previous timer — both interval AND DOM
   if (_restTimerInterval) clearInterval(_restTimerInterval);
+  if (_activeTimerEl && _activeTimerEl !== el) {
+    _activeTimerEl.innerHTML = '';
+    _activeTimerEl.style.display = 'none';
+  }
+  _activeTimerEl = el;
 
   let remaining = seconds;
   el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
@@ -620,9 +629,8 @@ function startRestTimer(exIdx, seconds) {
       clearInterval(_restTimerInterval);
       _restTimerInterval = null;
       el.innerHTML = `<div class="rest-countdown rest-done">GO</div>`;
-      // Vibrate if available
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      setTimeout(() => { el.style.display = 'none'; }, 3000);
+      setTimeout(() => { el.style.display = 'none'; _activeTimerEl = null; }, 3000);
     } else {
       el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
     }
@@ -633,6 +641,27 @@ function formatTimer(sec) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
+}
+
+// ─── WEIGHT ROUNDING (valid plate combinations) ─────────────────────────
+function isBarbell(exName) {
+  const nl = exName.toLowerCase();
+  return nl.includes('barbell') || nl.includes('ez-bar') || nl.includes('deadlift') ||
+         nl.includes('squat') && !nl.includes('goblet') || nl.includes('ohp') ||
+         nl.includes('bench press') && !nl.includes('db') && !nl.includes('dumbbell');
+}
+
+function roundWeight(weight, exName) {
+  if (!weight || weight <= 0) return weight;
+  if (isBarbell(exName)) {
+    // Barbell: bar = 45, plates come in 2.5, 5, 10, 25, 35, 45
+    // Valid total weights: 45 (empty bar), then bar + plates on each side
+    // Smallest increment = 5 lbs (2.5 per side)
+    // Round to nearest 5
+    return Math.round(weight / 5) * 5;
+  }
+  // Dumbbell / cable / machine: 5 lb increments
+  return Math.round(weight / 5) * 5;
 }
 
 function getLastRPEs(exName, count) {
@@ -739,7 +768,10 @@ function getSuggestedWeight(exName, currentWeekNum) {
 
 function getWeightForExercise(exName, weekNum) {
   const suggestion = getSuggestedWeight(exName, weekNum);
-  if (suggestion.weight !== null) return suggestion;
+  if (suggestion.weight !== null) {
+    suggestion.weight = roundWeight(suggestion.weight, exName);
+    return suggestion;
+  }
   return { weight: null, reason: '' };
 }
 
