@@ -4829,7 +4829,11 @@ function formatWuTimer(sec) {
 }
 
 function renderPostWorkoutCoach() {
-  // Show post-workout coach chat at the bottom of the detail panel
+  // Only show on today — not past or future days
+  const todayJsDay = new Date().getDay();
+  const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+  if (currentDay !== todayMon) return '';
+
   // Only visible after the run is logged (workout complete)
   const runKey = currentWeek + '_' + currentDay;
   const hasRun = _runLogCache && _runLogCache[runKey];
@@ -5363,6 +5367,14 @@ async function renderCoachTop() {
     const el = document.getElementById('coach-top');
     if (!el) return;
 
+    // Only show coach chat when viewing today — not past or future days
+    const todayJsDay = new Date().getDay();
+    const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+    if (currentDay !== null && currentDay !== todayMon) {
+        el.innerHTML = '';
+        return;
+    }
+
     const today = todayStr();
     const morningKey = '12w_morning_' + today;
     const hasMorningMessage = localStorage.getItem(morningKey);
@@ -5373,7 +5385,7 @@ async function renderCoachTop() {
         ((m.date && m.date === today) || (m.time && m.time.startsWith(today)))
     );
 
-    // Show only Erik's last message FROM TODAY — new day = fresh message
+    // Show only Erik's last message FROM TODAY
     let bubblesHtml = '';
     const todayCoachVisible = _chatHistory.filter(m =>
         (m.role === 'coach' || m.role === 'assistant') &&
@@ -5385,19 +5397,20 @@ async function renderCoachTop() {
         bubblesHtml = `<div class="coach-top-bubble coach">${escapeHtml(last.text || last.content || '')}</div>`;
     }
 
-    // Render the shell immediately
     el.innerHTML = renderCoachTopShell(bubblesHtml);
 
     // If coach hasn't spoken today, fire off a morning greeting
     if (todayCoachMsgs.length === 0 && !hasMorningMessage) {
         const weekData = workoutData[String(currentWeek)];
-        const todayDayIdx = new Date().getDay();
-        const mappedIdx = todayDayIdx === 0 ? 6 : todayDayIdx - 1;
+        const mappedIdx = todayMon;
         const dayData = weekData && weekData.days ? weekData.days[mappedIdx] : null;
         const workoutName = dayData ? dayData.liftName : 'Rest';
         const timing = dayData && dayData.timing ? dayData.timing[0] : '6:00';
+        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const dayName = dayNames[todayMon];
+        const isRest = dayData ? dayData.isRest : false;
 
-        const triggerMsg = `[MORNING_CHECKIN] Today is ${workoutName} — Week ${currentWeek}. Session starts at ${timing}. Greet the athlete, state the schedule, and tell them to check in on how they feel.`;
+        const triggerMsg = `[MORNING_CHECKIN] Today is ${dayName}, ${today}. ${isRest ? 'Rest day.' : `Workout: ${workoutName}. Session starts at ${timing}.`} Week ${currentWeek}. Greet the athlete, state the schedule, and tell them to check in on how they feel.`;
 
         // Show loading state
         const msgsEl = document.getElementById('coach-top-messages');

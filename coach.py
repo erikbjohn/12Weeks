@@ -458,6 +458,8 @@ NEVER end with "what time" or "when will you" — YOU set the time. The schedule
 ATHLETE: {ctx.get('athlete_name', 'Athlete')}
 Use their name when addressing them directly.
 
+TODAY: {date.today().strftime('%A, %B %d, %Y')} ({date.today().strftime('%A')} = day {date.today().weekday()} of the training week, Mon=0)
+
 ATHLETE CONTEXT:
 - Week {week} of 12, Phase {phase.get('label', '?')}
 - Focus: {phase.get('focus', '?')}
