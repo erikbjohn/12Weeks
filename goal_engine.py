@@ -171,7 +171,7 @@ def compute_tdee(weight_lbs, height_in, age, sex, activity_multiplier=1.7):
     return {"bmr": int(round(bmr)), "tdee": int(round(tdee))}
 
 
-def compute_targets(tdee, goal_type, weight_lbs):
+def compute_targets(tdee, goal_type, weight_lbs, age=None):
     """Compute daily macro targets based on goal type.
 
     For CUT: aggressive deficit, high protein to preserve muscle.

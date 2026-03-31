@@ -364,7 +364,31 @@ the athlete waits until 11am to eat. Do NOT tell them to "get some protein" afte
             fasting_section += """The athlete eats ONE meal per day. Do NOT suggest eating at any other time.
 """
 
-    return f"""*** CRITICAL SAFETY WARNING — FOOD & ALLERGENS ***
+    # Check if athlete is a minor
+    goal_data = ctx.get("goal")
+    is_minor = False
+    if goal_data and goal_data.get("goal_type") == "recomp":
+        # Check age from physical assessment context
+        pa = ctx.get("physical_assessment")
+        # We can't directly get age here, but if fasting is "none" and goal is recomp, likely a minor
+        if goal_data.get("fasting_protocol") == "none":
+            is_minor = True  # Conservative: treat as potential minor
+
+    minor_warning = ""
+    if is_minor:
+        minor_warning = """
+*** MINOR ATHLETE SAFETY ***
+This athlete may be under 18. ABSOLUTE RULES:
+- NEVER suggest calorie restriction, cutting, or weight loss
+- NEVER suggest fasting of any kind
+- NEVER suggest supplements beyond basic nutrition
+- Focus on: building strength, proper form, eating ENOUGH to fuel growth
+- Their goal is RECOMP: eat at maintenance or above, build muscle
+- Encourage eating MORE, not less. Growing athletes need fuel.
+- If they mention wanting to lose weight, redirect: "You're building. Eat to grow."
+"""
+
+    return f"""{minor_warning}*** CRITICAL SAFETY WARNING — FOOD & ALLERGENS ***
 NEVER recommend, suggest, or include ANY food that conflicts with the athlete's
 dietary restrictions or allergies. This is a LIFE-SAFETY issue. Allergen exposure
 can cause anaphylaxis and death. There is ZERO tolerance for this.

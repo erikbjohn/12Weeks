@@ -150,25 +150,29 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # ONE-TIME FIX: siggijohnson226@gmail.com weight = 128
+    # ONE-TIME FIX: siggijohnson226@gmail.com — minor (14yo), force recomp, fix weight
     try:
         _fix_user = User.query.filter_by(email="siggijohnson226@gmail.com").first()
         if _fix_user:
-            # Fix PhysicalAssessment
+            # Fix weight
             _fix_pa = PhysicalAssessment.query.filter_by(user_id=_fix_user.id).first()
             if _fix_pa:
                 _fix_pa.bodyweight_lbs = 128.0
-            # Fix/create BodyWeight entry
             from datetime import date as _d
             _fix_bw = BodyWeight.query.filter_by(user_id=_fix_user.id).order_by(BodyWeight.log_date.desc()).first()
             if _fix_bw:
                 _fix_bw.weight_lbs = 128.0
             else:
                 db.session.add(BodyWeight(log_date=_d.today(), weight_lbs=128.0, user_id=_fix_user.id))
-            # Reset goal to recompute with correct weight
+            # SAFETY: Force recomp for minor — NO cut, NO deficit
             _fix_goal = TrainingGoal.query.filter_by(user_id=_fix_user.id).first()
             if _fix_goal:
+                _fix_goal.goal_type = "recomp"
+                _fix_goal.fasting_protocol = "none"
                 _fix_goal.plan_accepted = False
+                # Recalculate calories at maintenance for 14yo, 128lb
+                _fix_goal.daily_calories = 2600  # ~TDEE for active 14yo male
+                _fix_goal.protein_grams = 128  # 1g per lb
             db.session.commit()
     except Exception:
         db.session.rollback()
@@ -2728,10 +2732,15 @@ def api_goal_compute():
     goal_type = goal_info["goal_type"]
     target_bf = goal_info["target_bf"]
 
+    # *** SAFETY: Minors (under 18) — NO calorie deficit, NO cut, NO fasting ***
+    is_minor = age < 18
+    if is_minor:
+        goal_type = "recomp"  # Force recomp — eat at maintenance, build muscle
+        target_bf = 0.12 if sex == "male" else 0.20  # Healthy teen target
+
     tdee_info = compute_tdee(weight, height, age, sex)
 
     # Compute target weight from body fat
-    # Estimate current BF: rough formula (not perfect but functional)
     if sex == "male":
         est_bf = 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
     else:
@@ -2739,8 +2748,20 @@ def api_goal_compute():
     lean_mass = weight * (1 - est_bf)
     target_weight = lean_mass / (1 - target_bf)
 
-    targets = compute_targets(tdee_info["tdee"], goal_type, weight)
-    fasting = determine_fasting_protocol(goal_type, targets["calories"])
+    # For minors: target weight should be ABOVE current weight (growth, not loss)
+    if is_minor:
+        target_weight = max(target_weight, weight + 5)
+
+    targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age)
+
+    if is_minor:
+        # Override: NO deficit for minors — eat at TDEE or above
+        targets["calories"] = max(targets["calories"], tdee_info["tdee"])
+        # No fasting for minors
+        fasting = {"protocol": "none", "eating_window_hours": 24, "electrolytes": False, "notes": "No fasting for athletes under 18. Eat regular meals throughout the day."}
+    else:
+        fasting = determine_fasting_protocol(goal_type, targets["calories"])
+
     phase_plan = compute_phase_plan(goal_type, weight, target_weight, est_bf)
     projection = project_weight_curve(weight, target_weight, tdee_info["tdee"], targets["calories"])
 
