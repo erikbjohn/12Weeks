@@ -4745,7 +4745,7 @@ function renderWarmupSection(dayData) {
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
         <div class="wu-step-content">
-          <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' warm up stretch')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
+          <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
           ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
         </div>
         ${hasDuration && !isWuDone ? `<button class="wu-start-btn" onclick="startWuStepTimer(${i},'${step.duration.replace(/'/g, "\\'")}')" id="wu-start-${i}">${step.duration}</button>` : ''}
@@ -5879,7 +5879,7 @@ async function renderDetail() {
     return `<div class="exercise-block">
       <div class="exercise-header">
         <div class="ex-info">
-          <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form tutorial')}" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
+          <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
           ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
         </div>
         <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}</div>
