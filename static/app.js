@@ -109,6 +109,31 @@ function markPopupFired(key) {
   localStorage.setItem('popup_' + key + '_' + todayStr(), '1');
 }
 
+function showPreStartLockout(startDateStr) {
+  const startDate = new Date(startDateStr + 'T00:00:00');
+  const now = new Date();
+  const diffMs = startDate - now;
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+  const dateLabel = startDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+  document.body.innerHTML = `
+    <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;text-align:center;background:var(--bg,#0d0f0e);color:var(--text,#e8ede9)">
+      <div style="max-width:400px">
+        <div style="font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin-bottom:1rem">COACH ERIK</div>
+        <h1 style="font-size:1.8rem;font-weight:700;margin-bottom:0.5rem">YOUR PROGRAM STARTS</h1>
+        <div style="font-size:1.4rem;color:#4ade80;font-weight:600;margin-bottom:2rem">${dateLabel}</div>
+        <div style="font-family:'DM Mono',monospace;font-size:3rem;font-weight:800;color:#4ade80;margin-bottom:0.5rem">${days}d ${hours}h</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:2rem">until Day 1</div>
+        <div style="background:#1a2e24;border:2px solid #3a7a56;border-radius:12px;padding:20px;margin-bottom:2rem;text-align:left;font-size:15px;line-height:1.6;color:#e8ede9">
+          Rest up. Eat clean. Hydrate. When that clock hits zero, we go. No warm-up period. No easing in. Day 1 is full speed. Be ready.
+        </div>
+        <button onclick="window.location='/logout'" style="background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
+      </div>
+    </div>`;
+}
+
 function apiPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -3438,8 +3463,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Auto-calculate week from start date if set
     if (_stateCache.start_date) {
-      const start = new Date(_stateCache.start_date);
+      const start = new Date(_stateCache.start_date + 'T00:00:00');
       const now = new Date();
+      // If start date is in the future, show lockout screen
+      if (start > now) {
+        showPreStartLockout(_stateCache.start_date);
+        return; // Don't render the app
+      }
       const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
       const week = Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
       currentWeek = week;

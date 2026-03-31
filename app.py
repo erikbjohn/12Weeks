@@ -150,30 +150,32 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # ONE-TIME FIX: siggijohnson226@gmail.com — minor (14yo), force recomp, fix weight
+    # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
+    # Wipe all corrupted data, keep psych intake, restart from physical assessment
     try:
         _fix_user = User.query.filter_by(email="siggijohnson226@gmail.com").first()
         if _fix_user:
-            # Fix weight
-            _fix_pa = PhysicalAssessment.query.filter_by(user_id=_fix_user.id).first()
-            if _fix_pa:
-                _fix_pa.bodyweight_lbs = 128.0
-            from datetime import date as _d
-            _fix_bw = BodyWeight.query.filter_by(user_id=_fix_user.id).order_by(BodyWeight.log_date.desc()).first()
-            if _fix_bw:
-                _fix_bw.weight_lbs = 128.0
-            else:
-                db.session.add(BodyWeight(log_date=_d.today(), weight_lbs=128.0, user_id=_fix_user.id))
-            # SAFETY: Force recomp for minor — NO cut, NO deficit
-            _fix_goal = TrainingGoal.query.filter_by(user_id=_fix_user.id).first()
-            if _fix_goal:
-                _fix_goal.goal_type = "recomp"
-                _fix_goal.fasting_protocol = "none"
-                _fix_goal.plan_accepted = False
-                # Recalculate calories at maintenance for 14yo, 128lb
-                _fix_goal.daily_calories = 2600  # ~TDEE for active 14yo male
-                _fix_goal.protein_grams = 128  # 1g per lb
-            db.session.commit()
+            _uid = _fix_user.id
+            # Check if already rebuilt (has no TrainingGoal = already wiped)
+            _existing_goal = TrainingGoal.query.filter_by(user_id=_uid).first()
+            if _existing_goal:
+                # Wipe everything except User and PsychIntake
+                for _model in [TrainingGoal, UserFoodSelections, ExerciseLog, SetLog,
+                               ExerciseCompletion, DayCompletion, MealLog, WeeklyReport,
+                               CoachMemory, ChatMessage, RunLog, WarmupCompletion,
+                               BodyWeight, BodyMeasurement, PhysicalAssessment,
+                               UserEquipment, ExerciseSwap]:
+                    try:
+                        _model.query.filter_by(user_id=_uid).delete()
+                    except Exception:
+                        db.session.rollback()
+                # Reset AppState
+                _state = AppState.query.filter_by(user_id=_uid).first()
+                if _state:
+                    _state.baseline_done = False
+                    _state.start_date = None
+                    _state.current_week = 1
+                db.session.commit()
     except Exception:
         db.session.rollback()
 
@@ -194,6 +196,97 @@ with app.app_context():
             db.session.commit()
     except Exception:
         db.session.rollback()
+
+    # PRE-START COACH EMAIL: Send day before start date
+    try:
+        tomorrow = date.today() + timedelta(days=1)
+        _prestart_users = db.session.query(User, AppState).join(
+            AppState, AppState.user_id == User.id
+        ).filter(AppState.start_date == tomorrow).all()
+        for _user, _state in _prestart_users:
+            # Check if already sent (look for marker in ChatMessage)
+            _already_sent = ChatMessage.query.filter_by(
+                user_id=_user.id, role="system", content="[PRESTART_EMAIL_SENT]"
+            ).first()
+            if not _already_sent:
+                _send_prestart_email(_user)
+    except Exception:
+        pass
+
+
+def _send_prestart_email(user):
+    """Send a personalized pre-start email from Coach Erik the day before Day 1."""
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if not api_key:
+        return
+
+    # Get their intake report for personalization
+    intake = PsychIntake.query.filter_by(user_id=user.id).first()
+    report = intake.report if intake and intake.report else "No intake report available."
+
+    # Generate personalized email body via Claude
+    email_body = _generate_prestart_email_body(user.name or "Athlete", report)
+
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+
+        from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@12weeks.app")
+        msg = Mail(
+            from_email=from_email,
+            to_emails=user.email,
+            subject="Tomorrow. Day 1. — Coach Erik",
+            html_content=email_body,
+        )
+        sg = SendGridAPIClient(api_key)
+        sg.send(msg)
+
+        # Mark as sent
+        db.session.add(ChatMessage(
+            role="system", content="[PRESTART_EMAIL_SENT]",
+            log_date=date.today(), user_id=user.id,
+        ))
+        db.session.commit()
+    except Exception:
+        pass
+
+
+def _generate_prestart_email_body(name, intake_report):
+    """Generate the pre-start email using Claude in Coach Erik's voice."""
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not anthropic_key:
+        # Fallback static email
+        return f"""<div style="background:#0d0f0e;color:#e8ede9;padding:2rem;font-family:sans-serif;max-width:500px;margin:0 auto">
+        <div style="color:#4ade80;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem">COACH ERIK</div>
+        <h2 style="color:#e8ede9;margin-bottom:1rem">{name}. Tomorrow.</h2>
+        <p style="line-height:1.6">Tomorrow is Day 1. You signed up for a reason. Don't forget it.</p>
+        <p style="line-height:1.6">6am. Warm-up by 6:05. Lifting by 6:15. No negotiation.</p>
+        <p style="line-height:1.6">I'll be there. You show up.</p>
+        <p style="color:#4ade80;margin-top:2rem">— Erik</p>
+        </div>"""
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=anthropic_key, timeout=15.0)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            system="""You are Coach Erik. Write a brief, powerful pre-start email for an athlete whose program begins TOMORROW.
+Lombardi voice — direct, no fluff, no warmth. State facts. Set expectations.
+Include: why they signed up (from their intake report), what Day 1 looks like, that you hold them accountable, no excuses.
+Output HTML with inline styles. Dark background (#0d0f0e), light text (#e8ede9), green accent (#4ade80).
+Keep it SHORT — 4-5 sentences max. Sign it "— Erik".""",
+            messages=[{"role": "user", "content": f"Athlete name: {name}\n\nIntake report:\n{intake_report[:500]}"}],
+        )
+        return response.content[0].text
+    except Exception:
+        return f"""<div style="background:#0d0f0e;color:#e8ede9;padding:2rem;font-family:sans-serif;max-width:500px;margin:0 auto">
+        <div style="color:#4ade80;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem">COACH ERIK</div>
+        <h2>{name}. Tomorrow.</h2>
+        <p style="line-height:1.6">Tomorrow is Day 1. Show up. 6am.</p>
+        <p style="color:#4ade80;margin-top:2rem">— Erik</p>
+        </div>"""
+
 
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
