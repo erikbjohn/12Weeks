@@ -2735,22 +2735,49 @@ def api_goal_compute():
     # *** SAFETY: Minors (under 18) — NO calorie deficit, NO cut, NO fasting ***
     is_minor = age < 18
     if is_minor:
-        goal_type = "recomp"  # Force recomp — eat at maintenance, build muscle
-        target_bf = 0.12 if sex == "male" else 0.20  # Healthy teen target
+        goal_type = "recomp"
+        target_bf = 0.12 if sex == "male" else 0.20
+
+    # *** SAFETY: Weight-based goal override ***
+    # A lightweight person should NEVER be on a cut — they need to build, not lose.
+    # BMI-based thresholds (rough): underweight < 18.5, normal 18.5-25
+    bmi = (weight / (height * height)) * 703 if height > 0 else 22
+    if sex == "male":
+        if weight < 150 and goal_type == "cut":
+            goal_type = "bulk"  # Too light to cut — build muscle
+            target_bf = 0.13
+        elif weight < 170 and goal_type == "cut" and bmi < 22:
+            goal_type = "recomp"  # Lean — recomp, not cut
+            target_bf = 0.11
+    else:
+        if weight < 120 and goal_type == "cut":
+            goal_type = "bulk"
+            target_bf = 0.22
+        elif weight < 140 and goal_type == "cut" and bmi < 22:
+            goal_type = "recomp"
+            target_bf = 0.19
 
     tdee_info = compute_tdee(weight, height, age, sex)
 
     # Compute target weight from body fat
     if sex == "male":
-        est_bf = 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
+        est_bf = 0.12 if weight < 150 else 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
     else:
-        est_bf = 0.22 if weight < 150 else 0.28 if weight < 180 else 0.33
+        est_bf = 0.20 if weight < 130 else 0.22 if weight < 150 else 0.28 if weight < 180 else 0.33
     lean_mass = weight * (1 - est_bf)
     target_weight = lean_mass / (1 - target_bf)
+
+    # Never target weight loss below healthy minimum
+    min_healthy_weight = lean_mass / 0.92 if sex == "male" else lean_mass / 0.85
+    target_weight = max(target_weight, min_healthy_weight)
 
     # For minors: target weight should be ABOVE current weight (growth, not loss)
     if is_minor:
         target_weight = max(target_weight, weight + 5)
+
+    # For bulk: target above current
+    if goal_type == "bulk":
+        target_weight = max(target_weight, weight + 10)
 
     targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age)
 

@@ -115,9 +115,9 @@ def detect_goal(actor_answer, sex="male", current_weight=None, current_bf_estima
                 goal_type = val
                 break
 
-    # Default to cut -- most common goal
+    # Default to recomp — safest when we don't know the user's intent
     if goal_type is None:
-        goal_type = "cut"
+        goal_type = "recomp"
 
     target_bf = _TARGET_BF[goal_type][sex]
 
