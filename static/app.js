@@ -4834,6 +4834,10 @@ function drawWeighInSparkline(bwData) {
 // ─── SUPPLEMENT TRACKER ─────────────────────────────────────────────────────
 function renderSupplementBar() {
   const el = document.getElementById('supplement-bar');
+  if (el) el.innerHTML = '';
+  return;
+  // Supplements disabled — original code below
+  const el = document.getElementById('supplement-bar');
   if (!el) return;
   if (!_supplementsCache || !_supplementsCache.list || _supplementsCache.list.length === 0) {
     el.innerHTML = '';
