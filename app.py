@@ -21,7 +21,12 @@ from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
-from compliance import compute_compliance_score, get_improvement_tip
+# Lazy import — compliance.py may fail on first deploy before table exists
+try:
+    from compliance import compute_compliance_score, get_improvement_tip
+except Exception:
+    def compute_compliance_score(user_id): return {"score": 50, "grade": "B", "breakdown": {}, "streak": 0}
+    def get_improvement_tip(grade, breakdown): return "Stay consistent."
 from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,

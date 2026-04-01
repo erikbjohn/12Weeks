@@ -3597,10 +3597,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     _supplementsCache = _supplementsCache || { taken: {}, list: [] };
     _bodyweightCache = _bodyweightCache || [];
     renderAll();
+  } finally {
+    // ALWAYS hide loading spinner — even on error, redirect, or early return
+    const appLoading = document.getElementById('app-loading');
+    if (appLoading) appLoading.style.display = 'none';
   }
-  // Hide loading spinner
-  const appLoading = document.getElementById('app-loading');
-  if (appLoading) appLoading.style.display = 'none';
 });
 
 function saveState() {
