@@ -202,12 +202,12 @@ function isMealEaten(mealIdx) {
   return (data.eaten || []).includes(mealIdx);
 }
 
-function toggleMealEaten(mealIdx) {
+function toggleMealEaten(mealIdx, btnEl) {
   const data = loadMealData();
   if (!data.eaten) data.eaten = [];
   if (!data.foodItems) data.foodItems = [];
   const idx = data.eaten.indexOf(mealIdx);
-  const marking = idx < 0; // true if checking, false if unchecking
+  const marking = idx < 0;
 
   if (marking) {
     data.eaten.push(mealIdx);
@@ -224,14 +224,25 @@ function toggleMealEaten(mealIdx) {
     }
   } else {
     data.eaten.splice(idx, 1);
-    // Uncheck all food items in this meal
     data.foodItems = data.foodItems.filter(k => !k.startsWith(mealIdx + '_'));
   }
 
   saveMealData(data);
+
+  // Update button in-place immediately (don't wait for async renderDetail)
+  if (btnEl) {
+    if (marking) {
+      btnEl.classList.add('eaten');
+      btnEl.innerHTML = '&#10003; ' + btnEl.textContent.replace('✓ ', '').trim();
+    } else {
+      btnEl.classList.remove('eaten');
+      btnEl.innerHTML = btnEl.textContent.replace('✓ ', '').trim();
+    }
+  }
+
+  // Full re-render to sync food checkboxes
   renderDetail();
 
-  // Check if all meals are done → coach closes the kitchen
   if (marking) {
     const totalMeals = _getTotalMealCount();
     if (totalMeals > 0 && data.eaten.length >= totalMeals) {
@@ -398,7 +409,7 @@ function renderMealSection(dayData) {
     }).join('');
 
     mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
-      <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx})">
+      <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">
         ${eaten ? '&#10003;' : ''}
       </button>
       <div class="meal-time">${meal.time}</div>
@@ -433,7 +444,7 @@ function renderMealSection(dayData) {
   let compactChecks = '';
   meals.forEach((meal, idx) => {
     const eaten = isMealEaten(idx);
-    compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx})">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
+    compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
   });
 
   return `<div class="detail-section">
@@ -5834,11 +5845,13 @@ async function renderDetail() {
     return;
   }
 
+  try {
+
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
   const d = weekData.days[currentDay];
   if (!d) return;
-  const runClass = `run-${d.run.type}`;
+  const runClass = d.run ? `run-${d.run.type}` : 'run-z2';
   const isTraveling = _stateCache && _stateCache.traveling;
 
   // Load per-set data from DB for this day (if not already loaded)
@@ -6168,6 +6181,12 @@ async function renderDetail() {
   // Load Sunday photo previews asynchronously
   if (isSunday(d)) {
     loadSundayPhotoPreviews();
+  }
+
+  } catch(e) {
+    console.error('renderDetail crashed:', e);
+    panel.innerHTML = `<div class="detail-inner" style="padding:1rem;color:var(--muted)">Error loading day details. Try refreshing.</div>`;
+    panel.classList.add('visible');
   }
 }
 
