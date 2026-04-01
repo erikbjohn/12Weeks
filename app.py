@@ -302,6 +302,16 @@ Keep it SHORT — 4-5 sentences max. Sign it "— Erik".""",
         </div>"""
 
 
+# Validate exercise swap data on startup
+try:
+    from equipment_swaps import validate_exercise_swaps
+    _missing_alts = validate_exercise_swaps()
+    if _missing_alts:
+        import logging
+        logging.warning(f"Exercises with <2 alternatives: {_missing_alts}")
+except Exception:
+    pass
+
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
 

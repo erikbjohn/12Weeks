@@ -196,6 +196,152 @@ EXERCISE_SWAPS = {
         ],
     },
 
+    # ─── DIPS ─────────────────────────────────────────────
+    "Weighted Dips": {
+        "muscle_group": "chest_triceps",
+        "requires": ["dip_station"],
+        "alternatives": [
+            {"name": "Cable Tricep Pushdown", "requires": ["cable_machine"], "note": "Tricep isolation, constant tension"},
+            {"name": "Close-Grip Bench Press", "requires": ["barbell", "flat_bench"], "note": "Heavy tricep compound"},
+            {"name": "Skull Crusher", "requires": ["ez_bar", "flat_bench"], "note": "Lying tricep extension"},
+            {"name": "Overhead Dumbbell Tricep Extension", "requires": ["dumbbells"], "note": "Long head stretch"},
+            {"name": "Diamond Push-Ups", "requires": [], "note": "Bodyweight, hands together"},
+            {"name": "Machine Dip", "requires": ["chest_press_machine"], "note": "Guided path, adjustable weight"},
+        ],
+    },
+
+    # ─── ADDITIONAL EXERCISES ─────────────────────────────
+    "Dumbbell Shoulder Press": {
+        "muscle_group": "shoulders",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Barbell OHP", "requires": ["barbell"], "note": "Heavier loading"},
+            {"name": "Pike Push-Ups", "requires": [], "note": "Bodyweight overhead press"},
+            {"name": "Arnold Press", "requires": ["dumbbells"], "note": "Rotation adds front delt work"},
+        ],
+    },
+    "Romanian Deadlift": {
+        "muscle_group": "hamstrings",
+        "requires": ["barbell"],
+        "alternatives": [
+            {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Lighter, easier to control"},
+            {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Unilateral balance work"},
+            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Machine isolation"},
+        ],
+    },
+    "Walking Lunge": {
+        "muscle_group": "quads",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Stationary, rear foot elevated"},
+            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Hold at chest, full depth"},
+            {"name": "Step-Up", "requires": ["dumbbells"], "note": "Use a bench or box"},
+        ],
+    },
+    "Standing Calf Raise": {
+        "muscle_group": "calves",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Seated Calf Raise", "requires": ["dumbbells"], "note": "Seated, weight on knees"},
+            {"name": "Calf Raises (step)", "requires": [], "note": "Bodyweight on a step, full ROM"},
+        ],
+    },
+    "Leg Press": {
+        "muscle_group": "quads",
+        "requires": ["leg_press"],
+        "alternatives": [
+            {"name": "Barbell Back Squat", "requires": ["barbell"], "note": "Free weight compound"},
+            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Hold dumbbell at chest"},
+            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Unilateral, no machine needed"},
+        ],
+    },
+    "Wide-Grip Lat Pulldown": {
+        "muscle_group": "back",
+        "requires": ["lat_pulldown"],
+        "alternatives": [
+            {"name": "Pull-Ups", "requires": ["pull_up_bar"], "note": "Wide grip, bodyweight"},
+            {"name": "Dumbbell Pullover", "requires": ["dumbbells", "flat_bench"], "note": "Stretch + contraction"},
+            {"name": "Barbell Bent-Over Row (underhand)", "requires": ["barbell"], "note": "Supinated grip for lats"},
+        ],
+    },
+    "Single-Arm DB Row": {
+        "muscle_group": "back",
+        "requires": ["dumbbells", "flat_bench"],
+        "alternatives": [
+            {"name": "Cable Seated Row", "requires": ["cable_machine"], "note": "Bilateral, constant tension"},
+            {"name": "Barbell Bent-Over Row", "requires": ["barbell"], "note": "Heavier bilateral pull"},
+            {"name": "Inverted Row", "requires": ["pull_up_bar"], "note": "Bodyweight horizontal pull"},
+        ],
+    },
+    "DB Shrug": {
+        "muscle_group": "traps",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Barbell Shrug", "requires": ["barbell"], "note": "Heavier loading"},
+            {"name": "Band Shrug", "requires": ["resistance_bands"], "note": "Stand on band, shrug up"},
+        ],
+    },
+    "Hammer Curl": {
+        "muscle_group": "biceps",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Dumbbell Curl", "requires": ["dumbbells"], "note": "Supinated grip, standard curl"},
+            {"name": "EZ-Bar Curl", "requires": ["ez_bar"], "note": "Heavier loading, angled grip"},
+            {"name": "Band Curl", "requires": ["resistance_bands"], "note": "Step on band, curl up"},
+        ],
+    },
+    "Skull Crusher": {
+        "muscle_group": "triceps",
+        "requires": ["ez_bar", "flat_bench"],
+        "alternatives": [
+            {"name": "Cable Tricep Pushdown", "requires": ["cable_machine"], "note": "Standing, constant tension"},
+            {"name": "Overhead Dumbbell Tricep Extension", "requires": ["dumbbells"], "note": "Long head focus"},
+            {"name": "Diamond Push-Ups", "requires": [], "note": "Bodyweight tricep work"},
+        ],
+    },
+    "Overhead Tricep Extension": {
+        "muscle_group": "triceps",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Cable Tricep Pushdown", "requires": ["cable_machine"], "note": "Standing, constant tension"},
+            {"name": "Skull Crusher", "requires": ["ez_bar", "flat_bench"], "note": "Lying extension"},
+            {"name": "Diamond Push-Ups", "requires": [], "note": "Bodyweight, hands together"},
+        ],
+    },
+    "Cable Lateral Raise": {
+        "muscle_group": "shoulders",
+        "requires": ["cable_machine"],
+        "alternatives": [
+            {"name": "Lateral Raise", "requires": ["dumbbells"], "note": "Free weight, standard"},
+            {"name": "Band Lateral Raise", "requires": ["resistance_bands"], "note": "Step on band"},
+        ],
+    },
+    "KB Swing": {
+        "muscle_group": "posterior_chain",
+        "requires": ["kettlebells"],
+        "alternatives": [
+            {"name": "Dumbbell Swing", "requires": ["dumbbells"], "note": "Same movement, hold one DB"},
+            {"name": "Romanian Deadlift", "requires": ["barbell"], "note": "Slower hip hinge, same muscles"},
+        ],
+    },
+    "Nordic Hamstring Curl": {
+        "muscle_group": "hamstrings",
+        "requires": [],
+        "alternatives": [
+            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Machine isolation"},
+            {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Hip hinge hamstring work"},
+        ],
+    },
+    "Bulgarian Split Squat": {
+        "muscle_group": "quads",
+        "requires": ["dumbbells"],
+        "alternatives": [
+            {"name": "Walking Lunge", "requires": ["dumbbells"], "note": "Moving lunge, similar pattern"},
+            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Bilateral, hold at chest"},
+            {"name": "Step-Up", "requires": ["dumbbells"], "note": "Unilateral, use bench or box"},
+        ],
+    },
+
     # ─── MISC ──────────────────────────────────────────────
     "Incline Cable Fly": {
         "muscle_group": "chest",
@@ -276,27 +422,52 @@ def check_exercise_available(exercise_name, user_equipment):
 
 def auto_swap_workout(exercises, user_equipment):
     """Auto-swap exercises the user can't do with the best available alternative.
-
-    Args:
-        exercises: list of exercise dicts from workout_data
-        user_equipment: list of equipment IDs
-
-    Returns:
-        modified exercises list with swaps applied
+    Also prevents duplicate exercises in the same day.
     """
     result = []
+    used_names = set()
+
     for ex in exercises:
         if check_exercise_available(ex["name"], user_equipment):
-            result.append(ex)
+            if ex["name"] not in used_names:
+                result.append(ex)
+                used_names.add(ex["name"])
+            # else: skip duplicate
         else:
             alts = get_alternatives(ex["name"], user_equipment)
-            if alts:
+            # Find first available alternative not already in today's workout
+            picked = None
+            for alt in alts:
+                if alt["available"] and alt["name"] not in used_names:
+                    picked = alt
+                    break
+            # Fallback: pick first available even if duplicate risk
+            if not picked:
+                for alt in alts:
+                    if alt["available"]:
+                        picked = alt
+                        break
+            if picked:
                 swapped = dict(ex)
-                swapped["name"] = alts[0]["name"]
-                swapped["note"] = alts[0]["note"] + f" (replaces {ex['name']})"
+                swapped["name"] = picked["name"]
+                swapped["note"] = picked["note"] + f" (replaces {ex['name']})"
                 swapped["_swapped_from"] = ex["name"]
                 result.append(swapped)
+                used_names.add(picked["name"])
             else:
                 # No alternatives available, keep original
                 result.append(ex)
+                used_names.add(ex["name"])
     return result
+
+
+def validate_exercise_swaps():
+    """Startup validation: warn about exercises with no alternatives.
+    Returns list of exercise names with 0 alternatives."""
+    import logging
+    missing = []
+    for name, data in EXERCISE_SWAPS.items():
+        if not data.get("alternatives") or len(data["alternatives"]) < 2:
+            missing.append(name)
+            logging.warning(f"Exercise '{name}' has fewer than 2 alternatives")
+    return missing
