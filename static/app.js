@@ -3580,12 +3580,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
 
-    // Check if morning checkin is done today
-    try {
-        const mcRes = await fetch('/api/morning-checkin?date=' + todayStr());
-        const mcData = await mcRes.json();
-        _morningCheckinDone = mcData.exists && !mcData.missed;
-    } catch(e) { _morningCheckinDone = false; }
+    // Morning checkin gate disabled — always unlocked
+    _morningCheckinDone = true;
 
     renderAll();
   } catch(e) {
