@@ -5975,8 +5975,13 @@ async function renderDetail() {
     const displayName = swaps[swapKey] || ex.name;
     const isSwapped = !!swaps[swapKey];
     const done = isExDone(currentWeek, currentDay, i);
-    const suggestion = getWeightForExercise(displayName, currentWeek);
-    const lastWt = getLastWeight(displayName);
+    let suggestion = getWeightForExercise(displayName, currentWeek);
+    let lastWt = getLastWeight(displayName);
+    // Fallback: if swapped exercise has no history, use original exercise's weight
+    if (isSwapped && suggestion.weight == null) {
+      suggestion = getWeightForExercise(ex.name, currentWeek);
+      if (!lastWt) lastWt = getLastWeight(ex.name);
+    }
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
     const exData = getExerciseData(displayName);
@@ -6008,14 +6013,18 @@ async function renderDetail() {
     const restSeconds = parseRestSeconds(ex.rest);
     const escapedName = displayName.replace(/'/g, "\\'");
 
-    // Build per-set rows
+    // Build per-set rows — carry weight forward from earlier sets
     let setRowsHtml = '';
+    let carryWeight = weightVal; // Start with suggestion, override with actual logged weights
     for (let s = 0; s < setCount; s++) {
       const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
       const setData = _setCache && _setCache[setKey];
       const setDone = !!(setData && setData.done);
-      const setWeight = setData && setData.weight ? setData.weight : weightVal;
+      // Priority: 1) this set's saved weight, 2) previous set's weight, 3) suggestion
+      const setWeight = setData && setData.weight ? setData.weight : carryWeight;
       const setReps = setData && setData.reps ? setData.reps : '';
+      // Carry this set's weight forward to next set
+      if (setData && setData.weight) carryWeight = setData.weight;
       setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}" ${!setDone ? `onclick="enterExerciseFocus(${i})"` : ''} style="${!setDone ? 'cursor:pointer' : ''}">
         <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
           ${setDone ? '&#10003;' : ''}
@@ -6683,9 +6692,20 @@ function enterExerciseFocus(exIdx) {
   _focusExName = displayName;
   _focusExIdx = exIdx;
 
-  const suggestion = getWeightForExercise(displayName, currentWeek);
-  _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+  let suggestion = getWeightForExercise(displayName, currentWeek);
   _focusLastWeight = getLastWeight(displayName);
+  // Fallback: swapped exercise with no history → use original
+  if (suggestion.weight == null && swaps[swapKey]) {
+    suggestion = getWeightForExercise(ex.name, currentWeek);
+    if (!_focusLastWeight) _focusLastWeight = getLastWeight(ex.name);
+  }
+  _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+
+  // Carry forward from earlier completed sets in this session
+  for (let s = 0; s < (_focusSetCount || 4); s++) {
+    const sd = _setCache[`${currentWeek}_${currentDay}_${exIdx}_${s}`];
+    if (sd && sd.weight) _focusWeightVal = sd.weight;
+  }
 
   // Find first uncompleted set
   _focusSetIdx = 0;
@@ -6749,6 +6769,9 @@ function logFocusSet() {
 
   const key = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
   _setCache[key] = { done: true, weight, reps };
+
+  // Carry weight forward to next set
+  if (weight > 0) _focusWeightVal = weight;
 
   // Save to DB
   apiPost('/api/sets', {
