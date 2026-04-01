@@ -245,7 +245,7 @@ function _isFoodItemEaten(foodKey) {
   return (data.foodItems || []).includes(foodKey);
 }
 
-function toggleFoodItem(foodKey, mealIdx, totalFoodsInMeal) {
+function toggleFoodItem(foodKey, mealIdx, totalFoodsInMeal, btnEl) {
   const data = loadMealData();
   if (!data.foodItems) data.foodItems = [];
   if (!data.eaten) data.eaten = [];
@@ -268,17 +268,20 @@ function toggleFoodItem(foodKey, mealIdx, totalFoodsInMeal) {
 
   saveMealData(data);
 
-  // Update in-place
-  const btn = event.target;
-  const row = btn.closest('.meal-food-row');
+  // Update in-place using the button element directly
+  const btn = btnEl;
+  const row = btn ? btn.closest('.meal-food-row') : null;
   if (checking) {
-    btn.classList.add('checked');
-    btn.innerHTML = '&#10003;';
+    if (btn) { btn.classList.add('checked'); btn.innerHTML = '&#10003;'; }
     if (row) row.classList.add('food-eaten');
   } else {
-    btn.classList.remove('checked');
-    btn.innerHTML = '';
+    if (btn) { btn.classList.remove('checked'); btn.innerHTML = ''; }
     if (row) row.classList.remove('food-eaten');
+  }
+
+  // If all meals auto-completed, re-render to update compact row
+  if (checking && mealFoodsChecked >= totalFoodsInMeal) {
+    renderDetail();
   }
 
   // Check if all meals done → coach closes kitchen
@@ -387,7 +390,7 @@ function renderMealSection(dayData) {
       const foodKey = idx + '_' + fIdx;
       const foodEaten = _isFoodItemEaten(foodKey);
       return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
-        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length})">${foodEaten ? '&#10003;' : ''}</button>
+        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length},this)">${foodEaten ? '&#10003;' : ''}</button>
         <span class="meal-food-name">${f.item}</span>
         <span class="meal-food-portion">${f.portion}</span>
         <span class="meal-food-portion">${adjCal}cal</span>
