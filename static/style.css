@@ -3818,3 +3818,13 @@ footer {
   .focus-input { width: 120px; font-size: 32px; padding: 10px; }
   .focus-timer-display { font-size: 56px; }
 }
+
+/* ─── TRAINING ENGINE INDICATORS ─── */
+.focus-reason { font-size: 14px; color: var(--muted); font-family: 'DM Mono', monospace; text-align: center; margin-bottom: 8px; max-width: 280px; }
+.focus-indicator { font-weight: 700; margin-right: 4px; }
+.focus-up { color: var(--accent); }
+.focus-hold { color: var(--muted); }
+.focus-deload { color: #3b82f6; }
+.focus-weak { color: #f59e0b; }
+.focus-down { color: #ef4444; }
+.ex-prog-indicator { font-size: 14px; font-weight: 700; margin-left: 6px; }

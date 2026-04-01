@@ -237,6 +237,12 @@ def _build_system_prompt(ctx):
     # Recent check-in trends
     checkin_summary = _summarize_checkins(ctx.get("checkins", []))
 
+    # Session analysis
+    _sa = ctx.get('session_analysis')
+    session_analysis_str = ''
+    if _sa:
+        session_analysis_str = f"LAST SESSION ({_sa.get('date', '?')}): Compliance {_sa.get('compliance', '?')}%. {_sa.get('summary', '')}\nMuscle groups: {', '.join(_sa.get('muscles', []))}"
+
     # Body weight trend — full program history (weekly weigh-ins)
     bw = ctx.get("bodyweight", [])
     bw_summary = ""
@@ -517,6 +523,7 @@ CURRENT STATE:
 {garmin_summary}
 {readiness_summary}
 {checkin_summary}
+{session_analysis_str}
 {'ALERT: The user MISSED their morning check-in today. Reference this directly — they skipped accountability.' if ctx.get('missed_checkin_today') else ''}
 Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
 
@@ -550,6 +557,11 @@ MONITORING:
 - Overtraining: declining mood + rising soreness + poor sleep + HRV drops = adjust training.
 - Mental health: mood below 3 or above 8 sustained, anxiety above 7 for 3+ days = flag it. Observe. Suggest. Don't diagnose.
 - Push harder when data supports it. Pull back when it doesn't. Be honest either way.
+
+TRAINING ENGINE:
+compute_next_targets() is the source of truth for all weight prescriptions.
+NEVER contradict the engine's weight targets. You explain WHY the weight is what it is.
+Reference the session analysis when giving feedback.
 
 SUNDAY PLANNING ([WEEKLY_PLANNING]):
 Review the week. Then plan the next week. Ask specifically:

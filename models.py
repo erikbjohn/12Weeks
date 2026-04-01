@@ -65,6 +65,34 @@ class ComplianceScore(db.Model):
     streak_days = db.Column(db.Integer, default=0)
 
 
+class MuscleGroupProfile(db.Model):
+    """Per-muscle-group strength tracking."""
+    __tablename__ = "muscle_group_profile"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    muscle_group = db.Column(db.String(30), nullable=False)
+    strength_score = db.Column(db.Float, default=1.0)
+    relative_strength = db.Column(db.String(15), default='average')
+    user_flagged_weak = db.Column(db.Boolean, default=False)
+    last_updated = db.Column(db.DateTime, default=lambda: datetime.now())
+
+
+class SessionAnalysis(db.Model):
+    """Post-session analysis for coach and progression."""
+    __tablename__ = "session_analysis"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer)
+    day_idx = db.Column(db.Integer)
+    log_date = db.Column(db.Date, default=date.today)
+    overall_compliance = db.Column(db.Float)
+    muscle_groups_trained = db.Column(db.JSON, default=list)
+    deviations = db.Column(db.JSON, default=list)
+    progression_applied = db.Column(db.JSON, default=list)
+    flags = db.Column(db.JSON, default=list)
+    summary_text = db.Column(db.Text)
+
+
 class ExerciseLog(db.Model):
     """Per-exercise weight/reps/RPE history."""
     __tablename__ = "exercise_log"

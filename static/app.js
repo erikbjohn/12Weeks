@@ -6042,7 +6042,7 @@ async function renderDetail() {
           <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
           ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
         </div>
-        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}</div>
+        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}${suggestion.reason && suggestion.reason !== 'estimated' ? `<span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
       </div>
       ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${suggestion.reason && suggestion.reason !== 'estimated' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
       <div class="set-rows">${setRowsHtml}</div>
@@ -6674,7 +6674,7 @@ function _getImprovementTip(grade, breakdown) {
 }
 
 // ─── EXERCISE FOCUS MODE ───────────────────────────────────────────────────
-function enterExerciseFocus(exIdx) {
+async function enterExerciseFocus(exIdx) {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData || currentDay === null) return;
   const dayData = weekData.days[currentDay];
@@ -6700,6 +6700,20 @@ function enterExerciseFocus(exIdx) {
     if (!_focusLastWeight) _focusLastWeight = getLastWeight(ex.name);
   }
   _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+
+  // Fetch adaptive targets from training engine
+  try {
+      const targetRes = await fetch('/api/targets/' + encodeURIComponent(displayName));
+      if (targetRes.ok) {
+          const targets = await targetRes.json();
+          if (targets.target_weight) {
+              _focusWeightVal = roundWeight(targets.target_weight, displayName);
+          }
+          window._focusTargetReps = targets.target_reps || _focusTargetReps;
+          window._focusReason = targets.adjustment_reason || '';
+          window._focusIndicator = targets.progression_indicator || 'hold';
+      }
+  } catch(e) {}
 
   // Carry forward from earlier completed sets in this session
   for (let s = 0; s < (_focusSetCount || 4); s++) {
@@ -6746,6 +6760,7 @@ function renderExerciseFocus() {
       <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
       <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
       ${_focusLastWeight ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : '<div style="height:20px"></div>'}
+      ${window._focusReason ? `<div class="focus-reason"><span class="focus-indicator focus-${window._focusIndicator || 'hold'}">${{'up':'↑','hold':'—','deload':'○','weak':'⚑','down':'↓'}[window._focusIndicator] || '—'}</span> ${escapeHtml(window._focusReason)}</div>` : ''}
       <div class="focus-input-group">
         <input class="focus-input" type="number" inputmode="decimal" id="focus-wt" value="${wt}" placeholder="lb" autofocus>
         <span class="focus-input-label">lb</span>

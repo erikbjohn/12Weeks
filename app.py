@@ -27,6 +27,12 @@ try:
 except Exception:
     def compute_compliance_score(user_id): return {"score": 50, "grade": "B", "breakdown": {}, "streak": 0}
     def get_improvement_tip(grade, breakdown): return "Stay consistent."
+try:
+    from training_engine import compute_next_targets, compute_muscle_strength, generate_session_analysis
+except Exception:
+    def compute_next_targets(uid, ex, w, d): return {"target_weight": None, "target_reps": 10, "target_sets": 4, "adjustment_reason": "", "progression_indicator": "hold"}
+    def compute_muscle_strength(uid): pass
+    def generate_session_analysis(uid, w, d): return None
 from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
@@ -34,7 +40,7 @@ from models import (
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
-    ComplianceScore,
+    ComplianceScore, MuscleGroupProfile, SessionAnalysis,
 )
 
 app = Flask(__name__)
@@ -133,6 +139,12 @@ with app.app_context():
         ("morning_checkin", "started_at", "VARCHAR(30)"),
         ("morning_checkin", "completed_at_time", "VARCHAR(30)"),
         ("morning_checkin", "missed", "BOOLEAN"),
+        ("set_log", "target_weight", "FLOAT"),
+        ("set_log", "target_reps", "INTEGER"),
+        ("set_log", "target_rpe", "INTEGER"),
+        ("set_log", "user_modified", "BOOLEAN"),
+        ("set_log", "modification_direction", "VARCHAR(30)"),
+        ("set_log", "set_skipped", "BOOLEAN"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -208,6 +220,21 @@ with app.app_context():
                 target = _target_reps.get(s.exercise_name, 10)
                 s.reps = target
             db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Seed muscle group profiles
+    try:
+        _erik = User.query.filter_by(email="erikbjohn@gmail.com").first()
+        if _erik:
+            _shoulders = MuscleGroupProfile.query.filter_by(user_id=_erik.id, muscle_group='shoulders').first()
+            if not _shoulders:
+                db.session.add(MuscleGroupProfile(
+                    user_id=_erik.id, muscle_group='shoulders',
+                    strength_score=0.8, relative_strength='weak',
+                    user_flagged_weak=True
+                ))
+                db.session.commit()
     except Exception:
         db.session.rollback()
 
@@ -1134,6 +1161,24 @@ def api_set_log():
             weight=weight, reps=reps, done=done, logged_date=date.today(),
         )
         db.session.add(existing)
+    # Compute targets and detect modifications
+    try:
+        targets = compute_next_targets(current_user.id, exercise, week, day_idx)
+        if targets.get("target_weight"):
+            existing.target_weight = targets["target_weight"]
+            existing.target_reps = targets.get("target_reps")
+        # Detect user modification
+        if targets.get("target_weight") and weight and targets["target_weight"] > 0:
+            if weight > targets["target_weight"] * 1.02:
+                existing.user_modified = True
+                existing.modification_direction = 'increased_weight'
+            elif weight < targets["target_weight"] * 0.98:
+                existing.user_modified = True
+                existing.modification_direction = 'decreased_weight'
+            else:
+                existing.modification_direction = 'as_prescribed'
+    except Exception:
+        pass
     try:
         db.session.commit()
     except Exception as e:
@@ -1182,6 +1227,16 @@ def api_get_day_sets(week, day_idx):
             "weight": s.weight, "reps": s.reps, "done": s.done,
         }
     return jsonify(result)
+
+
+@app.route("/api/targets/<path:exercise_name>")
+@login_required
+def api_exercise_targets(exercise_name):
+    s = _get_state()
+    week = s.current_week
+    day_idx = date.today().weekday()
+    targets = compute_next_targets(current_user.id, exercise_name, week, day_idx)
+    return jsonify(targets)
 
 
 @app.route("/api/weights/baseline", methods=["POST"])
@@ -1316,6 +1371,11 @@ def api_toggle_day():
     # Recompute compliance score
     try:
         compute_compliance_score(current_user.id)
+    except Exception:
+        pass
+    try:
+        generate_session_analysis(current_user.id, w, d)
+        compute_muscle_strength(current_user.id)
     except Exception:
         pass
     return jsonify({"done": dc.done})
@@ -2452,6 +2512,20 @@ def _build_coach_context():
     if mc_today and mc_today.notes and '[MISSED]' in (mc_today.notes or ''):
         missed_today = True
 
+    # Latest session analysis
+    latest_analysis = SessionAnalysis.query.filter_by(
+        user_id=current_user.id
+    ).order_by(SessionAnalysis.log_date.desc()).first()
+    session_analysis = None
+    if latest_analysis:
+        session_analysis = {
+            "date": latest_analysis.log_date.isoformat() if latest_analysis.log_date else None,
+            "compliance": latest_analysis.overall_compliance,
+            "muscles": latest_analysis.muscle_groups_trained,
+            "deviations": latest_analysis.deviations,
+            "summary": latest_analysis.summary_text,
+        }
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -2484,6 +2558,7 @@ def _build_coach_context():
         "coach_memories": coach_memories,
         "compliance_grade": compliance_grade,
         "missed_checkin_today": missed_today,
+        "session_analysis": session_analysis,
     }
 
 
