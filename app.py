@@ -1297,9 +1297,9 @@ def api_meals():
     if not ml:
         return jsonify({"eaten": [], "adjustments": {}, "foodItems": [], "fasting": False})
     return jsonify({
-        "eaten": ml.eaten or [],
-        "adjustments": ml.adjustments or {},
-        "foodItems": ml.food_items or [],
+        "eaten": ml.eaten if isinstance(ml.eaten, list) else [],
+        "adjustments": ml.adjustments if isinstance(ml.adjustments, dict) else {},
+        "foodItems": ml.food_items if isinstance(ml.food_items, list) else [],
         "fasting": ml.fasting,
     })
 

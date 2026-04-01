@@ -194,7 +194,7 @@ function loadMealData() {
 function saveMealData(data) {
   const key = getMealDateKey();
   _mealsCache[key] = data;
-  apiPost('/api/meals', { date: key, eaten: data.eaten || [], adjustments: data.adjustments || {}, foodItems: data.foodItems || [], fasting: data.fasting || false });
+  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], fasting: data.fasting || false });
 }
 
 function isMealEaten(mealIdx) {
