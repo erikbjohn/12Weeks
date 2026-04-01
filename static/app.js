@@ -199,13 +199,13 @@ function saveMealData(data) {
 
 function isMealEaten(mealIdx) {
   const data = loadMealData();
-  return (data.eaten || []).includes(mealIdx);
+  return Array.isArray(data.eaten) && data.eaten.includes(mealIdx);
 }
 
 function toggleMealEaten(mealIdx, btnEl) {
   const data = loadMealData();
-  if (!data.eaten) data.eaten = [];
-  if (!data.foodItems) data.foodItems = [];
+  if (!Array.isArray(data.eaten)) data.eaten = [];
+  if (!Array.isArray(data.foodItems)) data.foodItems = [];
   const idx = data.eaten.indexOf(mealIdx);
   const marking = idx < 0;
 
@@ -253,13 +253,13 @@ function toggleMealEaten(mealIdx, btnEl) {
 
 function _isFoodItemEaten(foodKey) {
   const data = loadMealData();
-  return (data.foodItems || []).includes(foodKey);
+  return Array.isArray(data.foodItems) && data.foodItems.includes(foodKey);
 }
 
 function toggleFoodItem(foodKey, mealIdx, totalFoodsInMeal, btnEl) {
   const data = loadMealData();
-  if (!data.foodItems) data.foodItems = [];
-  if (!data.eaten) data.eaten = [];
+  if (!Array.isArray(data.foodItems)) data.foodItems = [];
+  if (!Array.isArray(data.eaten)) data.eaten = [];
   const idx = data.foodItems.indexOf(foodKey);
   const checking = idx < 0;
 
