@@ -3783,3 +3783,38 @@ footer {
 @keyframes gradePulseDown { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 100% { box-shadow: 0 0 0 12px rgba(239,68,68,0); } }
 .grade-pulse-up { animation: gradePulseUp 0.6s ease-out; }
 .grade-pulse-down { animation: gradePulseDown 0.6s ease-out; }
+
+/* ─── EXERCISE FOCUS MODE ─── */
+.exercise-focus-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 170; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; padding-top: calc(1.5rem + env(safe-area-inset-top, 0px)); }
+.exercise-focus-overlay.visible { display: flex; }
+.focus-back { position: absolute; top: 16px; left: 16px; background: none; border: none; color: var(--muted); font-size: 28px; cursor: pointer; padding: 8px; z-index: 1; }
+.focus-back:hover { color: var(--text); }
+.focus-content { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: 340px; }
+.focus-ex-name { font-size: 28px; font-weight: 700; color: var(--text); text-align: center; line-height: 1.2; }
+.focus-set-counter { font-size: 20px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.focus-last-perf { font-size: 15px; color: var(--muted); font-family: 'DM Mono', monospace; margin-bottom: 8px; }
+.focus-input-group { display: flex; align-items: center; gap: 12px; }
+.focus-input { width: 140px; font-size: 36px; font-weight: 700; text-align: center; background: var(--surface2); border: 2px solid var(--border); color: var(--text); padding: 12px; border-radius: 10px; font-family: 'DM Mono', monospace; -moz-appearance: textfield; }
+.focus-input:focus { border-color: var(--accent); }
+.focus-input::-webkit-outer-spin-button, .focus-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.focus-input-label { font-size: 16px; color: var(--muted); font-family: 'DM Mono', monospace; min-width: 36px; }
+.focus-x { font-size: 24px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.focus-log-btn { width: 100%; max-width: 300px; font-size: 18px; font-weight: 700; padding: 18px; margin-top: 16px; background: var(--lift-bg); border: 2px solid var(--lift-border); color: var(--accent); border-radius: 12px; cursor: pointer; font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.15s; }
+.focus-log-btn:active { transform: scale(0.97); background: var(--accent); color: var(--bg); }
+.focus-timer-display { font-size: 64px; font-weight: 800; color: var(--accent); font-family: 'DM Mono', monospace; animation: pulse-timer 1s infinite; }
+.focus-timer-label { font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+.focus-timer-done { color: var(--lift); animation: none; }
+.focus-skip-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; margin-top: 16px; font-family: 'DM Mono', monospace; }
+.focus-rpe-title { font-size: 20px; color: var(--text); margin-bottom: 12px; }
+.focus-rpe-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.focus-rpe-btns .rpe-btn { padding: 14px 20px; font-size: 16px; min-height: 50px; flex: 1; text-align: center; }
+.focus-done-label { font-size: 20px; color: var(--accent); font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+/* START button on exercise block */
+.ex-start-btn { font-size: 11px; font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); background: var(--lift-bg); border: 1px solid var(--lift-border); border-radius: 5px; padding: 4px 10px; cursor: pointer; margin-left: 8px; }
+.ex-start-btn:active { background: var(--accent); color: var(--bg); }
+
+@media (max-width: 480px) {
+  .focus-ex-name { font-size: 24px; }
+  .focus-input { width: 120px; font-size: 32px; padding: 10px; }
+  .focus-timer-display { font-size: 56px; }
+}

@@ -14,6 +14,15 @@ let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
 let _complianceCache = null;
 let _morningCheckinDone = true; // Gate disabled for now
+let _focusExIdx = null;
+let _focusSetIdx = null;
+let _focusSetCount = null;
+let _focusExName = '';
+let _focusRestSec = 60;
+let _focusTargetReps = 10;
+let _focusWeightVal = '';
+let _focusLastWeight = null;
+let _focusTimerInterval = null;
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -6007,7 +6016,7 @@ async function renderDetail() {
       const setDone = !!(setData && setData.done);
       const setWeight = setData && setData.weight ? setData.weight : weightVal;
       const setReps = setData && setData.reps ? setData.reps : '';
-      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
+      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}" ${!setDone ? `onclick="enterExerciseFocus(${i})"` : ''} style="${!setDone ? 'cursor:pointer' : ''}">
         <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
           ${setDone ? '&#10003;' : ''}
         </button>
@@ -6024,7 +6033,7 @@ async function renderDetail() {
           <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
           ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
         </div>
-        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}</div>
+        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}</div>
       </div>
       ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${suggestion.reason && suggestion.reason !== 'estimated' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
       <div class="set-rows">${setRowsHtml}</div>
@@ -6654,3 +6663,254 @@ function _getImprovementTip(grade, breakdown) {
     };
     return tips[weakest[0]] || 'Stay consistent.';
 }
+
+// ─── EXERCISE FOCUS MODE ───────────────────────────────────────────────────
+function enterExerciseFocus(exIdx) {
+  const weekData = workoutData[String(currentWeek)];
+  if (!weekData || currentDay === null) return;
+  const dayData = weekData.days[currentDay];
+  if (!dayData || !dayData.exercises || !dayData.exercises[exIdx]) return;
+
+  const ex = dayData.exercises[exIdx];
+  const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  const swapKey = currentWeek + '_' + currentDay + '_' + exIdx;
+  const displayName = swaps[swapKey] || ex.name;
+
+  const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
+  _focusSetCount = setsMatch ? parseInt(setsMatch[1]) : 1;
+  _focusTargetReps = setsMatch ? setsMatch[2] : ex.sets;
+  _focusRestSec = parseRestSeconds(ex.rest);
+  _focusExName = displayName;
+  _focusExIdx = exIdx;
+
+  const suggestion = getWeightForExercise(displayName, currentWeek);
+  _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+  _focusLastWeight = getLastWeight(displayName);
+
+  // Find first uncompleted set
+  _focusSetIdx = 0;
+  for (let s = 0; s < _focusSetCount; s++) {
+    const key = `${currentWeek}_${currentDay}_${exIdx}_${s}`;
+    if (!_setCache[key] || !_setCache[key].done) {
+      _focusSetIdx = s;
+      break;
+    }
+    if (s === _focusSetCount - 1) _focusSetIdx = _focusSetCount; // All done
+  }
+
+  // Push history state for back button
+  history.pushState({ focus: true }, '');
+
+  renderExerciseFocus();
+}
+
+function renderExerciseFocus() {
+  const el = document.getElementById('exercise-focus');
+  if (!el) return;
+
+  // Check if all sets done → show RPE
+  if (_focusSetIdx >= _focusSetCount) {
+    showFocusRPE();
+    return;
+  }
+
+  // Get saved weight for this set (if previously entered)
+  const setKey = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
+  const setData = _setCache && _setCache[setKey];
+  const wt = setData && setData.weight ? setData.weight : _focusWeightVal;
+  const rp = setData && setData.reps ? setData.reps : '';
+
+  el.innerHTML = `
+    <button class="focus-back" onclick="exitExerciseFocus()">&#8249;</button>
+    <div class="focus-content">
+      <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
+      <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
+      ${_focusLastWeight ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : '<div style="height:20px"></div>'}
+      <div class="focus-input-group">
+        <input class="focus-input" type="number" inputmode="decimal" id="focus-wt" value="${wt}" placeholder="lb" autofocus>
+        <span class="focus-input-label">lb</span>
+      </div>
+      <div class="focus-x">&times;</div>
+      <div class="focus-input-group">
+        <input class="focus-input" type="number" inputmode="numeric" id="focus-reps" value="${rp}" placeholder="${_focusTargetReps}">
+        <span class="focus-input-label">reps</span>
+      </div>
+      <button class="focus-log-btn" onclick="logFocusSet()">LOG SET</button>
+    </div>`;
+  el.classList.add('visible');
+}
+
+function logFocusSet() {
+  const wtInput = document.getElementById('focus-wt');
+  const repsInput = document.getElementById('focus-reps');
+  const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
+  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
+  const reps = repsTyped || parseInt(_focusTargetReps) || 0;
+
+  const key = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
+  _setCache[key] = { done: true, weight, reps };
+
+  // Save to DB
+  apiPost('/api/sets', {
+    exercise: _focusExName, week: currentWeek, day_idx: currentDay,
+    set_number: _focusSetIdx, weight, reps, done: true
+  });
+
+  // Update weight cache
+  if (weight > 0) {
+    if (!_weightsCache) _weightsCache = {};
+    if (!_weightsCache[_focusExName]) _weightsCache[_focusExName] = { current: 0, history: [] };
+    _weightsCache[_focusExName].current = weight;
+  }
+
+  // Check if all sets done
+  let allDone = true;
+  for (let s = 0; s < _focusSetCount; s++) {
+    if (!_setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`]) {
+      allDone = false; break;
+    }
+  }
+
+  if (allDone) {
+    // Mark exercise complete
+    if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
+    if (!_completionsCache.exercises) _completionsCache.exercises = {};
+    _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusExIdx}`] = true;
+    apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusExIdx });
+
+    // Show rest timer then RPE
+    _focusSetIdx = _focusSetCount;
+    if (_focusRestSec > 0) {
+      showFocusRestTimer(_focusRestSec, true); // true = show RPE after
+    } else {
+      showFocusRPE();
+    }
+  } else {
+    // Advance to next set after rest
+    _focusSetIdx++;
+    if (_focusRestSec > 0) {
+      showFocusRestTimer(_focusRestSec, false); // false = show next set after
+    } else {
+      renderExerciseFocus();
+    }
+  }
+}
+
+function showFocusRestTimer(seconds, showRpeAfter) {
+  const el = document.getElementById('exercise-focus');
+  if (!el) return;
+
+  let remaining = seconds;
+
+  function render() {
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    const timeStr = m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
+
+    el.innerHTML = `
+      <div class="focus-content">
+        <div class="focus-timer-label">REST</div>
+        <div class="focus-timer-display">${timeStr}</div>
+        <button class="focus-skip-btn" onclick="skipFocusRest()">Skip Rest &rarr;</button>
+      </div>`;
+  }
+
+  render();
+
+  if (_focusTimerInterval) clearInterval(_focusTimerInterval);
+  window._focusShowRpeAfter = showRpeAfter;
+
+  _focusTimerInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(_focusTimerInterval);
+      _focusTimerInterval = null;
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+      // Show GO briefly
+      el.innerHTML = `<div class="focus-content"><div class="focus-timer-display focus-timer-done" style="font-size:72px">GO</div></div>`;
+      setTimeout(() => {
+        if (window._focusShowRpeAfter) {
+          showFocusRPE();
+        } else {
+          renderExerciseFocus();
+        }
+      }, 1000);
+    } else {
+      render();
+    }
+  }, 1000);
+}
+
+function skipFocusRest() {
+  if (_focusTimerInterval) clearInterval(_focusTimerInterval);
+  _focusTimerInterval = null;
+  if (window._focusShowRpeAfter) {
+    showFocusRPE();
+  } else {
+    renderExerciseFocus();
+  }
+}
+
+function showFocusRPE() {
+  const el = document.getElementById('exercise-focus');
+  if (!el) return;
+
+  const escapedName = _focusExName.replace(/'/g, "\\'");
+  el.innerHTML = `
+    <div class="focus-content">
+      <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
+      <div class="focus-done-label">COMPLETE</div>
+      <div class="focus-rpe-title">How did it feel?</div>
+      <div class="focus-rpe-btns">
+        <button class="rpe-btn rpe-easy" onclick="submitFocusRPE('too_easy')">Too Easy</button>
+        <button class="rpe-btn rpe-right" onclick="submitFocusRPE('just_right')">Just Right</button>
+        <button class="rpe-btn rpe-hard" onclick="submitFocusRPE('too_hard')">Too Hard</button>
+      </div>
+    </div>`;
+}
+
+function submitFocusRPE(rpe) {
+  // Read all set weights to get the working weight
+  let weight = 0;
+  let totalReps = 0;
+  for (let s = 0; s < _focusSetCount; s++) {
+    const setData = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
+    if (setData) {
+      if (setData.weight > 0) weight = setData.weight;
+      totalReps += setData.reps || 0;
+    }
+  }
+
+  const weekData = workoutData[String(currentWeek)];
+  const setsLabel = weekData ? weekData.days[currentDay].exercises[_focusExIdx].sets : '';
+  const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
+  recordWeight(_focusExName, weight, setsLabel, rpe, currentWeek, currentDay, rpeScore, totalReps || null);
+
+  exitExerciseFocus();
+}
+
+function exitExerciseFocus() {
+  const el = document.getElementById('exercise-focus');
+  if (el) {
+    el.classList.remove('visible');
+    el.innerHTML = '';
+  }
+  if (_focusTimerInterval) {
+    clearInterval(_focusTimerInterval);
+    _focusTimerInterval = null;
+  }
+  _focusExIdx = null;
+  _focusSetIdx = null;
+
+  // Re-render session overview
+  renderDetail();
+}
+
+// Handle browser back button
+window.addEventListener('popstate', (e) => {
+  const el = document.getElementById('exercise-focus');
+  if (el && el.classList.contains('visible')) {
+    exitExerciseFocus();
+  }
+});
