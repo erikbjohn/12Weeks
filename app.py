@@ -21,6 +21,7 @@ from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
+from compliance import compute_compliance_score, get_improvement_tip
 from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
@@ -28,6 +29,7 @@ from models import (
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
+    ComplianceScore,
 )
 
 app = Flask(__name__)
@@ -119,6 +121,13 @@ with app.app_context():
         ("exercise_log", "difficulty_notes", "TEXT"),
         ("training_goal", "baseline_assessment", "TEXT"),
         ("meal_log", "food_items", "TEXT"),
+        ("meal_log", "scheduled_time", "VARCHAR(10)"),
+        ("meal_log", "actual_time", "VARCHAR(30)"),
+        ("set_log", "actual_time", "VARCHAR(30)"),
+        ("day_completion", "completed_at", "VARCHAR(30)"),
+        ("morning_checkin", "started_at", "VARCHAR(30)"),
+        ("morning_checkin", "completed_at_time", "VARCHAR(30)"),
+        ("morning_checkin", "missed", "BOOLEAN"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -1115,6 +1124,11 @@ def api_set_log():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    # Recompute compliance score
+    try:
+        compute_compliance_score(current_user.id)
+    except Exception:
+        pass
     return jsonify({"ok": True, "id": existing.id})
 
 
@@ -1284,6 +1298,11 @@ def api_toggle_day():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    # Recompute compliance score
+    try:
+        compute_compliance_score(current_user.id)
+    except Exception:
+        pass
     return jsonify({"done": dc.done})
 
 
@@ -1296,10 +1315,23 @@ def api_meals():
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ml:
         return jsonify({"eaten": [], "adjustments": {}, "foodItems": [], "fasting": False})
+    import json as _json
+    def _ensure_list(val):
+        if isinstance(val, list): return val
+        if isinstance(val, str):
+            try: parsed = _json.loads(val); return parsed if isinstance(parsed, list) else []
+            except Exception: return []
+        return []
+    def _ensure_dict(val):
+        if isinstance(val, dict): return val
+        if isinstance(val, str):
+            try: parsed = _json.loads(val); return parsed if isinstance(parsed, dict) else {}
+            except Exception: return {}
+        return {}
     return jsonify({
-        "eaten": ml.eaten if isinstance(ml.eaten, list) else [],
-        "adjustments": ml.adjustments if isinstance(ml.adjustments, dict) else {},
-        "foodItems": ml.food_items if isinstance(ml.food_items, list) else [],
+        "eaten": _ensure_list(ml.eaten),
+        "adjustments": _ensure_dict(ml.adjustments),
+        "foodItems": _ensure_list(ml.food_items),
         "fasting": ml.fasting,
     })
 
@@ -1326,6 +1358,11 @@ def api_meals_update():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    # Recompute compliance score
+    try:
+        compute_compliance_score(current_user.id)
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 
@@ -1671,6 +1708,7 @@ def api_morning_checkin():
         "motivation": ci.motivation,
         "anxiety": ci.anxiety,
         "notes": ci.notes,
+        "missed": bool(ci.notes and '[MISSED]' in (ci.notes or '')),
     })
 
 
@@ -1701,12 +1739,43 @@ def api_morning_checkin_save():
             user_id=current_user.id,
         )
         db.session.add(ci)
+    if "missed" in data:
+        # Need to handle the 'missed' field — store as notes marker for now
+        if data.get("missed"):
+            ci.notes = (ci.notes or '') + ' [MISSED]'
     try:
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    # Recompute compliance score
+    try:
+        compute_compliance_score(current_user.id)
+    except Exception:
+        pass
     return jsonify({"ok": True})
+
+
+@app.route("/api/compliance")
+@login_required
+def api_compliance():
+    cs = ComplianceScore.query.filter_by(user_id=current_user.id).first()
+    if not cs:
+        result = compute_compliance_score(current_user.id)
+        return jsonify(result)
+    return jsonify({
+        "score": cs.weighted_score,
+        "grade": cs.letter_grade,
+        "breakdown": cs.breakdown or {},
+        "streak": cs.streak_days,
+    })
+
+
+@app.route("/api/compliance/refresh", methods=["POST"])
+@login_required
+def api_compliance_refresh():
+    result = compute_compliance_score(current_user.id)
+    return jsonify(result)
 
 
 @app.route("/api/morning-checkin/history")
@@ -2355,6 +2424,19 @@ def _build_coach_context():
     ).limit(20).all()
     coach_memories = [{"type": m.memory_type, "content": m.content, "week": m.week} for m in memories]
 
+    # Compliance grade for coach tone
+    try:
+        cs = ComplianceScore.query.filter_by(user_id=current_user.id).first()
+        compliance_grade = cs.letter_grade if cs else "B"
+    except Exception:
+        compliance_grade = "B"
+
+    # Check if missed morning checkin today
+    missed_today = False
+    mc_today = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=date.today()).first()
+    if mc_today and mc_today.notes and '[MISSED]' in (mc_today.notes or ''):
+        missed_today = True
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -2385,6 +2467,8 @@ def _build_coach_context():
         "completed_days_this_week": completed_days,
         "schedule_notes": schedule_notes,
         "coach_memories": coach_memories,
+        "compliance_grade": compliance_grade,
+        "missed_checkin_today": missed_today,
     }
 
 

@@ -12,6 +12,8 @@ let _runLogCache = {};
 let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, reps, weight }
 let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
+let _complianceCache = null;
+let _morningCheckinDone = false;
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -195,6 +197,8 @@ function saveMealData(data) {
   const key = getMealDateKey();
   _mealsCache[key] = data;
   apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], fasting: data.fasting || false });
+  // Refresh compliance badge
+  fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 }
 
 function isMealEaten(mealIdx) {
@@ -586,6 +590,8 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
 
     // Save set to DB (every set, every rep, every weight)
     apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true });
+    // Refresh compliance badge
+    fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 
     // Also update the exercise-level weight cache
     if (weight > 0) {
@@ -3503,6 +3509,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Run logs
     try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
 
+    // Compliance grade
+    try { const complianceRes = await fetch('/api/compliance'); _complianceCache = await complianceRes.json(); } catch(e) { _complianceCache = null; }
+
     // Per-set completion cache — loaded per-day in renderDetail()
     _setCache = {};
 
@@ -3570,6 +3579,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
+
+    // Check if morning checkin is done today
+    try {
+        const mcRes = await fetch('/api/morning-checkin?date=' + todayStr());
+        const mcData = await mcRes.json();
+        _morningCheckinDone = mcData.exists && !mcData.missed;
+    } catch(e) { _morningCheckinDone = false; }
 
     renderAll();
   } catch(e) {
@@ -5498,6 +5514,22 @@ function renderAll() {
 function renderCoachTop() { /* no-op — coach uses popups now */ }
 
 async function triggerMorningPopup() {
+    // Missed session detection — if after noon and no checkin, mark as missed
+    const hour = new Date().getHours();
+    if (hour >= 12 && !hasPopupFired('morning') && !_morningCheckinDone) {
+        markPopupFired('morning');
+        _morningCheckinDone = true; // Don't gate after noon
+        apiPost('/api/morning-checkin', {
+            date: todayStr(),
+            sleep_quality: 0, stress_level: 0, soreness: 0,
+            mood: 0, motivation: 0, anxiety: 0,
+            notes: '[MISSED] Morning check-in not completed before noon',
+            missed: true,
+        });
+        // Recompute compliance
+        fetch('/api/compliance/refresh', { method: 'POST' }).catch(() => {});
+        return;
+    }
     if (hasPopupFired('morning')) return;
     const today = todayStr();
     const todayCoachMsgs = _chatHistory.filter(m =>
@@ -5529,6 +5561,14 @@ async function triggerMorningPopup() {
         const data = await res.json();
         if (data.response) {
             showCoachPopup(data.response);
+            _morningCheckinDone = true;
+            // Save morning checkin completion
+            apiPost('/api/morning-checkin', {
+                date: todayStr(),
+                sleep_quality: 5, stress_level: 5, soreness: 5,
+                mood: 5, motivation: 5, anxiety: 5,
+                notes: 'Auto-completed via morning popup'
+            });
         }
     } catch(e) {
         console.error('Morning popup failed:', e);
@@ -5731,7 +5771,7 @@ function renderTodayNav() {
   el.innerHTML = `
     <div class="tn-week-row">
       <button class="tn-week-arrow" onclick="setWeek(Math.max(1, currentWeek-1))">&lsaquo;</button>
-      <span class="tn-week-label">Week ${currentWeek}${isDeload ? ' &middot; Deload' : ''} &middot; Phase ${weekData.phase}</span>
+      <span class="tn-week-label">Week ${currentWeek}${isDeload ? ' &middot; Deload' : ''} &middot; Phase ${weekData.phase}</span>${_complianceCache && _complianceCache.grade ? `<span class="grade-badge grade-${_getGradeClass(_complianceCache.grade)}" onclick="showComplianceBreakdown()">${_complianceCache.grade}</span>` : ''}
       <button class="tn-week-arrow" onclick="setWeek(Math.min(12, currentWeek+1))">&rsaquo;</button>
     </div>
     <div class="tn-days">${dayBtns}</div>
@@ -5850,6 +5890,20 @@ async function renderDetail() {
   }
 
   try {
+
+  // Morning check-in gate — lock until done
+  const todayJsDay = new Date().getDay();
+  const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
+  if (currentDay === todayMonIdx && !_morningCheckinDone) {
+      panel.innerHTML = `<div class="detail-inner" style="padding:2rem;text-align:center">
+          <div style="font-size:48px;margin-bottom:1rem">&#x1F512;</div>
+          <h3 style="color:var(--text);margin-bottom:0.5rem">Morning Check-In Required</h3>
+          <div style="color:var(--muted);font-size:14px;margin-bottom:1.5rem">Complete your morning session with Erik to unlock today's tracking.</div>
+          <button class="btn btn-primary" onclick="toggleChatOverlay()">Talk to Erik</button>
+      </div>`;
+      panel.classList.add('visible');
+      return;
+  }
 
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
@@ -6557,4 +6611,72 @@ function urlBase64ToUint8Array(base64String) {
   const arr = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
   return arr;
+}
+
+// ─── COMPLIANCE GRADE ─────────────────────────────────────────────────────────
+
+function _getGradeClass(grade) {
+    if (grade.startsWith('A')) return 'a';
+    if (grade.startsWith('B')) return 'b';
+    if (grade.startsWith('C')) return 'c';
+    if (grade === 'D') return 'd';
+    return 'f';
+}
+
+async function showComplianceBreakdown() {
+    // Refresh compliance data
+    try {
+        const res = await fetch('/api/compliance/refresh', { method: 'POST' });
+        _complianceCache = await res.json();
+    } catch(e) {}
+
+    if (!_complianceCache) return;
+    const c = _complianceCache;
+    const b = c.breakdown || {};
+
+    const overlay = document.getElementById('morning-checkin-overlay');
+    overlay.innerHTML = `<div class="morning-checkin-overlay">
+        <div class="morning-checkin-card" style="max-width:400px">
+            <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('morning-checkin-overlay').innerHTML=''">&times;</button>
+            <div style="text-align:center;margin-bottom:1.5rem">
+                <span class="grade-badge-large grade-${_getGradeClass(c.grade)}">${c.grade}</span>
+                <div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--muted);margin-top:8px">${c.score} / 100</div>
+                ${c.streak > 0 ? `<div style="font-size:12px;color:var(--accent);margin-top:4px">${c.streak} day streak</div>` : ''}
+            </div>
+            <div style="margin-bottom:1.5rem">
+                ${_renderProgressBar('Morning Check-ins', b.checkins || 0)}
+                ${_renderProgressBar('Food Tracking', b.food_timing || 0)}
+                ${_renderProgressBar('Workout Completion', b.workout_timing || 0)}
+            </div>
+            <div style="font-size:13px;color:var(--muted);text-align:center;padding-top:1rem;border-top:1px solid var(--border)">
+                ${_getImprovementTip(c.grade, b)}
+            </div>
+        </div>
+    </div>`;
+}
+
+function _renderProgressBar(label, score) {
+    const color = score >= 80 ? 'var(--accent)' : score >= 60 ? 'var(--amber,#f59e0b)' : 'var(--red,#ef4444)';
+    return `<div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--text)">${label}</span>
+            <span style="color:var(--muted);font-family:'DM Mono',monospace">${score}%</span>
+        </div>
+        <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${score}%;background:${color};border-radius:3px;transition:width 0.3s"></div>
+        </div>
+    </div>`;
+}
+
+function _getImprovementTip(grade, breakdown) {
+    if (grade.startsWith('A')) return 'Excellence is the standard. Maintain it.';
+    const b = breakdown || {};
+    const weakest = Object.entries(b).sort((a, b) => a[1] - b[1])[0];
+    if (!weakest) return 'Stay consistent.';
+    const tips = {
+        checkins: 'Complete your morning check-in every day.',
+        food_timing: 'Log all your meals consistently.',
+        workout_timing: 'Show up for every scheduled workout.',
+    };
+    return tips[weakest[0]] || 'Stay consistent.';
 }

@@ -3766,3 +3766,20 @@ footer {
 /* Legacy coach styles kept for chat overlay */
 .coach-top-loading { padding: 8px 0; }
 .coach-top-bubble { padding: 10px 14px; margin-bottom: 4px; font-size: 15px; line-height: 1.6; color: var(--text); }
+
+/* ─── COMPLIANCE GRADE BADGE ─── */
+.grade-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'DM Mono', monospace; margin-left: 8px; cursor: pointer; vertical-align: middle; transition: all 0.15s; }
+.grade-badge:active { transform: scale(0.95); }
+.grade-a { background: #EAF3DE; color: #3B6D11; }
+.grade-b { background: #E6F1FB; color: #0C447C; }
+.grade-c { background: #FAEEDA; color: #633806; }
+.grade-d { background: #FAECE7; color: #993C1D; }
+.grade-f { background: #FCEBEB; color: #791F1F; }
+
+.grade-badge-large { display: inline-block; padding: 8px 24px; border-radius: 8px; font-size: 2rem; font-weight: 800; font-family: 'DM Mono', monospace; }
+
+/* Grade change animations */
+@keyframes gradePulseUp { 0% { box-shadow: 0 0 0 0 rgba(74,222,128,0.4); } 100% { box-shadow: 0 0 0 12px rgba(74,222,128,0); } }
+@keyframes gradePulseDown { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 100% { box-shadow: 0 0 0 12px rgba(239,68,68,0); } }
+.grade-pulse-up { animation: gradePulseUp 0.6s ease-out; }
+.grade-pulse-down { animation: gradePulseDown 0.6s ease-out; }

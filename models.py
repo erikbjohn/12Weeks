@@ -52,6 +52,19 @@ class CoachMemory(db.Model):
     week = db.Column(db.Integer)  # Which week this was recorded
 
 
+class ComplianceScore(db.Model):
+    """Rolling compliance score for the athlete."""
+    __tablename__ = "compliance_score"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    computed_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    raw_score = db.Column(db.Float, default=0)
+    weighted_score = db.Column(db.Float, default=0)
+    letter_grade = db.Column(db.String(3), default='B')
+    breakdown = db.Column(db.JSON, default=dict)
+    streak_days = db.Column(db.Integer, default=0)
+
+
 class ExerciseLog(db.Model):
     """Per-exercise weight/reps/RPE history."""
     __tablename__ = "exercise_log"
