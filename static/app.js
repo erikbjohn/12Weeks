@@ -4848,33 +4848,10 @@ function drawWeighInSparkline(bwData) {
   }
 }
 
-// ─── SUPPLEMENT TRACKER ─────────────────────────────────────────────────────
+// ─── SUPPLEMENT TRACKER (disabled) ──────────────────────────────────────────
 function renderSupplementBar() {
   const el = document.getElementById('supplement-bar');
   if (el) el.innerHTML = '';
-  return;
-  // Supplements disabled — original code below
-  const el = document.getElementById('supplement-bar');
-  if (!el) return;
-  if (!_supplementsCache || !_supplementsCache.list || _supplementsCache.list.length === 0) {
-    el.innerHTML = '';
-    return;
-  }
-
-  const taken = _supplementsCache.taken || {};
-  const pills = _supplementsCache.list.map(s => {
-    const name = typeof s === 'string' ? s : s.name;
-    const required = typeof s === 'object' && s.required;
-    const isTaken = !!taken[name];
-    return `<button class="supplement-pill${isTaken ? ' taken' : ''}${required ? ' required' : ''}" onclick="toggleSupplement('${name.replace(/'/g, "\\'")}')">
-      ${isTaken ? '&#10003; ' : ''}${name}
-    </button>`;
-  }).join('');
-
-  el.innerHTML = `<div class="supplement-row">
-    <span class="supplement-label">Supplements</span>
-    ${pills}
-  </div>`;
 }
 
 function toggleSupplement(name) {
