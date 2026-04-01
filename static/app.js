@@ -13,7 +13,7 @@ let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, re
 let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
 let _complianceCache = null;
-let _morningCheckinDone = false;
+let _morningCheckinDone = true; // Gate disabled for now
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
