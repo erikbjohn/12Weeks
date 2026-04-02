@@ -6226,8 +6226,6 @@ async function renderDetail() {
       garminStatsHtml += `<div class="gds-card"><div class="gds-label">Stress</div><div class="gds-value" style="color:${c}">${stress.overall}</div></div>`;
     }
     garminStatsHtml += '</div>';
-  } else if (!garminConnected) {
-    garminStatsHtml = '<div class="garmin-nudge">Connect Garmin for personalized readiness data</div>';
   }
 
   // Daily Goals
