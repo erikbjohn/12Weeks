@@ -184,6 +184,9 @@ class DayCompletion(db.Model):
     day_idx = db.Column(db.Integer, nullable=False)
     done = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    workout_started_at = db.Column(db.Text, nullable=True)
+    workout_ended_at = db.Column(db.Text, nullable=True)
+    workout_duration_min = db.Column(db.Integer, nullable=True)
     __table_args__ = (db.UniqueConstraint("week", "day_idx"),)
 
 

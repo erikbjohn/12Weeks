@@ -149,6 +149,9 @@ with app.app_context():
         ("set_log", "exercise_swapped", "BOOLEAN"),
         ("user", "timezone", "VARCHAR(64) DEFAULT 'UTC'"),
         ("chat_message", "message_type", "VARCHAR(30) DEFAULT 'chat'"),
+        ("day_completion", "workout_started_at", "TEXT"),
+        ("day_completion", "workout_ended_at", "TEXT"),
+        ("day_completion", "workout_duration_min", "INTEGER"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -1480,6 +1483,13 @@ def api_toggle_day():
     else:
         dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
         db.session.add(dc)
+    # Save workout timing if provided
+    if "workout_started_at" in data:
+        dc.workout_started_at = data["workout_started_at"]
+    if "workout_ended_at" in data:
+        dc.workout_ended_at = data["workout_ended_at"]
+    if "workout_duration_min" in data:
+        dc.workout_duration_min = data["workout_duration_min"]
     try:
         db.session.commit()
     except Exception as e:
