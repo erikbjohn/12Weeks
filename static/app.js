@@ -7161,21 +7161,28 @@ async function enterExerciseFocus(exIdx) {
       }
   } catch(e) {}
 
-  // Carry forward from earlier completed sets in this session
-  for (let s = 0; s < (_focusSetCount || 4); s++) {
-    const sd = _setCache[`${currentWeek}_${currentDay}_${exIdx}_${s}`];
-    if (sd && sd.weight) _focusWeightVal = sd.weight;
+  // Warm-ups always start fresh — don't check _setCache
+  // (warm-up indices collide with regular exercise indices in cache)
+  const isWarmupEx = ex._isWarmup;
+  if (!isWarmupEx) {
+    // Carry forward from earlier completed sets in this session
+    for (let s = 0; s < (_focusSetCount || 4); s++) {
+      const sd = _setCache[`${currentWeek}_${currentDay}_${exIdx}_${s}`];
+      if (sd && sd.weight) _focusWeightVal = sd.weight;
+    }
   }
 
-  // Find first uncompleted set
+  // Find first uncompleted set (warm-ups always start at 0)
   _focusSetIdx = 0;
-  for (let s = 0; s < _focusSetCount; s++) {
-    const key = `${currentWeek}_${currentDay}_${exIdx}_${s}`;
-    if (!_setCache[key] || !_setCache[key].done) {
-      _focusSetIdx = s;
-      break;
+  if (!isWarmupEx) {
+    for (let s = 0; s < _focusSetCount; s++) {
+      const key = `${currentWeek}_${currentDay}_${exIdx}_${s}`;
+      if (!_setCache[key] || !_setCache[key].done) {
+        _focusSetIdx = s;
+        break;
+      }
+      if (s === _focusSetCount - 1) _focusSetIdx = _focusSetCount; // All done
     }
-    if (s === _focusSetCount - 1) _focusSetIdx = _focusSetCount; // All done
   }
 
   // Push history state for back button
@@ -7188,8 +7195,13 @@ function renderExerciseFocus() {
   const el = document.getElementById('exercise-focus');
   if (!el) return;
 
-  // Check if all sets done → show RPE
+  // Check if all sets done → show RPE (skip RPE for warm-ups)
   if (_focusSetIdx >= _focusSetCount) {
+    const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
+    if (currentEx && currentEx._isWarmup) {
+      if (_workoutActive) { advanceWorkoutSession(); } else { exitExerciseFocus(); }
+      return;
+    }
     showFocusRPE();
     return;
   }
