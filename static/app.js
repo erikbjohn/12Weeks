@@ -423,6 +423,11 @@ function renderMealSection(dayData) {
   const plan = dayData.mealPlan;
   if (!plan) return '';
 
+  // Determine if we're viewing today's meals
+  const todayJsDay = new Date().getDay();
+  const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
+  const isViewingToday = currentDay === todayMonIdx;
+
   // Sunday = automatic fast day (no toggle — it's the plan)
   const isSundayFast = dayData.day === 'Sun';
   const activePlan = isSundayFast ? ((window._mealPlansCache || {}).fast_day || plan) : plan;
@@ -432,7 +437,8 @@ function renderMealSection(dayData) {
 
   const meals = activePlan.meals || [];
   meals.forEach((meal, idx) => {
-    const eaten = isMealEaten(idx);
+    // Only check eaten state when viewing today — prevents cross-day data leaking
+    const eaten = isViewingToday ? isMealEaten(idx) : false;
     const multiplier = getMealMultiplier(idx);
     const macros = calcMealMacros(meal.foods, multiplier);
 
@@ -445,32 +451,56 @@ function renderMealSection(dayData) {
 
     const foodRows = meal.foods.map((f, fIdx) => {
       const adjCal = Math.round((f.cal || 0) * multiplier);
-      const foodKey = idx + '_' + fIdx;
-      const foodEaten = _isFoodItemEaten(foodKey);
-      return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
-        <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length},this)">${foodEaten ? '&#10003;' : ''}</button>
-        <span class="meal-food-name">${f.item}</span>
-        <span class="meal-food-portion">${f.portion}</span>
-        <span class="meal-food-portion">${adjCal}cal</span>
-      </div>`;
+      if (isViewingToday) {
+        const foodKey = idx + '_' + fIdx;
+        const foodEaten = _isFoodItemEaten(foodKey);
+        return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
+          <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length},this)">${foodEaten ? '&#10003;' : ''}</button>
+          <span class="meal-food-name">${f.item}</span>
+          <span class="meal-food-portion">${f.portion}</span>
+          <span class="meal-food-portion">${adjCal}cal</span>
+        </div>`;
+      } else {
+        return `<div class="meal-food-row">
+          <span class="meal-food-name">${f.item}</span>
+          <span class="meal-food-portion">${f.portion}</span>
+          <span class="meal-food-portion">${adjCal}cal</span>
+        </div>`;
+      }
     }).join('');
 
-    mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
-      <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">
-        ${eaten ? '&#10003;' : ''}
-      </button>
-      <div class="meal-time">${meal.time}</div>
-      <div class="meal-content">
-        <div class="meal-name">${meal.name}</div>
-        <div class="meal-foods">${foodRows}</div>
-        <div class="meal-macros">
-          <span class="mm-cal">${macros.cal} cal</span>
-          <span class="mm-p">${macros.protein}P</span>
-          <span class="mm-c">${macros.carbs}C</span>
-          <span class="mm-f">${macros.fat}F</span>
+    if (isViewingToday) {
+      mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
+        <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">
+          ${eaten ? '&#10003;' : ''}
+        </button>
+        <div class="meal-time">${meal.time}</div>
+        <div class="meal-content">
+          <div class="meal-name">${meal.name}</div>
+          <div class="meal-foods">${foodRows}</div>
+          <div class="meal-macros">
+            <span class="mm-cal">${macros.cal} cal</span>
+            <span class="mm-p">${macros.protein}P</span>
+            <span class="mm-c">${macros.carbs}C</span>
+            <span class="mm-f">${macros.fat}F</span>
+          </div>
         </div>
-      </div>
-    </div>`;
+      </div>`;
+    } else {
+      mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
+        <div class="meal-time">${meal.time}</div>
+        <div class="meal-content">
+          <div class="meal-name">${meal.name}</div>
+          <div class="meal-foods">${foodRows}</div>
+          <div class="meal-macros">
+            <span class="mm-cal">${macros.cal} cal</span>
+            <span class="mm-p">${macros.protein}P</span>
+            <span class="mm-c">${macros.carbs}C</span>
+            <span class="mm-f">${macros.fat}F</span>
+          </div>
+        </div>
+      </div>`;
+    }
   });
 
   const target = {
@@ -487,19 +517,24 @@ function renderMealSection(dayData) {
 
   const totalsHtml = ''; // Daily totals removed — eat the plan, check it off
 
-  // Compact row: meal name checkboxes
+  // Compact row: meal name checkboxes (today only)
   let compactChecks = '';
-  meals.forEach((meal, idx) => {
-    const eaten = isMealEaten(idx);
-    compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
-  });
+  if (isViewingToday) {
+    meals.forEach((meal, idx) => {
+      const eaten = isMealEaten(idx);
+      compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
+    });
+  }
+
+  const notTodayNote = !isViewingToday ? '<div class="meal-plan-note" style="opacity:0.6;font-style:italic">Meal tracking available on today\'s view only</div>' : '';
 
   return `<div class="detail-section">
     <h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
     ${isSundayFast ? '<div class="meal-plan-note" style="color:var(--accent)">Fast day. Water, black coffee, electrolytes only.</div>' : ''}
     ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
+    ${notTodayNote}
     ${totalsHtml}
-    <div class="meal-compact-row">${compactChecks}</div>
+    ${isViewingToday ? '<div class="meal-compact-row">' + compactChecks + '</div>' : ''}
     <button class="meal-detail-toggle" onclick="toggleMealDetails()">
       ${_mealDetailExpanded ? 'Hide details \u25B2' : 'Show meal details \u25BC'}
     </button>
