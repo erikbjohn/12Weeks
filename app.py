@@ -133,8 +133,8 @@ with app.app_context():
         ("exercise_log", "difficulty_notes", "TEXT"),
         ("training_goal", "baseline_assessment", "TEXT"),
         ("meal_log", "food_items", "TEXT"),
-        ("meal_log", "scheduled_time", "VARCHAR(10)"),
-        ("meal_log", "actual_time", "VARCHAR(30)"),
+        ("meal_log", "scheduled_time", "TEXT"),
+        ("meal_log", "actual_time", "TEXT"),
         ("set_log", "actual_time", "VARCHAR(30)"),
         ("day_completion", "completed_at", "VARCHAR(30)"),
         ("morning_checkin", "started_at", "VARCHAR(30)"),
@@ -157,6 +157,14 @@ with app.app_context():
                 existing = {c["name"] for c in inspector.get_columns(table)}
                 if col not in existing:
                     db.session.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {col} {col_type}'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Fix column types that are too small
+    try:
+        db.session.execute(text('ALTER TABLE "meal_log" ALTER COLUMN scheduled_time TYPE TEXT'))
+        db.session.execute(text('ALTER TABLE "meal_log" ALTER COLUMN actual_time TYPE TEXT'))
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -1539,6 +1547,7 @@ def api_meals_update():
     if not ml:
         ml = MealLog(log_date=d, user_id=current_user.id)
         db.session.add(ml)
+    # Save core meal data first
     if "eaten" in data:
         ml.eaten = data["eaten"]
     if "adjustments" in data:
@@ -1547,14 +1556,20 @@ def api_meals_update():
         ml.food_items = data["foodItems"]
     if "fasting" in data:
         ml.fasting = data["fasting"]
-    if "mealTiming" in data:
-        import json as _json
-        ml.scheduled_time = _json.dumps(data["mealTiming"])  # Per-meal timing as JSON
     try:
         db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+
+    # Save timing data separately (non-critical)
+    if "mealTiming" in data:
+        try:
+            import json as _json
+            ml.scheduled_time = _json.dumps(data["mealTiming"])
+            db.session.commit()
+        except Exception:
+            db.session.rollback()  # Don't fail the whole save for timing
     # Recompute compliance score
     try:
         compute_compliance_score(current_user.id)
