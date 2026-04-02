@@ -921,10 +921,10 @@ async function toggleWeightDetail(exerciseName, rowEl) {
             const dir = change > 0 ? '+' : '';
             html += `<div class="ws-baseline">
                 <span>Baseline 1RM: ${data.baseline_1rm} lb</span>
-                <span style="color:var(--accent)">→ Current: ${data.current_1rm} lb (${dir}${pct}%)</span>
+                <span style="color:var(--accent)">→ Current est 1RM: ${data.current_1rm} lb (${dir}${pct}%)</span>
             </div>`;
         } else if (data.current_1rm) {
-            html += `<div class="ws-baseline">Est 1RM: ${data.current_1rm} lb</div>`;
+            html += `<div class="ws-baseline">Current est 1RM: ${data.current_1rm} lb</div>`;
         }
 
         // Percentile bar
@@ -6278,19 +6278,20 @@ async function renderDetail() {
         const lastWt = last.weight || wt;
         const lastReps = last.reps_completed || 10;
         const oneRM = estimate1RM(lastWt, lastReps);
-        if (oneRM > 0) est1rm = `<span class="ws-1rm">${oneRM} 1RM</span>`;
+        if (oneRM > 0) est1rm = oneRM;
       }
+      const displayVal = est1rm || wt;
       wsRows += `<div class="ws-row-wrap">
   <div class="ws-row" onclick="toggleWeightDetail('${name}', this)">
     <span class="ws-name">${shortName}</span>
-    <span class="ws-val">${wt} lb ${est1rm} ${trendIcon}</span>
+    <span class="ws-val">${displayVal} lb ${trendIcon}</span>
   </div>
   <div class="ws-detail" id="ws-detail-${name.replace(/\s/g, '-')}" style="display:none"></div>
 </div>`;
     }
     weightSummaryHtml = `<div class="weight-summary" id="weight-summary">
       <button class="weight-summary-toggle" onclick="document.getElementById('weight-summary').classList.toggle('open')">
-        Working Weights <span class="ws-arrow">\u25BC</span>
+        Estimated One Rep Max <span class="ws-arrow">\u25BC</span>
       </button>
       <div class="weight-summary-body">${wsRows}</div>
     </div>`;
