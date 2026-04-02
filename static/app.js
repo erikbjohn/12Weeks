@@ -6163,14 +6163,15 @@ async function renderDetail() {
   if (hasSomeWeights) {
     let wsRows = '';
     for (const name of summaryLifts) {
-      const d2 = weights[name];
-      if (!d2 || !d2.current) continue;
+      const suggestion = getWeightForExercise(name, currentWeek);
+      const wt = suggestion.weight || (weights[name] && weights[name].current);
+      if (!wt) continue;
       const trend = getWeightTrend(name);
       const trendIcon = trend === 'up' ? '<span class="ws-trend-up">\u2191</span>' :
                         trend === 'down' ? '<span class="ws-trend-down">\u2193</span>' :
                         '<span class="ws-trend-same">\u2192</span>';
       const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
-      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${d2.current} lb ${trendIcon}</span></div>`;
+      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${wt} lb ${trendIcon}</span></div>`;
     }
     weightSummaryHtml = `<div class="weight-summary" id="weight-summary">
       <button class="weight-summary-toggle" onclick="document.getElementById('weight-summary').classList.toggle('open')">
