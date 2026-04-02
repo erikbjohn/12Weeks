@@ -1443,6 +1443,10 @@ def api_meals_update():
         ml.food_items = data["foodItems"]
     if "fasting" in data:
         ml.fasting = data["fasting"]
+    if "scheduled_time" in data and data["scheduled_time"]:
+        ml.scheduled_time = data["scheduled_time"]
+    if "actual_time" in data and data["actual_time"]:
+        ml.actual_time = data["actual_time"]
     try:
         db.session.commit()
     except Exception as e:

@@ -221,7 +221,18 @@ function loadMealData() {
 function saveMealData(data) {
   const key = getMealDateKey();
   _mealsCache[key] = data;
-  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], fasting: data.fasting || false });
+  // Get the scheduled time from the current day's meal plan
+  let scheduledTime = '';
+  try {
+    const weekData = workoutData[String(currentWeek)];
+    const dayData = weekData && currentDay !== null ? weekData.days[currentDay] : null;
+    const mp = dayData ? dayData.mealPlan : null;
+    if (mp && mp.meals && data.eaten && data.eaten.length > 0) {
+      const lastEatenIdx = data.eaten[data.eaten.length - 1];
+      if (mp.meals[lastEatenIdx]) scheduledTime = mp.meals[lastEatenIdx].time || '';
+    }
+  } catch(e) {}
+  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], fasting: data.fasting || false, scheduled_time: scheduledTime, actual_time: new Date().toISOString() });
   // Refresh compliance badge
   fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 }
