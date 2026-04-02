@@ -13,7 +13,7 @@ let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, re
 let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
 let _complianceCache = null;
-let _morningCheckinDone = true; // Gate disabled for now
+let _morningCheckinDone = false;
 let _focusExIdx = null;
 let _focusSetIdx = null;
 let _focusSetCount = null;
@@ -3832,8 +3832,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
 
-    // Morning checkin gate disabled — always unlocked
-    _morningCheckinDone = true;
+    // Morning check-in gate — check if already done today
+    await checkMorningCheckin();
 
     renderAll();
   } catch(e) {
@@ -3949,13 +3949,16 @@ async function checkMorningCheckin() {
     const res = await fetch('/api/morning-checkin?date=' + today);
     const data = await res.json();
     if (data.exists) {
+      _morningCheckinDone = true;
       _morningCheckinCache = data.checkin || data;
       renderCheckinSummaryBar();
     } else {
+      _morningCheckinDone = false;
       showMorningCheckinOverlay();
     }
   } catch(e) {
     console.error('Morning checkin check failed', e);
+    _morningCheckinDone = true; // Don't block on network error
   }
 }
 
@@ -4262,8 +4265,10 @@ async function sendMorningCoachReply() {
 }
 
 function closeMorningCheckin() {
+  _morningCheckinDone = true;
   document.getElementById('morning-checkin-overlay').innerHTML = '';
   renderCheckinSummaryBar();
+  renderDetail(); // Unlock the daily view
 
   const today = new Date();
   if (today.getDay() === 0) {
