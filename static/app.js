@@ -892,6 +892,74 @@ function getWeightTrend(exName) {
   return 'same';
 }
 
+// ─── WEIGHT DETAIL ACCORDION ───────────────────────────────────────────────
+
+async function toggleWeightDetail(exerciseName, rowEl) {
+    const detailId = 'ws-detail-' + exerciseName.replace(/\s/g, '-');
+    const detail = document.getElementById(detailId);
+    if (!detail) return;
+
+    // Toggle
+    if (detail.style.display !== 'none') {
+        detail.style.display = 'none';
+        return;
+    }
+
+    detail.style.display = 'block';
+    detail.innerHTML = '<div style="padding:8px 0;color:var(--muted);font-size:12px">Loading...</div>';
+
+    try {
+        const res = await fetch('/api/weight-detail/' + encodeURIComponent(exerciseName));
+        const data = await res.json();
+
+        let html = '';
+
+        // Baseline vs Current
+        if (data.baseline_1rm && data.current_1rm) {
+            const change = data.current_1rm - data.baseline_1rm;
+            const pct = data.baseline_1rm > 0 ? Math.round((change / data.baseline_1rm) * 100) : 0;
+            const dir = change > 0 ? '+' : '';
+            html += `<div class="ws-baseline">
+                <span>Baseline 1RM: ${data.baseline_1rm} lb</span>
+                <span style="color:var(--accent)">→ Current: ${data.current_1rm} lb (${dir}${pct}%)</span>
+            </div>`;
+        } else if (data.current_1rm) {
+            html += `<div class="ws-baseline">Est 1RM: ${data.current_1rm} lb</div>`;
+        }
+
+        // Percentile bar
+        if (data.percentile != null) {
+            const pctWidth = Math.min(data.percentile, 100);
+            const color = pctWidth >= 75 ? 'var(--accent)' : pctWidth >= 50 ? '#f59e0b' : 'var(--muted)';
+            html += `<div class="ws-percentile">
+                <div class="ws-pct-bar"><div class="ws-pct-fill" style="width:${pctWidth}%;background:${color}"></div></div>
+                <div class="ws-pct-label">${data.percentile}th percentile${data.rating ? ' · ' + data.rating : ''}</div>
+            </div>`;
+        }
+
+        // Timeline (most recent first, max 8 entries)
+        if (data.timeline && data.timeline.length > 0) {
+            const entries = data.timeline.slice(-8).reverse();
+            html += '<div class="ws-timeline">';
+            for (const e of entries) {
+                const isBaseline = e.baseline_weight != null;
+                const rpeLabel = e.rpe ? ` · ${e.rpe}` : '';
+                const weekLabel = e.week ? `Wk ${e.week}` : '';
+                html += `<div class="ws-timeline-entry${isBaseline ? ' ws-baseline-entry' : ''}">
+                    <span class="ws-tl-week">${weekLabel}</span>
+                    <span class="ws-tl-weight">${e.weight} lb${e.reps ? ' × ' + e.reps : ''}${rpeLabel}</span>
+                    ${isBaseline ? '<span class="ws-tl-tag">baseline</span>' : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        detail.innerHTML = html || '<div style="color:var(--muted);font-size:12px">No history yet</div>';
+    } catch(e) {
+        detail.innerHTML = '<div style="color:var(--muted);font-size:12px">Failed to load</div>';
+    }
+}
+
 // ─── WELCOME & ONBOARDING ──────────────────────────────────────────────────
 
 async function checkOnboardingComplete() {
@@ -6212,7 +6280,13 @@ async function renderDetail() {
         const oneRM = estimate1RM(lastWt, lastReps);
         if (oneRM > 0) est1rm = `<span class="ws-1rm">${oneRM} 1RM</span>`;
       }
-      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${wt} lb ${est1rm} ${trendIcon}</span></div>`;
+      wsRows += `<div class="ws-row-wrap">
+  <div class="ws-row" onclick="toggleWeightDetail('${name}', this)">
+    <span class="ws-name">${shortName}</span>
+    <span class="ws-val">${wt} lb ${est1rm} ${trendIcon}</span>
+  </div>
+  <div class="ws-detail" id="ws-detail-${name.replace(/\s/g, '-')}" style="display:none"></div>
+</div>`;
     }
     weightSummaryHtml = `<div class="weight-summary" id="weight-summary">
       <button class="weight-summary-toggle" onclick="document.getElementById('weight-summary').classList.toggle('open')">

@@ -1277,6 +1277,91 @@ def api_weights_baseline():
     return jsonify({"ok": True})
 
 
+@app.route("/api/weight-detail/<path:exercise_name>")
+@login_required
+def api_weight_detail(exercise_name):
+    """Detailed weight history + percentile for accordion expansion."""
+    from body_stats import compute_1rm_percentile
+
+    logs = ExerciseLog.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise_name
+    ).order_by(ExerciseLog.logged_date.asc()).all()
+
+    # Build timeline
+    timeline = []
+    for log in logs:
+        entry = {
+            "date": log.logged_date.isoformat() if log.logged_date else None,
+            "weight": log.weight,
+            "reps": log.reps_completed,
+            "rpe": log.rpe,
+            "week": log.week,
+            "sets_label": log.sets_label,
+        }
+        if log.estimated_1rm:
+            entry["est_1rm"] = log.estimated_1rm
+        if log.test_weight:
+            entry["baseline_weight"] = log.test_weight
+            entry["baseline_reps"] = log.test_reps
+        timeline.append(entry)
+
+    # Compute current 1RM and percentile
+    current_1rm = None
+    percentile = None
+    rating = None
+    baseline_1rm = None
+
+    if logs:
+        last = logs[-1]
+        reps = last.reps_completed or 10
+        current_1rm = round(last.weight * (1 + reps / 30))
+
+        # Baseline
+        baseline_entries = [l for l in logs if l.test_weight]
+        if baseline_entries:
+            bl = baseline_entries[0]
+            baseline_1rm = round(bl.test_weight * (1 + (bl.test_reps or 10) / 30))
+
+        # Population percentile — get age/sex from psych intake
+        try:
+            pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+            latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+            bw = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else 180)
+
+            intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
+            sex = "male"
+            age = 30
+            if intake and intake.conversation:
+                for msg in intake.conversation:
+                    content = msg.get("content", "").lower().strip()
+                    if msg.get("role") == "user":
+                        if content in ("male", "female", "m", "f"):
+                            sex = "female" if content in ("female", "f") else "male"
+                        try:
+                            num = int(content)
+                            if 15 <= num <= 80:
+                                age = num
+                        except ValueError:
+                            pass
+
+            pct_data = compute_1rm_percentile(current_1rm, bw, exercise_name, age, sex)
+            if pct_data:
+                percentile = pct_data.get("percentile")
+                rating = pct_data.get("rating")
+        except Exception:
+            pass
+
+    return jsonify({
+        "exercise": exercise_name,
+        "timeline": timeline,
+        "current_1rm": current_1rm,
+        "baseline_1rm": baseline_1rm,
+        "percentile": percentile,
+        "rating": rating,
+        "total_sessions": len(logs),
+    })
+
+
 # ─── COMPLETIONS ────────────────────────────────────────────────────────────
 
 @app.route("/api/completions")

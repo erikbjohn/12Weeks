@@ -1312,6 +1312,24 @@ footer {
 .ws-trend-same { color: var(--muted); font-size: 13px; }
 .ws-1rm { font-size: 11px; color: var(--muted); margin-left: 4px; margin-right: 4px; }
 
+.ws-row-wrap { border-bottom: 1px solid var(--border); }
+.ws-row-wrap:last-child { border-bottom: none; }
+.ws-row { cursor: pointer; }
+.ws-row:active { opacity: 0.7; }
+.ws-detail { padding: 0 12px 10px; }
+.ws-baseline { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--muted); padding: 4px 0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; }
+.ws-percentile { padding: 6px 0; }
+.ws-pct-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+.ws-pct-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.ws-pct-label { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 3px; }
+.ws-timeline { padding-top: 4px; }
+.ws-timeline-entry { display: flex; gap: 8px; font-size: 12px; font-family: 'DM Mono', monospace; padding: 3px 0; border-bottom: 1px solid var(--border); align-items: center; }
+.ws-timeline-entry:last-child { border-bottom: none; }
+.ws-tl-week { color: var(--muted); min-width: 36px; }
+.ws-tl-weight { color: var(--text); flex: 1; }
+.ws-tl-tag { font-size: 10px; color: var(--accent); background: var(--lift-bg); border: 1px solid var(--lift-border); border-radius: 3px; padding: 1px 5px; }
+.ws-baseline-entry { background: var(--surface2); border-radius: 4px; padding: 3px 6px; margin: 2px 0; }
+
 /* ─── SETTINGS BUTTON ─── */
 .settings-btn {
   background: none;
