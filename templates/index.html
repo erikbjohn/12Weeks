@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=88">
+  <link rel="stylesheet" href="/static/style.css?v=89">
 </head>
 <body>
 
@@ -50,7 +50,6 @@
 <div class="detail-panel" id="detail-panel"></div>
 <div id="weighin-bar" class="weighin-bar"></div>
 <div id="checkin-summary-bar"></div>
-<div class="garmin-bar" id="garmin-bar"></div>
 <div id="supplement-bar" class="supplement-bar"></div>
 <!-- Legacy containers kept for renderAll compatibility -->
 <div class="phase-nav" id="phase-nav" style="display:none"></div>
@@ -61,20 +60,7 @@
 <!-- Progress Dashboard Overlay -->
 <div class="progress-overlay" id="progress-overlay"></div>
 
-<!-- Garmin Login Modal -->
-<div class="modal-overlay" id="garmin-modal">
-  <div class="modal">
-    <h2>Connect Garmin</h2>
-    <input type="email" id="garmin-email" placeholder="Garmin email" autocomplete="email">
-    <input type="password" id="garmin-password" placeholder="Password" autocomplete="current-password">
-    <input type="text" id="garmin-mfa" placeholder="Verification code" autocomplete="one-time-code" inputmode="numeric" style="display:none">
-    <div class="modal-error" id="garmin-error"></div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" id="garmin-submit" onclick="garminLogin()">Connect</button>
-    </div>
-  </div>
-</div>
+<!-- Garmin removed -->
 
 <div id="chat-overlay"></div>
 <div id="exercise-focus" class="exercise-focus-overlay"></div>
@@ -94,6 +80,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
-<script src="/static/app.js?v=88"></script>
+<script src="/static/app.js?v=89"></script>
 </body>
 </html>

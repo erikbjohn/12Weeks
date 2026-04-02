@@ -29,7 +29,7 @@ let workoutData = {};
 let currentPhase = 1;
 let currentWeek = 1;
 let currentDay = null;
-let garminConnected = false;
+let garminConnected = false; // Garmin disabled
 let garminData = null;
 let readinessData = null;
 let warmupTimerInterval = null;
@@ -3526,13 +3526,12 @@ function swapExercise(week, day, exIdx, newName) {
 document.addEventListener('DOMContentLoaded', async () => {
   // Fetch all data in parallel
   try {
-    const [stateRes, weightsRes, compRes, suppRes, bwRes, garminRes, workoutRes, mealsRes] = await Promise.all([
+    const [stateRes, weightsRes, compRes, suppRes, bwRes, workoutRes, mealsRes] = await Promise.all([
       fetch('/api/state'),
       fetch('/api/weights'),
       fetch('/api/completions'),
       fetch('/api/supplements?date=' + todayStr()),
       fetch('/api/bodyweight'),
-      fetch('/api/garmin/status'),
       fetch('/api/workouts'),
       fetch('/api/meals?date=' + todayStr()),
     ]);
@@ -3564,13 +3563,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const mealsData = await mealsRes.json();
       _mealsCache[todayStr()] = mealsData;
-    } catch(e) {}
-
-    // Garmin
-    try {
-      const garminStatus = await garminRes.json();
-      garminConnected = garminStatus.connected;
-      if (garminConnected) await refreshGarmin();
     } catch(e) {}
 
     // Warm-up completions
@@ -5707,16 +5699,10 @@ function quickCoachReply(msg) {
 
 function renderGarminBar() {
   const el = document.getElementById('garmin-bar');
+  if (el) el.innerHTML = '';
+  return;
+  // Garmin disabled — original code below
   if (!garminConnected) {
-    // Don't nag — show a subtle link, not a big button
-    const dismissed = localStorage.getItem('garmin_dismissed');
-    if (dismissed) {
-      el.innerHTML = '';
-    } else {
-      el.innerHTML = `<div style="text-align:center;padding:8px"><span style="font-size:12px;color:var(--muted);cursor:pointer" onclick="showModal()">Connect Garmin for HRV &amp; sleep data</span> <span style="font-size:12px;color:var(--dim);cursor:pointer;margin-left:8px" onclick="localStorage.setItem('garmin_dismissed','1');this.parentElement.parentElement.innerHTML=''">&times;</span></div>`;
-    }
-    return;
-  }
 
   let metricsHtml = '<div class="garmin-header"><span class="gh-label">Garmin Connected</span><button class="garmin-disconnect" onclick="garminLogout()">Disconnect</button></div>';
   metricsHtml += '<div class="garmin-metrics">';
