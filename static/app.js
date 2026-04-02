@@ -7229,18 +7229,22 @@ function logFocusSet() {
   }
 }
 
+let _timedSetPaused = false;
+
 function startTimedSet(seconds) {
   const el = document.getElementById('exercise-focus');
   if (!el) return;
 
   let remaining = seconds;
+  _timedSetPaused = false;
 
   function render() {
     el.innerHTML = `
       <div class="focus-content">
         <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
         <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
-        <div class="focus-timer-display">${remaining}s</div>
+        <div class="focus-timer-display${_timedSetPaused ? '' : ''}">${remaining}s</div>
+        <button class="focus-skip-btn" onclick="toggleTimedPause()" style="margin-top:12px">${_timedSetPaused ? '&#9654; Resume' : '&#10074;&#10074; Pause'}</button>
       </div>`;
   }
 
@@ -7248,6 +7252,7 @@ function startTimedSet(seconds) {
 
   if (_focusTimerInterval) clearInterval(_focusTimerInterval);
   _focusTimerInterval = setInterval(() => {
+    if (_timedSetPaused) return; // Skip tick when paused
     remaining--;
     if (remaining <= 0) {
       clearInterval(_focusTimerInterval);
@@ -7295,6 +7300,18 @@ function startTimedSet(seconds) {
       render();
     }
   }, 1000);
+}
+
+function toggleTimedPause() {
+  _timedSetPaused = !_timedSetPaused;
+  // Re-render to update button text
+  const el = document.getElementById('exercise-focus');
+  if (el) {
+    const btn = el.querySelector('.focus-skip-btn');
+    if (btn) btn.innerHTML = _timedSetPaused ? '&#9654; Resume' : '&#10074;&#10074; Pause';
+    const timer = el.querySelector('.focus-timer-display');
+    if (timer) timer.style.animationPlayState = _timedSetPaused ? 'paused' : 'running';
+  }
 }
 
 function showFocusRestTimer(seconds, showRpeAfter) {
