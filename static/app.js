@@ -239,7 +239,9 @@ function saveMealData(data) {
       }
     }
   } catch(e) {}
-  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], mealTiming: data.mealTiming || {}, fasting: data.fasting || false });
+  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], mealTiming: data.mealTiming || {}, fasting: data.fasting || false })
+    .then(r => { if (r && !r.ok) console.error('Meal save failed:', r.status); })
+    .catch(e => console.error('Meal save error:', e));
   // Refresh compliance badge
   fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 }
@@ -4376,6 +4378,21 @@ function updateChatFabPulse() {
   }
 }
 
+function _getChatOpener() {
+  try {
+    const weekData = workoutData[String(currentWeek)];
+    const todayJsDay = new Date().getDay();
+    const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
+    const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
+    if (dayData) {
+      const name = dayData.liftName || 'Rest';
+      if (dayData.isRest) return "Rest day. What's on your mind?";
+      return `${name} today. Talk to me.`;
+    }
+  } catch(e) {}
+  return "Talk to me.";
+}
+
 function toggleChatOverlay() {
   if (_chatOverlayOpen) {
     const msgs = document.getElementById('chat-overlay-messages');
@@ -4408,7 +4425,7 @@ function renderChatOverlay() {
       <h2>Coach Erik</h2>
     </div>
     <div class="chat-messages" id="chat-overlay-messages">
-      <div class="chat-bubble coach">What do you need?</div>
+      <div class="chat-bubble coach">${_getChatOpener()}</div>
     </div>
     <div class="chat-input-bar">
       <input type="text" id="chat-overlay-input" placeholder="Message Coach..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
