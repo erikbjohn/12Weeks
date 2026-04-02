@@ -221,18 +221,25 @@ function loadMealData() {
 function saveMealData(data) {
   const key = getMealDateKey();
   _mealsCache[key] = data;
-  // Get the scheduled time from the current day's meal plan
-  let scheduledTime = '';
+  // Build per-meal timing: { mealIdx: { scheduled: "2:30pm", actual: "2026-04-01T18:30:00Z" } }
+  if (!data.mealTiming) data.mealTiming = {};
   try {
     const weekData = workoutData[String(currentWeek)];
     const dayData = weekData && currentDay !== null ? weekData.days[currentDay] : null;
     const mp = dayData ? dayData.mealPlan : null;
-    if (mp && mp.meals && data.eaten && data.eaten.length > 0) {
-      const lastEatenIdx = data.eaten[data.eaten.length - 1];
-      if (mp.meals[lastEatenIdx]) scheduledTime = mp.meals[lastEatenIdx].time || '';
+    if (mp && mp.meals && Array.isArray(data.eaten)) {
+      const now = new Date().toISOString();
+      for (const mealIdx of data.eaten) {
+        if (!data.mealTiming[String(mealIdx)] && mp.meals[mealIdx]) {
+          data.mealTiming[String(mealIdx)] = {
+            scheduled: mp.meals[mealIdx].time || '',
+            actual: now,
+          };
+        }
+      }
     }
   } catch(e) {}
-  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], fasting: data.fasting || false, scheduled_time: scheduledTime, actual_time: new Date().toISOString() });
+  apiPost('/api/meals', { date: key, eaten: Array.isArray(data.eaten) ? data.eaten : [], adjustments: data.adjustments || {}, foodItems: Array.isArray(data.foodItems) ? data.foodItems : [], mealTiming: data.mealTiming || {}, fasting: data.fasting || false });
   // Refresh compliance badge
   fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 }

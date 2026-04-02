@@ -1418,10 +1418,20 @@ def api_meals():
             try: parsed = _json.loads(val); return parsed if isinstance(parsed, dict) else {}
             except Exception: return {}
         return {}
+    # Parse mealTiming from scheduled_time field
+    meal_timing = {}
+    if ml.scheduled_time:
+        try:
+            _parsed = _json.loads(ml.scheduled_time)
+            if isinstance(_parsed, dict):
+                meal_timing = _parsed
+        except Exception:
+            pass
     return jsonify({
         "eaten": _ensure_list(ml.eaten),
         "adjustments": _ensure_dict(ml.adjustments),
         "foodItems": _ensure_list(ml.food_items),
+        "mealTiming": meal_timing,
         "fasting": ml.fasting,
     })
 
@@ -1443,10 +1453,9 @@ def api_meals_update():
         ml.food_items = data["foodItems"]
     if "fasting" in data:
         ml.fasting = data["fasting"]
-    if "scheduled_time" in data and data["scheduled_time"]:
-        ml.scheduled_time = data["scheduled_time"]
-    if "actual_time" in data and data["actual_time"]:
-        ml.actual_time = data["actual_time"]
+    if "mealTiming" in data:
+        import json as _json
+        ml.scheduled_time = _json.dumps(data["mealTiming"])  # Per-meal timing as JSON
     try:
         db.session.commit()
     except Exception as e:

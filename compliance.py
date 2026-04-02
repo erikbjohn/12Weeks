@@ -103,7 +103,7 @@ def compute_compliance_score(user_id):
             day_points -= 10
             checkin_points -= 10
 
-        # Meals: scored by timing compliance, not just logged/not-logged
+        # Meals: scored PER-MEAL by timing compliance
         if not is_sunday:  # Sunday is fast day
             meals_expected = 3
             day_max += meals_expected * 10
@@ -111,51 +111,51 @@ def compute_compliance_score(user_id):
             if d in meal_dates:
                 ml = meal_dates[d]
                 eaten = ml.eaten if isinstance(ml.eaten, list) else []
-                food_items = ml.food_items if isinstance(getattr(ml, 'food_items', None), list) else []
                 meals_logged = len(eaten)
                 missed_meals = meals_expected - meals_logged
 
-                # Check timing for each logged meal
-                actual_time_str = getattr(ml, 'actual_time', None)
-                scheduled_time_str = getattr(ml, 'scheduled_time', None)
-
-                if actual_time_str and scheduled_time_str:
-                    # Parse times and compute delta
+                # Parse per-meal timing from scheduled_time field (JSON dict)
+                meal_timing = {}
+                sched_raw = getattr(ml, 'scheduled_time', None)
+                if sched_raw and isinstance(sched_raw, str):
                     try:
-                        from datetime import datetime as _dt
-                        actual_t = _dt.fromisoformat(actual_time_str) if isinstance(actual_time_str, str) else None
-                        # scheduled_time is like "11:00am" — parse it
-                        import re
-                        _m = re.match(r'(\d+):?(\d*)\s*(am|pm)', (scheduled_time_str or '').lower())
-                        if _m and actual_t:
-                            _h = int(_m.group(1))
-                            _min = int(_m.group(2) or 0)
-                            if _m.group(3) == 'pm' and _h != 12: _h += 12
-                            if _m.group(3) == 'am' and _h == 12: _h = 0
-                            sched_dt = actual_t.replace(hour=_h, minute=_min, second=0, microsecond=0)
-                            delta_min = abs((actual_t - sched_dt).total_seconds()) / 60
-
-                            for _ in range(meals_logged):
-                                if delta_min <= 60:
-                                    food_points += 10  # On time
-                                    day_points += 10
-                                elif delta_min <= 120:
-                                    food_points -= 10  # Late 61-120 min
-                                    day_points -= 10
-                                else:
-                                    food_points -= 15  # Very late 120+ min
-                                    day_points -= 15
-                        else:
-                            # Can't parse timing — give credit for logging
-                            food_points += meals_logged * 10
-                            day_points += meals_logged * 10
+                        import json as _json
+                        meal_timing = _json.loads(sched_raw)
+                        if not isinstance(meal_timing, dict):
+                            meal_timing = {}
                     except Exception:
-                        food_points += meals_logged * 10
-                        day_points += meals_logged * 10
-                else:
-                    # No timing data — give credit for logging (legacy data)
-                    food_points += meals_logged * 10
-                    day_points += meals_logged * 10
+                        meal_timing = {}
+
+                scored_meals = 0
+                for meal_idx in eaten:
+                    mt = meal_timing.get(str(meal_idx))
+                    if mt and isinstance(mt, dict) and mt.get('scheduled') and mt.get('actual'):
+                        try:
+                            import re
+                            from datetime import datetime as _dt
+                            actual_t = _dt.fromisoformat(mt['actual'])
+                            _m = re.match(r'(\d+):?(\d*)\s*(am|pm)', mt['scheduled'].lower())
+                            if _m:
+                                _h = int(_m.group(1))
+                                _min = int(_m.group(2) or 0)
+                                if _m.group(3) == 'pm' and _h != 12: _h += 12
+                                if _m.group(3) == 'am' and _h == 12: _h = 0
+                                sched_dt = actual_t.replace(hour=_h, minute=_min, second=0, microsecond=0)
+                                delta_min = abs((actual_t - sched_dt).total_seconds()) / 60
+
+                                if delta_min <= 60:
+                                    food_points += 10; day_points += 10
+                                elif delta_min <= 120:
+                                    food_points -= 10; day_points -= 10
+                                else:
+                                    food_points -= 15; day_points -= 15
+                                scored_meals += 1
+                                continue
+                        except Exception:
+                            pass
+                    # No timing data for this meal — give credit for logging
+                    food_points += 10; day_points += 10
+                    scored_meals += 1
 
                 if missed_meals > 0:
                     day_points -= missed_meals * 15
