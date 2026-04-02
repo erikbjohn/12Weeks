@@ -41,6 +41,7 @@ from models import (
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
+    DailyCoachState,
 )
 
 app = Flask(__name__)
@@ -147,6 +148,7 @@ with app.app_context():
         ("set_log", "set_skipped", "BOOLEAN"),
         ("set_log", "exercise_swapped", "BOOLEAN"),
         ("user", "timezone", "VARCHAR(64) DEFAULT 'UTC'"),
+        ("chat_message", "message_type", "VARCHAR(30) DEFAULT 'chat'"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -2164,6 +2166,8 @@ def api_full_profile_result(job_id):
 
 # ─── AI COACH CHAT ──────────────────────────────────────────────────────────
 
+_chat_rate_limit = {}  # user_id → last_send_timestamp
+
 @app.route("/api/chat/history")
 @login_required
 def api_chat_history():
@@ -2198,8 +2202,18 @@ def api_chat():
     if not user_msg:
         return jsonify({"error": "Message required"}), 400
 
+    # Double-send protection
+    import time as _time
+    _now = _time.time()
+    _last = _chat_rate_limit.get(current_user.id, 0)
+    if _now - _last < 2:
+        return jsonify({"error": "Too fast — wait a moment"}), 429
+    _chat_rate_limit[current_user.id] = _now
+
+    mode = data.get('mode', 'chat')
+
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id)
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id, message_type=mode)
     db.session.add(user_chat)
     try:
         db.session.commit()
@@ -2214,7 +2228,7 @@ def api_chat():
     response_text = get_coach_response(user_msg, context)
 
     # Save assistant message
-    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id)
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id, message_type=mode)
     db.session.add(asst_chat)
     try:
         db.session.commit()
@@ -2260,12 +2274,23 @@ def api_chat_stream():
     if not user_msg:
         return jsonify({"error": "Message required"}), 400
 
+    # Double-send protection
+    import time as _time
+    _now = _time.time()
+    _last = _chat_rate_limit.get(current_user.id, 0)
+    if _now - _last < 2:
+        return jsonify({"error": "Too fast — wait a moment"}), 429
+    _chat_rate_limit[current_user.id] = _now
+
+    mode = data.get('mode', 'chat')
+
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id)
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id, message_type=mode)
     db.session.add(user_chat)
     db.session.commit()
 
     _current_user_id = current_user.id
+    _mode = mode
 
     context = _build_coach_context()
 
@@ -2308,7 +2333,7 @@ def api_chat_stream():
             if full_text.strip():
                 try:
                     with _app.app_context():
-                        asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
+                        asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id, message_type=_mode)
                         db.session.add(asst_chat)
                         db.session.commit()
                 except Exception:
@@ -2316,6 +2341,75 @@ def api_chat_stream():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route('/api/coach/daily-opener')
+@login_required
+def api_daily_opener():
+    """Returns today's morning opener. Generates if not yet created."""
+    today = date.today()
+
+    # Check daily state
+    state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
+
+    # Check if opener already exists
+    existing = ChatMessage.query.filter_by(
+        user_id=current_user.id, log_date=today
+    ).filter(ChatMessage.content.contains('[MORNING_CHECKIN]') == False).filter_by(
+        role='assistant'
+    ).order_by(ChatMessage.created_at.asc()).first()
+
+    # Check if already dismissed
+    already_seen = state and state.opener_dismissed_at is not None
+
+    if existing and state and state.opener_shown_at:
+        return jsonify({'message': existing.content, 'already_seen': already_seen})
+
+    # Not yet generated — trigger it
+    if not state:
+        state = DailyCoachState(user_id=current_user.id, state_date=today)
+        db.session.add(state)
+    state.opener_shown_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    return jsonify({'message': None, 'needs_generation': True, 'already_seen': False})
+
+
+@app.route('/api/coach/dismiss-opener', methods=['POST'])
+@login_required
+def api_dismiss_opener():
+    today = date.today()
+    state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
+    if not state:
+        state = DailyCoachState(user_id=current_user.id, state_date=today)
+        db.session.add(state)
+    state.opener_dismissed_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/coach/today-history')
+@login_required
+def api_coach_today_history():
+    """Today's chat messages only, excluding internal triggers."""
+    today = date.today()
+    messages = ChatMessage.query.filter_by(
+        user_id=current_user.id, log_date=today
+    ).order_by(ChatMessage.created_at.asc()).all()
+
+    result = []
+    for m in messages:
+        content = m.content or ''
+        # Skip internal trigger messages
+        if content.startswith('[MORNING_CHECKIN]') or content.startswith('[WORKOUT_COMPLETE]') or content.startswith('[MEALS_COMPLETE]') or content.startswith('[END_OF_DAY]'):
+            continue
+        result.append({
+            'role': m.role,
+            'content': content,
+            'type': getattr(m, 'message_type', 'chat') or 'chat',
+            'time': m.created_at.strftime('%I:%M %p') if m.created_at else None,
+        })
+    return jsonify(result)
 
 
 def _build_coach_context():

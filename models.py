@@ -415,6 +415,20 @@ class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     role = db.Column(db.String(20), nullable=False)  # "user" or "assistant"
     content = db.Column(db.Text, nullable=False)
+    message_type = db.Column(db.String(30), default='chat')  # chat, morning_opener, checkin_response, workout_nudge, post_workout, scold
     log_date = db.Column(db.Date, default=date.today, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DailyCoachState(db.Model):
+    """Per-user per-day coach state tracking."""
+    __tablename__ = "daily_coach_state"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    state_date = db.Column(db.Date, nullable=False, default=date.today)
+    opener_shown_at = db.Column(db.DateTime, nullable=True)
+    opener_dismissed_at = db.Column(db.DateTime, nullable=True)
+    checkin_completed_at = db.Column(db.DateTime, nullable=True)
+    nudge_sent_at = db.Column(db.DateTime, nullable=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'state_date'),)

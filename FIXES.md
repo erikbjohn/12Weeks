@@ -71,3 +71,29 @@ Fix 6 complete — coach now uses user local timezone for all time references. U
 - Browser auto-detects IANA timezone and sends to backend
 - Coach prompt shows "Tuesday, April 1 at 7:00 AM (America/Los_Angeles)"
 - Guard rule prevents LLM from mentioning UTC or computing elapsed time
+
+---
+
+# Fix 7 — Coach Chat Experience
+
+Fix 7 complete — coach chat rebuilt. Compact daily panel, no history shown, streaming responses, typing indicators, humanlike Lombardi voice hardened across all edge cases, conversation memory working correctly. Verified Agent 6.
+
+## Changes
+
+| File | Change |
+|------|--------|
+| `models.py` | Added `message_type` to ChatMessage. New `DailyCoachState` model (opener/dismiss/checkin/nudge tracking) |
+| `app.py` | Daily opener endpoint, dismiss endpoint, today-only history endpoint, double-send protection (2s rate limit), message_type on all ChatMessage saves |
+| `coach.py` | Morning checkin rewritten (compact panel, 1-3 sentences, weave naturally). 8 persona hardening rules. Duplicate message bug fixed. Off-topic/rude redirects. MESSAGE FORMAT replaces POPUP MODE |
+| `static/app.js` | Opener is compact inline panel (not full-screen overlay). Today-only history via /api/coach/today-history. Dismiss calls backend. Chat bubbles have messageIn animation |
+| `static/style.css` | Removed full-screen overlay CSS. Added .coach-opener (max-height 220px, inline). Typing indicator bounce. Message appear animation |
+
+## Verification
+- Opener is compact 220px panel, NOT full-screen
+- No previous chat history in opener
+- Typing indicator works
+- Streaming responses via SSE
+- Double-send protection (429 on rapid fire)
+- Persona hardened: no generic phrases, no character breaks
+- Duplicate message bug fixed in _build_messages()
+- Today-only history scoping

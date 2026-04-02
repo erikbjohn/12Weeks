@@ -70,42 +70,58 @@ let _coachPopupQueue = [];
 
 function showCoachPopup(message) {
   // If a popup is already showing, queue this one
-  const existing = document.getElementById('coach-popup-overlay');
+  const existing = document.getElementById('coach-opener-panel');
   if (existing) {
     _coachPopupQueue.push(message);
     return;
   }
 
-  const overlay = document.createElement('div');
-  overlay.id = 'coach-popup-overlay';
-  overlay.className = 'coach-popup-overlay';
-  overlay.innerHTML = `<div class="coach-popup-card">
-    <div class="coach-popup-label">ERIK</div>
-    <button class="coach-popup-dismiss" onclick="dismissCoachPopup()">&times;</button>
-    <div class="coach-popup-message">${escapeHtml(message)}</div>
-  </div>`;
-  document.body.appendChild(overlay);
+  const panel = document.createElement('div');
+  panel.id = 'coach-opener-panel';
+  panel.className = 'coach-opener';
+  panel.innerHTML = `
+    <div class="coach-opener__inner">
+      <div class="coach-opener__header">
+        <div class="coach-opener__avatar">E</div>
+        <div class="coach-opener__meta">
+          <span class="coach-opener__name">Erik</span>
+          <span class="coach-opener__status">Online</span>
+        </div>
+        <button class="coach-opener__dismiss" onclick="dismissCoachPopup()" aria-label="Dismiss">&times;</button>
+      </div>
+      <div class="coach-opener__body">
+        <p class="coach-opener__message">${escapeHtml(message)}</p>
+      </div>
+    </div>`;
 
-  // Only dismiss via X button — no auto-dismiss, no tap-card-to-dismiss
+  // Insert at top of page, after header
+  const header = document.querySelector('header');
+  if (header && header.nextSibling) {
+    header.parentNode.insertBefore(panel, header.nextSibling);
+  } else {
+    document.body.prepend(panel);
+  }
 
-  // Push to chat history so it appears in the full chat overlay
+  // Push to chat history
   _chatHistory.push({ role: 'coach', text: message, time: new Date().toISOString(), date: todayStr() });
 }
 
 function dismissCoachPopup() {
   if (_coachPopupTimeout) { clearTimeout(_coachPopupTimeout); _coachPopupTimeout = null; }
-  const overlay = document.getElementById('coach-popup-overlay');
-  if (overlay) {
-    const card = overlay.querySelector('.coach-popup-card');
-    if (card) card.classList.add('fade-out');
+  const panel = document.getElementById('coach-opener-panel');
+  if (panel) {
+    panel.style.opacity = '0';
+    panel.style.maxHeight = '0';
     setTimeout(() => {
-      overlay.remove();
-      // Show next queued popup
+      panel.remove();
+      // Show next queued
       if (_coachPopupQueue.length > 0) {
         showCoachPopup(_coachPopupQueue.shift());
       }
     }, 300);
   }
+  // Mark as dismissed
+  fetch('/api/coach/dismiss-opener', { method: 'POST' }).catch(() => {});
 }
 
 // Dedup: prevent duplicate popups per day
@@ -4192,9 +4208,10 @@ function renderCheckinSummaryBar() {
 // ─── AI COACH CHAT ─────────────────────────────────────────────────────────
 async function loadChatHistory() {
   try {
-    const res = await fetch('/api/chat/history?days=7&limit=50');
+    const res = await fetch('/api/coach/today-history');
     const data = await res.json();
-    _chatHistory = Array.isArray(data) ? data : (data.messages || []);
+    const raw = Array.isArray(data) ? data : (data.messages || []);
+    _chatHistory = raw.map(m => ({ ...m, text: m.text || m.content || '' }));
   } catch(e) {
     _chatHistory = [];
   }
