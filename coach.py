@@ -243,6 +243,11 @@ def _build_system_prompt(ctx):
     if _sa:
         session_analysis_str = f"LAST SESSION ({_sa.get('date', '?')}): Compliance {_sa.get('compliance', '?')}%. {_sa.get('summary', '')}\nMuscle groups: {', '.join(_sa.get('muscles', []))}"
 
+    _ws = ctx.get('weekly_summary')
+    weekly_summary_str = ''
+    if _ws and _ws.get('sessions', 0) > 0:
+        weekly_summary_str = f"WEEKLY SUMMARY (Week {_ws.get('week', '?')}): {_ws.get('summary', '')}"
+
     # Body weight trend — full program history (weekly weigh-ins)
     bw = ctx.get("bodyweight", [])
     bw_summary = ""
@@ -524,6 +529,7 @@ CURRENT STATE:
 {readiness_summary}
 {checkin_summary}
 {session_analysis_str}
+{weekly_summary_str}
 {'ALERT: The user MISSED their morning check-in today. Reference this directly — they skipped accountability.' if ctx.get('missed_checkin_today') else ''}
 Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
 

@@ -598,7 +598,9 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     btn.closest('.set-row').classList.add('set-done');
 
     // Save set to DB (every set, every rep, every weight)
-    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true });
+    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+    const isSwapped = !!swaps[`${week}_${dayIdx}_${exIdx}`];
+    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true, exercise_swapped: isSwapped });
     // Refresh compliance badge
     fetch('/api/compliance').then(r => r.json()).then(d => { _complianceCache = d; renderTodayNav(); }).catch(() => {});
 
@@ -5090,6 +5092,9 @@ async function saveRunLog() {
       msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Couldn't reach Erik. Tap below to try again.</div>`;
     }
   }
+
+  // Show session summary after coach popup
+  setTimeout(() => showSessionSummary(), 3000);
 }
 
 // startWarmupTimer removed — each warm-up step now has its own Start button
@@ -6673,6 +6678,71 @@ function _getImprovementTip(grade, breakdown) {
     return tips[weakest[0]] || 'Stay consistent.';
 }
 
+// ─── SESSION SUMMARY OVERLAY ──────────────────────────────────────────────
+async function showSessionSummary() {
+    try {
+        const res = await fetch(`/api/session-summary/${currentWeek}/${currentDay}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const overlay = document.getElementById('morning-checkin-overlay');
+
+        let exerciseHtml = '';
+        for (const [name, info] of Object.entries(data.exercises || {})) {
+            const tw = info.target_weight;
+            const sets = info.sets || [];
+            const avgWeight = sets.length > 0 ? Math.round(sets.reduce((s, x) => s + (x.weight || 0), 0) / sets.length) : 0;
+            const avgReps = sets.length > 0 ? Math.round(sets.reduce((s, x) => s + (x.reps || 0), 0) / sets.length) : 0;
+            const direction = sets.find(s => s.direction)?.direction;
+
+            let deviation = '';
+            if (direction === 'increased_weight') deviation = '<span style="color:var(--accent)">↑ Went heavier</span>';
+            else if (direction === 'decreased_weight') deviation = '<span style="color:#f59e0b">↓ Reduced weight</span>';
+            else if (direction === 'decreased_reps') deviation = '<span style="color:#f59e0b">↓ Fewer reps</span>';
+            else if (direction === 'as_prescribed') deviation = '<span style="color:var(--accent)">✓ As prescribed</span>';
+
+            exerciseHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                <div>
+                    <div style="font-size:14px;color:var(--text)">${escapeHtml(name)}</div>
+                    <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace">${sets.length} sets · ${avgWeight} lb × ${avgReps}</div>
+                    ${deviation ? `<div style="font-size:11px;margin-top:2px">${deviation}</div>` : ''}
+                </div>
+                <div style="font-size:12px;color:var(--muted);font-family:'DM Mono',monospace;text-align:right">
+                    ${tw ? `Target: ${Math.round(tw)} lb` : ''}
+                </div>
+            </div>`;
+        }
+
+        let muscleHtml = '';
+        for (const [mg, info] of Object.entries(data.muscle_scores || {})) {
+            const pct = Math.round(Math.min((info.score || 1) * 50, 100));
+            const color = info.strength === 'strong' ? 'var(--accent)' : (info.strength === 'weak' || info.weak) ? '#f59e0b' : info.strength === 'very_weak' ? '#ef4444' : 'var(--muted)';
+            muscleHtml += `<div style="margin-bottom:6px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+                    <span style="color:var(--text);text-transform:capitalize">${mg.replace(/_/g, ' ')}</span>
+                    <span style="color:var(--muted)">${info.strength}${info.weak ? ' ⚑' : ''}</span>
+                </div>
+                <div style="height:4px;background:var(--surface2);border-radius:2px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${color};border-radius:2px"></div>
+                </div>
+            </div>`;
+        }
+
+        overlay.innerHTML = `<div class="morning-checkin-overlay">
+            <div class="morning-checkin-card" style="max-width:500px">
+                <button style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1" onclick="document.getElementById('morning-checkin-overlay').innerHTML=''">&times;</button>
+                <h2 style="margin-bottom:4px">Session Complete</h2>
+                ${data.compliance != null ? `<div style="font-family:'DM Mono',monospace;font-size:14px;color:var(--accent);margin-bottom:1rem">${Math.round(data.compliance)}% compliance</div>` : ''}
+                <div style="margin-bottom:1.5rem">${exerciseHtml || '<div style="color:var(--muted)">No exercises logged.</div>'}</div>
+                ${muscleHtml ? `<div style="margin-bottom:1rem"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);margin-bottom:8px">Muscle Groups</div>${muscleHtml}</div>` : ''}
+                ${data.summary ? `<div style="font-size:13px;color:var(--muted);border-top:1px solid var(--border);padding-top:0.75rem">${escapeHtml(data.summary)}</div>` : ''}
+            </div>
+        </div>`;
+    } catch(e) {
+        console.error('Session summary failed:', e);
+    }
+}
+
 // ─── EXERCISE FOCUS MODE ───────────────────────────────────────────────────
 async function enterExerciseFocus(exIdx) {
   const weekData = workoutData[String(currentWeek)];
@@ -6789,9 +6859,11 @@ function logFocusSet() {
   if (weight > 0) _focusWeightVal = weight;
 
   // Save to DB
+  const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  const isSwapped = !!swaps[`${currentWeek}_${currentDay}_${_focusExIdx}`];
   apiPost('/api/sets', {
     exercise: _focusExName, week: currentWeek, day_idx: currentDay,
-    set_number: _focusSetIdx, weight, reps, done: true
+    set_number: _focusSetIdx, weight, reps, done: true, exercise_swapped: isSwapped
   });
 
   // Update weight cache

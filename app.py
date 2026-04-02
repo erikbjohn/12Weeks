@@ -1180,6 +1180,8 @@ def api_set_log():
                 existing.modification_direction = 'as_prescribed'
     except Exception:
         pass
+    if "exercise_swapped" in data:
+        existing.exercise_swapped = data.get("exercise_swapped", False)
     try:
         db.session.commit()
     except Exception as e:
@@ -2531,6 +2533,14 @@ def _build_coach_context():
             "summary": latest_analysis.summary_text,
         }
 
+    # Weekly summary (for coach weekly check-in)
+    weekly_summary = None
+    try:
+        from training_engine import generate_weekly_summary
+        weekly_summary = generate_weekly_summary(current_user.id, week)
+    except Exception:
+        pass
+
     return {
         "checkins": checkins,
         "chat_history": chat_history,
@@ -2564,6 +2574,7 @@ def _build_coach_context():
         "compliance_grade": compliance_grade,
         "missed_checkin_today": missed_today,
         "session_analysis": session_analysis,
+        "weekly_summary": weekly_summary,
     }
 
 
@@ -3986,6 +3997,48 @@ def api_run_logs():
         "distance_miles": l.distance_miles, "avg_hr": l.avg_hr,
         "elevation_ft": l.elevation_ft, "duration_min": l.duration_min,
     } for l in logs})
+
+
+@app.route("/api/session-summary/<int:week>/<int:day_idx>")
+@login_required
+def api_session_summary(week, day_idx):
+    """Get session summary for a completed workout day."""
+    analysis = SessionAnalysis.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=day_idx
+    ).order_by(SessionAnalysis.log_date.desc()).first()
+
+    sets = SetLog.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=day_idx, done=True
+    ).order_by(SetLog.exercise_name, SetLog.set_number).all()
+
+    exercises = {}
+    for s in sets:
+        if s.exercise_name not in exercises:
+            exercises[s.exercise_name] = {"sets": [], "target_weight": None, "target_reps": None}
+        exercises[s.exercise_name]["sets"].append({
+            "set": s.set_number + 1, "weight": s.weight, "reps": s.reps,
+            "target_weight": getattr(s, 'target_weight', None),
+            "target_reps": getattr(s, 'target_reps', None),
+            "modified": getattr(s, 'user_modified', False),
+            "direction": getattr(s, 'modification_direction', None),
+        })
+        if getattr(s, 'target_weight', None):
+            exercises[s.exercise_name]["target_weight"] = s.target_weight
+        if getattr(s, 'target_reps', None):
+            exercises[s.exercise_name]["target_reps"] = s.target_reps
+
+    profiles = MuscleGroupProfile.query.filter_by(user_id=current_user.id).all()
+    muscle_scores = {p.muscle_group: {
+        "score": p.strength_score, "strength": p.relative_strength, "weak": p.user_flagged_weak
+    } for p in profiles}
+
+    return jsonify({
+        "exercises": exercises,
+        "compliance": analysis.overall_compliance if analysis else None,
+        "deviations": analysis.deviations if analysis else [],
+        "summary": analysis.summary_text if analysis else None,
+        "muscle_scores": muscle_scores,
+    })
 
 
 if __name__ == "__main__":

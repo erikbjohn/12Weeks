@@ -380,3 +380,81 @@ def generate_session_analysis(user_id, week, day_idx):
         db.session.rollback()
 
     return analysis
+
+
+def generate_weekly_summary(user_id, week):
+    """Generate weekly training summary for coach context.
+    Called every 7 days or on Sunday planning."""
+
+    # Get all sessions this week
+    analyses = SessionAnalysis.query.filter_by(
+        user_id=user_id, week=week
+    ).all()
+
+    if not analyses:
+        return {"week": week, "sessions": 0, "summary": "No sessions completed this week."}
+
+    # Average compliance
+    compliances = [a.overall_compliance for a in analyses if a.overall_compliance is not None]
+    avg_compliance = sum(compliances) / len(compliances) if compliances else 0
+
+    # Collect all muscle groups trained
+    all_muscles = set()
+    all_deviations = []
+    all_flags = []
+    for a in analyses:
+        if a.muscle_groups_trained:
+            all_muscles.update(a.muscle_groups_trained)
+        if a.deviations:
+            all_deviations.extend(a.deviations)
+        if a.flags:
+            all_flags.extend(a.flags)
+
+    # Get muscle group profiles for progress assessment
+    profiles = MuscleGroupProfile.query.filter_by(user_id=user_id).all()
+    progressing = [p.muscle_group for p in profiles if p.strength_score and p.strength_score > 1.05]
+    stalling = [p.muscle_group for p in profiles if p.strength_score and p.strength_score < 0.85]
+    weak_flagged = [p.muscle_group for p in profiles if p.user_flagged_weak or p.relative_strength in ('weak', 'very_weak')]
+
+    # Phase assessment
+    phase = _get_phase(week)
+    phase_names = {1: "Hypertrophy", 2: "Strength", 3: "Power"}
+
+    # Build summary
+    parts = []
+    parts.append(f"Week {week} ({phase_names.get(phase, '?')} phase): {len(analyses)} sessions completed.")
+    parts.append(f"Average compliance: {round(avg_compliance)}%.")
+
+    if progressing:
+        parts.append(f"Progressing: {', '.join(progressing)}.")
+    if stalling:
+        parts.append(f"Stalling: {', '.join(stalling)} — may need adjustment.")
+    if weak_flagged:
+        parts.append(f"Weak areas: {', '.join(weak_flagged)} — conservative progression active.")
+
+    deviation_count = len(all_deviations)
+    if deviation_count > 0:
+        parts.append(f"{deviation_count} exercise modification(s) this week.")
+
+    # Periodization assessment
+    if avg_compliance >= 85:
+        parts.append("On track with periodization plan.")
+    elif avg_compliance >= 70:
+        parts.append("Slightly behind plan — consistency needed.")
+    else:
+        parts.append("Behind plan — review obstacles this week.")
+
+    summary_text = ' '.join(parts)
+
+    return {
+        "week": week,
+        "phase": phase_names.get(phase, '?'),
+        "sessions": len(analyses),
+        "avg_compliance": round(avg_compliance),
+        "muscles_trained": list(all_muscles),
+        "progressing": progressing,
+        "stalling": stalling,
+        "weak_flagged": weak_flagged,
+        "deviations": deviation_count,
+        "summary": summary_text,
+    }
