@@ -2588,19 +2588,26 @@ def _build_coach_context():
         garmin_data = gc.get_today_summary()
         readiness_data = assess_readiness(garmin_data)
 
-    # Current state — compute week from start_date, not stale DB value
+    # Current state — compute week from start_date using user's local timezone
+    # Server may be in UTC; user in US timezone — date.today() could be tomorrow
     s = _get_state()
     week = s.current_week
+    user_tz = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
+    try:
+        from utils_time import user_local_now
+        local_today = user_local_now(user_tz).date()
+    except Exception:
+        local_today = date.today()
     if s.start_date:
-        diff_days = (date.today() - s.start_date).days
+        diff_days = (local_today - s.start_date).days
         week = min(12, max(1, diff_days // 7 + 1))
     phase = get_phase(week)
     phase_info = PHASES[phase]
 
-    # Today's workout
+    # Today's workout — use user's local day of week
     workouts = get_workouts(week)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    today_idx = date.today().weekday()  # 0=Mon
+    today_idx = local_today.weekday()  # 0=Mon
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
 
     # Full week schedule — so coach knows which day is which muscle group
@@ -2754,6 +2761,18 @@ def _build_coach_context():
     for day_idx in sets_by_day:
         if day_idx not in completed_days:
             completed_days.append(day_idx)
+
+    # Fallback: also check by calendar week date range to catch any week number mismatch
+    # (DST or timezone can cause frontend week != backend week)
+    week_monday = local_today - timedelta(days=local_today.weekday())
+    date_based_sets = SetLog.query.filter(
+        SetLog.user_id == current_user.id,
+        SetLog.done == True,
+        SetLog.logged_date >= week_monday
+    ).all()
+    for s in date_based_sets:
+        if s.day_idx not in completed_days:
+            completed_days.append(s.day_idx)
 
     # Enrich completed_days with day name and workout name
     completed_days_enriched = []
