@@ -1,11 +1,11 @@
-const CACHE_NAME = '12weeks-v5';
+const CACHE_NAME = '12weeks-v6';
 const STATIC_ASSETS = [
   '/',
-  '/static/style.css?v=110',
-  '/static/app.js?v=110',
+  '/static/style.css?v=111',
+  '/static/app.js?v=111',
   '/static/manifest.json',
 ];
-const DATA_CACHE = '12weeks-data-v4';
+const DATA_CACHE = '12weeks-data-v5';
 
 // Install: cache static assets
 self.addEventListener('install', (e) => {

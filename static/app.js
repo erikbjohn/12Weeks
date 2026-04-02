@@ -44,6 +44,35 @@ let _milestonesShownThisSession = new Set();
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
+// ─── ACCORDION STATE ───
+const _accordionState = JSON.parse(sessionStorage.getItem('accordion_state') || '{}');
+
+function renderAccordion(id, title, contentHtml, defaultOpen) {
+    if (defaultOpen === undefined) defaultOpen = false;
+    const isOpen = _accordionState[id] !== undefined ? _accordionState[id] : defaultOpen;
+    return '<div class="accordion-section' + (isOpen ? ' open' : '') + '" id="acc-' + id + '">' +
+      '<button class="accordion-toggle" onclick="toggleAccordion(\'' + id + '\')">' +
+        '<h3>' + title + '</h3>' +
+        '<span class="accordion-arrow">' + (isOpen ? '\u25B2' : '\u25BC') + '</span>' +
+      '</button>' +
+      '<div class="accordion-body' + (isOpen ? ' visible' : '') + '" id="acc-body-' + id + '">' +
+        contentHtml +
+      '</div>' +
+    '</div>';
+}
+
+function toggleAccordion(id) {
+    const section = document.getElementById('acc-' + id);
+    const body = document.getElementById('acc-body-' + id);
+    if (!section || !body) return;
+    const isOpen = section.classList.toggle('open');
+    body.classList.toggle('visible');
+    _accordionState[id] = isOpen;
+    sessionStorage.setItem('accordion_state', JSON.stringify(_accordionState));
+    const arrow = section.querySelector('.accordion-arrow');
+    if (arrow) arrow.textContent = isOpen ? '\u25B2' : '\u25BC';
+}
+
 // ─── API HELPERS ────────────────────────────────────────────────────────────
 function checkAuth(res) {
   if (res.status === 401) {
@@ -453,7 +482,7 @@ function calcMealMacros(foods, multiplier) {
   };
 }
 
-function renderMealSection(dayData) {
+function renderMealInner(dayData) {
   const plan = dayData.mealPlan;
   if (!plan) return '';
 
@@ -562,8 +591,7 @@ function renderMealSection(dayData) {
 
   const notTodayNote = !isViewingToday ? '<div class="meal-plan-note" style="opacity:0.6;font-style:italic">Meal tracking available on today\'s view only</div>' : '';
 
-  return `<div class="detail-section">
-    <h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
+  return `<h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
     ${isSundayFast ? '<div class="meal-plan-note" style="color:var(--accent)">Fast day. Water, black coffee, electrolytes only.</div>' : ''}
     ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
     ${notTodayNote}
@@ -576,8 +604,13 @@ function renderMealSection(dayData) {
       <div class="meal-timeline">
         ${mealsHtml}
       </div>
-    </div>
-  </div>`;
+    </div>`;
+}
+
+function renderMealSection(dayData) {
+    const inner = renderMealInner(dayData);
+    if (!inner) return '';
+    return '<div class="detail-section meal-section">' + inner + '</div>';
 }
 
 function toggleMealDetails() {
@@ -5105,11 +5138,10 @@ function toggleSupplement(name) {
 }
 
 // ─── WARM-UP SECTION ────────────────────────────────────────────────────────
-function renderWarmupSection(dayData) {
+function renderWarmupInner(dayData) {
   if (!dayData.warmup) return '';
   const wu = dayData.warmup;
-  return `<div class="detail-section warmup-section">
-    <button class="warmup-toggle open" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
+  return `<button class="warmup-toggle open" onclick="document.getElementById('warmup-body').classList.toggle('visible');this.classList.toggle('open')">
       <h3 style="margin:0">Warm-Up${wu.time ? ' - ' + wu.time : ''}</h3>
       <span class="warmup-arrow">\u25BC</span>
     </button>
@@ -5130,8 +5162,13 @@ function renderWarmupSection(dayData) {
         <div class="wu-timer" id="wu-timer-${i}"></div>
       </div>`;
       }).join('')}
-    </div>
-  </div>`;
+    </div>`;
+}
+
+function renderWarmupSection(dayData) {
+    const inner = renderWarmupInner(dayData);
+    if (!inner) return '';
+    return '<div class="detail-section warmup-section">' + inner + '</div>';
 }
 
 function toggleWarmup(week, dayIdx, stepIdx, btn) {
@@ -5331,11 +5368,10 @@ async function saveRunLog() {
 // startWarmupTimer removed — each warm-up step now has its own Start button
 
 // ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
-function renderCheckinSection(dayData, dayIdx) {
+function renderCheckinInner(dayData, dayIdx) {
   // Show on last day of week (index 6 = Sunday, or 5 = Saturday)
   if (dayIdx < 5) return '';
-  return `<div class="detail-section checkin-form-section">
-    <h3>Weekly Check-In</h3>
+  return `<h3>Weekly Check-In</h3>
     <div class="checkin-form" id="checkin-form">
       <div class="checkin-slider-row">
         <label>Energy</label>
@@ -5366,8 +5402,13 @@ function renderCheckinSection(dayData, dayIdx) {
         <textarea id="checkin-notes" class="checkin-notes" placeholder="How did this week go?" rows="2"></textarea>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitCheckin()">Submit Check-In</button>
-    </div>
-  </div>`;
+    </div>`;
+}
+
+function renderCheckinSection(dayData, dayIdx) {
+    const inner = renderCheckinInner(dayData, dayIdx);
+    if (!inner) return '';
+    return '<div class="detail-section checkin-form-section">' + inner + '</div>';
 }
 
 function initCheckinSliders() {
@@ -6054,6 +6095,87 @@ function renderDayGrid() {
   }).join('');
 }
 
+// ─── ACCORDION CONTENT BUILDERS ───
+function buildCoachContent(d, chatHtml) {
+    var html = '';
+    if (d.notes) html += '<div class="notes-box"><strong>Coach note:</strong> ' + d.notes + '</div>';
+    if (chatHtml) html += '<div class="inline-chat-preview">' + chatHtml + '</div>';
+    if (!d.notes && !chatHtml) html += '<div style="color:var(--muted);font-size:13px">No coach notes for today.</div>';
+    return html;
+}
+
+function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling) {
+    var html = '';
+    html += renderWarmupInner(d);
+    if (displayExercises.length > 0) {
+        if (!displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); })) {
+            html += '<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>';
+        }
+        html += bwToggleHtml + exRows;
+    }
+    html += buildRunSubsection(d, runClass);
+    return html;
+}
+
+function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, dayIdx) {
+    var html = '';
+    html += weightSummaryHtml;
+    html += garminStatsHtml;
+    html += dailyGoalsHtml;
+    if (timingRows.length > 0) {
+        html += '<div style="margin-top:12px"><h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Session Timing</h4>' + timingRows.join('') + '</div>';
+    }
+    html += renderCheckinInner(d, dayIdx);
+    return html;
+}
+
+function buildFoodContent(d) {
+    return renderMealInner(d);
+}
+
+function buildRunSubsection(d, runClass) {
+    var runKey = currentWeek + '_' + currentDay;
+    var existingRun = _runLogCache ? _runLogCache[runKey] : null;
+    var runFormHtml = '';
+    if (existingRun && (existingRun.distance_miles || existingRun.avg_hr || existingRun.elevation_ft)) {
+        runFormHtml = '<div class="run-log-form" style="margin-top:10px">' +
+            '<div style="display:flex;gap:12px;align-items:center;padding:8px 0;color:var(--accent);font-family:\'DM Mono\',monospace;font-size:13px">' +
+                '<span>&#10003; Logged</span>' +
+                (existingRun.distance_miles ? '<span>' + existingRun.distance_miles + ' mi</span>' : '') +
+                (existingRun.avg_hr ? '<span>HR ' + existingRun.avg_hr + '</span>' : '') +
+                (existingRun.elevation_ft ? '<span>' + existingRun.elevation_ft + ' ft</span>' : '') +
+            '</div>' +
+            '<button class="btn btn-secondary" style="width:100%;font-size:13px;padding:6px" onclick="document.getElementById(\'run-edit-form\').style.display=\'block\';this.style.display=\'none\'">Edit</button>' +
+            '<div id="run-edit-form" style="display:none;margin-top:8px">' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
+                    '<div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" value="' + (existingRun.distance_miles || '') + '" placeholder="mi"></div>' +
+                    '<div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" value="' + (existingRun.avg_hr || '') + '" placeholder="bpm"></div>' +
+                    '<div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" value="' + (existingRun.elevation_ft || '') + '" placeholder="ft"></div>' +
+                '</div>' +
+                '<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Update Run</button>' +
+            '</div>' +
+          '</div>';
+    } else {
+        runFormHtml = '<div class="run-log-form" style="margin-top:10px">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
+                '<div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" placeholder="mi"></div>' +
+                '<div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" placeholder="bpm"></div>' +
+                '<div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" placeholder="ft"></div>' +
+            '</div>' +
+            '<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Log Run</button>' +
+          '</div>';
+    }
+    return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
+        '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
+        '<div class="run-detail-box">' +
+            '<div class="rdl">Type</div>' +
+            '<div class="rdt"><span class="run-pill ' + runClass + '">' + d.run.label + ' &middot; ' + d.run.time + '</span></div>' +
+            '<div class="rdd" style="margin-top:8px">' + d.run.detail + '</div>' +
+        '</div>' +
+        runFormHtml +
+    '</div>';
+}
+
 async function renderDetail() {
   const panel = document.getElementById('detail-panel');
   if (currentDay === null) {
@@ -6365,65 +6487,11 @@ async function renderDetail() {
         <span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
       </div>
     </div>
-    ${d.notes ? `<div class="detail-section"><div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div></div>` : ''}
     ${sundaySectionHtml}
-    ${d.timing ? `<div class="detail-section">
-      <h3>Session Timing</h3>
-      ${timingRows.join('')}
-    </div>` : ''}
-    <div class="detail-section">
-      ${weightSummaryHtml}
-      <h3>Today's Status</h3>
-      ${garminStatsHtml}
-      ${dailyGoalsHtml}
-    </div>
-    ${renderWarmupSection(d)}
-    ${displayExercises.length > 0 ? `
-    <div class="detail-section">
-      <h3>${isTraveling ? 'Travel Workout' : 'Exercises'}</h3>
-      ${bwToggleHtml}
-      ${!displayExercises.every((_, i) => isExDone(currentWeek, currentDay, i)) ? `<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>` : ''}
-      ${exRows}
-    </div>` : ''}
-    <div class="detail-section">
-      <h3>Run</h3>
-      <div class="run-detail-box">
-        <div class="rdl">Type</div>
-        <div class="rdt"><span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span></div>
-        <div class="rdd" style="margin-top:8px">${d.run.detail}</div>
-      </div>
-      ${(() => { const runKey = currentWeek + '_' + currentDay; const existingRun = _runLogCache ? _runLogCache[runKey] : null;
-        if (existingRun && (existingRun.distance_miles || existingRun.avg_hr || existingRun.elevation_ft)) {
-          return `<div class="run-log-form" style="margin-top:10px">
-            <div style="display:flex;gap:12px;align-items:center;padding:8px 0;color:var(--accent);font-family:'DM Mono',monospace;font-size:13px">
-              <span>&#10003; Logged</span>
-              ${existingRun.distance_miles ? `<span>${existingRun.distance_miles} mi</span>` : ''}
-              ${existingRun.avg_hr ? `<span>HR ${existingRun.avg_hr}</span>` : ''}
-              ${existingRun.elevation_ft ? `<span>${existingRun.elevation_ft} ft</span>` : ''}
-            </div>
-            <button class="btn btn-secondary" style="width:100%;font-size:13px;padding:6px" onclick="document.getElementById('run-edit-form').style.display='block';this.style.display='none'">Edit</button>
-            <div id="run-edit-form" style="display:none;margin-top:8px">
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-                <div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" value="${existingRun.distance_miles || ''}" placeholder="mi"></div>
-                <div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" value="${existingRun.avg_hr || ''}" placeholder="bpm"></div>
-                <div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" value="${existingRun.elevation_ft || ''}" placeholder="ft"></div>
-              </div>
-              <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Update Run</button>
-            </div>
-          </div>`;
-        }
-        return `<div class="run-log-form" style="margin-top:10px">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-          <div><label style="font-size:12px;color:var(--muted)">Distance (mi)</label><input type="number" inputmode="decimal" step="0.1" id="run-dist" class="weight-input" style="width:100%" placeholder="mi"></div>
-          <div><label style="font-size:12px;color:var(--muted)">Avg HR</label><input type="number" inputmode="numeric" id="run-hr" class="weight-input" style="width:100%" placeholder="bpm"></div>
-          <div><label style="font-size:12px;color:var(--muted)">Elevation (ft)</label><input type="number" inputmode="numeric" id="run-elev" class="weight-input" style="width:100%" placeholder="ft"></div>
-        </div>
-        <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Log Run</button>
-      </div>`; })()}
-    </div>
-    ${renderMealSection(d)}
-    ${renderCheckinSection(d, currentDay)}
-    ${renderPostWorkoutCoach()}
+    ${renderAccordion('coach', 'Coach', buildCoachContent(d, chatMessagesHtml), true)}
+    ${renderAccordion('exercise', 'Exercise', buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
+    ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
+    ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
   </div>`;
 
   panel.classList.add('visible');
