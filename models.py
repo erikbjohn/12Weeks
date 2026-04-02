@@ -1,6 +1,6 @@
 """SQLAlchemy models for all tracking data."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 
@@ -19,7 +19,8 @@ class User(UserMixin, db.Model):
     avatar_url = db.Column(db.Text, nullable=True)
     invites_remaining = db.Column(db.Integer, default=0, nullable=False)
     invited_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    timezone = db.Column(db.String(64), default='UTC')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_login_at = db.Column(db.DateTime, nullable=True)
 
     @property
@@ -35,7 +36,7 @@ class Invite(db.Model):
     used_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
     email_sent_to = db.Column(db.String(255), nullable=True)
     multi_use = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     used_at = db.Column(db.DateTime, nullable=True)
 
 
@@ -48,7 +49,7 @@ class CoachMemory(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)  # The summary text
     memory_type = db.Column(db.String(30), default="summary")  # summary, commitment, injury, observation
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     week = db.Column(db.Integer)  # Which week this was recorded
 
 
@@ -57,7 +58,7 @@ class ComplianceScore(db.Model):
     __tablename__ = "compliance_score"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    computed_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    computed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     raw_score = db.Column(db.Float, default=0)
     weighted_score = db.Column(db.Float, default=0)
     letter_grade = db.Column(db.String(3), default='B')
@@ -74,7 +75,7 @@ class MuscleGroupProfile(db.Model):
     strength_score = db.Column(db.Float, default=1.0)
     relative_strength = db.Column(db.String(15), default='average')
     user_flagged_weak = db.Column(db.Boolean, default=False)
-    last_updated = db.Column(db.DateTime, default=lambda: datetime.now())
+    last_updated = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SessionAnalysis(db.Model):
@@ -215,7 +216,7 @@ class BodyWeight(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     log_date = db.Column(db.Date, nullable=False, index=True)
     weight_lbs = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
 
@@ -239,7 +240,7 @@ class ProgressPhoto(db.Model):
     week = db.Column(db.Integer)
     analysis = db.Column(db.Text, nullable=True)  # AI analysis text
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class WeeklyCheckIn(db.Model):
@@ -280,7 +281,7 @@ class MorningCheckIn(db.Model):
     anxiety = db.Column(db.Integer)             # 1-10
     notes = db.Column(db.Text, nullable=True)   # free text "anything on your mind?"
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class PsychIntake(db.Model):
@@ -292,7 +293,7 @@ class PsychIntake(db.Model):
     completed = db.Column(db.Boolean, default=False)
     locked_until = db.Column(db.Date, nullable=True)  # locked out until this date
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class GarminTokens(db.Model):
@@ -300,7 +301,7 @@ class GarminTokens(db.Model):
     __tablename__ = "garmin_tokens"
     id = db.Column(db.Integer, primary_key=True)
     token_data = db.Column(db.Text, nullable=False)  # garth token dump
-    updated_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
 
@@ -330,7 +331,7 @@ class PhysicalAssessment(db.Model):
     gym_baseline_done = db.Column(db.Boolean, default=False)
     completed = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class UserEquipment(db.Model):
@@ -340,7 +341,7 @@ class UserEquipment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     available_equipment = db.Column(db.JSON, default=list)
     completed = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class UserConstraints(db.Model):
@@ -353,7 +354,7 @@ class UserConstraints(db.Model):
     schedule_notes = db.Column(db.Text, nullable=True)
     completed = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class TrainingGoal(db.Model):
@@ -375,7 +376,7 @@ class TrainingGoal(db.Model):
     plan_accepted = db.Column(db.Boolean, default=False)
     baseline_assessment = db.Column(db.JSON, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class UserFoodSelections(db.Model):
@@ -385,7 +386,7 @@ class UserFoodSelections(db.Model):
     selected_foods = db.Column(db.JSON, default=dict)
     completed = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class WeeklyReport(db.Model):
@@ -405,7 +406,7 @@ class WeeklyReport(db.Model):
     adherence_pct = db.Column(db.Float, nullable=True)
     narrative = db.Column(db.Text, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ChatMessage(db.Model):
@@ -416,4 +417,4 @@ class ChatMessage(db.Model):
     content = db.Column(db.Text, nullable=False)
     log_date = db.Column(db.Date, default=date.today, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

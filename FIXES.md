@@ -45,3 +45,29 @@ The program is NOT the same workout 12 times — it has meaningful phase variati
 - [x] Session analysis generated after day completion
 - [x] Coach prompt includes session analysis + training engine rule
 - [x] compute_next_targets() returns adjustment_reason for every code path
+
+---
+
+# Fix 6 — Coach Timezone
+
+Fix 6 complete — coach now uses user local timezone for all time references. UTC stored, local displayed. Verified by Agent 5.
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `models.py` | Added `timezone` column to User model. All `datetime.now()` → `datetime.now(timezone.utc)` |
+| `utils_time.py` | **NEW.** `to_user_local()`, `format_user_local()`, `hours_ago_local()`, `user_local_now()` |
+| `app.py` | Added `/api/user/timezone` endpoint, timezone on login, migration for user.timezone column, all datetime.now() fixed |
+| `coach.py` | `_format_today(ctx)` shows local time+timezone in prompt. ABSOLUTE RULE guard prevents LLM from computing times |
+| `static/app.js` | Browser timezone detection on every page load via `Intl.DateTimeFormat().resolvedOptions().timeZone` |
+| `templates/login.html` | Hidden timezone field auto-populated on login form |
+| `garmin_client.py` | `datetime.now()` → `datetime.now(timezone.utc)` |
+| `compliance.py` | `datetime.now()` → `datetime.now(timezone.utc)` |
+| `training_engine.py` | `datetime.now()` → `datetime.now(timezone.utc)` |
+
+## Verification
+- Zero `datetime.now()` or `datetime.utcnow()` calls remain in any .py file
+- Browser auto-detects IANA timezone and sends to backend
+- Coach prompt shows "Tuesday, April 1 at 7:00 AM (America/Los_Angeles)"
+- Guard rule prevents LLM from mentioning UTC or computing elapsed time

@@ -1,6 +1,6 @@
 """Adaptive training engine — computes exercise targets from performance data."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from models import db, SetLog, MuscleGroupProfile, SessionAnalysis, ExerciseCompletion, AppState
 
 
@@ -307,7 +307,7 @@ def compute_muscle_strength(user_id):
         profile.strength_score = round(avg_score, 2)
         if not profile.user_flagged_weak:
             profile.relative_strength = rel
-        profile.last_updated = datetime.now()
+        profile.last_updated = datetime.now(timezone.utc)
 
     try:
         db.session.commit()

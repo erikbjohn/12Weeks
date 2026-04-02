@@ -1,6 +1,6 @@
 """Compliance scoring engine for 12 Weeks."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from models import db, MorningCheckIn, MealLog, DayCompletion, SetLog, ComplianceScore
 import math
 
@@ -169,7 +169,7 @@ def compute_compliance_score(user_id):
     if not cs:
         cs = ComplianceScore(user_id=user_id)
         db.session.add(cs)
-    cs.computed_at = datetime.now()
+    cs.computed_at = datetime.now(timezone.utc)
     cs.raw_score = round(total_decayed, 1)
     cs.weighted_score = round(score, 1)
     cs.letter_grade = grade

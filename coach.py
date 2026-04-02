@@ -231,6 +231,21 @@ def get_coach_response(user_message, context):
         return "Erik stepped away. He'll be back in a moment."
 
 
+def _format_today(ctx):
+    """Format today's date and time in user's local timezone."""
+    user_tz = ctx.get('user_timezone', 'UTC')
+    try:
+        from utils_time import user_local_now, format_user_local
+        from datetime import datetime, timezone
+        local_now = user_local_now(user_tz)
+        day_name = local_now.strftime('%A')
+        date_str = local_now.strftime('%B %d, %Y')
+        time_str = local_now.strftime('%I:%M %p').lstrip('0')
+        return f"{day_name}, {date_str} at {time_str} ({user_tz}). Day {local_now.weekday()} of training week (Mon=0)."
+    except Exception:
+        return f"{date.today().strftime('%A, %B %d, %Y')} (timezone unknown)"
+
+
 def _build_system_prompt(ctx):
     """Build the system prompt with full user context."""
 
@@ -515,7 +530,7 @@ NEVER end with "what time" or "when will you" — YOU set the time. The schedule
 ATHLETE: {ctx.get('athlete_name', 'Athlete')}
 Use their name when addressing them directly.
 
-TODAY: {date.today().strftime('%A, %B %d, %Y')} ({date.today().strftime('%A')} = day {date.today().weekday()} of the training week, Mon=0)
+TODAY: {_format_today(ctx)}
 
 ATHLETE CONTEXT:
 - Week {week} of 12, Phase {phase.get('label', '?')}
@@ -612,6 +627,13 @@ END OF DAY ([END_OF_DAY]):
 The training day is done. 1-2 sentences. Popup — no questions.
 Briefly state what was accomplished. State tomorrow's plan. No warmth, no questions.
 Example: "Solid day. Chest and back done, meals on point. Tomorrow: legs at 6am. Rest up."
+
+ABSOLUTE RULE — TIME REFERENCES:
+Never mention UTC, GMT, or server time to the athlete.
+Never compute elapsed time yourself from timestamps.
+Use ONLY the local time and date shown in the TODAY line above.
+If unsure what time it is, say "earlier today" or "this morning" — never invent a specific time.
+All pre-computed time values in the context are already in the athlete's local timezone.
 
 Crisis (suicidal ideation, self-harm): 988 Suicide & Crisis Lifeline. Don't coach through it."""
 

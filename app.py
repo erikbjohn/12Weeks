@@ -6,7 +6,7 @@ import secrets
 import threading
 import time
 import uuid
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, Response, redirect, url_for, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -146,6 +146,7 @@ with app.app_context():
         ("set_log", "modification_direction", "VARCHAR(30)"),
         ("set_log", "set_skipped", "BOOLEAN"),
         ("set_log", "exercise_swapped", "BOOLEAN"),
+        ("user", "timezone", "VARCHAR(64) DEFAULT 'UTC'"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -381,7 +382,16 @@ def login():
             flash("Check your email for a verification link.", "error")
             return render_template("login.html")
 
-        user.last_login_at = datetime.now()
+        user.last_login_at = datetime.now(timezone.utc)
+        # Save timezone from browser
+        tz = request.form.get('timezone')
+        if tz:
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(tz)
+                user.timezone = tz
+            except Exception:
+                pass
         db.session.commit()
         login_user(user, remember=True)
         return redirect(_safe_next_url(request.args.get("next")))
@@ -440,7 +450,7 @@ def signup():
     # Redeem invite
     if invite and not invite.multi_use:
         invite.used_by = user.id
-        invite.used_at = datetime.now()
+        invite.used_at = datetime.now(timezone.utc)
         db.session.commit()
 
     # Send verification email
@@ -605,7 +615,7 @@ def google_callback():
             if picture:
                 user.avatar_url = picture
             user.email_verified = True
-            user.last_login_at = datetime.now()
+            user.last_login_at = datetime.now(timezone.utc)
             db.session.commit()
             login_user(user, remember=True)
             return redirect("/")
@@ -635,10 +645,10 @@ def google_callback():
 
         if invite and not invite.multi_use:
             invite.used_by = user.id
-            invite.used_at = datetime.now()
+            invite.used_at = datetime.now(timezone.utc)
             db.session.commit()
 
-        user.last_login_at = datetime.now()
+        user.last_login_at = datetime.now(timezone.utc)
         db.session.commit()
         login_user(user, remember=True)
         return redirect("/")
@@ -1613,7 +1623,7 @@ def api_supplements_toggle():
 def api_export():
     """Export all data as JSON for backup."""
     return jsonify({
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "weights": _serialize_weights(),
         "completions": _serialize_completions(),
         "bodyweight": [{
@@ -2553,6 +2563,7 @@ def _build_coach_context():
         "supplements_today": {"taken": supps_taken},
         "intake_report": intake_report,
         "athlete_name": current_user.name or "Athlete",
+        "user_timezone": current_user.timezone if hasattr(current_user, 'timezone') else 'UTC',
         "scheduled_activities": _get_scheduled_activities(),
         "food_restrictions": food_restrictions,
         "custom_allergies": custom_allergies,
@@ -2862,6 +2873,30 @@ def garmin_logout():
         del _garmin_clients[uid]
     session.pop("garmin_connected", None)
     return jsonify({"connected": False})
+
+
+# ─── TIMEZONE ──────────────────────────────────────────────────────────────
+
+@app.route('/api/user/timezone', methods=['POST'])
+@login_required
+def api_user_timezone():
+    """Update user's timezone from browser detection."""
+    data = request.get_json()
+    tz = data.get('timezone', '').strip()
+    if not tz:
+        return jsonify({'error': 'timezone required'}), 400
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(tz)
+    except Exception:
+        try:
+            import pytz
+            pytz.timezone(tz)
+        except Exception:
+            return jsonify({'error': 'invalid timezone'}), 400
+    current_user.timezone = tz
+    db.session.commit()
+    return jsonify({'timezone': tz})
 
 
 # ─── PUSH NOTIFICATIONS ────────────────────────────────────────────────────

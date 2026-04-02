@@ -3495,6 +3495,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    // Detect and send browser timezone
+    try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (tz) {
+            fetch('/api/user/timezone', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({timezone: tz})
+            }).catch(() => {});
+        }
+    } catch(e) {}
+
     _stateCache = await stateRes.json();
     _weightsCache = await weightsRes.json();
     _completionsCache = await compRes.json();

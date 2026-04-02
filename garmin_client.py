@@ -2,7 +2,7 @@
 
 import time
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class GarminClient:
             existing = GarminTokens.query.filter_by(user_id=uid).first() if uid else GarminTokens.query.first()
             if existing:
                 existing.token_data = token_data
-                existing.updated_at = datetime.now()
+                existing.updated_at = datetime.now(timezone.utc)
             else:
                 db.session.add(GarminTokens(token_data=token_data, user_id=uid))
             db.session.commit()
