@@ -937,18 +937,15 @@ async function toggleWeightDetail(exerciseName, rowEl) {
             </div>`;
         }
 
-        // Timeline (most recent first, max 8 entries)
+        // Weekly e1RM timeline
         if (data.timeline && data.timeline.length > 0) {
-            const entries = data.timeline.slice(-8).reverse();
             html += '<div class="ws-timeline">';
-            for (const e of entries) {
-                const isBaseline = e.baseline_weight != null;
-                const rpeLabel = e.rpe ? ` · ${e.rpe}` : '';
-                const weekLabel = e.week ? `Wk ${e.week}` : '';
-                html += `<div class="ws-timeline-entry${isBaseline ? ' ws-baseline-entry' : ''}">
-                    <span class="ws-tl-week">${weekLabel}</span>
-                    <span class="ws-tl-weight">${e.weight} lb${e.reps ? ' × ' + e.reps : ''}${rpeLabel}</span>
-                    ${isBaseline ? '<span class="ws-tl-tag">baseline</span>' : ''}
+            for (const e of data.timeline) {
+                const isCurrent = e === data.timeline[data.timeline.length - 1];
+                html += `<div class="ws-timeline-entry${isCurrent ? ' ws-baseline-entry' : ''}">
+                    <span class="ws-tl-week">Wk ${e.week}</span>
+                    <span class="ws-tl-weight">${e.est_1rm} lb e1RM</span>
+                    ${isCurrent ? '<span class="ws-tl-tag">current</span>' : ''}
                 </div>`;
             }
             html += '</div>';

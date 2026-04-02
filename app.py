@@ -1283,44 +1283,40 @@ def api_weight_detail(exercise_name):
     """Detailed weight history + percentile for accordion expansion."""
     from body_stats import compute_1rm_percentile
 
+    # Build weekly e1RM from per-set data (max e1RM per set per week)
+    sets = SetLog.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise_name, done=True
+    ).order_by(SetLog.week, SetLog.set_number).all()
+
+    # Group by week, compute max e1RM per week
+    weekly_e1rm = {}
+    for s in sets:
+        if s.weight and s.weight > 0:
+            reps = min(s.reps or 10, 15)  # Cap at 15
+            e1rm = round(s.weight * (1 + reps / 30))
+            wk = s.week or 1
+            if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
+                weekly_e1rm[wk] = e1rm
+
+    # Build timeline sorted by week
+    timeline = [{"week": wk, "est_1rm": e1rm} for wk, e1rm in sorted(weekly_e1rm.items())]
+
+    # Also check ExerciseLog for baseline data
     logs = ExerciseLog.query.filter_by(
         user_id=current_user.id, exercise_name=exercise_name
     ).order_by(ExerciseLog.logged_date.asc()).all()
 
-    # Build timeline
-    timeline = []
-    for log in logs:
-        entry = {
-            "date": log.logged_date.isoformat() if log.logged_date else None,
-            "weight": log.weight,
-            "reps": log.reps_completed,
-            "rpe": log.rpe,
-            "week": log.week,
-            "sets_label": log.sets_label,
-        }
-        if log.estimated_1rm:
-            entry["est_1rm"] = log.estimated_1rm
-        if log.test_weight:
-            entry["baseline_weight"] = log.test_weight
-            entry["baseline_reps"] = log.test_reps
-        timeline.append(entry)
-
-    # Compute current 1RM and percentile
-    current_1rm = None
+    current_1rm = timeline[-1]["est_1rm"] if timeline else None
     percentile = None
     rating = None
     baseline_1rm = None
 
-    if logs:
-        last = logs[-1]
-        reps = min(last.reps_completed or 10, 15)  # Cap at 15 — Epley unreliable above this
-        current_1rm = round(last.weight * (1 + reps / 30))
-
-        # Baseline
-        baseline_entries = [l for l in logs if l.test_weight]
-        if baseline_entries:
-            bl = baseline_entries[0]
-            baseline_1rm = round(bl.test_weight * (1 + (bl.test_reps or 10) / 30))
+    # Baseline from ExerciseLog test entries
+    baseline_entries = [l for l in logs if l.test_weight]
+    if baseline_entries:
+        bl = baseline_entries[0]
+        bl_reps = min(bl.test_reps or 10, 15)
+        baseline_1rm = round(bl.test_weight * (1 + bl_reps / 30))
 
         # Population percentile — get age/sex from psych intake
         try:
