@@ -145,6 +145,7 @@ with app.app_context():
         ("set_log", "user_modified", "BOOLEAN"),
         ("set_log", "modification_direction", "VARCHAR(30)"),
         ("set_log", "set_skipped", "BOOLEAN"),
+        ("set_log", "exercise_swapped", "BOOLEAN"),
     ]
     try:
         inspector = sa_inspect(db.engine)
