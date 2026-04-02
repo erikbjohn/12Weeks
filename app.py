@@ -1298,8 +1298,21 @@ def api_weight_detail(exercise_name):
             if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                 weekly_e1rm[wk] = e1rm
 
+    # Fallback: if SetLog is empty, compute from ExerciseLog
+    if not weekly_e1rm:
+        ex_logs = ExerciseLog.query.filter_by(
+            user_id=current_user.id, exercise_name=exercise_name
+        ).order_by(ExerciseLog.week).all()
+        for log in ex_logs:
+            if log.weight and log.weight > 0:
+                reps = min(log.reps_completed or 10, 15)
+                e1rm = round(log.weight * (1 + reps / 30))
+                wk = log.week or 1
+                if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
+                    weekly_e1rm[wk] = e1rm
+
     # Build timeline sorted by week
-    timeline = [{"week": wk, "est_1rm": e1rm} for wk, e1rm in sorted(weekly_e1rm.items())]
+    timeline = [{"week": wk, "est_1rm": e1rm} for wk, e1rm in sorted(weekly_e1rm.items()) if e1rm and e1rm > 0]
 
     # Also check ExerciseLog for baseline data
     logs = ExerciseLog.query.filter_by(

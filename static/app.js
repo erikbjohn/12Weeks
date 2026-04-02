@@ -941,6 +941,7 @@ async function toggleWeightDetail(exerciseName, rowEl) {
         if (data.timeline && data.timeline.length > 0) {
             html += '<div class="ws-timeline">';
             for (const e of data.timeline) {
+                if (!e.est_1rm) continue; // Skip entries with no data
                 const isCurrent = e === data.timeline[data.timeline.length - 1];
                 html += `<div class="ws-timeline-entry${isCurrent ? ' ws-baseline-entry' : ''}">
                     <span class="ws-tl-week">Wk ${e.week}</span>
