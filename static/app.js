@@ -1082,7 +1082,8 @@ function showBaseline() {
 function estimate1RM(weight, reps) {
   if (reps <= 0) return 0;
   if (reps === 1) return weight;
-  return Math.round(weight * (1 + reps / 30));
+  const cappedReps = Math.min(reps, 15); // Epley unreliable above 15 reps
+  return Math.round(weight * (1 + cappedReps / 30));
 }
 
 function workingWeightFrom1RM(oneRM) {
@@ -3498,21 +3499,24 @@ function importData() {
 
 // ─── RPE FEEDBACK ───────────────────────────────────────────────────────────
 function submitRPE(week, dayIdx, exIdx, exName, rpe) {
-  // Read from per-set inputs — use the last set's weight
+  // Read from per-set inputs — use the last set's weight and PER-SET reps (not total)
   let weight = 0;
-  let totalReps = 0;
+  let lastSetReps = 0;
   for (let s = 0; s < 20; s++) {
     const wtEl = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${s}`);
     if (!wtEl) break;
     const w = parseFloat(wtEl.value) || 0;
     if (w > 0) weight = w;
     const rEl = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${s}`);
-    if (rEl) totalReps += parseInt(rEl.value) || 0;
+    if (rEl) {
+      const r = parseInt(rEl.value) || 0;
+      if (r > 0) lastSetReps = r; // Keep last non-zero per-set reps
+    }
   }
   const weekData = workoutData[String(week)];
   const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
   const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
-  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, totalReps || null);
+  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, lastSetReps || null);
   renderDetail();
 }
 
@@ -7121,21 +7125,21 @@ function showFocusRPE() {
 }
 
 function submitFocusRPE(rpe) {
-  // Read all set weights to get the working weight
+  // Read last set's weight and PER-SET reps (not total)
   let weight = 0;
-  let totalReps = 0;
+  let lastSetReps = 0;
   for (let s = 0; s < _focusSetCount; s++) {
     const setData = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
     if (setData) {
       if (setData.weight > 0) weight = setData.weight;
-      totalReps += setData.reps || 0;
+      if (setData.reps > 0) lastSetReps = setData.reps;
     }
   }
 
   const weekData = workoutData[String(currentWeek)];
   const setsLabel = weekData ? weekData.days[currentDay].exercises[_focusExIdx].sets : '';
   const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
-  recordWeight(_focusExName, weight, setsLabel, rpe, currentWeek, currentDay, rpeScore, totalReps || null);
+  recordWeight(_focusExName, weight, setsLabel, rpe, currentWeek, currentDay, rpeScore, lastSetReps || null);
 
   exitExerciseFocus();
 }

@@ -1313,7 +1313,7 @@ def api_weight_detail(exercise_name):
 
     if logs:
         last = logs[-1]
-        reps = last.reps_completed or 10
+        reps = min(last.reps_completed or 10, 15)  # Cap at 15 — Epley unreliable above this
         current_1rm = round(last.weight * (1 + reps / 30))
 
         # Baseline
