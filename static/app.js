@@ -4657,6 +4657,7 @@ function setWeek(w) {
 
 function setDay(d) {
   currentDay = currentDay === d ? null : d;
+  renderTodayNav();
   renderDayGrid();
   renderDetail();
 }
