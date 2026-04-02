@@ -3399,29 +3399,60 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
     if (event) event.stopPropagation();
     const swapContainer = document.getElementById('swap-container-' + exIdx);
     if (!swapContainer) return;
-    if (swapContainer.innerHTML.trim()) { swapContainer.innerHTML = ''; return; } // Toggle off
+    if (swapContainer.innerHTML.trim()) { swapContainer.innerHTML = ''; return; }
     swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading...</div>';
 
+    // Always look up alternatives for the ORIGINAL exercise, not the current swap
+    const weekData = workoutData[String(currentWeek)];
+    const dayData = weekData ? weekData.days[currentDay] : null;
+    const originalName = dayData && dayData.exercises && dayData.exercises[exIdx] ? dayData.exercises[exIdx].name : exerciseName;
+    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+    const isCurrentlySwapped = !!swaps[`${currentWeek}_${currentDay}_${exIdx}`];
+
     try {
-        const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(exerciseName));
+        const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(originalName));
         const data = await res.json();
 
-        if (!data.alternatives || data.alternatives.length === 0) {
+        let options = [];
+
+        // If currently swapped, offer "Revert to original" first
+        if (isCurrentlySwapped) {
+            options.push(`<div class="swap-option" onclick="revertExerciseSwap(${currentWeek},${currentDay},${exIdx})" style="border-left:3px solid var(--accent)">
+                <span class="swap-name">${escapeHtml(originalName)}</span>
+                <span class="swap-note">Original exercise</span>
+            </div>`);
+        }
+
+        // Add all alternatives (excluding the one currently displayed)
+        if (data.alternatives) {
+            for (const alt of data.alternatives) {
+                if (alt.name === exerciseName) continue; // Skip current
+                options.push(`<div class="swap-option" onclick="swapExercise(${currentWeek},${currentDay},${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
+                    <span class="swap-name">${alt.name}</span>
+                    <span class="swap-note">${alt.note}</span>
+                </div>`);
+            }
+        }
+
+        if (options.length === 0) {
             swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">No alternatives available</div>';
             return;
         }
 
-        const altsHtml = data.alternatives.map(alt =>
-            `<div class="swap-option" onclick="swapExercise(${currentWeek},${currentDay},${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
-                <span class="swap-name">${alt.name}</span>
-                <span class="swap-note">${alt.note}</span>
-            </div>`
-        ).join('');
-
-        swapContainer.innerHTML = `<div class="swap-options">${altsHtml}</div>`;
+        swapContainer.innerHTML = `<div class="swap-options">${options.join('')}</div>`;
     } catch(e) {
         swapContainer.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load alternatives</div>';
     }
+}
+
+function revertExerciseSwap(week, day, exIdx) {
+    const key = week + '_' + day + '_' + exIdx;
+    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+    delete swaps[key];
+    sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+    // Also remove from DB
+    apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: '' });
+    renderDetail();
 }
 
 // Hotel room bodyweight workouts — no equipment, no excuses
@@ -6196,6 +6227,7 @@ async function renderDetail() {
         <span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
       </div>
     </div>
+    ${d.notes ? `<div class="detail-section"><div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div></div>` : ''}
     ${sundaySectionHtml}
     ${d.timing ? `<div class="detail-section">
       <h3>Session Timing</h3>
@@ -6251,10 +6283,6 @@ async function renderDetail() {
       </div>`; })()}
     </div>
     ${renderMealSection(d)}
-    ${d.notes ? `
-    <div class="detail-section">
-      <div class="notes-box"><strong>Coach note:</strong> ${d.notes}</div>
-    </div>` : ''}
     ${renderCheckinSection(d, currentDay)}
     ${renderPostWorkoutCoach()}
   </div>`;
