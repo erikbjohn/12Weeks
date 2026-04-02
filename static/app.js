@@ -4334,18 +4334,19 @@ function renderChatOverlay() {
   el.classList.add('visible');
   el.innerHTML = `
     <div class="chat-header">
+      <button class="chat-close" onclick="closeChatOverlay()">&larr;</button>
       <h2>Coach Erik</h2>
-      <button class="chat-close" onclick="closeChatOverlay()">&times;</button>
     </div>
-    <div class="chat-messages" id="chat-overlay-messages"></div>
+    <div class="chat-messages" id="chat-overlay-messages">
+      <div class="chat-bubble coach">What do you need?</div>
+    </div>
     <div class="chat-input-bar">
-      <input type="text" id="chat-overlay-input" placeholder="Ask Erik anything..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
-      <button class="chat-mic-btn" id="chat-mic-btn" onclick="toggleVoiceInput('chat-overlay-input')" title="Voice input">&#127908;</button>
+      <input type="text" id="chat-overlay-input" placeholder="Message Coach..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
       <button onclick="sendChatMessage('chat-overlay-input','chat-overlay-messages')">Send</button>
     </div>
   `;
 
-  renderChatMessages('chat-overlay-messages');
+  // No history shown — clean slate each time
   const input = document.getElementById('chat-overlay-input');
   if (input) setTimeout(() => input.focus(), 100);
 }

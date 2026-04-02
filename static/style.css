@@ -2575,16 +2575,22 @@ footer {
   font-family: 'Inter', sans-serif;
   font-size: 1rem;
   font-weight: 700;
+  flex: 1;
 }
 
 .chat-header .chat-close {
   background: none;
   border: none;
-  color: var(--muted);
-  font-size: 24px;
+  color: var(--text);
+  font-size: 22px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 8px 12px;
   line-height: 1;
+  min-height: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .chat-header .chat-close:hover { color: var(--text); }
