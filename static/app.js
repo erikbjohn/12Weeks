@@ -7041,14 +7041,14 @@ function startWorkoutSession() {
   _workoutExercises = [...warmupAsExercises, ...dayData.exercises];
   _workoutExIdx = 0;
 
-  // Show transition screen for the first exercise
-  showExerciseTransition(0);
+  // Go directly into the first exercise (no transition screen)
+  enterExerciseFocus(0);
 }
 
 function advanceWorkoutSession() {
   _workoutExIdx++;
   if (_workoutExIdx < _workoutExercises.length) {
-    showExerciseTransition(_workoutExIdx);
+    enterExerciseFocus(_workoutExIdx);
   } else {
     completeWorkoutSession();
   }
@@ -7209,12 +7209,26 @@ function renderExerciseFocus() {
   const isTimedExercise = typeof _focusTargetReps === 'string' && _focusTargetReps.includes('s');
   const timedSeconds = isTimedExercise ? parseInt(_focusTargetReps) : 0;
 
+  // Build video + note + swap bar (available during exercise, not a separate screen)
+  const _videoUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(_focusExName + ' form short')}&sp=EgIYAQ%253D%253D`;
+  const _currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
+  const _exNote = _currentEx ? (_currentEx.note || '') : '';
+  const _isWu = _currentEx && _currentEx._isWarmup;
+  const _escapedFocusName = _focusExName.replace(/'/g, "\\'");
+  const _focusInfoBar = `
+    <div style="display:flex;gap:10px;justify-content:center;margin-bottom:8px">
+      <a href="${_videoUrl}" target="_blank" rel="noopener" style="font-size:13px;color:var(--accent);text-decoration:none">&#9654; Form</a>
+      ${!_isWu ? `<button style="font-size:13px;color:var(--muted);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer" onclick="showExerciseSwap(_focusExIdx,'${_escapedFocusName}',event)">&#128260; Swap</button>` : ''}
+    </div>
+    ${_exNote ? `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;text-align:center">${escapeHtml(_exNote)}</div>` : ''}`;
+
   if (isTimedExercise) {
     el.innerHTML = `
       <button class="focus-back" onclick="exitExerciseFocus()">&#8249;</button>
       <div class="focus-content">
         <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
-        <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
+        <div class="focus-set-counter">${_isWu ? 'WARM-UP' : 'Set ' + (_focusSetIdx + 1) + ' of ' + _focusSetCount}</div>
+        ${_focusInfoBar}
         <div style="font-size:48px;font-weight:800;color:var(--accent);font-family:'DM Mono',monospace;margin:16px 0">${timedSeconds}s</div>
         <button class="focus-log-btn" onclick="startTimedSet(${timedSeconds})">START</button>
       </div>`;
@@ -7231,6 +7245,7 @@ function renderExerciseFocus() {
       <div class="focus-content">
         <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
         <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
+        ${_focusInfoBar}
         ${_focusLastWeight ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : '<div style="height:20px"></div>'}
         ${window._focusReason ? `<div class="focus-reason"><span class="focus-indicator focus-${window._focusIndicator || 'hold'}">${{'up':'↑','hold':'—','deload':'○','weak':'⚑','down':'↓'}[window._focusIndicator] || '—'}</span> ${escapeHtml(window._focusReason)}</div>` : ''}
         <div class="focus-input-group">
