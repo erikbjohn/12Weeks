@@ -2355,7 +2355,7 @@ def api_daily_opener():
     # Check if opener already exists
     existing = ChatMessage.query.filter_by(
         user_id=current_user.id, log_date=today
-    ).filter(ChatMessage.content.contains('[MORNING_CHECKIN]') == False).filter_by(
+    ).filter(~ChatMessage.content.contains('[MORNING_CHECKIN]')).filter_by(
         role='assistant'
     ).order_by(ChatMessage.created_at.asc()).first()
 
