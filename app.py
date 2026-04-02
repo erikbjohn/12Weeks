@@ -156,7 +156,7 @@ with app.app_context():
             if table in inspector.get_table_names():
                 existing = {c["name"] for c in inspector.get_columns(table)}
                 if col not in existing:
-                    db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}'))
+                    db.session.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {col} {col_type}'))
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -175,7 +175,7 @@ with app.app_context():
             if tbl in inspector.get_table_names():
                 existing = {c["name"] for c in inspector.get_columns(tbl)}
                 if "user_id" not in existing:
-                    db.session.execute(text(f'ALTER TABLE {tbl} ADD COLUMN user_id INTEGER REFERENCES "user"(id)'))
+                    db.session.execute(text(f'ALTER TABLE "{tbl}" ADD COLUMN user_id INTEGER REFERENCES "user"(id)'))
         db.session.commit()
     except Exception:
         db.session.rollback()
