@@ -6950,20 +6950,27 @@ function startWorkoutSession() {
 
   _workoutActive = true;
   _workoutStartTime = new Date().toISOString();
-  _workoutExercises = dayData.exercises;
+  // Prepend warm-up steps as timed single-set exercises
+  const warmupSteps = (dayData.warmup && dayData.warmup.steps) || [];
+  const warmupAsExercises = warmupSteps.map(s => ({
+    name: s.name,
+    sets: '1x' + (s.duration || '30s'),
+    rest: '0s',
+    note: s.note || '',
+    _isWarmup: true,
+  }));
+  _workoutExercises = [...warmupAsExercises, ...dayData.exercises];
   _workoutExIdx = 0;
 
-  // Enter focus mode for the first exercise
-  enterExerciseFocus(0);
+  // Show transition screen for the first exercise
+  showExerciseTransition(0);
 }
 
 function advanceWorkoutSession() {
   _workoutExIdx++;
   if (_workoutExIdx < _workoutExercises.length) {
-    // Next exercise — no rest between exercises
-    enterExerciseFocus(_workoutExIdx);
+    showExerciseTransition(_workoutExIdx);
   } else {
-    // All exercises done — complete the workout
     completeWorkoutSession();
   }
 }
@@ -7032,9 +7039,15 @@ async function enterExerciseFocus(exIdx) {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData || currentDay === null) return;
   const dayData = weekData.days[currentDay];
-  if (!dayData || !dayData.exercises || !dayData.exercises[exIdx]) return;
 
-  const ex = dayData.exercises[exIdx];
+  // If in workout session, read from _workoutExercises (includes warm-ups)
+  let ex;
+  if (_workoutActive && _workoutExercises[exIdx]) {
+    ex = _workoutExercises[exIdx];
+  } else {
+    if (!dayData || !dayData.exercises || !dayData.exercises[exIdx]) return;
+    ex = dayData.exercises[exIdx];
+  }
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const swapKey = currentWeek + '_' + currentDay + '_' + exIdx;
   const displayName = swaps[swapKey] || ex.name;
@@ -7187,6 +7200,17 @@ function logFocusSet() {
     _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusExIdx}`] = true;
     apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusExIdx });
 
+    // Skip RPE for warm-up exercises
+    const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
+    if (currentEx && currentEx._isWarmup) {
+      if (_workoutActive) {
+        advanceWorkoutSession();
+      } else {
+        exitExerciseFocus();
+      }
+      return;
+    }
+
     // Show rest timer then RPE
     _focusSetIdx = _focusSetCount;
     if (_focusRestSec > 0) {
@@ -7249,6 +7273,18 @@ function startTimedSet(seconds) {
         if (!_completionsCache.exercises) _completionsCache.exercises = {};
         _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusExIdx}`] = true;
         apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusExIdx });
+
+        // Skip RPE for warm-up exercises
+        const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
+        if (currentEx && currentEx._isWarmup) {
+          if (_workoutActive) {
+            advanceWorkoutSession();
+          } else {
+            exitExerciseFocus();
+          }
+          return;
+        }
+
         _focusSetIdx = _focusSetCount;
         showFocusRestTimer(_focusRestSec, true); // Show RPE after
       } else {
@@ -7411,7 +7447,12 @@ function submitFocusRPE(rpe) {
   }
 
   const weekData = workoutData[String(currentWeek)];
-  const setsLabel = weekData ? weekData.days[currentDay].exercises[_focusExIdx].sets : '';
+  let setsLabel = '';
+  if (_workoutActive && _workoutExercises[_workoutExIdx]) {
+    setsLabel = _workoutExercises[_workoutExIdx].sets || '';
+  } else if (weekData && weekData.days[currentDay] && weekData.days[currentDay].exercises[_focusExIdx]) {
+    setsLabel = weekData.days[currentDay].exercises[_focusExIdx].sets;
+  }
   const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
   recordWeight(_focusExName, weight, setsLabel, rpe, currentWeek, currentDay, rpeScore, lastSetReps || null);
 
@@ -7420,6 +7461,79 @@ function submitFocusRPE(rpe) {
   } else {
     exitExerciseFocus();
   }
+}
+
+function showExerciseTransition(exIdx) {
+  const ex = _workoutExercises[exIdx];
+  if (!ex) { completeWorkoutSession(); return; }
+
+  const el = document.getElementById('exercise-focus');
+  if (!el) return;
+
+  const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  const displayName = swaps[`${currentWeek}_${currentDay}_${exIdx}`] || ex.name;
+  const isWarmup = ex._isWarmup;
+  const videoUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D`;
+
+  el.innerHTML = `
+    <div class="focus-content" style="max-width:380px;width:100%">
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">${isWarmup ? 'WARM-UP' : 'NEXT UP'}</div>
+      <div class="focus-ex-name">${escapeHtml(displayName)}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:16px;color:var(--muted);margin-bottom:8px">${ex.sets}${ex.rest && ex.rest !== '0s' ? ' \u00B7 ' + ex.rest + ' rest' : ''}</div>
+      ${ex.note ? '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">' + escapeHtml(ex.note) + '</div>' : ''}
+      <div style="display:flex;gap:10px;margin-bottom:16px;justify-content:center">
+        <a href="${videoUrl}" target="_blank" rel="noopener" style="font-size:13px;color:var(--accent);text-decoration:none">&#9654; Form Video</a>
+        ${!isWarmup ? '<button style="font-size:13px;color:var(--muted);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer" onclick="showTransitionSwap(' + exIdx + ',\\''+displayName.replace(/'/g, "\\\\'")+'\\')">&#128260; Swap</button>' : ''}
+      </div>
+      <div id="transition-swap-container"></div>
+      <button class="focus-log-btn" onclick="enterExerciseFocus(${exIdx})">LET'S GO</button>
+    </div>`;
+  el.classList.add('visible');
+}
+
+async function showTransitionSwap(exIdx, exerciseName) {
+  const container = document.getElementById('transition-swap-container');
+  if (!container) return;
+  if (container.innerHTML.trim()) { container.innerHTML = ''; return; }
+  container.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading...</div>';
+
+  // Get original exercise name for alternatives lookup
+  const weekData = workoutData[String(currentWeek)];
+  const dayData = weekData ? weekData.days[currentDay] : null;
+  const liftingIdx = exIdx - ((_workoutExercises || []).filter(e => e._isWarmup).length);
+  const originalName = dayData && dayData.exercises && dayData.exercises[liftingIdx] ? dayData.exercises[liftingIdx].name : exerciseName;
+
+  try {
+    const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(originalName));
+    const data = await res.json();
+    if (!data.alternatives || data.alternatives.length === 0) {
+      container.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">No alternatives</div>';
+      return;
+    }
+    const altsHtml = data.alternatives.filter(a => a.name !== exerciseName).map(alt =>
+      `<div class="swap-option" onclick="transitionSwapTo(${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
+        <span class="swap-name">${alt.name}</span>
+        <span class="swap-note">${alt.note}</span>
+      </div>`
+    ).join('');
+    container.innerHTML = `<div class="swap-options">${altsHtml}</div>`;
+  } catch(e) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:13px">Failed to load</div>';
+  }
+}
+
+function transitionSwapTo(exIdx, newName) {
+  // Update the exercise in the workout list
+  if (_workoutExercises && _workoutExercises[exIdx]) {
+    _workoutExercises[exIdx] = { ..._workoutExercises[exIdx], name: newName, _swapped: true };
+  }
+  // Save swap
+  const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  swaps[`${currentWeek}_${currentDay}_${exIdx}`] = newName;
+  sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
+  apiPost('/api/exercise-swap', { week: currentWeek, day_idx: currentDay, exercise_idx: exIdx, swapped_to: newName });
+  // Re-show transition with new name
+  showExerciseTransition(exIdx);
 }
 
 function exitExerciseFocus() {
