@@ -5752,48 +5752,7 @@ function quickCoachReply(msg) {
 }
 
 function renderGarminBar() {
-  const el = document.getElementById('garmin-bar');
-  if (el) el.innerHTML = '';
-  return;
-  // Garmin disabled — original code below
-  if (!garminConnected) {
-
-  let metricsHtml = '<div class="garmin-header"><span class="gh-label">Garmin Connected</span><button class="garmin-disconnect" onclick="garminLogout()">Disconnect</button></div>';
-  metricsHtml += '<div class="garmin-metrics">';
-
-  if (garminData) {
-    const hrv = garminData.hrv;
-    if (hrv && hrv.lastNight != null) {
-      const color = getMetricColor('hrv', readinessData);
-      metricsHtml += metric('HRV', hrv.lastNight, `avg ${hrv.weeklyAvg || '?'}`, color);
-    }
-    const sleep = garminData.sleep;
-    if (sleep) {
-      const color = getMetricColor('sleep', readinessData);
-      const score = sleep.score != null ? sleep.score : '?';
-      metricsHtml += metric('Sleep', score, `${sleep.durationHours || '?'}h`, color);
-    }
-    const bb = garminData.bodyBattery;
-    if (bb && bb.current != null) {
-      const color = getMetricColor('bodyBattery', readinessData);
-      metricsHtml += metric('Battery', bb.current, '', color);
-    }
-    const tr = garminData.trainingReadiness;
-    if (tr && tr.score != null) {
-      const color = getMetricColor('trainingReadiness', readinessData);
-      metricsHtml += metric('Ready', tr.score, tr.level || '', color);
-    }
-    const stress = garminData.stress;
-    if (stress && stress.overall != null) {
-      const color = getMetricColor('stress', readinessData);
-      metricsHtml += metric('Stress', stress.overall, '', color);
-    }
-  } else {
-    metricsHtml += '<div style="color:var(--dim);font-size:11px;padding:4px;">Loading Garmin data...</div>';
-  }
-
-  metricsHtml += '</div>';
-  el.innerHTML = metricsHtml;
+  // Garmin disabled
 }
 
 function metric(label, value, sub, color) {
