@@ -2578,9 +2578,12 @@ def _build_coach_context():
         garmin_data = gc.get_today_summary()
         readiness_data = assess_readiness(garmin_data)
 
-    # Current state
+    # Current state — compute week from start_date, not stale DB value
     s = _get_state()
     week = s.current_week
+    if s.start_date:
+        diff_days = (date.today() - s.start_date).days
+        week = min(12, max(1, diff_days // 7 + 1))
     phase = get_phase(week)
     phase_info = PHASES[phase]
 
@@ -2722,6 +2725,15 @@ def _build_coach_context():
         user_id=current_user.id, week=week
     ).all()
     completed_days = [dc.day_idx for dc in day_completions if dc.done]
+
+    # Also count days with logged sets as completed (user may not have toggled day checkbox)
+    sets_by_day = {}
+    recent_sets = SetLog.query.filter_by(user_id=current_user.id, week=week, done=True).all()
+    for s in recent_sets:
+        sets_by_day[s.day_idx] = True
+    for day_idx in sets_by_day:
+        if day_idx not in completed_days:
+            completed_days.append(day_idx)
 
     # Schedule notes
     schedule_notes = constraints.schedule_notes if constraints else None

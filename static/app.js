@@ -92,6 +92,10 @@ function showCoachPopup(message) {
       <div class="coach-opener__body">
         <p class="coach-opener__message">${escapeHtml(message)}</p>
       </div>
+      <div class="coach-opener__input">
+        <input type="text" id="opener-reply-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendOpenerReply()">
+        <button onclick="sendOpenerReply()">Send</button>
+      </div>
     </div>`;
 
   // Insert at top of page, after header
@@ -104,6 +108,30 @@ function showCoachPopup(message) {
 
   // Push to chat history
   _chatHistory.push({ role: 'coach', text: message, time: new Date().toISOString(), date: todayStr() });
+}
+
+function sendOpenerReply() {
+    const input = document.getElementById('opener-reply-input');
+    if (!input) return;
+    const text = (input.value || '').trim();
+    if (!text) return;
+    input.value = '';
+
+    // Dismiss the opener
+    dismissCoachPopup();
+
+    // Open the full chat and send the message there
+    _chatOverlayOpen = true;
+    renderChatOverlay();
+
+    // Wait for chat to render, then send the message
+    setTimeout(() => {
+        const chatInput = document.getElementById('chat-overlay-input');
+        if (chatInput) {
+            chatInput.value = text;
+            sendChatMessage('chat-overlay-input', 'chat-overlay-messages');
+        }
+    }, 200);
 }
 
 function dismissCoachPopup() {
