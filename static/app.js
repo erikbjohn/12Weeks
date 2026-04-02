@@ -4529,14 +4529,14 @@ async function sendChatMessage(inputId, containerId) {
     }
 
     // Show typing indicator
-    const container = document.getElementById(containerId);
-    if (container) {
+    const msgContainer = document.getElementById(containerId);
+    if (msgContainer) {
         const typing = document.createElement('div');
         typing.className = 'chat-typing';
         typing.id = 'chat-typing-' + containerId;
         typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-        container.appendChild(typing);
-        container.scrollTop = container.scrollHeight;
+        msgContainer.appendChild(typing);
+        msgContainer.scrollTop = msgContainer.scrollHeight;
     }
 
     try {
