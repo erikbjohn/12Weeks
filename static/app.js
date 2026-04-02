@@ -4518,8 +4518,15 @@ async function sendChatMessage(inputId, containerId) {
 
     const now = new Date().toISOString();
     _chatHistory.push({ role: 'user', text: text, time: now });
-    renderChatMessages(containerId);
-    syncChatContainers(containerId);
+    // Append user bubble directly — don't re-render all history
+    const container = document.getElementById(containerId);
+    if (container) {
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble user';
+        bubble.textContent = text;
+        container.appendChild(bubble);
+        container.scrollTop = container.scrollHeight;
+    }
 
     // Show typing indicator
     const container = document.getElementById(containerId);
@@ -4591,10 +4598,8 @@ async function sendChatMessage(inputId, containerId) {
         _chatHistory.push({ role: 'coach', text: errMsg, time: new Date().toISOString() });
     }
 
-    renderChatMessages(containerId);
-    syncChatContainers(containerId);
+    // Don't re-render history — messages were appended during streaming
     updateChatFabPulse();
-    renderCoachTop();
 }
 
 function syncChatContainers(sourceId) {

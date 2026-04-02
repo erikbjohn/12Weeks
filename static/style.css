@@ -2569,15 +2569,21 @@ footer {
 /* ─── CHAT OVERLAY ─── */
 .chat-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0;
+  width: min(380px, 85vw);
   background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 24px rgba(0,0,0,0.3);
   z-index: 160;
   display: none;
   flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
 }
 
 .chat-overlay.visible {
   display: flex;
+  transform: translateX(0);
 }
 
 .chat-header {
@@ -2737,15 +2743,7 @@ footer {
   .chat-input-bar { padding: 10px 2rem; }
 }
 
-@media (min-width: 768px) {
-  .chat-overlay {
-    left: auto;
-    right: 0;
-    width: 420px;
-    border-left: 1px solid var(--border);
-    box-shadow: -4px 0 24px rgba(0,0,0,0.3);
-  }
-}
+/* chat-overlay side panel is always right-anchored — no media query needed */
 
 /* ─── SUNDAY MEASUREMENT & PHOTOS ─── */
 .sunday-section {
