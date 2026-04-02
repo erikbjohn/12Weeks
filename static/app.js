@@ -7500,7 +7500,7 @@ function showExerciseTransition(exIdx) {
       ${ex.note ? '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">' + escapeHtml(ex.note) + '</div>' : ''}
       <div style="display:flex;gap:10px;margin-bottom:16px;justify-content:center">
         <a href="${videoUrl}" target="_blank" rel="noopener" style="font-size:13px;color:var(--accent);text-decoration:none">&#9654; Form Video</a>
-        ${!isWarmup ? '<button style="font-size:13px;color:var(--muted);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer" onclick="showTransitionSwap(' + exIdx + ',\\''+displayName.replace(/'/g, "\\\\'")+'\\')">&#128260; Swap</button>' : ''}
+        ${!isWarmup ? `<button style="font-size:13px;color:var(--muted);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer" onclick="showTransitionSwap(${exIdx},'${displayName.replace(/'/g, "\\'")}')">&#128260; Swap</button>` : ''}
       </div>
       <div id="transition-swap-container"></div>
       <button class="focus-log-btn" onclick="enterExerciseFocus(${exIdx})">LET'S GO</button>
