@@ -6203,7 +6203,17 @@ async function renderDetail() {
                         trend === 'down' ? '<span class="ws-trend-down">\u2193</span>' :
                         '<span class="ws-trend-same">\u2192</span>';
       const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
-      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${wt} lb ${trendIcon}</span></div>`;
+      // Estimate 1RM from last logged weight × reps
+      const exData = getExerciseData(name);
+      let est1rm = '';
+      if (exData && exData.history && exData.history.length > 0) {
+        const last = exData.history[exData.history.length - 1];
+        const lastWt = last.weight || wt;
+        const lastReps = last.reps_completed || 10;
+        const oneRM = estimate1RM(lastWt, lastReps);
+        if (oneRM > 0) est1rm = `<span class="ws-1rm">${oneRM} 1RM</span>`;
+      }
+      wsRows += `<div class="ws-row"><span class="ws-name">${shortName}</span><span class="ws-val">${wt} lb ${est1rm} ${trendIcon}</span></div>`;
     }
     weightSummaryHtml = `<div class="weight-summary" id="weight-summary">
       <button class="weight-summary-toggle" onclick="document.getElementById('weight-summary').classList.toggle('open')">

@@ -1310,6 +1310,7 @@ footer {
 .ws-trend-up { color: var(--lift); font-size: 13px; }
 .ws-trend-down { color: var(--run-hiit); font-size: 13px; }
 .ws-trend-same { color: var(--muted); font-size: 13px; }
+.ws-1rm { font-size: 11px; color: var(--muted); margin-left: 4px; margin-right: 4px; }
 
 /* ─── SETTINGS BUTTON ─── */
 .settings-btn {
