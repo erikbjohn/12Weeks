@@ -246,6 +246,27 @@ def _format_today(ctx):
         return f"{date.today().strftime('%A, %B %d, %Y')} (timezone unknown)"
 
 
+def _format_week_schedule(schedule, completed):
+    """Format weekly schedule showing what's done and what's ahead."""
+    if not schedule:
+        return "Week schedule: Not available"
+    completed_indices = set()
+    for d in completed:
+        if isinstance(d, dict):
+            completed_indices.add(d.get('day_idx', -1))
+        else:
+            completed_indices.add(d)
+    lines = ["WEEK SCHEDULE:"]
+    for day in schedule:
+        idx = day['day_idx']
+        name = day.get('day', '?')
+        lift = day.get('liftName', 'Rest')
+        done = idx in completed_indices
+        marker = "[DONE]" if done else "[    ]"
+        lines.append(f"  {marker} {name}: {lift}")
+    return "\n".join(lines)
+
+
 def _build_system_prompt(ctx):
     """Build the system prompt with full user context."""
 
@@ -570,7 +591,7 @@ Equipment available: {', '.join(ctx.get('equipment', [])) or 'Not specified'}
 
 {_format_meals_today(ctx.get('meals_today'), ctx.get('meal_plan_today'))}
 
-Days completed this week: {ctx.get('completed_days_this_week', []) or 'None yet'}
+{_format_week_schedule(ctx.get('week_schedule', []), ctx.get('completed_days_this_week', []))}
 {f"Schedule notes: {ctx.get('schedule_notes')}" if ctx.get('schedule_notes') else ''}
 
 {_format_memories(ctx.get('coach_memories', []))}

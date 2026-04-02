@@ -2603,6 +2603,16 @@ def _build_coach_context():
     today_idx = date.today().weekday()  # 0=Mon
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
 
+    # Full week schedule — so coach knows which day is which muscle group
+    week_schedule = []
+    for i, w in enumerate(workouts):
+        week_schedule.append({
+            "day_idx": i,
+            "day": day_names[i],
+            "liftName": w.get("liftName", "Rest"),
+            "isRest": w.get("isRest", False),
+        })
+
     # Supplements today
     supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=date.today()).all()
     supps_taken = {s.supplement_name: s.taken for s in supps}
@@ -2745,6 +2755,14 @@ def _build_coach_context():
         if day_idx not in completed_days:
             completed_days.append(day_idx)
 
+    # Enrich completed_days with day name and workout name
+    completed_days_enriched = []
+    for di in completed_days:
+        entry = {"day_idx": di, "day": day_names[di] if di < 7 else "?"}
+        if di < len(workouts):
+            entry["liftName"] = workouts[di].get("liftName", "")
+        completed_days_enriched.append(entry)
+
     # Schedule notes
     schedule_notes = constraints.schedule_notes if constraints else None
 
@@ -2817,7 +2835,8 @@ def _build_coach_context():
         "equipment": equipment,
         "meals_today": meals_today,
         "meal_plan_today": todays_meal_plan,
-        "completed_days_this_week": completed_days,
+        "completed_days_this_week": completed_days_enriched,
+        "week_schedule": week_schedule,
         "schedule_notes": schedule_notes,
         "coach_memories": coach_memories,
         "compliance_grade": compliance_grade,

@@ -6096,11 +6096,22 @@ function renderDayGrid() {
 }
 
 // ─── ACCORDION CONTENT BUILDERS ───
-function buildCoachContent(d, chatHtml) {
+function buildCoachContent(d) {
     var html = '';
     if (d.notes) html += '<div class="notes-box"><strong>Coach note:</strong> ' + d.notes + '</div>';
-    if (chatHtml) html += '<div class="inline-chat-preview">' + chatHtml + '</div>';
-    if (!d.notes && !chatHtml) html += '<div style="color:var(--muted);font-size:13px">No coach notes for today.</div>';
+    // Show last coach message only (compact), not full history
+    var lastCoachMsg = '';
+    for (var i = _chatHistory.length - 1; i >= 0; i--) {
+        if (_chatHistory[i].role === 'coach' || _chatHistory[i].role === 'assistant') {
+            lastCoachMsg = _chatHistory[i].text || _chatHistory[i].content || '';
+            break;
+        }
+    }
+    if (lastCoachMsg) {
+        var truncated = lastCoachMsg.length > 200 ? lastCoachMsg.substring(0, 200) + '...' : lastCoachMsg;
+        html += '<div style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5">' + escapeHtml(truncated) + '</div>';
+    }
+    html += '<button class="btn btn-primary" style="width:100%;margin-top:8px;font-size:15px;padding:12px" onclick="toggleChatOverlay()">Talk to Erik</button>';
     return html;
 }
 
@@ -6428,7 +6439,7 @@ async function renderDetail() {
   </div>`;
 
   // AI Coach chat
-  let chatMessagesHtml = renderInlineChat();
+  // Chat history removed from accordion — full chat lives in overlay only
 
   // Weight summary dashboard
   let weightSummaryHtml = '';
@@ -6488,7 +6499,7 @@ async function renderDetail() {
       </div>
     </div>
     ${sundaySectionHtml}
-    ${renderAccordion('coach', 'Coach', buildCoachContent(d, chatMessagesHtml), true)}
+    ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
     ${renderAccordion('exercise', 'Exercise', buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
