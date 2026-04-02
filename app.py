@@ -2260,7 +2260,10 @@ def api_chat_stream():
     if not api_key:
         return jsonify({"error": "API key not configured"}), 500
 
+    _app = app
+
     def generate():
+        full_text = ""
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
@@ -2269,7 +2272,6 @@ def api_chat_stream():
             system_prompt = _build_system_prompt(context)
             messages = _build_messages(user_msg, context.get("chat_history", []))
 
-            full_text = ""
             with client.messages.stream(
                 model="claude-opus-4-20250514",
                 max_tokens=800,
@@ -2280,22 +2282,24 @@ def api_chat_stream():
                     full_text += text
                     yield f"data: {text}\n\n"
 
-            # Only save if stream completed fully with content
-            if full_text.strip():
-                asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
-                db.session.add(asst_chat)
-                db.session.commit()
-
             yield f"data: [DONE]\n\n"
         except GeneratorExit:
-            # Client disconnected mid-stream — don't save partial response
             import logging
-            logging.warning("Client disconnected mid-stream, discarding partial response")
+            logging.warning("Client disconnected mid-stream")
         except Exception as e:
-            # Don't save partial response on error
             import logging
             logging.error("Stream error: %s", e)
             yield f"data: [ERROR]\n\n"
+        finally:
+            # ALWAYS save the response if we got any text — even partial
+            if full_text.strip():
+                try:
+                    with _app.app_context():
+                        asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id)
+                        db.session.add(asst_chat)
+                        db.session.commit()
+                except Exception:
+                    pass
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
