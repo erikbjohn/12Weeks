@@ -57,11 +57,20 @@ def compute_compliance_score(user_id):
     ).all()
     completed_days = set()
     for dc in completions:
-        # Convert week/day_idx to actual date
         if state.start_date:
             d = state.start_date + timedelta(days=(dc.week - 1) * 7 + dc.day_idx)
             if d >= since:
                 completed_days.add(d)
+
+    # Also count days with logged sets as completed
+    logged_sets = SetLog.query.filter(
+        SetLog.user_id == user_id,
+        SetLog.done == True,
+        SetLog.logged_date >= since
+    ).all()
+    for s in logged_sets:
+        if s.logged_date:
+            completed_days.add(s.logged_date)
 
     # Calculate daily scores
     total_decayed = 0
