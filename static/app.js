@@ -7671,6 +7671,7 @@ function exitExerciseFocus() {
   }
   _focusExIdx = null;
   _focusSetIdx = null;
+  _workoutActive = false;
 
   // Re-render session overview
   renderDetail();
