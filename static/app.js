@@ -6192,23 +6192,67 @@ function renderDayGrid() {
 }
 
 // ─── ACCORDION CONTENT BUILDERS ───
+let _lastCoachMsgTime = 0;
+
 function buildCoachContent(d) {
     var html = '';
     if (d.notes) html += '<div class="notes-box"><strong>Coach note:</strong> ' + d.notes + '</div>';
     // Show last coach message only (compact), not full history
     var lastCoachMsg = '';
+    var lastCoachTime = 0;
     for (var i = _chatHistory.length - 1; i >= 0; i--) {
         if (_chatHistory[i].role === 'coach' || _chatHistory[i].role === 'assistant') {
             lastCoachMsg = _chatHistory[i].text || _chatHistory[i].content || '';
+            if (_chatHistory[i].time) lastCoachTime = new Date(_chatHistory[i].time).getTime();
             break;
         }
     }
-    if (lastCoachMsg) {
+    // If last message is older than 10 min, auto-refresh when accordion opens
+    var isStale = !lastCoachMsg || (Date.now() - lastCoachTime > 10 * 60 * 1000);
+    if (isStale) {
+        html += '<div id="coach-accordion-refresh" style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
+        setTimeout(function() { _refreshCoachAccordionMsg(); }, 100);
+    } else if (lastCoachMsg) {
         var truncated = lastCoachMsg.length > 200 ? lastCoachMsg.substring(0, 200) + '...' : lastCoachMsg;
         html += '<div style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5">' + escapeHtml(truncated) + '</div>';
     }
     html += '<button class="btn btn-primary" style="width:100%;margin-top:8px;font-size:15px;padding:12px" onclick="toggleChatOverlay()">Talk to Erik</button>';
     return html;
+}
+
+async function _refreshCoachAccordionMsg() {
+    var el = document.getElementById('coach-accordion-refresh');
+    if (!el) return;
+    var trigger = '[COACH_CHECKIN] Briefly comment on where the athlete is right now — workouts done, meals, timing. 1-2 sentences. Be relevant to the current moment.';
+    try {
+        var res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: trigger }),
+        });
+        var fullText = '';
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var result = await reader.read();
+            if (result.done) break;
+            var chunk = decoder.decode(result.value, { stream: true });
+            var lines = chunk.split('\n');
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('data: ')) {
+                    var data = lines[i].slice(6);
+                    if (data === '[DONE]' || data === '[ERROR]') break;
+                    fullText += data;
+                    el.textContent = fullText;
+                }
+            }
+        }
+        if (_chatHistory) {
+            _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+        }
+    } catch(e) {
+        el.textContent = 'Tap below to talk to Erik.';
+    }
 }
 
 function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling) {
