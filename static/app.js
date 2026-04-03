@@ -3992,119 +3992,168 @@ function buildMorningBriefing() {
   return lines.join(' ');
 }
 
+let _mcExchangeCount = 0;
+
 function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
-
-  const briefing = buildMorningBriefing();
+  _mcExchangeCount = 0;
 
   el.innerHTML = `<div class="morning-checkin-overlay">
-    <div class="morning-checkin-card">
-      <div class="morning-briefing">
-        <div class="morning-briefing-label">Coach Erik</div>
-        <div class="morning-briefing-bubble">${briefing}</div>
+    <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
+      <div class="morning-briefing" style="flex-shrink:0">
+        <div class="morning-briefing-label">Morning Check-In with Erik</div>
       </div>
-      <div class="mc-subtitle">Your check-in</div>
-
-      <div class="mc-slider-row">
-        <label>Sleep</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-sleep" min="1" max="10" value="5">
-          <div class="mc-range-labels"><span>Terrible</span><span>Amazing</span></div>
+      <div id="mc-chat-messages" class="mc-coach-messages" style="flex:1;overflow-y:auto;padding:12px 0">
+        <div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>
+      </div>
+      <div style="flex-shrink:0;padding-top:8px">
+        <div class="mc-coach-input-bar">
+          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMcChat()">
+          <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
+          <button onclick="sendMcChat()">Send</button>
         </div>
-        <span class="mc-slider-val" id="mc-sleep-val">5</span>
+        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">Show Me Today's Workout</button>
       </div>
-
-      <div class="mc-slider-row">
-        <label>Stress</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-stress" min="1" max="10" value="5">
-          <div class="mc-range-labels"><span>Calm</span><span>Overwhelmed</span></div>
-        </div>
-        <span class="mc-slider-val" id="mc-stress-val">5</span>
-      </div>
-
-      <div class="mc-slider-row">
-        <label>Soreness</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-soreness" min="1" max="10" value="5">
-          <div class="mc-range-labels"><span>Fresh</span><span>Wrecked</span></div>
-        </div>
-        <span class="mc-slider-val" id="mc-soreness-val">5</span>
-      </div>
-      <div class="mc-followup" id="mc-soreness-followup" style="display:none">
-        <label>Where are you sore?</label>
-        <input type="text" class="mc-followup-input" id="mc-soreness-where" placeholder="e.g. shoulders, quads, lower back...">
-      </div>
-
-      <div class="mc-slider-row">
-        <label>Mood</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-mood" min="0" max="10" value="5">
-          <div class="mc-range-labels"><span>Very Low</span><span>Very High</span></div>
-        </div>
-        <span class="mc-slider-val" id="mc-mood-val">5</span>
-      </div>
-
-      <div class="mc-slider-row">
-        <label>Motivation</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-motivation" min="1" max="10" value="5">
-          <div class="mc-range-labels"><span>Zero</span><span>On Fire</span></div>
-        </div>
-        <span class="mc-slider-val" id="mc-motivation-val">5</span>
-      </div>
-      <div class="mc-followup" id="mc-motivation-followup" style="display:none">
-        <label>What's draining your motivation?</label>
-        <input type="text" class="mc-followup-input" id="mc-motivation-why" placeholder="e.g. tired, bored, work stress, no progress...">
-      </div>
-
-      <div class="mc-slider-row">
-        <label>Anxiety</label>
-        <div class="mc-range-wrap">
-          <input type="range" class="mc-slider" id="mc-anxiety" min="1" max="10" value="3">
-          <div class="mc-range-labels"><span>None</span><span>Severe</span></div>
-        </div>
-        <span class="mc-slider-val" id="mc-anxiety-val">3</span>
-      </div>
-      <div class="mc-followup" id="mc-anxiety-followup" style="display:none">
-        <label>What's causing the anxiety?</label>
-        <input type="text" class="mc-followup-input" id="mc-anxiety-why" placeholder="e.g. work deadline, relationship, health, finances...">
-      </div>
-
-      <div class="mc-textarea-label">Anything else on your mind today?</div>
-      <textarea class="mc-textarea" id="mc-notes" placeholder="Optional \u2014 free text..."></textarea>
-
-      <button class="btn btn-primary" style="width:100%" onclick="submitMorningCheckin()">Let's Go</button>
-      <button class="btn btn-secondary" style="width:100%;margin-top:8px;opacity:0.7" onclick="skipMorningCheckin()">Skip Today</button>
     </div>
   </div>`;
 
-  // Wire up slider value displays and follow-up questions
-  const sliders = ['sleep', 'stress', 'soreness', 'mood', 'motivation', 'anxiety'];
-  sliders.forEach(name => {
-    const slider = document.getElementById('mc-' + name);
-    const valEl = document.getElementById('mc-' + name + '-val');
-    if (slider && valEl) {
-      slider.addEventListener('input', () => {
-        valEl.textContent = slider.value;
-        const val = parseInt(slider.value);
-        // Show follow-up for concerning values
-        if (name === 'soreness') {
-          const fu = document.getElementById('mc-soreness-followup');
-          if (fu) fu.style.display = val >= 6 ? 'block' : 'none';
+  // Send trigger to coach to start the check-in conversation
+  _startMcChat();
+}
+
+async function _startMcChat() {
+  const trigger = '[MORNING_CHECKIN] Start the morning check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief.';
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: trigger }),
+    });
+    const messagesEl = document.getElementById('mc-chat-messages');
+    if (!messagesEl) return;
+    // Remove loading indicator
+    const typing = messagesEl.querySelector('.mc-typing-indicator');
+    if (typing) typing.remove();
+
+    const bubble = document.createElement('div');
+    bubble.className = 'mc-coach-bubble';
+    messagesEl.appendChild(bubble);
+
+    let fullText = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          bubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
         }
-        if (name === 'motivation') {
-          const fu = document.getElementById('mc-motivation-followup');
-          if (fu) fu.style.display = val <= 4 ? 'block' : 'none';
-        }
-        if (name === 'anxiety') {
-          const fu = document.getElementById('mc-anxiety-followup');
-          if (fu) fu.style.display = val >= 6 ? 'block' : 'none';
-        }
-      });
+      }
     }
-  });
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    const messagesEl = document.getElementById('mc-chat-messages');
+    if (messagesEl) {
+      const typing = messagesEl.querySelector('.mc-typing-indicator');
+      if (typing) typing.remove();
+      messagesEl.innerHTML += '<div class="mc-coach-bubble">Good morning. How did you sleep?</div>';
+    }
+  }
+  // Focus the input
+  const input = document.getElementById('mc-chat-input');
+  if (input) setTimeout(() => input.focus(), 100);
+}
+
+async function sendMcChat() {
+  const input = document.getElementById('mc-chat-input');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  const messagesEl = document.getElementById('mc-chat-messages');
+  if (!messagesEl) return;
+
+  // Show user message
+  messagesEl.innerHTML += '<div class="mc-user-bubble">' + escapeHtml(text) + '</div>';
+  messagesEl.innerHTML += '<div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  _mcExchangeCount++;
+
+  // After 2+ exchanges, show continue button
+  if (_mcExchangeCount >= 2) {
+    const btn = document.getElementById('mc-continue-btn');
+    if (btn) btn.style.display = 'block';
+  }
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+
+    const typing = messagesEl.querySelector('.mc-typing-indicator');
+    if (typing) typing.remove();
+
+    const bubble = document.createElement('div');
+    bubble.className = 'mc-coach-bubble';
+    messagesEl.appendChild(bubble);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    let fullText = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          bubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'user', content: text, date: todayStr() });
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    const typing = messagesEl.querySelector('.mc-typing-indicator');
+    if (typing) typing.remove();
+    messagesEl.innerHTML += '<div class="mc-coach-bubble" style="color:var(--muted)">Connection issue. Try again.</div>';
+  }
+
+  if (input) input.focus();
+}
+
+function finishMorningCheckin() {
+  // Save a basic check-in record (coach already has the conversation data)
+  fetch('/api/morning-checkin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      date: todayStr(),
+      sleep_quality: 5, stress_level: 5, soreness: 5,
+      mood: 5, motivation: 5, anxiety: 3,
+      notes: '[Coach conversation check-in]',
+    }),
+  }).catch(e => console.error('Morning checkin save failed', e));
+
+  closeMorningCheckin();
 }
 
 function submitMorningCheckin() {
