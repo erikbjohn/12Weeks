@@ -6216,8 +6216,125 @@ function buildCoachContent(d) {
         var truncated = lastCoachMsg.length > 200 ? lastCoachMsg.substring(0, 200) + '...' : lastCoachMsg;
         html += '<div style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5">' + escapeHtml(truncated) + '</div>';
     }
-    html += '<button class="btn btn-primary" style="width:100%;margin-top:8px;font-size:15px;padding:12px" onclick="toggleChatOverlay()">Talk to Erik</button>';
+    html += '<div id="coach-inline-chat" style="margin-top:12px">' +
+      '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
+    '</div>';
     return html;
+}
+
+function openInlineCoachChat() {
+    var container = document.getElementById('coach-inline-chat');
+    if (!container) return;
+    container.innerHTML =
+      '<div id="coach-inline-messages" style="max-height:50vh;overflow-y:auto;padding:8px 0">' +
+        '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" ' +
+          'onkeydown="if(event.key===\'Enter\')sendInlineCoachMsg()" ' +
+          'style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
+        '<button onclick="sendInlineCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
+      '</div>';
+    _fetchInlineCoachOpener();
+}
+
+async function _fetchInlineCoachOpener() {
+    var messagesEl = document.getElementById('coach-inline-messages');
+    if (!messagesEl) return;
+    var trigger = '[CHAT_OPENED] The athlete just opened the chat. Look at ALL their data right now — what workouts are done, what meals are logged, timing compliance, what time it is. Give a brief, relevant comment on where they are RIGHT NOW. If something stands out (early/late meal, missed workout, great streak, etc.), address it directly. Be concise — 1-3 sentences. Then ask what\'s on their mind.';
+    try {
+        var res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: trigger }),
+        });
+        var bubble = messagesEl.querySelector('.chat-bubble.coach');
+        if (bubble) bubble.innerHTML = '';
+        var fullText = '';
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var result = await reader.read();
+            if (result.done) break;
+            var chunk = decoder.decode(result.value, { stream: true });
+            var lines = chunk.split('\n');
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('data: ')) {
+                    var data = lines[i].slice(6);
+                    if (data === '[DONE]' || data === '[ERROR]') break;
+                    fullText += data;
+                    if (bubble) bubble.textContent = fullText;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+            }
+        }
+        if (_chatHistory) {
+            _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+        }
+    } catch(e) {
+        var bubble = messagesEl.querySelector('.chat-bubble.coach');
+        if (bubble) bubble.textContent = 'What\'s on your mind?';
+    }
+    var input = document.getElementById('coach-inline-input');
+    if (input) setTimeout(function() { input.focus(); }, 100);
+}
+
+async function sendInlineCoachMsg() {
+    var input = document.getElementById('coach-inline-input');
+    var text = (input.value || '').trim();
+    if (!text) return;
+    input.value = '';
+
+    var messagesEl = document.getElementById('coach-inline-messages');
+    if (!messagesEl) return;
+
+    // User bubble
+    var userBubble = document.createElement('div');
+    userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
+    userBubble.textContent = text;
+    messagesEl.appendChild(userBubble);
+
+    // Typing indicator
+    var typingBubble = document.createElement('div');
+    typingBubble.className = 'chat-bubble coach';
+    typingBubble.style.cssText = 'background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px';
+    typingBubble.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
+    messagesEl.appendChild(typingBubble);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    try {
+        var res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: text }),
+        });
+        typingBubble.innerHTML = '';
+        var fullText = '';
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var result = await reader.read();
+            if (result.done) break;
+            var chunk = decoder.decode(result.value, { stream: true });
+            var lines = chunk.split('\n');
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('data: ')) {
+                    var data = lines[i].slice(6);
+                    if (data === '[DONE]' || data === '[ERROR]') break;
+                    fullText += data;
+                    typingBubble.textContent = fullText;
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+            }
+        }
+        if (_chatHistory) {
+            _chatHistory.push({ role: 'user', content: text, date: todayStr() });
+            _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+        }
+    } catch(e) {
+        typingBubble.textContent = 'Connection issue. Try again.';
+    }
+    if (input) input.focus();
 }
 
 async function _refreshCoachAccordionMsg() {
