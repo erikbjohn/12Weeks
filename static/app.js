@@ -4434,6 +4434,7 @@ async function triggerWeeklyPlanning() {
 }
 
 function renderCheckinSummaryBar() {
+  return; // Removed from UI
   const el = document.getElementById('checkin-summary-bar');
   if (!el || !_morningCheckinCache) {
     if (el) el.classList.remove('visible');
@@ -5051,6 +5052,7 @@ function toggleDay(week, dayIdx, e) {
 
 // ─── BODY WEIGHT / WEIGH-IN ────────────────────────────────────────────────
 function renderWeighInBar() {
+  return; // Removed from UI
   const el = document.getElementById('weighin-bar');
   if (!el) return;
 
