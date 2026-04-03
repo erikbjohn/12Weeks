@@ -3864,6 +3864,12 @@ footer {
   .focus-ex-name { font-size: 24px; }
   .focus-input { width: 120px; font-size: 32px; padding: 10px; }
   .focus-timer-display { font-size: 56px; }
+  .focus-content { max-width: 100%; padding: 0 12px; box-sizing: border-box; }
+  .exercise-focus-overlay { padding: 1rem; }
+  .focus-log-btn { max-width: 100%; font-size: 16px; padding: 14px; }
+  .focus-rpe-btns { gap: 6px; }
+  .focus-rpe-btns .rpe-btn { padding: 12px 14px; font-size: 14px; min-height: 44px; }
+  .focus-input-group { gap: 8px; }
 }
 
 /* ─── TRAINING ENGINE INDICATORS ─── */

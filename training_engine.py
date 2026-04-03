@@ -1,5 +1,6 @@
 """Adaptive training engine — computes exercise targets from performance data."""
 
+import re
 from datetime import date, datetime, timedelta, timezone
 from models import db, SetLog, MuscleGroupProfile, SessionAnalysis, ExerciseCompletion, AppState
 
@@ -56,6 +57,23 @@ def _get_progression_increment(exercise_name, muscle_group, is_weak):
     if any(k in nl for k in ['curl', 'raise', 'fly', 'extension', 'pushdown', 'face pull']):
         return 2.5
     return 5.0
+
+
+def _get_configured_reps(exercise_name, week, day_idx):
+    """Look up the configured rep count from workout data for this exercise."""
+    try:
+        from workout_data import get_workouts
+        days = get_workouts(week)
+        if day_idx < len(days):
+            day = days[day_idx]
+            for ex in day.get("exercises", []):
+                if ex.get("name", "").lower() == exercise_name.lower():
+                    m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
+                    if m:
+                        return int(m.group(2))
+    except Exception:
+        pass
+    return None
 
 
 def _round_weight(weight, exercise_name):
@@ -195,22 +213,25 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
 
     # ─── SIGNAL 1: STANDARD PROGRESSION BY PHASE ───
     if phase == 1:
-        # Hypertrophy: increase reps to 15, then bump weight
-        phase_max_reps = 15
+        # Hypertrophy: increase reps, then bump weight
+        # Cap at the workout's configured reps if available, otherwise 15
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        phase_max_reps = configured_reps if configured_reps else 15
         if avg_reps >= phase_max_reps:
             new_weight = _round_weight(last_weight + inc, exercise_name)
             return {
                 "target_weight": new_weight,
-                "target_reps": 10,
+                "target_reps": configured_reps or 10,
                 "target_sets": last_set_count,
-                "adjustment_reason": f"Hit {int(avg_reps)} reps — weight +{inc} lb, reps reset to 10",
+                "adjustment_reason": f"Hit {int(avg_reps)} reps — weight +{inc} lb, reps reset to {configured_reps or 10}",
                 "progression_indicator": "up",
             }
+        target = min(int(avg_reps) + 1, phase_max_reps)
         return {
             "target_weight": _round_weight(last_weight, exercise_name),
-            "target_reps": min(int(avg_reps) + 1, phase_max_reps),
+            "target_reps": target,
             "target_sets": last_set_count,
-            "adjustment_reason": f"Building reps: {int(avg_reps)} → {min(int(avg_reps) + 1, phase_max_reps)}",
+            "adjustment_reason": f"Building reps: {int(avg_reps)} → {target}",
             "progression_indicator": "up" if avg_reps < phase_max_reps else "hold",
         }
 

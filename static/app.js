@@ -3944,6 +3944,7 @@ function renderTravelBanner() {
 
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
+  if (_morningCheckinDone) return; // Already unlocked this session
   const today = todayStr();
   try {
     const res = await fetch('/api/morning-checkin?date=' + today);
@@ -5405,60 +5406,173 @@ async function saveRunLog() {
   const hr = parseInt(document.getElementById('run-hr')?.value) || null;
   const elev = parseInt(document.getElementById('run-elev')?.value) || null;
 
+  // Check if this is an edit (cache already has data for this key)
+  var key = currentWeek + '_' + currentDay;
+  var isEdit = _runLogCache && _runLogCache[key] && (_runLogCache[key].distance_miles || _runLogCache[key].avg_hr);
+
   await apiPost('/api/run-log', {
     week: currentWeek, day_idx: currentDay,
     distance_miles: dist, avg_hr: hr, elevation_ft: elev,
   });
 
-  const key = currentWeek + '_' + currentDay;
   if (!_runLogCache) _runLogCache = {};
   _runLogCache[key] = { distance_miles: dist, avg_hr: hr, elevation_ft: elev };
 
   showToast('Run logged!', 'success');
 
-  // Re-render to show the post-workout coach section
-  renderDetail();
-
-  // Trigger post-workout coach feedback
-  const weekData = workoutData[String(currentWeek)];
-  const dayData = weekData ? weekData.days[currentDay] : null;
-  const workoutName = dayData ? dayData.liftName : 'workout';
-
-  // Build a summary of the workout for the coach
-  let exerciseSummary = '';
-  if (dayData && dayData.exercises) {
-    const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-    for (let i = 0; i < dayData.exercises.length; i++) {
-      const ex = dayData.exercises[i];
-      const swapKey = currentWeek + '_' + currentDay + '_' + i;
-      const name = swaps[swapKey] || ex.name;
-      const exData = getExerciseData(name);
-      const wt = exData ? exData.current : 0;
-      if (wt > 0) exerciseSummary += `${name}: ${wt}lb. `;
-    }
+  if (!isEdit) {
+    // First save — open inline coach run chat
+    _openInlineRunCoachChat(dist, hr, elev);
+  } else {
+    // Edit — just re-render, no coach trigger
+    renderDetail();
   }
+}
 
-  const triggerMsg = `[WORKOUT_COMPLETE] ${workoutName} done. ${exerciseSummary}Run: ${dist || '?'} mi, HR ${hr || '?'}, elev ${elev || '?'} ft. Give post-workout feedback.`;
+function _openInlineRunCoachChat(dist, hr, elev) {
+  // Open the exercise-focus overlay with an inline coach chat for run feedback
+  var el = document.getElementById('exercise-focus');
+  if (!el) { renderDetail(); return; }
 
+  window._runChatExchanges = 0;
+
+  var triggerMsg = '[RUN_COMPLETE] Run logged: ' + (dist || '?') + ' mi, HR ' + (hr || '?') + ', elev ' + (elev || '?') + ' ft. Give brief post-run feedback. Ask how the run felt. Be concise.';
+
+  el.innerHTML =
+    '<button class="focus-back" onclick="exitExerciseFocus()">&larr;</button>' +
+    '<div class="focus-content" style="max-width:400px;width:100%">' +
+      '<div style="font-size:36px;text-align:center;margin-bottom:4px">&#127939;</div>' +
+      '<div class="focus-ex-name" style="margin-bottom:4px">Run Complete</div>' +
+      '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--accent);text-align:center;margin-bottom:12px">' + (dist || '?') + ' mi \u00B7 HR ' + (hr || '?') + '</div>' +
+      '<div id="run-coach-messages" style="max-height:40vh;overflow-y:auto;padding:8px 0;width:100%">' +
+        '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;width:100%">' +
+        '<input type="text" id="run-coach-input" placeholder="Reply to Erik..." enterkeyhint="send" ' +
+          'onkeydown="if(event.key===\'Enter\')sendRunCoachMsg()" ' +
+          'style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
+        '<button onclick="sendRunCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
+      '</div>' +
+      '<div id="run-coach-done-btn-container" style="width:100%;margin-top:12px"></div>' +
+    '</div>';
+  el.classList.add('visible');
+
+  _fetchRunCoachOpener(triggerMsg);
+}
+
+async function _fetchRunCoachOpener(triggerMsg) {
+  var messagesEl = document.getElementById('run-coach-messages');
+  if (!messagesEl) return;
   try {
-    const res = await fetch('/api/chat', {
+    var res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ message: triggerMsg }),
     });
-    const data = await res.json();
-    if (data.response) {
-      showCoachPopup(data.response);
+    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (bubble) bubble.innerHTML = '';
+    var fullText = '';
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      var chunk = decoder.decode(result.value, { stream: true });
+      var lines = chunk.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('data: ')) {
+          var data = lines[i].slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          if (bubble) bubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
     }
   } catch(e) {
-    console.error('Post-workout feedback failed:', e);
-    if (false) {
-      msgsEl.innerHTML = `<div class="coach-top-bubble coach" style="color:var(--muted)">Couldn't reach Erik. Tap below to try again.</div>`;
+    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (bubble) bubble.textContent = 'Nice run! How did it feel out there?';
+  }
+  var input = document.getElementById('run-coach-input');
+  if (input) setTimeout(function() { input.focus(); }, 100);
+}
+
+async function sendRunCoachMsg() {
+  var input = document.getElementById('run-coach-input');
+  var text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  var messagesEl = document.getElementById('run-coach-messages');
+  if (!messagesEl) return;
+
+  // User bubble
+  var userBubble = document.createElement('div');
+  userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
+  userBubble.textContent = text;
+  messagesEl.appendChild(userBubble);
+
+  // Typing indicator
+  var typingBubble = document.createElement('div');
+  typingBubble.className = 'chat-bubble coach';
+  typingBubble.style.cssText = 'background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px';
+  typingBubble.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
+  messagesEl.appendChild(typingBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  try {
+    var res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+    typingBubble.innerHTML = '';
+    var fullText = '';
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      var chunk = decoder.decode(result.value, { stream: true });
+      var lines = chunk.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('data: ')) {
+          var data = lines[i].slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          typingBubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'user', content: text, date: todayStr() });
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    typingBubble.textContent = 'Connection issue. Try again.';
+  }
+
+  window._runChatExchanges = (window._runChatExchanges || 0) + 1;
+
+  // After 2+ exchanges, show "Back to Schedule" button
+  if (window._runChatExchanges >= 2) {
+    var btnContainer = document.getElementById('run-coach-done-btn-container');
+    if (btnContainer && !btnContainer.querySelector('button')) {
+      var btn = document.createElement('button');
+      btn.className = 'focus-log-btn';
+      btn.textContent = 'Back to Schedule';
+      btn.onclick = function() {
+        exitExerciseFocus();
+      };
+      btnContainer.appendChild(btn);
     }
   }
 
-  // Show session summary after coach popup
-  setTimeout(() => showSessionSummary(), 3000);
+  if (input) input.focus();
 }
 
 // startWarmupTimer removed — each warm-up step now has its own Start button
@@ -7302,10 +7416,10 @@ function advanceWorkoutSession() {
 }
 
 function completeWorkoutSession() {
-  const endTime = new Date().toISOString();
-  const startMs = new Date(_workoutStartTime).getTime();
-  const endMs = new Date(endTime).getTime();
-  const durationMin = Math.round((endMs - startMs) / 60000);
+  var endTime = new Date().toISOString();
+  var startMs = new Date(_workoutStartTime).getTime();
+  var endMs = new Date(endTime).getTime();
+  var durationMin = Math.round((endMs - startMs) / 60000);
 
   _workoutActive = false;
 
@@ -7317,47 +7431,169 @@ function completeWorkoutSession() {
     workout_duration_min: durationMin,
   });
 
-  // Show completion screen
-  const el = document.getElementById('exercise-focus');
-  if (el) {
-    let exerciseSummary = '';
-    for (let i = 0; i < _workoutExercises.length; i++) {
-      const ex = _workoutExercises[i];
-      const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-      const name = swaps[`${currentWeek}_${currentDay}_${i}`] || ex.name;
-      const exData = getExerciseData(name);
-      const wt = exData ? exData.current : '';
-      const lastRPE = exData && exData.history && exData.history.length > 0 ? exData.history[exData.history.length - 1].rpe : null;
-      const rpeColor = lastRPE === 'too_easy' ? 'var(--accent)' : lastRPE === 'too_hard' ? '#ef4444' : lastRPE === 'just_right' ? '#f59e0b' : 'var(--muted)';
-      exerciseSummary += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--text)">${escapeHtml(name)}</span>
-        <span style="color:${rpeColor};font-family:'DM Mono',monospace">${wt ? wt + ' lb' : ''}</span>
-      </div>`;
-    }
-
-    el.innerHTML = `
-      <div class="focus-content" style="max-width:400px;width:100%">
-        <div style="font-size:48px;text-align:center;margin-bottom:8px">&#10003;</div>
-        <div class="focus-ex-name">Workout Complete</div>
-        <div style="font-family:'DM Mono',monospace;font-size:20px;color:var(--accent);text-align:center;margin-bottom:16px">${durationMin} min</div>
-        <div style="margin-bottom:16px">${exerciseSummary}</div>
-        <button class="focus-log-btn" onclick="exitExerciseFocus()">Done</button>
-      </div>`;
-    el.classList.add('visible');
+  // Build exercise summary for coach trigger (non-warmup only)
+  var exerciseSummaryText = '';
+  var swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  for (var i = 0; i < _workoutExercises.length; i++) {
+    var ex = _workoutExercises[i];
+    if (ex._isWarmup) continue;
+    var name = swaps[currentWeek + '_' + currentDay + '_' + i] || ex.name;
+    var exData = getExerciseData(name);
+    var wt = exData ? exData.current : 0;
+    if (wt > 0) exerciseSummaryText += name + ': ' + wt + 'lb. ';
   }
 
-  // Coach feedback
-  const weekData = workoutData[String(currentWeek)];
-  const dayData = weekData ? weekData.days[currentDay] : null;
-  const workoutName = dayData ? dayData.liftName : 'workout';
-  const triggerMsg = `[WORKOUT_COMPLETE] ${workoutName} done in ${durationMin} minutes. Give post-workout feedback.`;
-  fetch('/api/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ message: triggerMsg }),
-  }).then(r => r.json()).then(data => {
-    if (data.response) showCoachPopup(data.response);
-  }).catch(() => {});
+  var weekData = workoutData[String(currentWeek)];
+  var dayData = weekData ? weekData.days[currentDay] : null;
+  var workoutName = dayData ? dayData.liftName : 'workout';
+
+  // Show inline coach chat in the exercise-focus overlay
+  var el = document.getElementById('exercise-focus');
+  if (!el) return;
+
+  window._liftChatExchanges = 0;
+
+  el.innerHTML =
+    '<div class="focus-content" style="max-width:400px;width:100%">' +
+      '<div style="font-size:36px;text-align:center;margin-bottom:4px">&#10003;</div>' +
+      '<div class="focus-ex-name" style="margin-bottom:4px">Lifting Complete</div>' +
+      '<div style="font-family:\'DM Mono\',monospace;font-size:16px;color:var(--accent);text-align:center;margin-bottom:12px">' + durationMin + ' min</div>' +
+      '<div id="lift-coach-messages" style="max-height:40vh;overflow-y:auto;padding:8px 0;width:100%">' +
+        '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px;width:100%">' +
+        '<input type="text" id="lift-coach-input" placeholder="Reply to Erik..." enterkeyhint="send" ' +
+          'onkeydown="if(event.key===\'Enter\')sendLiftCoachMsg()" ' +
+          'style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
+        '<button onclick="sendLiftCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
+      '</div>' +
+      '<div id="lift-coach-run-btn-container" style="width:100%;margin-top:12px"></div>' +
+    '</div>';
+  el.classList.add('visible');
+
+  // Send lifting-complete trigger
+  var triggerMsg = '[LIFTING_COMPLETE] ' + workoutName + ' done in ' + durationMin + ' minutes. ' + exerciseSummaryText + 'Give brief post-lifting feedback. Ask how they felt. Be concise.';
+  _fetchLiftCoachOpener(triggerMsg);
+}
+
+async function _fetchLiftCoachOpener(triggerMsg) {
+  var messagesEl = document.getElementById('lift-coach-messages');
+  if (!messagesEl) return;
+  try {
+    var res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: triggerMsg }),
+    });
+    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (bubble) bubble.innerHTML = '';
+    var fullText = '';
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      var chunk = decoder.decode(result.value, { stream: true });
+      var lines = chunk.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('data: ')) {
+          var data = lines[i].slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          if (bubble) bubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (bubble) bubble.textContent = 'Nice work! How did the session feel?';
+  }
+  var input = document.getElementById('lift-coach-input');
+  if (input) setTimeout(function() { input.focus(); }, 100);
+}
+
+async function sendLiftCoachMsg() {
+  var input = document.getElementById('lift-coach-input');
+  var text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  var messagesEl = document.getElementById('lift-coach-messages');
+  if (!messagesEl) return;
+
+  // User bubble
+  var userBubble = document.createElement('div');
+  userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
+  userBubble.textContent = text;
+  messagesEl.appendChild(userBubble);
+
+  // Typing indicator
+  var typingBubble = document.createElement('div');
+  typingBubble.className = 'chat-bubble coach';
+  typingBubble.style.cssText = 'background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px';
+  typingBubble.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
+  messagesEl.appendChild(typingBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  try {
+    var res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: text }),
+    });
+    typingBubble.innerHTML = '';
+    var fullText = '';
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      var chunk = decoder.decode(result.value, { stream: true });
+      var lines = chunk.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('data: ')) {
+          var data = lines[i].slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          typingBubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'user', content: text, date: todayStr() });
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    typingBubble.textContent = 'Connection issue. Try again.';
+  }
+
+  window._liftChatExchanges = (window._liftChatExchanges || 0) + 1;
+
+  // After 2+ exchanges, show "Log Your Run" button
+  if (window._liftChatExchanges >= 2) {
+    var btnContainer = document.getElementById('lift-coach-run-btn-container');
+    if (btnContainer && !btnContainer.querySelector('button')) {
+      var btn = document.createElement('button');
+      btn.className = 'focus-log-btn';
+      btn.textContent = 'Log Your Run \u2192';
+      btn.onclick = function() {
+        exitExerciseFocus();
+        // Scroll to the run section
+        setTimeout(function() {
+          var runSection = document.getElementById('run-section');
+          if (runSection) runSection.scrollIntoView({ behavior: 'smooth' });
+        }, 300);
+      };
+      btnContainer.appendChild(btn);
+    }
+  }
+
+  if (input) input.focus();
 }
 
 // ─── EXERCISE FOCUS MODE ───────────────────────────────────────────────────
@@ -7556,6 +7792,9 @@ function logFocusSet() {
     // Skip RPE for warm-up exercises
     const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
     if (currentEx && currentEx._isWarmup) {
+      var wuKey = currentWeek + '_' + currentDay + '_' + _workoutExIdx;
+      _warmupCache[wuKey] = true;
+      apiPost('/api/warmup-completions', { week: currentWeek, day_idx: currentDay, step_idx: _workoutExIdx });
       if (_workoutActive) {
         advanceWorkoutSession();
       } else {
@@ -7564,13 +7803,9 @@ function logFocusSet() {
       return;
     }
 
-    // Show rest timer then RPE
+    // Last set done — go directly to RPE (no rest timer)
     _focusSetIdx = _focusSetCount;
-    if (_focusRestSec > 0) {
-      showFocusRestTimer(_focusRestSec, true); // true = show RPE after
-    } else {
-      showFocusRPE();
-    }
+    showFocusRPE();
   } else {
     // Advance to next set after rest
     _focusSetIdx++;
@@ -7607,6 +7842,7 @@ function startTimedSet(seconds) {
   _focusTimerInterval = setInterval(() => {
     if (_timedSetPaused) return; // Skip tick when paused
     remaining--;
+    render(); // Always render current state (including "0s")
     if (remaining <= 0) {
       clearInterval(_focusTimerInterval);
       _focusTimerInterval = null;
@@ -7635,6 +7871,9 @@ function startTimedSet(seconds) {
         // Skip RPE for warm-up exercises
         const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
         if (currentEx && currentEx._isWarmup) {
+          var wuKey = currentWeek + '_' + currentDay + '_' + _workoutExIdx;
+          _warmupCache[wuKey] = true;
+          apiPost('/api/warmup-completions', { week: currentWeek, day_idx: currentDay, step_idx: _workoutExIdx });
           if (_workoutActive) {
             advanceWorkoutSession();
           } else {
@@ -7649,8 +7888,6 @@ function startTimedSet(seconds) {
         _focusSetIdx++;
         showFocusRestTimer(_focusRestSec, false); // Show next set after
       }
-    } else {
-      render();
     }
   }, 1000);
 }
@@ -7710,12 +7947,26 @@ function showFocusRestTimer(seconds, showRpeAfter) {
   }
 
   function buildUpcomingHtml() {
-    let html = '';
+    var html = '';
+
+    // Next set info (weight x reps) for current exercise
+    if (!showRpeAfter) {
+      var nextSetNum = _focusSetIdx + 1;
+      var nextWeight = _focusWeightVal;
+      // Check if a previous set had a weight logged
+      for (var s = _focusSetIdx; s >= 0; s--) {
+        var sd = _setCache[currentWeek + '_' + currentDay + '_' + _focusExIdx + '_' + s];
+        if (sd && sd.weight) { nextWeight = sd.weight; break; }
+      }
+      if (nextSetNum < _focusSetCount) {
+        html += '<div style="font-family:\'DM Mono\',monospace;font-size:15px;color:var(--text);margin-top:12px">Next: Set ' + (nextSetNum + 1) + ' \u2014 ' + nextWeight + ' lb \u00D7 ' + _focusTargetReps + '</div>';
+      }
+    }
 
     // Remaining sets for current exercise
-    const remainingSets = _focusSetCount - _focusSetIdx;
+    var remainingSets = _focusSetCount - _focusSetIdx;
     if (remainingSets > 0 && !showRpeAfter) {
-      html += `<div style="font-size:12px;color:var(--muted);margin-top:12px">${remainingSets} set${remainingSets > 1 ? 's' : ''} remaining</div>`;
+      html += '<div style="font-size:12px;color:var(--muted);margin-top:12px">' + remainingSets + ' set' + (remainingSets > 1 ? 's' : '') + ' remaining</div>';
     }
 
     // Coming up exercises
