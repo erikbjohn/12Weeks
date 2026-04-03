@@ -66,21 +66,14 @@
 <div id="exercise-focus" class="exercise-focus-overlay"></div>
 
 <script>
-// Unregister old service workers and clear all caches before loading app
-(async function() {
-  if ('serviceWorker' in navigator) {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.map(r => r.unregister()));
-  }
-  if ('caches' in window) {
-    const names = await caches.keys();
-    await Promise.all(names.map(n => caches.delete(n)));
-  }
-  // Now load app.js fresh from server (no SW intercept)
-  const s = document.createElement('script');
-  s.src = '/static/app.js?v=120&t=' + Date.now();
-  document.body.appendChild(s);
-})();
+// Nuke service workers so they can't serve stale assets
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+}
+if ('caches' in window) {
+  caches.keys().then(names => names.forEach(n => caches.delete(n)));
+}
 </script>
+<script src="/static/app.js?v=121"></script>
 </body>
 </html>
