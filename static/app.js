@@ -6935,17 +6935,7 @@ async function loadSundayPhotoPreviews() {
   }
 }
 
-// ─── SERVICE WORKER REGISTRATION ──────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
-      .then(reg => {
-        console.log('SW registered:', reg.scope);
-        initPushNotifications(reg);
-      })
-      .catch(err => console.warn('SW registration failed:', err));
-  });
-}
+// Service worker disabled — cache-busting handled by index.html
 
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────
 async function initPushNotifications(reg) {
