@@ -2621,7 +2621,7 @@ def _build_coach_context():
         })
 
     # Supplements today
-    supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=date.today()).all()
+    supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=local_today).all()
     supps_taken = {s.supplement_name: s.taken for s in supps}
 
     # Psych intake report (contains aspirational body type, goals, etc.)
@@ -2676,7 +2676,7 @@ def _build_coach_context():
             exercise_history[log.exercise_name].append(entry)
 
     # Per-set data for today
-    today_idx = date.today().weekday()
+    today_idx = local_today.weekday()
     today_sets = SetLog.query.filter_by(
         user_id=current_user.id, week=week, day_idx=today_idx
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
@@ -2728,8 +2728,8 @@ def _build_coach_context():
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     equipment = eq.available_equipment if eq else []
 
-    # Meal adherence today + today's meal plan
-    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.today()).first()
+    # Meal adherence today + today's meal plan (use local_today, not server UTC)
+    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=local_today).first()
     meals_today = None
     if ml:
         meals_today = {"eaten": ml.eaten or [], "fasting": ml.fasting}
@@ -2800,7 +2800,7 @@ def _build_coach_context():
 
     # Check if missed morning checkin today
     missed_today = False
-    mc_today = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=date.today()).first()
+    mc_today = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=local_today).first()
     if mc_today and mc_today.notes and '[MISSED]' in (mc_today.notes or ''):
         missed_today = True
 
