@@ -4013,7 +4013,7 @@ function showMorningCheckinOverlay() {
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMcChat()">Send</button>
         </div>
-        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">Show Me Today's Workout</button>
+        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">Start Today's Workout</button>
       </div>
     </div>
   </div>`;
@@ -4023,7 +4023,7 @@ function showMorningCheckinOverlay() {
 }
 
 async function _startMcChat() {
-  const trigger = '[MORNING_CHECKIN] Start the morning check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief.';
+  const trigger = '[MORNING_CHECKIN] Start the morning check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief. After 2-3 exchanges, transition to today\'s workout — tell me what we\'re doing, what to focus on, any technique cues or mindset notes for the session. End with energy and intent.';
   try {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
@@ -4209,7 +4209,7 @@ function submitMorningCheckin() {
           <button onclick="sendMorningCoachReply()">Send</button>
         </div>
       </div>
-      <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Show Me Today's Workout</button>
+      <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:12px" onclick="closeMorningCheckin()">Start Today's Workout</button>
     `;
 
     // Fetch morning briefing

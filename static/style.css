@@ -12,6 +12,9 @@
   --lift: #4ade80;
   --lift-bg: #0d2218;
   --lift-border: #1a4a2e;
+  --coach: #60a5fa;
+  --coach-bg: #0d1825;
+  --coach-border: #1a3a5e;
   --run-z2: #60a5fa;
   --run-z2-bg: #0a1a2e;
   --run-z2-border: #1a3a5e;
@@ -627,8 +630,8 @@ header .subtitle {
 
 /* ─── NOTES ─── */
 .notes-box {
-  background: var(--lift-bg);
-  border: 1px solid var(--lift-border);
+  background: var(--coach-bg);
+  border: 1px solid var(--coach-border);
   border-radius: 8px;
   padding: 12px 15px;
   font-size: 14px;
@@ -637,7 +640,7 @@ header .subtitle {
   margin-top: 10px;
 }
 
-.notes-box strong { color: var(--lift); font-weight: 500; }
+.notes-box strong { color: var(--coach); font-weight: 500; }
 
 /* ─── MODAL ─── */
 .modal-overlay {
@@ -2446,8 +2449,8 @@ footer {
 }
 
 .mc-coach-bubble {
-  background: var(--lift-bg);
-  border: 1px solid var(--lift-border);
+  background: var(--coach-bg);
+  border: 1px solid var(--coach-border);
   border-radius: 12px;
   padding: 14px 16px;
   font-size: 15px;
@@ -2678,8 +2681,8 @@ footer {
 }
 
 .chat-bubble.coach {
-  background: var(--lift-bg);
-  border: 1px solid var(--lift-border);
+  background: var(--coach-bg);
+  border: 1px solid var(--coach-border);
   color: var(--text);
   align-self: flex-start;
   border-bottom-left-radius: 4px;
