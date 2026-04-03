@@ -4544,7 +4544,7 @@ function renderChatOverlay() {
       <h2>Coach Erik</h2>
     </div>
     <div class="chat-messages" id="chat-overlay-messages">
-      <div class="chat-bubble coach">${_getChatOpener()}</div>
+      <div class="chat-bubble coach"><div class="chat-typing"><span></span><span></span><span></span></div></div>
     </div>
     <div class="chat-input-bar">
       <input type="text" id="chat-overlay-input" placeholder="Message Coach..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
@@ -4552,7 +4552,47 @@ function renderChatOverlay() {
     </div>
   `;
 
-  // No history shown — clean slate each time
+  // Send context trigger so Erik gives a relevant greeting
+  _fetchChatOpener();
+}
+
+async function _fetchChatOpener() {
+  const trigger = '[CHAT_OPENED] The athlete just opened the chat. Look at ALL their data right now — what workouts are done, what meals are logged, timing compliance, what time it is. Give a brief, relevant comment on where they are RIGHT NOW. If something stands out (early/late meal, missed workout, great streak, etc.), address it directly. Be concise — 1-3 sentences. Then ask what\'s on their mind.';
+  const messagesEl = document.getElementById('chat-overlay-messages');
+  if (!messagesEl) return;
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: trigger }),
+    });
+    // Replace typing indicator with streamed response
+    const firstBubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (firstBubble) firstBubble.innerHTML = '';
+    let fullText = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          if (firstBubble) firstBubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    const firstBubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (firstBubble) firstBubble.textContent = 'What\'s up?';
+  }
   const input = document.getElementById('chat-overlay-input');
   if (input) setTimeout(() => input.focus(), 100);
 }
