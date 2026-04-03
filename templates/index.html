@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=120">
+  <link rel="stylesheet" href="/static/style.css?v=121">
 </head>
 <body>
 
@@ -66,20 +66,21 @@
 <div id="exercise-focus" class="exercise-focus-overlay"></div>
 
 <script>
-// Force-clear old service worker caches so updated assets load
-if ('caches' in window) {
-  caches.keys().then(names => names.forEach(n => caches.delete(n)));
-}
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(r => r.update());
-  });
-  // Auto-reload when new service worker takes control
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    window.location.reload();
-  });
-}
+// Unregister old service workers and clear all caches before loading app
+(async function() {
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(r => r.unregister()));
+  }
+  if ('caches' in window) {
+    const names = await caches.keys();
+    await Promise.all(names.map(n => caches.delete(n)));
+  }
+  // Now load app.js fresh from server (no SW intercept)
+  const s = document.createElement('script');
+  s.src = '/static/app.js?v=120&t=' + Date.now();
+  document.body.appendChild(s);
+})();
 </script>
-<script src="/static/app.js?v=120"></script>
 </body>
 </html>
