@@ -203,6 +203,13 @@ function todayStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function localTimeContext() {
+  var d = new Date();
+  var day = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
+  var time = d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'});
+  return 'RIGHT NOW it is ' + day + ' ' + time + ' local time.';
+}
+
 // ─── MEAL TRACKING ─────────────────────────────────────────────────────────
 function getMealDateKey() {
   return todayStr();
@@ -3959,7 +3966,7 @@ function showMorningCheckinOverlay() {
 }
 
 async function _startMcChat() {
-  const trigger = '[MORNING_CHECKIN] Start the morning check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief. After 2-3 exchanges, transition to today\'s workout — tell me what we\'re doing, what to focus on, any technique cues or mindset notes for the session. End with energy and intent.';
+  const trigger = '[MORNING_CHECKIN] ' + localTimeContext() + ' Start the check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief. After 2-3 exchanges, transition to today\'s workout — tell me what we\'re doing, what to focus on, any technique cues or mindset notes for the session. End with energy and intent.';
   try {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
@@ -6220,7 +6227,7 @@ function openInlineCoachChat() {
 async function _fetchInlineCoachOpener() {
     var messagesEl = document.getElementById('coach-inline-messages');
     if (!messagesEl) return;
-    var trigger = '[CHAT_OPENED] The athlete just opened the chat. FIRST: check the TODAY field for the current time. If it is evening, do NOT say good morning or talk about starting a workout. Match the time of day. THEN: look at workouts done, meals logged, timing compliance. Give a brief, relevant comment on where they are RIGHT NOW. If something stands out (early/late meal, great day, rest evening, etc.), address it. 1-3 sentences. Ask what is on their mind.';
+    var trigger = '[CHAT_OPENED] ' + localTimeContext() + ' Look at workouts done, meals logged, timing compliance. Give a brief, relevant comment on where the athlete is RIGHT NOW. If something stands out (early/late meal, great day, rest evening, etc.), address it. 1-3 sentences. Ask what is on their mind.';
     try {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',
@@ -6319,7 +6326,7 @@ async function sendInlineCoachMsg() {
 async function _refreshCoachAccordionMsg() {
     var el = document.getElementById('coach-accordion-refresh');
     if (!el) return;
-    var trigger = '[COACH_CHECKIN] Check the TODAY field for the current time of day. Match it — do NOT say good morning if it is evening. Briefly comment on where the athlete is right now — workouts done, meals, timing. 1-2 sentences. Be relevant to the current moment.';
+    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + ' Briefly comment on where the athlete is right now — workouts done, meals, timing. 1-2 sentences. Be relevant to the current moment.';
     try {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',

@@ -1063,6 +1063,9 @@ def api_state():
         "baseline_done": s.baseline_done,
         "start_date": s.start_date.isoformat() if s.start_date else None,
         "traveling": s.traveling,
+        "timezone": current_user.timezone if hasattr(current_user, 'timezone') else 'UTC',
+        "server_date": str(date.today()),
+        "user_date": str(_user_today()),
     })
 
 
