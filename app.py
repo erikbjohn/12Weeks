@@ -2042,6 +2042,57 @@ def api_morning_checkin_history():
     } for e in entries])
 
 
+@app.route("/api/morning-checkin/extract", methods=["POST"])
+@login_required
+def api_extract_checkin_values():
+    """Extract numeric check-in values from the morning conversation using AI."""
+    data = request.get_json()
+    conversation = data.get('conversation', '')
+    if not conversation:
+        return jsonify({"error": "No conversation"}), 400
+
+    try:
+        import anthropic
+        import json
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": f"""Extract numeric check-in values from this coach conversation. Return ONLY a JSON object with these fields (each 1-10 scale):
+- sleep_quality (how well they slept)
+- stress_level (stress level)
+- soreness (physical soreness)
+- mood (emotional state)
+- motivation (drive to train)
+- anxiety (anxiety level)
+
+If a value wasn't discussed, use 5 as default. Infer from context.
+
+Conversation:
+{conversation}"""}],
+        )
+        text = response.content[0].text.strip()
+        # Find JSON in the response
+        if '{' in text:
+            json_str = text[text.index('{'):text.rindex('}') + 1]
+            values = json.loads(json_str)
+            # Update the morning check-in record
+            d = _user_today()
+            ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
+            if ci:
+                ci.sleep_quality = values.get('sleep_quality', ci.sleep_quality)
+                ci.stress_level = values.get('stress_level', ci.stress_level)
+                ci.soreness = values.get('soreness', ci.soreness)
+                ci.mood = values.get('mood', ci.mood)
+                ci.motivation = values.get('motivation', ci.motivation)
+                ci.anxiety = values.get('anxiety', ci.anxiety)
+                ci.notes = (ci.notes or '') + ' [AI-extracted values]'
+                db.session.commit()
+            return jsonify(values)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── PSYCHOLOGICAL INTAKE ───────────────────────────────────────────────────
 
 @app.route("/api/psych-intake/status")
@@ -2493,6 +2544,27 @@ def api_chat_stream():
                 except Exception:
                     pass
 
+                # Extract memories from conversation (same as non-streaming endpoint)
+                try:
+                    def _save_memories_stream():
+                        with _app.app_context():
+                            try:
+                                memories = extract_memories(user_msg, full_text, context)
+                                for mem in memories:
+                                    cm = CoachMemory(
+                                        user_id=_current_user_id, content=mem["content"],
+                                        memory_type=mem["type"], week=context.get("week", 1),
+                                    )
+                                    db.session.add(cm)
+                                if memories:
+                                    db.session.commit()
+                            except Exception:
+                                pass  # Memory extraction is best-effort
+
+                    threading.Thread(target=_save_memories_stream, daemon=True).start()
+                except Exception:
+                    pass
+
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -2729,16 +2801,11 @@ def _build_coach_context():
             "squats": pa.squat_count, "pullups": pa.pullup_count,
         }
 
-    # Body measurements (latest)
-    latest_measure = BodyMeasurement.query.filter_by(
+    # Body measurements (last 4 for trend visibility)
+    recent_measures = BodyMeasurement.query.filter_by(
         user_id=current_user.id
-    ).order_by(BodyMeasurement.log_date.desc()).first()
-    measurements = None
-    if latest_measure:
-        measurements = {
-            "date": latest_measure.log_date.isoformat(),
-            "waist": latest_measure.waist_inches,
-        }
+    ).order_by(BodyMeasurement.log_date.desc()).limit(4).all()
+    measurements = [{"date": m.log_date.isoformat(), "waist": m.waist_inches} for m in recent_measures] if recent_measures else []
 
     # Equipment
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
@@ -2748,7 +2815,12 @@ def _build_coach_context():
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=local_today).first()
     meals_today = None
     if ml:
-        meals_today = {"eaten": ml.eaten or [], "fasting": ml.fasting}
+        meals_today = {
+            "eaten": ml.eaten or [],
+            "fasting": ml.fasting,
+            "scheduled_time": ml.scheduled_time if hasattr(ml, 'scheduled_time') else None,
+            "actual_time": ml.actual_time if hasattr(ml, 'actual_time') else None,
+        }
 
     # Today's meal plan (what they're supposed to eat)
     todays_meal_plan = None

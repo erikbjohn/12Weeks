@@ -4114,6 +4114,19 @@ async function finishMorningCheckin() {
     } catch(e2) { console.error('Morning checkin retry also failed', e2); }
   }
 
+  // Extract real values from the coach conversation (best-effort, async)
+  var messagesEl = document.getElementById('mc-chat-messages');
+  if (messagesEl) {
+      var convo = messagesEl.textContent || '';
+      if (convo.length > 20) {
+          fetch('/api/morning-checkin/extract', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ conversation: convo }),
+          }).catch(function() {}); // Best-effort extraction
+      }
+  }
+
   closeMorningCheckin();
 }
 
@@ -7305,7 +7318,7 @@ function advanceWorkoutSession() {
   }
 }
 
-function completeWorkoutSession() {
+async function completeWorkoutSession() {
   var endTime = new Date().toISOString();
   var startMs = new Date(_workoutStartTime).getTime();
   var endMs = new Date(endTime).getTime();
@@ -7313,8 +7326,8 @@ function completeWorkoutSession() {
 
   _workoutActive = false;
 
-  // Save duration to backend
-  apiPost('/api/completions/day', {
+  // Save duration to backend — await to ensure it lands before navigation
+  await apiPost('/api/completions/day', {
     week: currentWeek, day_idx: currentDay,
     workout_started_at: _workoutStartTime,
     workout_ended_at: endTime,

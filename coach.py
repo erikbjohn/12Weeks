@@ -99,7 +99,15 @@ def _format_physical(pa):
 def _format_measurements(m):
     if not m:
         return ""
-    return f"LATEST MEASUREMENTS ({m.get('date', '?')}): waist {m.get('waist', '?')}\""
+    # Support both list (new: last 4) and dict (legacy: single)
+    if isinstance(m, dict):
+        return f"LATEST MEASUREMENTS ({m.get('date', '?')}): waist {m.get('waist', '?')}\""
+    if not isinstance(m, list) or len(m) == 0:
+        return ""
+    lines = ["BODY MEASUREMENTS (recent trend):"]
+    for entry in reversed(m):  # Oldest first for trend readability
+        lines.append(f"  {entry.get('date', '?')}: waist {entry.get('waist', '?')}\"")
+    return '\n'.join(lines)
 
 
 def _format_meals_today(meals, meal_plan=None):
@@ -120,6 +128,10 @@ def _format_meals_today(meals, meal_plan=None):
             parts.append(f"Meals eaten: {len(eaten)} of {len(meal_plan.get('meals', [])) if meal_plan else '?'}")
         else:
             parts.append("Meals eaten: None yet")
+    sched = meals.get('scheduled_time') if meals else None
+    actual = meals.get('actual_time') if meals else None
+    if sched and actual:
+        parts.append(f"  Meal timing: scheduled={sched}, actual={actual}")
     return '\n'.join(parts) if parts else "Meals today: Not tracked"
 
 
