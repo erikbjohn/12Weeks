@@ -41,7 +41,7 @@ from models import (
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
-    DailyCoachState,
+    DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
 )
 
 app = Flask(__name__)
@@ -190,6 +190,25 @@ with app.app_context():
         db.session.commit()
     except Exception:
         db.session.rollback()
+
+    # Ensure override tables exist (db.create_all handles creation above)
+    for tbl in ["weekly_schedule_override", "meal_plan_override", "run_override"]:
+        try:
+            db.session.execute(text(f'SELECT 1 FROM "{tbl}" LIMIT 1'))
+        except Exception:
+            db.session.rollback()
+            # Table will be created by db.create_all() above
+
+    # actual_bmr column on physical_assessment
+    try:
+        db.session.execute(text('SELECT actual_bmr FROM physical_assessment LIMIT 1'))
+    except Exception:
+        db.session.rollback()
+        try:
+            db.session.execute(text('ALTER TABLE physical_assessment ADD COLUMN actual_bmr FLOAT'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
     # Wipe all corrupted data, keep psych intake, restart from physical assessment
@@ -4438,6 +4457,201 @@ def api_session_summary(week, day_idx):
         "summary": analysis.summary_text if analysis else None,
         "muscle_scores": muscle_scores,
     })
+
+
+# ─── DEFICIT CALCULATION & BMR RECALCULATION ─────────────────────────────
+
+@app.route("/api/deficit-plan", methods=["POST"])
+@login_required
+def api_deficit_plan():
+    """Calculate deficit gap and recommend interventions to hit target weight."""
+    from math import ceil
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if not goal or not goal.target_weight:
+        return jsonify({"error": "No target weight set"}), 400
+
+    # Current weight from latest bodyweight entry
+    bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+    if not bw:
+        return jsonify({"error": "No weight data"}), 400
+
+    current_weight = bw.weight
+    target_weight = goal.target_weight
+
+    state = _get_state()
+    week = state.current_week if state else 1
+    weeks_remaining = max(1, 12 - week + 1)
+    required_weekly_loss = (current_weight - target_weight) / weeks_remaining
+
+    if required_weekly_loss <= 0:
+        return jsonify({"on_pace": True, "message": "Already at or below target"})
+
+    # BMR -- use actual if available, otherwise Mifflin-St Jeor
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    if pa and pa.actual_bmr:
+        bmr = pa.actual_bmr
+    elif pa and pa.bodyweight_lbs and pa.height_inches:
+        # Mifflin-St Jeor (male): 10 x kg + 6.25 x cm - 5 x age - 5
+        weight_kg = pa.bodyweight_lbs * 0.453592
+        height_cm = pa.height_inches * 2.54
+        age = 30  # default
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 5
+    else:
+        bmr = current_weight * 10  # rough fallback
+
+    # Current daily calories
+    daily_cals = goal.daily_calories or 2000
+
+    # Exercise burn estimate (from this week's SetLog)
+    local_today = _user_today()
+    week_start = local_today - timedelta(days=local_today.weekday())
+    sets = SetLog.query.filter(
+        SetLog.user_id == current_user.id,
+        SetLog.logged_date >= week_start,
+        SetLog.done == True
+    ).all()
+    # Rough estimate: each set burns ~5-8 calories per set (weight x reps x 0.0003)
+    exercise_burn = sum((s.weight or 0) * (s.reps or 0) * 0.0003 for s in sets)
+    exercise_burn = max(exercise_burn, 200)  # floor at 200 cal/week from lifting
+
+    # Run burn estimate
+    runs = RunLog.query.filter(
+        RunLog.user_id == current_user.id,
+        RunLog.log_date >= week_start
+    ).all()
+    run_burn = sum((r.distance_miles or 0) * current_weight * 0.63 for r in runs)
+
+    # Weekly budget
+    eating_days = 5  # Mon-Fri (Sat-Sun could be fast)
+    weekly_intake = daily_cals * eating_days
+    weekly_expenditure = (bmr * 7) + exercise_burn + run_burn
+    current_deficit = weekly_expenditure - weekly_intake
+    required_deficit = required_weekly_loss * 3500
+    gap = required_deficit - current_deficit
+
+    if gap <= 0:
+        return jsonify({
+            "on_pace": True,
+            "current_weight": current_weight,
+            "target_weight": target_weight,
+            "weeks_remaining": weeks_remaining,
+            "current_deficit": round(current_deficit),
+            "required_deficit": round(required_deficit),
+            "bmr": round(bmr),
+        })
+
+    recommendations = {"add_saturday_fast": True}
+    remaining_gap = gap
+
+    # 1. Saturday fast
+    fast_savings = bmr
+    remaining_gap -= fast_savings
+
+    # 2. Reduce daily calories
+    protein_floor = target_weight  # 1g/lb target weight in protein = ~4 cal/g
+    cal_floor = max(bmr, protein_floor * 4 + 400)  # protein + minimum fat/carb
+    max_reduction = max(0, daily_cals - cal_floor)
+    cal_reduction = min(remaining_gap / eating_days, max_reduction) if remaining_gap > 0 else 0
+    remaining_gap -= cal_reduction * eating_days
+    recommendations["cal_reduction_per_day"] = round(cal_reduction)
+    recommendations["new_daily_calories"] = round(daily_cals - cal_reduction)
+
+    # 3. Increase run duration
+    if remaining_gap > 0:
+        extra_min = remaining_gap / 50  # ~10 cal/min x 5 days
+        remaining_gap -= extra_min * 50
+        recommendations["extra_run_minutes"] = round(extra_min)
+
+    # 4. Tempo swaps
+    if remaining_gap > 0:
+        avg_run_burn = (run_burn / max(len(runs), 1))
+        tempo_swaps = min(3, ceil(remaining_gap / max(avg_run_burn * 0.3, 50)))
+        remaining_gap -= tempo_swaps * max(avg_run_burn * 0.3, 50)
+        recommendations["tempo_swap_days"] = tempo_swaps
+
+    if remaining_gap > 0:
+        recommendations["shortfall"] = round(remaining_gap)
+
+    recommendations["protein_floor_grams"] = round(target_weight)
+
+    return jsonify({
+        "on_pace": False,
+        "current_weight": current_weight,
+        "target_weight": target_weight,
+        "weeks_remaining": weeks_remaining,
+        "required_weekly_loss": round(required_weekly_loss, 1),
+        "current_deficit": round(current_deficit),
+        "required_deficit": round(required_deficit),
+        "gap": round(gap),
+        "bmr": round(bmr),
+        "recommendations": recommendations,
+    })
+
+
+@app.route("/api/bmr-recalculate", methods=["POST"])
+@login_required
+def api_bmr_recalculate():
+    """Recalculate BMR from actual weight loss data."""
+    data = request.get_json()
+    actual_loss = data.get("actual_weekly_loss", 0)
+    weekly_intake = data.get("weekly_intake", 0)
+    exercise_burn = data.get("exercise_burn", 0)
+    run_burn = data.get("run_burn", 0)
+
+    if actual_loss <= 0:
+        return jsonify({"error": "No weight loss to calculate from"}), 400
+
+    actual_deficit = actual_loss * 3500
+    actual_expenditure = weekly_intake + actual_deficit
+    actual_bmr = (actual_expenditure - exercise_burn - run_burn) / 7
+
+    # Save to DB
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    if pa:
+        pa.actual_bmr = round(actual_bmr)
+        db.session.commit()
+
+    return jsonify({"actual_bmr": round(actual_bmr)})
+
+
+# ─── OVERRIDE ENDPOINTS ──────────────────────────────────────────────────
+
+@app.route("/api/schedule-overrides")
+@login_required
+def api_schedule_overrides():
+    """Get schedule overrides for a given week."""
+    state = _get_state()
+    week = request.args.get("week", state.current_week, type=int)
+    overrides = WeeklyScheduleOverride.query.filter_by(user_id=current_user.id, week=week).all()
+    return jsonify([{
+        "day_idx": o.day_idx, "workout_time": o.workout_time,
+        "skip_day": o.skip_day, "notes": o.notes,
+    } for o in overrides])
+
+
+@app.route("/api/meal-overrides")
+@login_required
+def api_meal_overrides():
+    """Get meal plan overrides for a given week."""
+    state = _get_state()
+    week = request.args.get("week", state.current_week, type=int)
+    overrides = MealPlanOverride.query.filter_by(user_id=current_user.id, week=week).all()
+    return jsonify([{
+        "day_idx": o.day_idx, "meal_type": o.meal_type, "reason": o.reason,
+    } for o in overrides])
+
+
+@app.route("/api/run-overrides")
+@login_required
+def api_run_overrides():
+    """Get run overrides for a given week."""
+    state = _get_state()
+    week = request.args.get("week", state.current_week, type=int)
+    overrides = RunOverride.query.filter_by(user_id=current_user.id, week=week).all()
+    return jsonify([{
+        "day_idx": o.day_idx, "duration": o.duration,
+        "run_type": o.run_type, "reason": o.reason,
+    } for o in overrides])
 
 
 if __name__ == "__main__":
