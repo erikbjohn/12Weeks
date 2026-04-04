@@ -3666,11 +3666,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // Detect and send browser timezone
+    // Detect and send browser timezone — MUST complete before any date-dependent calls
     try {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         if (tz) {
-            fetch('/api/user/timezone', {
+            await fetch('/api/user/timezone', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({timezone: tz})
