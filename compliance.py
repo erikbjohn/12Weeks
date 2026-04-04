@@ -42,8 +42,9 @@ def compute_compliance_score(user_id):
     if program_days <= 0:
         return {"score": 100, "grade": "A+", "breakdown": {}, "streak": 0}
 
-    # Cap at 84 days (12 weeks)
-    lookback = min(program_days, 84)
+    # Cap lookback at 14 days — only score recent behavior, not historical gaps
+    # (Earlier days may have missing data due to app bugs, not user non-compliance)
+    lookback = min(program_days, 14)
     since = today - timedelta(days=lookback)
 
     # Fetch data
