@@ -3506,25 +3506,7 @@ function importData() {
 
 // ─── RPE FEEDBACK ───────────────────────────────────────────────────────────
 function submitRPE(week, dayIdx, exIdx, exName, rpe) {
-  // Read from per-set inputs — use the last set's weight and PER-SET reps (not total)
-  let weight = 0;
-  let lastSetReps = 0;
-  for (let s = 0; s < 20; s++) {
-    const wtEl = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${s}`);
-    if (!wtEl) break;
-    const w = parseFloat(wtEl.value) || 0;
-    if (w > 0) weight = w;
-    const rEl = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${s}`);
-    if (rEl) {
-      const r = parseInt(rEl.value) || 0;
-      if (r > 0) lastSetReps = r; // Keep last non-zero per-set reps
-    }
-  }
-  const weekData = workoutData[String(week)];
-  const setsLabel = weekData ? weekData.days[dayIdx].exercises[exIdx].sets : '';
-  const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
-  recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, lastSetReps || null);
-  renderDetail();
+  // No-op: RPE removed from workout flow
 }
 
 async function showExerciseSwap(exIdx, exerciseName, event) {
@@ -6597,27 +6579,7 @@ async function renderDetail() {
     }
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
-    const exData = getExerciseData(displayName);
-    const lastEntry = exData && exData.history && exData.history.length > 0 ? exData.history[exData.history.length - 1] : null;
-    const hasRPE = lastEntry && lastEntry.week === currentWeek && lastEntry.day === currentDay && lastEntry.rpe;
-    const lastRPE = hasRPE ? lastEntry.rpe : null;
-
-    let rpeHtml = '';
-    if (done && !hasRPE) {
-      rpeHtml = `<div class="rpe-feedback">
-        <span class="rpe-label">How was it?</span>
-        <button class="rpe-btn rpe-easy" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','too_easy')">Too Easy</button>
-        <button class="rpe-btn rpe-right" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','just_right')">Just Right</button>
-        <button class="rpe-btn rpe-hard" onclick="submitRPE(${currentWeek},${currentDay},${i},'${displayName.replace(/'/g, "\\'")}','too_hard')">Too Hard</button>
-      </div>`;
-    } else if (hasRPE) {
-      const rpeLabels = { too_easy: 'Too Easy', just_right: 'Just Right', too_hard: 'Too Hard' };
-      const rpeCls = { too_easy: 'rpe-easy', just_right: 'rpe-right', too_hard: 'rpe-hard' };
-      rpeHtml = `<div class="rpe-feedback">
-        <span class="rpe-label">Felt:</span>
-        <button class="rpe-btn ${rpeCls[lastRPE] || 'rpe-right'} selected" disabled>${rpeLabels[lastRPE]}</button>
-      </div>`;
-    }
+    // RPE removed — progression driven by actual data
 
     // Parse sets format: "4x10" → { count: 4, reps: "10" }
     const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
@@ -6660,7 +6622,6 @@ async function renderDetail() {
       ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${suggestion.reason && suggestion.reason !== 'estimated' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
-      ${rpeHtml ? `<div>${rpeHtml}</div>` : ''}
       <div id="swap-container-${i}"></div>
     </div>`;
   }).join('');
@@ -7600,12 +7561,8 @@ function renderExerciseFocus() {
 
   // Check if all sets done → show RPE (skip RPE for warm-ups)
   if (_focusSetIdx >= _focusSetCount) {
-    const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
-    if (currentEx && currentEx._isWarmup) {
-      if (_workoutActive) { advanceWorkoutSession(); } else { exitExerciseFocus(); }
-      return;
-    }
-    showFocusRPE();
+    // All sets done — advance or exit (no RPE)
+    if (_workoutActive) { advanceWorkoutSession(); } else { exitExerciseFocus(); }
     return;
   }
 
@@ -7723,9 +7680,33 @@ function logFocusSet() {
       return;
     }
 
-    // Last set done — go directly to RPE (no rest timer)
+    // Last set done — auto-record weight and advance (no RPE)
     _focusSetIdx = _focusSetCount;
-    showFocusRPE();
+
+    // Gather last weight and reps for ExerciseLog history
+    let recWeight = 0;
+    let recReps = 0;
+    for (let s = 0; s < _focusSetCount; s++) {
+      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
+      if (sd) {
+        if (sd.weight > 0) recWeight = sd.weight;
+        if (sd.reps > 0) recReps = sd.reps;
+      }
+    }
+    const weekDataRec = workoutData[String(currentWeek)];
+    let setsLabelRec = '';
+    if (_workoutActive && _workoutExercises[_workoutExIdx]) {
+      setsLabelRec = _workoutExercises[_workoutExIdx].sets || '';
+    } else if (weekDataRec && weekDataRec.days[currentDay] && weekDataRec.days[currentDay].exercises[_focusExIdx]) {
+      setsLabelRec = weekDataRec.days[currentDay].exercises[_focusExIdx].sets;
+    }
+    recordWeight(_focusExName, recWeight, setsLabelRec, null, currentWeek, currentDay, null, recReps || null);
+
+    if (_workoutActive) {
+      advanceWorkoutSession();
+    } else {
+      exitExerciseFocus();
+    }
   } else {
     // Advance to next set after rest
     _focusSetIdx++;
@@ -7803,7 +7784,31 @@ function startTimedSet(seconds) {
         }
 
         _focusSetIdx = _focusSetCount;
-        showFocusRestTimer(_focusRestSec, true); // Show RPE after
+
+        // Auto-record weight and advance (no RPE)
+        let timedRecWeight = 0;
+        let timedRecReps = 0;
+        for (let ts = 0; ts < _focusSetCount; ts++) {
+          const tsd = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${ts}`];
+          if (tsd) {
+            if (tsd.weight > 0) timedRecWeight = tsd.weight;
+            if (tsd.reps > 0) timedRecReps = tsd.reps;
+          }
+        }
+        const timedWeekData = workoutData[String(currentWeek)];
+        let timedSetsLabel = '';
+        if (_workoutActive && _workoutExercises[_workoutExIdx]) {
+          timedSetsLabel = _workoutExercises[_workoutExIdx].sets || '';
+        } else if (timedWeekData && timedWeekData.days[currentDay] && timedWeekData.days[currentDay].exercises[_focusExIdx]) {
+          timedSetsLabel = timedWeekData.days[currentDay].exercises[_focusExIdx].sets;
+        }
+        recordWeight(_focusExName, timedRecWeight, timedSetsLabel, null, currentWeek, currentDay, null, timedRecReps || null);
+
+        if (_workoutActive) {
+          advanceWorkoutSession();
+        } else {
+          exitExerciseFocus();
+        }
       } else {
         _focusSetIdx++;
         showFocusRestTimer(_focusRestSec, false); // Show next set after
@@ -7840,10 +7845,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
         const ex = _workoutExercises[i];
         const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
         const name = swaps[`${currentWeek}_${currentDay}_${i}`] || ex.name;
-        const exData = getExerciseData(name);
-        const lastRPE = exData && exData.history && exData.history.length > 0 ? exData.history[exData.history.length - 1].rpe : null;
-        const rpeColor = lastRPE === 'too_easy' ? '#4ade80' : lastRPE === 'too_hard' ? '#ef4444' : lastRPE === 'just_right' ? '#f59e0b' : 'var(--muted)';
-        completedExs.push(`<div style="font-size:12px;color:${rpeColor};padding:2px 0">&check; ${escapeHtml(name)}</div>`);
+        completedExs.push(`<div style="font-size:12px;color:var(--muted);padding:2px 0">&check; ${escapeHtml(name)}</div>`);
       }
       if (completedExs.length > 0) {
         html += `<div style="margin-bottom:12px;opacity:0.7">${completedExs.join('')}</div>`;
@@ -7935,11 +7937,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
 
       el.innerHTML = `<div class="focus-content"><div class="focus-timer-display focus-timer-done" style="font-size:72px">GO</div></div>`;
       setTimeout(() => {
-        if (window._focusShowRpeAfter) {
-          showFocusRPE();
-        } else {
-          renderExerciseFocus();
-        }
+        renderExerciseFocus();
       }, 1000);
     } else {
       render();
@@ -7950,58 +7948,15 @@ function showFocusRestTimer(seconds, showRpeAfter) {
 function skipFocusRest() {
   if (_focusTimerInterval) clearInterval(_focusTimerInterval);
   _focusTimerInterval = null;
-  if (window._focusShowRpeAfter) {
-    showFocusRPE();
-  } else {
-    renderExerciseFocus();
-  }
+  renderExerciseFocus();
 }
 
 function showFocusRPE() {
-  const el = document.getElementById('exercise-focus');
-  if (!el) return;
-
-  const escapedName = _focusExName.replace(/'/g, "\\'");
-  el.innerHTML = `
-    <div class="focus-content">
-      <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
-      <div class="focus-done-label">COMPLETE</div>
-      <div class="focus-rpe-title">How did it feel?</div>
-      <div class="focus-rpe-btns">
-        <button class="rpe-btn rpe-easy" onclick="submitFocusRPE('too_easy')">Too Easy</button>
-        <button class="rpe-btn rpe-right" onclick="submitFocusRPE('just_right')">Just Right</button>
-        <button class="rpe-btn rpe-hard" onclick="submitFocusRPE('too_hard')">Too Hard</button>
-      </div>
-    </div>`;
+  // No-op: RPE removed from workout flow
 }
 
 function submitFocusRPE(rpe) {
-  // Read last set's weight and PER-SET reps (not total)
-  let weight = 0;
-  let lastSetReps = 0;
-  for (let s = 0; s < _focusSetCount; s++) {
-    const setData = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
-    if (setData) {
-      if (setData.weight > 0) weight = setData.weight;
-      if (setData.reps > 0) lastSetReps = setData.reps;
-    }
-  }
-
-  const weekData = workoutData[String(currentWeek)];
-  let setsLabel = '';
-  if (_workoutActive && _workoutExercises[_workoutExIdx]) {
-    setsLabel = _workoutExercises[_workoutExIdx].sets || '';
-  } else if (weekData && weekData.days[currentDay] && weekData.days[currentDay].exercises[_focusExIdx]) {
-    setsLabel = weekData.days[currentDay].exercises[_focusExIdx].sets;
-  }
-  const rpeScore = rpe === 'too_easy' ? 5 : rpe === 'just_right' ? 7 : 9;
-  recordWeight(_focusExName, weight, setsLabel, rpe, currentWeek, currentDay, rpeScore, lastSetReps || null);
-
-  if (_workoutActive) {
-    advanceWorkoutSession();
-  } else {
-    exitExerciseFocus();
-  }
+  // No-op: RPE removed from workout flow
 }
 
 function showExerciseTransition(exIdx) {

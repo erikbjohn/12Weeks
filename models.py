@@ -231,6 +231,13 @@ class BodyMeasurement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     log_date = db.Column(db.Date, nullable=False, index=True)
     waist_inches = db.Column(db.Float, nullable=True)
+    chest = db.Column(db.Float, nullable=True)
+    bicep_left = db.Column(db.Float, nullable=True)
+    bicep_right = db.Column(db.Float, nullable=True)
+    thigh_left = db.Column(db.Float, nullable=True)
+    thigh_right = db.Column(db.Float, nullable=True)
+    hips = db.Column(db.Float, nullable=True)
+    neck = db.Column(db.Float, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
@@ -334,6 +341,7 @@ class PhysicalAssessment(db.Model):
     pullup_count = db.Column(db.Integer, nullable=True)  # 0 if can't
     # Gym baseline (for gym users) stored in ExerciseLog, just flag here
     gym_baseline_done = db.Column(db.Boolean, default=False)
+    actual_bmr = db.Column(db.Float)  # Computed from actual weight loss data, overrides Mifflin-St Jeor
     completed = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -437,3 +445,42 @@ class DailyCoachState(db.Model):
     checkin_completed_at = db.Column(db.DateTime, nullable=True)
     nudge_sent_at = db.Column(db.DateTime, nullable=True)
     __table_args__ = (db.UniqueConstraint('user_id', 'state_date'),)
+
+
+class WeeklyScheduleOverride(db.Model):
+    """Coach-set schedule overrides per day (e.g., workout at 3pm instead of 6am)."""
+    __tablename__ = "weekly_schedule_override"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    workout_time = db.Column(db.String(20))
+    skip_day = db.Column(db.Boolean, default=False)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MealPlanOverride(db.Model):
+    """Coach-set meal plan overrides (e.g., fast day on Saturday)."""
+    __tablename__ = "meal_plan_override"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    meal_type = db.Column(db.String(30))
+    daily_calories = db.Column(db.Integer)
+    reason = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class RunOverride(db.Model):
+    """Coach-set run overrides (e.g., longer duration, tempo swap)."""
+    __tablename__ = "run_override"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    duration = db.Column(db.String(20))
+    run_type = db.Column(db.String(20))
+    reason = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

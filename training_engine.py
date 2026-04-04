@@ -143,7 +143,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return {
             "target_weight": _round_weight(last_weight * 0.85, exercise_name),
             "target_reps": last_reps,
-            "target_sets": max(last_set_count - 1, 2),
+            "target_sets": last_set_count,
             "adjustment_reason": "Deload week — 85% weight, recovery focus",
             "progression_indicator": "deload",
         }
@@ -191,25 +191,25 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         }
 
     # ─── SIGNAL 4: SETS SKIPPED ───
+    # Volume is sacred — never reduce sets. Alert the coach instead.
+    coach_alert = None
     if sets_skipped >= 2:
-        return {
-            "target_weight": _round_weight(last_weight, exercise_name),
-            "target_reps": last_reps,
-            "target_sets": max(last_set_count - 1, 2),
-            "adjustment_reason": f"Skipped {sets_skipped} sets — volume reduced",
-            "progression_indicator": "down",
-        }
+        coach_alert = f"skipped_{sets_skipped}_sets"
+        # target_sets stays at configured count — volume is sacred
 
     # ─── SIGNAL 5: EXCEEDED REPS ───
     if exceeded_reps:
         new_weight = _round_weight(last_weight + inc, exercise_name)
-        return {
+        result = {
             "target_weight": new_weight,
             "target_reps": {1: 10, 2: 6, 3: 4}.get(phase, 10),
             "target_sets": last_set_count,
             "adjustment_reason": f"Beat rep target — weight +{inc} lb",
             "progression_indicator": "up",
         }
+        if coach_alert:
+            result["coach_alert"] = coach_alert
+        return result
 
     # ─── SIGNAL 1: STANDARD PROGRESSION BY PHASE ───
     if phase == 1:
@@ -219,43 +219,55 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         phase_max_reps = configured_reps if configured_reps else 15
         if avg_reps >= phase_max_reps:
             new_weight = _round_weight(last_weight + inc, exercise_name)
-            return {
+            result = {
                 "target_weight": new_weight,
                 "target_reps": configured_reps or 10,
                 "target_sets": last_set_count,
                 "adjustment_reason": f"Hit {int(avg_reps)} reps — weight +{inc} lb, reps reset to {configured_reps or 10}",
                 "progression_indicator": "up",
             }
+            if coach_alert:
+                result["coach_alert"] = coach_alert
+            return result
         target = min(int(avg_reps) + 1, phase_max_reps)
-        return {
+        result = {
             "target_weight": _round_weight(last_weight, exercise_name),
             "target_reps": target,
             "target_sets": last_set_count,
             "adjustment_reason": f"Building reps: {int(avg_reps)} → {target}",
             "progression_indicator": "up" if avg_reps < phase_max_reps else "hold",
         }
+        if coach_alert:
+            result["coach_alert"] = coach_alert
+        return result
 
     elif phase == 2:
         # Strength: increase weight every 1-2 sessions
         new_weight = _round_weight(last_weight + inc, exercise_name)
-        return {
+        result = {
             "target_weight": new_weight,
             "target_reps": max(6, last_reps),
             "target_sets": last_set_count,
             "adjustment_reason": f"Strength phase — +{inc} lb",
             "progression_indicator": "up",
         }
+        if coach_alert:
+            result["coach_alert"] = coach_alert
+        return result
 
     else:  # Phase 3
         # Power: aggressive increases
         new_weight = _round_weight(last_weight + inc, exercise_name)
-        return {
+        result = {
             "target_weight": new_weight,
             "target_reps": max(4, last_reps),
             "target_sets": last_set_count,
             "adjustment_reason": f"Power phase — +{inc} lb, peak performance",
             "progression_indicator": "up",
         }
+        if coach_alert:
+            result["coach_alert"] = coach_alert
+        return result
 
 
 def _count_consecutive_good_sessions(user_id, exercise_name):
