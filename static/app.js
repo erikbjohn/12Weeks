@@ -3887,12 +3887,19 @@ function renderTravelBanner() {
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
   if (_morningCheckinDone) return; // Already unlocked this session
+  // If already dismissed today (survives reload)
+  var dismissKey = 'checkin_done_' + todayStr();
+  if (localStorage.getItem(dismissKey)) {
+    _morningCheckinDone = true;
+    return;
+  }
   const today = todayStr();
   try {
     const res = await fetch('/api/morning-checkin?date=' + today);
     const data = await res.json();
     if (data.exists) {
       _morningCheckinDone = true;
+      localStorage.setItem(dismissKey, '1');
       _morningCheckinCache = data.checkin || data;
       renderCheckinSummaryBar();
     } else {
@@ -4127,6 +4134,8 @@ async function finishMorningCheckin() {
       }
   }
 
+  // Mark as done in localStorage so it survives reload even if DB save failed
+  localStorage.setItem('checkin_done_' + todayStr(), '1');
   closeMorningCheckin();
 }
 
