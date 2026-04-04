@@ -3945,6 +3945,12 @@ function renderTravelBanner() {
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
   if (_morningCheckinDone) return; // Already unlocked this session
+  // Morning check-in is a morning thing — don't gate after noon
+  var hour = new Date().getHours();
+  if (hour >= 12) {
+    _morningCheckinDone = true;
+    return;
+  }
   const today = todayStr();
   try {
     const res = await fetch('/api/morning-checkin?date=' + today);
