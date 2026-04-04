@@ -2954,6 +2954,9 @@ def _build_coach_context():
         set_data[s.exercise_name].append({
             "set": s.set_number + 1, "weight": s.weight,
             "reps": s.reps, "done": s.done,
+            "target_weight": getattr(s, 'target_weight', None),
+            "target_reps": getattr(s, 'target_reps', None),
+            "modification_direction": getattr(s, 'modification_direction', None),
         })
 
     # Run logs (last 14 days)
@@ -3129,6 +3132,18 @@ def _build_coach_context():
         "missed_checkin_today": missed_today,
         "session_analysis": session_analysis,
         "weekly_summary": weekly_summary,
+        # Skipped sets today
+        "skipped_sets_today": [{"exercise": s.exercise_name, "set": s.set_number}
+                               for s in today_sets if not s.done],
+        # Active overrides for this week
+        "schedule_overrides": [{"day_idx": o.day_idx, "workout_time": o.workout_time, "skip_day": o.skip_day, "notes": o.notes}
+                               for o in WeeklyScheduleOverride.query.filter_by(user_id=current_user.id, week=week).all()],
+        "meal_overrides": [{"day_idx": o.day_idx, "meal_type": o.meal_type, "reason": o.reason}
+                           for o in MealPlanOverride.query.filter_by(user_id=current_user.id, week=week).all()],
+        "run_overrides": [{"day_idx": o.day_idx, "duration": o.duration, "run_type": o.run_type, "reason": o.reason}
+                          for o in RunOverride.query.filter_by(user_id=current_user.id, week=week).all()],
+        "active_swaps": [{"day_idx": o.day_idx, "exercise_idx": o.exercise_idx, "swapped_to": o.swapped_to}
+                         for o in ExerciseSwap.query.filter_by(user_id=current_user.id, week=week).all()],
     }
 
 

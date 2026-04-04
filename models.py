@@ -127,6 +127,11 @@ class SetLog(db.Model):
     reps = db.Column(db.Integer, default=0)
     done = db.Column(db.Boolean, default=False)
     logged_date = db.Column(db.Date, default=date.today)
+    target_weight = db.Column(db.Float)
+    target_reps = db.Column(db.Integer)
+    user_modified = db.Column(db.Boolean, default=False)
+    modification_direction = db.Column(db.String(30))
+    exercise_swapped = db.Column(db.Boolean, default=False)
 
 
 class ExerciseSwap(db.Model):
