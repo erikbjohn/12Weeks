@@ -13,6 +13,9 @@ let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, re
 let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
 let _complianceCache = null;
+let _scheduleOverrides = [];
+let _mealOverrides = [];
+let _runOverrides = [];
 let _morningCheckinDone = false;
 let _focusExIdx = null;
 let _focusSetIdx = null;
@@ -3736,6 +3739,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       };
     }
 
+    // Fetch overrides for current week
+    try {
+        var [schedRes2, mealOvRes, runOvRes] = await Promise.all([
+            fetch('/api/schedule-overrides?week=' + currentWeek),
+            fetch('/api/meal-overrides?week=' + currentWeek),
+            fetch('/api/run-overrides?week=' + currentWeek),
+        ]);
+        if (schedRes2.ok) _scheduleOverrides = await schedRes2.json();
+        if (mealOvRes.ok) _mealOverrides = await mealOvRes.json();
+        if (runOvRes.ok) _runOverrides = await runOvRes.json();
+    } catch(e) { /* overrides are optional — ignore failures */ }
+
     // Always check if onboarding is truly complete
     // Check for ?action=restart-plan query param
     const urlParams = new URLSearchParams(window.location.search);
@@ -6596,10 +6611,44 @@ function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml
 }
 
 function buildFoodContent(d) {
+    // Check for meal override (e.g. fasting day)
+    var mealOverride = _mealOverrides.find(function(o) { return o.day_idx === currentDay; });
+    if (mealOverride && mealOverride.meal_type === 'fast_day') {
+        return '<div style="text-align:center;padding:2rem;color:var(--muted)">' +
+            '<div style="font-size:36px;margin-bottom:8px">&#127811;</div>' +
+            '<div style="font-size:16px;color:var(--text);margin-bottom:4px">Fasting Day</div>' +
+            '<div style="font-size:13px">' + (mealOverride.reason || 'Coach prescribed') + '</div>' +
+        '</div>';
+    }
+    if (mealOverride && mealOverride.note) {
+        return '<div style="color:var(--coach);font-size:12px;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:8px">' +
+            '&#127860; Meal adjusted: ' + mealOverride.note +
+        '</div>' + renderMealInner(d);
+    }
     return renderMealInner(d);
 }
 
 function buildRunSubsection(d, runClass) {
+    // Check for run override
+    var runOv = _runOverrides.find(function(o) { return o.day_idx === currentDay; });
+    if (runOv) {
+        var ovLabel = runOv.run_type || (d.run && d.run.label) || 'Run';
+        var ovTime = runOv.duration || (d.run && d.run.time) || '';
+        var ovDetail = runOv.detail || (d.run && d.run.detail) || '';
+        var ovClass = runOv.run_type ? 'run-' + runOv.run_type.toLowerCase().replace(/\s+/g, '') : runClass;
+        return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
+            '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
+            '<div style="color:var(--coach);font-size:12px;margin-bottom:8px">' +
+                '&#127939; Run adjusted by coach' + (runOv.notes ? ' — ' + runOv.notes : '') +
+            '</div>' +
+            '<div class="run-detail-box">' +
+                '<div class="rdl">Type</div>' +
+                '<div class="rdt"><span class="run-pill ' + ovClass + '">' + ovLabel + ' &middot; ' + ovTime + '</span></div>' +
+                (ovDetail ? '<div class="rdd" style="margin-top:8px">' + ovDetail + '</div>' : '') +
+            '</div>' +
+        '</div>';
+    }
+
     var runKey = currentWeek + '_' + currentDay;
     var existingRun = _runLogCache ? _runLogCache[runKey] : null;
     var runFormHtml = '';
@@ -6688,6 +6737,19 @@ async function renderDetail() {
   if (!d) return;
   const runClass = d.run ? `run-${d.run.type}` : 'run-z2';
   const isTraveling = _stateCache && _stateCache.traveling;
+
+  // Check for schedule override — skip day shows rest message
+  var schedOverride = _scheduleOverrides.find(function(o) { return o.day_idx === currentDay; });
+  if (schedOverride && schedOverride.skip_day) {
+    panel.innerHTML = '<div class="detail-inner" style="padding:2rem;text-align:center">' +
+        '<div style="font-size:48px;margin-bottom:1rem">&#128524;</div>' +
+        '<h3 style="color:var(--text);margin-bottom:0.5rem">Rest Day</h3>' +
+        '<div style="color:var(--muted);font-size:14px;margin-bottom:8px">Coach adjusted — take it easy today.</div>' +
+        (schedOverride.notes ? '<div style="color:var(--coach);font-size:13px">' + schedOverride.notes + '</div>' : '') +
+    '</div>';
+    panel.classList.add('visible');
+    return;
+  }
 
   // Load per-set data from DB for this day (if not already loaded)
   const setDayKey = `${currentWeek}_${currentDay}`;
@@ -6827,6 +6889,13 @@ async function renderDetail() {
 
   // Timing rows
   const timingRows = [];
+  // Show schedule override banner if workout time was adjusted
+  if (schedOverride && schedOverride.workout_time) {
+    timingRows.push('<div style="color:var(--coach);font-size:12px;margin-bottom:8px">' +
+      '&#9200; Schedule adjusted: workout at ' + schedOverride.workout_time +
+      (schedOverride.notes ? ' — ' + schedOverride.notes : '') +
+    '</div>');
+  }
   if (d.timing) {
     for (let i = 0; i < d.timing.length; i += 2) {
       timingRows.push(`<div class="timing-row">
