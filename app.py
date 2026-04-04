@@ -369,6 +369,24 @@ def _get_garmin(user_id=None):
     return _garmin_clients[uid]
 
 
+def _user_today():
+    """Get today's date in the current user's local timezone (not server UTC)."""
+    try:
+        tz = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
+        from utils_time import user_local_now
+        return user_local_now(tz).date()
+    except Exception:
+        return date.today()
+
+def _user_now():
+    """Get current datetime in the current user's local timezone."""
+    try:
+        tz = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
+        from utils_time import user_local_now
+        return user_local_now(tz)
+    except Exception:
+        return datetime.now()
+
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1121,7 +1139,7 @@ def api_weights_record():
         existing.rpe = data.get("rpe")
         existing.rpe_score = data.get("rpe_score")
         existing.reps_completed = data.get("reps_completed")
-        existing.logged_date = date.today()
+        existing.logged_date = _user_today()
         try:
             db.session.commit()
         except Exception as e:
@@ -1139,7 +1157,7 @@ def api_weights_record():
         difficulty_notes=data.get("difficulty_notes"),
         week=data.get("week"),
         day_idx=data.get("day_idx"),
-        logged_date=date.today(),
+        logged_date=_user_today(),
         user_id=current_user.id,
     )
     db.session.add(log)
@@ -1177,12 +1195,12 @@ def api_set_log():
         existing.weight = weight
         existing.reps = reps
         existing.done = done
-        existing.logged_date = date.today()
+        existing.logged_date = _user_today()
     else:
         existing = SetLog(
             user_id=current_user.id, exercise_name=exercise,
             week=week, day_idx=day_idx, set_number=set_number,
-            weight=weight, reps=reps, done=done, logged_date=date.today(),
+            weight=weight, reps=reps, done=done, logged_date=_user_today(),
         )
         db.session.add(existing)
     # Compute targets and detect modifications
@@ -1260,7 +1278,7 @@ def api_get_day_sets(week, day_idx):
 def api_exercise_targets(exercise_name):
     s = _get_state()
     week = s.current_week
-    day_idx = date.today().weekday()
+    day_idx = _user_today().weekday()
     targets = compute_next_targets(current_user.id, exercise_name, week, day_idx)
     return jsonify(targets)
 
@@ -1277,7 +1295,7 @@ def api_weights_baseline():
             rpe="just_right",
             week=0,
             day_idx=0,
-            logged_date=date.today(),
+            logged_date=_user_today(),
             test_weight=entry.get("test_weight"),
             test_reps=entry.get("test_reps"),
             estimated_1rm=entry.get("estimated_1rm"),
@@ -1513,7 +1531,7 @@ def api_toggle_day():
 @app.route("/api/meals")
 @login_required
 def api_meals():
-    d = request.args.get("date", date.today().isoformat())
+    d = request.args.get("date", _user_today().isoformat())
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ml:
         return jsonify({"eaten": [], "adjustments": {}, "foodItems": [], "fasting": False})
@@ -1552,7 +1570,7 @@ def api_meals():
 @login_required
 def api_meals_update():
     data = request.get_json()
-    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     ml = MealLog.query.filter_by(user_id=current_user.id, log_date=d).first()
     if not ml:
         ml = MealLog(log_date=d, user_id=current_user.id)
@@ -1613,7 +1631,7 @@ def api_bodyweight_record():
     weight = data.get("weight")
     if not weight or weight < 50 or weight > 600:
         return jsonify({"error": "Weight must be between 50 and 600 lbs"}), 400
-    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bw:
         bw.weight_lbs = weight
@@ -1655,7 +1673,7 @@ def api_measurements():
 @login_required
 def api_measurements_record():
     data = request.get_json()
-    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bm:
         if "waist" in data:
@@ -1711,7 +1729,7 @@ def api_checkins_record():
             soreness_level=data.get("soreness"),
             adherence_pct=data.get("adherence"),
             notes=data.get("notes"),
-            check_in_date=date.today(),
+            check_in_date=_user_today(),
             user_id=current_user.id,
         )
         db.session.add(ci)
@@ -1724,7 +1742,7 @@ def api_checkins_record():
 @app.route("/api/supplements")
 @login_required
 def api_supplements():
-    d = request.args.get("date", date.today().isoformat())
+    d = request.args.get("date", _user_today().isoformat())
     logs = SupplementLog.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).all()
     taken = {s.supplement_name: s.taken for s in logs}
     return jsonify({"date": d, "taken": taken, "list": SUPPLEMENTS})
@@ -1734,7 +1752,7 @@ def api_supplements():
 @login_required
 def api_supplements_toggle():
     data = request.get_json()
-    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     name = data["name"]
     sl = SupplementLog.query.filter_by(user_id=current_user.id, log_date=d, supplement_name=name).first()
     if sl:
@@ -1824,7 +1842,7 @@ def api_import():
                     exercise_name=name, weight=h["weight"],
                     sets_label=h.get("reps"), rpe=h.get("rpe"),
                     week=h.get("week", 0), day_idx=h.get("day", 0),
-                    logged_date=date.fromisoformat(h["date"]) if h.get("date") else date.today(),
+                    logged_date=date.fromisoformat(h["date"]) if h.get("date") else _user_today(),
                     test_weight=h.get("testWeight"), test_reps=h.get("testReps"),
                     estimated_1rm=h.get("estimated1RM"),
                     user_id=current_user.id,
@@ -1916,7 +1934,7 @@ def api_travel_workout():
 @app.route("/api/morning-checkin")
 @login_required
 def api_morning_checkin():
-    d = request.args.get("date", date.today().isoformat())
+    d = request.args.get("date", _user_today().isoformat())
     ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(d)).first()
     if not ci:
         return jsonify({"exists": False})
@@ -1938,7 +1956,7 @@ def api_morning_checkin():
 @login_required
 def api_morning_checkin_save():
     data = request.get_json()
-    d = date.fromisoformat(data.get("date", date.today().isoformat()))
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
     if ci:
         ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
@@ -2004,7 +2022,7 @@ def api_compliance_refresh():
 @login_required
 def api_morning_checkin_history():
     days = request.args.get("days", 30, type=int)
-    since = date.today() - timedelta(days=days)
+    since = _user_today() - timedelta(days=days)
     entries = MorningCheckIn.query.filter(
         MorningCheckIn.user_id == current_user.id,
         MorningCheckIn.log_date >= since
@@ -2029,8 +2047,8 @@ def api_psych_intake_status():
     intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if not intake:
         return jsonify({"started": False, "completed": False, "has_report": False, "locked": False})
-    locked = intake.locked_until and date.today() < intake.locked_until
-    lockout_expired = intake.locked_until and date.today() >= intake.locked_until
+    locked = intake.locked_until and _user_today() < intake.locked_until
+    lockout_expired = intake.locked_until and _user_today() >= intake.locked_until
     return jsonify({
         "started": True,
         "completed": intake.completed,
@@ -2075,8 +2093,8 @@ def api_psych_intake_message():
             db.session.commit()
 
         # Check if locked out — return immediately (no background job needed)
-        if intake.locked_until and date.today() < intake.locked_until:
-            days_left = (intake.locked_until - date.today()).days
+        if intake.locked_until and _user_today() < intake.locked_until:
+            days_left = (intake.locked_until - _user_today()).days
             return jsonify({
                 "response": f"You're locked out for {days_left} more day{'s' if days_left != 1 else ''}. Come back when you've been alcohol-free for 7 days.",
                 "completed": False,
@@ -2184,7 +2202,7 @@ def api_psych_intake_result(job_id):
     is_locked = "[INTAKE_LOCKED]" in response_text
     if is_locked:
         response_text = response_text.replace("[INTAKE_LOCKED]", "").strip()
-        intake.locked_until = date.today() + timedelta(days=7)
+        intake.locked_until = _user_today() + timedelta(days=7)
 
     convo.append({"role": "assistant", "content": response_text})
     intake.conversation = convo
@@ -2305,7 +2323,7 @@ _chat_rate_limit = {}  # user_id → last_send_timestamp
 def api_chat_history():
     days = request.args.get("days", 7, type=int)
     limit = request.args.get("limit", 100, type=int)
-    since = date.today() - timedelta(days=days)
+    since = _user_today() - timedelta(days=days)
     messages = ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= since
@@ -2345,7 +2363,7 @@ def api_chat():
     mode = data.get('mode', 'chat')
 
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id, message_type=mode)
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=_user_today(), user_id=current_user.id, message_type=mode)
     db.session.add(user_chat)
     try:
         db.session.commit()
@@ -2360,7 +2378,7 @@ def api_chat():
     response_text = get_coach_response(user_msg, context)
 
     # Save assistant message
-    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id, message_type=mode)
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
     db.session.add(asst_chat)
     try:
         db.session.commit()
@@ -2417,7 +2435,8 @@ def api_chat_stream():
     mode = data.get('mode', 'chat')
 
     # Save user message
-    user_chat = ChatMessage(role="user", content=user_msg, log_date=date.today(), user_id=current_user.id, message_type=mode)
+    _log_date = _user_today()
+    user_chat = ChatMessage(role="user", content=user_msg, log_date=_log_date, user_id=current_user.id, message_type=mode)
     db.session.add(user_chat)
     db.session.commit()
 
@@ -2465,7 +2484,7 @@ def api_chat_stream():
             if full_text.strip():
                 try:
                     with _app.app_context():
-                        asst_chat = ChatMessage(role="assistant", content=full_text, log_date=date.today(), user_id=_current_user_id, message_type=_mode)
+                        asst_chat = ChatMessage(role="assistant", content=full_text, log_date=_log_date, user_id=_current_user_id, message_type=_mode)
                         db.session.add(asst_chat)
                         db.session.commit()
                 except Exception:
@@ -2479,7 +2498,7 @@ def api_chat_stream():
 @login_required
 def api_daily_opener():
     """Returns today's morning opener. Generates if not yet created."""
-    today = date.today()
+    today = _user_today()
 
     # Check daily state
     state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
@@ -2510,7 +2529,7 @@ def api_daily_opener():
 @app.route('/api/coach/dismiss-opener', methods=['POST'])
 @login_required
 def api_dismiss_opener():
-    today = date.today()
+    today = _user_today()
     state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
     if not state:
         state = DailyCoachState(user_id=current_user.id, state_date=today)
@@ -2524,7 +2543,7 @@ def api_dismiss_opener():
 @login_required
 def api_coach_today_history():
     """Today's chat messages only, excluding internal triggers."""
-    today = date.today()
+    today = _user_today()
     messages = ChatMessage.query.filter_by(
         user_id=current_user.id, log_date=today
     ).order_by(ChatMessage.created_at.asc()).all()
@@ -2547,7 +2566,7 @@ def api_coach_today_history():
 def _build_coach_context():
     """Gather all relevant data for the AI coach."""
     # Recent morning check-ins
-    since = date.today() - timedelta(days=14)
+    since = _user_today() - timedelta(days=14)
     checkins = [{
         "date": e.log_date.isoformat(),
         "sleep_quality": e.sleep_quality,
@@ -2589,15 +2608,9 @@ def _build_coach_context():
         readiness_data = assess_readiness(garmin_data)
 
     # Current state — compute week from start_date using user's local timezone
-    # Server may be in UTC; user in US timezone — date.today() could be tomorrow
     s = _get_state()
     week = s.current_week
-    user_tz = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
-    try:
-        from utils_time import user_local_now
-        local_today = user_local_now(user_tz).date()
-    except Exception:
-        local_today = date.today()
+    local_today = _user_today()
     if s.start_date:
         diff_days = (local_today - s.start_date).days
         week = min(12, max(1, diff_days // 7 + 1))
@@ -2919,7 +2932,7 @@ def api_photo_upload():
 
     # Save photo
     photo = ProgressPhoto(
-        log_date=date.today(),
+        log_date=_user_today(),
         photo_data=photo_b64,
         user_id=current_user.id,
         pose=pose,
@@ -2957,7 +2970,7 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
     prev_photos = ProgressPhoto.query.filter(
         ProgressPhoto.user_id == current_user.id,
         ProgressPhoto.pose == pose,
-        ProgressPhoto.log_date < date.today(),
+        ProgressPhoto.log_date < _user_today(),
     ).order_by(ProgressPhoto.log_date.desc()).limit(1).all()
 
     comparison_note = ""
@@ -3316,7 +3329,7 @@ def api_goal_compute():
     elif pa and pa.bodyweight_lbs:
         weight = pa.bodyweight_lbs
         # Sync to BodyWeight table so it's there for next time
-        db.session.add(BodyWeight(log_date=date.today(), weight_lbs=weight, user_id=current_user.id))
+        db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=current_user.id))
         db.session.commit()
     else:
         return jsonify({"error": "No weight data found. Complete physical assessment first."}), 400
@@ -3817,7 +3830,7 @@ def api_weekly_report_generate():
 
     report = WeeklyReport.query.filter_by(user_id=current_user.id, week=week).first()
     if not report:
-        report = WeeklyReport(week=week, report_date=date.today(), user_id=current_user.id)
+        report = WeeklyReport(week=week, report_date=_user_today(), user_id=current_user.id)
         db.session.add(report)
     report.workouts_completed = metrics["workouts_completed"]
     report.workouts_total = metrics["workouts_total"]
@@ -3969,7 +3982,7 @@ def api_morning_briefing():
     # Get today's workout
     s = _get_state()
     workouts = get_workouts(s.current_week)
-    today_idx = date.today().weekday()
+    today_idx = _user_today().weekday()
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
     workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
 
@@ -3985,8 +3998,8 @@ def api_morning_briefing():
     response_text = get_coach_response(briefing_msg, context)
 
     # Save as chat messages
-    user_chat = ChatMessage(role="user", content=checkin_summary, log_date=date.today(), user_id=current_user.id)
-    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=date.today(), user_id=current_user.id)
+    user_chat = ChatMessage(role="user", content=checkin_summary, log_date=_user_today(), user_id=current_user.id)
+    asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id)
     db.session.add(user_chat)
     db.session.add(asst_chat)
     db.session.commit()
@@ -4008,9 +4021,9 @@ def api_plan_lockout():
     """Lock user out for 1 week after rejecting the plan."""
     intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     if intake:
-        intake.locked_until = date.today() + timedelta(days=7)
+        intake.locked_until = _user_today() + timedelta(days=7)
         db.session.commit()
-    return jsonify({"ok": True, "locked_until": (date.today() + timedelta(days=7)).isoformat()})
+    return jsonify({"ok": True, "locked_until": (_user_today() + timedelta(days=7)).isoformat()})
 
 
 # ─── PHYSICAL ASSESSMENT ───────────────────────────────────────────────────
@@ -4070,7 +4083,7 @@ def api_physical_assessment_save():
     if "bodyweight" in data and data["bodyweight"]:
         pa.bodyweight_lbs = float(data["bodyweight"])
         # CRITICAL: Also log to BodyWeight table — this is the primary weight source
-        d = date.today()
+        d = _user_today()
         bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bw:
             bw.weight_lbs = float(data["bodyweight"])
@@ -4087,7 +4100,7 @@ def api_physical_assessment_save():
                 pa.bodyweight_lbs = float(data["bodyweight"])
     if "waist" in data:
         pa.waist_inches = data["waist"]
-        d = date.today()
+        d = _user_today()
         bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bm:
             bm.waist_inches = data["waist"]
@@ -4289,7 +4302,7 @@ def api_run_log():
             user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx"),
             distance_miles=data.get("distance_miles"), avg_hr=data.get("avg_hr"),
             elevation_ft=data.get("elevation_ft"), duration_min=data.get("duration_min"),
-            notes=data.get("notes"), log_date=date.today(),
+            notes=data.get("notes"), log_date=_user_today(),
         )
         db.session.add(existing)
     try:

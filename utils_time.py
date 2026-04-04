@@ -39,3 +39,8 @@ def hours_ago_local(utc_dt, user_timezone):
 def user_local_now(user_timezone):
     """Get current time in user's timezone."""
     return datetime.now(ZoneInfo(user_timezone or 'UTC'))
+
+
+def user_local_today(user_timezone='UTC'):
+    """Return the user's local date (not the server's UTC date)."""
+    return user_local_now(user_timezone).date()

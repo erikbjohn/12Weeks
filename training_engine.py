@@ -281,7 +281,16 @@ def _count_consecutive_good_sessions(user_id, exercise_name):
 
 def compute_muscle_strength(user_id):
     """Recompute muscle group strength scores from recent performance."""
-    since = date.today() - timedelta(days=14)
+    # Use user's local timezone, not server UTC
+    try:
+        from models import User
+        from utils_time import user_local_now
+        user = User.query.get(user_id)
+        user_tz = user.timezone if user and user.timezone else 'UTC'
+        _today = user_local_now(user_tz).date()
+    except Exception:
+        _today = date.today()
+    since = _today - timedelta(days=14)
     recent_sets = SetLog.query.filter(
         SetLog.user_id == user_id,
         SetLog.done == True,
@@ -299,7 +308,7 @@ def compute_muscle_strength(user_id):
 
         target_wt = getattr(s, 'target_weight', None)
         if target_wt and target_wt > 0 and s.weight > 0:
-            days_ago = (date.today() - s.logged_date).days if s.logged_date else 7
+            days_ago = (_today - s.logged_date).days if s.logged_date else 7
             recency_weight = 2.0 if days_ago <= 7 else 1.0
             groups[mg].append((s.weight / target_wt) * recency_weight)
 
@@ -338,7 +347,15 @@ def compute_muscle_strength(user_id):
 
 def generate_session_analysis(user_id, week, day_idx):
     """Generate post-session analysis after workout completion."""
-    today = date.today()
+    # Use user's local timezone, not server UTC
+    try:
+        from models import User
+        from utils_time import user_local_now
+        user = User.query.get(user_id)
+        user_tz = user.timezone if user and user.timezone else 'UTC'
+        today = user_local_now(user_tz).date()
+    except Exception:
+        today = date.today()
 
     # Get today's sets
     sets = SetLog.query.filter_by(

@@ -21,7 +21,15 @@ def compute_compliance_score(user_id):
 
     Time decay: 0.85^(days_ago / 7)
     """
-    today = date.today()
+    # Use user's local timezone, not server UTC
+    try:
+        from models import User
+        from utils_time import user_local_now
+        user = User.query.get(user_id)
+        user_tz = user.timezone if user and user.timezone else 'UTC'
+        today = user_local_now(user_tz).date()
+    except Exception:
+        today = date.today()
 
     # Get user's start date for program length
     from models import AppState
