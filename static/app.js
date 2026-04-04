@@ -3944,8 +3944,9 @@ function showMorningCheckinOverlay() {
 
   el.innerHTML = `<div class="morning-checkin-overlay">
     <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
-      <div class="morning-briefing" style="flex-shrink:0">
-        <div class="morning-briefing-label">Morning Check-In with Erik</div>
+      <div class="morning-briefing" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+        <div class="morning-briefing-label">Check-In with Erik</div>
+        <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px" onclick="finishMorningCheckin()">&times;</button>
       </div>
       <div id="mc-chat-messages" class="mc-coach-messages" style="flex:1;overflow-y:auto;padding:12px 0">
         <div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>
