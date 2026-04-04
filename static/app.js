@@ -4083,18 +4083,35 @@ async function sendMcChat() {
   if (input) input.focus();
 }
 
-function finishMorningCheckin() {
-  // Save a basic check-in record (coach already has the conversation data)
-  fetch('/api/morning-checkin', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      date: todayStr(),
-      sleep_quality: 5, stress_level: 5, soreness: 5,
-      mood: 5, motivation: 5, anxiety: 3,
-      notes: '[Coach conversation check-in]',
-    }),
-  }).catch(e => console.error('Morning checkin save failed', e));
+async function finishMorningCheckin() {
+  // Save check-in record — MUST succeed or the overlay will reappear on reload
+  try {
+    await fetch('/api/morning-checkin', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        date: todayStr(),
+        sleep_quality: 5, stress_level: 5, soreness: 5,
+        mood: 5, motivation: 5, anxiety: 3,
+        notes: '[Coach conversation check-in]',
+      }),
+    });
+  } catch(e) {
+    console.error('Morning checkin save failed, retrying...', e);
+    // Retry once
+    try {
+      await fetch('/api/morning-checkin', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          date: todayStr(),
+          sleep_quality: 5, stress_level: 5, soreness: 5,
+          mood: 5, motivation: 5, anxiety: 3,
+          notes: '[Coach conversation check-in]',
+        }),
+      });
+    } catch(e2) { console.error('Morning checkin retry also failed', e2); }
+  }
 
   closeMorningCheckin();
 }
