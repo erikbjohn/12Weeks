@@ -3938,6 +3938,60 @@ function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
   _mcExchangeCount = 0;
+  var dayOfWeek = new Date().getDay();
+  var buttonText = dayOfWeek === 1 ? "Let's Start This Week" : "Start Today's Workout";
+
+  if (dayOfWeek === 0) {
+    // Sunday — show measurement form first, then transition to coach review
+    el.innerHTML = `<div class="morning-checkin-overlay">
+      <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
+        <div class="morning-briefing" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+          <div class="morning-briefing-label">Sunday Measurements</div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:12px 0">
+          <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Take all measurements before your coach review.</div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Weight (lb)</label>
+            <input type="number" inputmode="decimal" id="sun-weight" class="weight-input" style="width:80px" placeholder="lbs">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Waist (in)</label>
+            <input type="number" inputmode="decimal" id="sun-waist" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Chest (in)</label>
+            <input type="number" inputmode="decimal" id="sun-chest" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Hips (in)</label>
+            <input type="number" inputmode="decimal" id="sun-hips" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Neck (in)</label>
+            <input type="number" inputmode="decimal" id="sun-neck" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Bicep L (in)</label>
+            <input type="number" inputmode="decimal" id="sun-bicep-l" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Bicep R (in)</label>
+            <input type="number" inputmode="decimal" id="sun-bicep-r" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Thigh L (in)</label>
+            <input type="number" inputmode="decimal" id="sun-thigh-l" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+          <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+            <label style="color:var(--text);font-size:14px;min-width:80px">Thigh R (in)</label>
+            <input type="number" inputmode="decimal" id="sun-thigh-r" class="weight-input" style="width:80px" placeholder="inches">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitSundayMeasurements()">Submit & Start Review</button>
+      </div>
+    </div>`;
+    return; // Don't start coach chat yet — wait for measurement submission
+  }
 
   el.innerHTML = `<div class="morning-checkin-overlay">
     <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
@@ -3954,7 +4008,7 @@ function showMorningCheckinOverlay() {
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMcChat()">Send</button>
         </div>
-        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">Start Today's Workout</button>
+        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">${buttonText}</button>
       </div>
     </div>
   </div>`;
@@ -3963,8 +4017,136 @@ function showMorningCheckinOverlay() {
   _startMcChat();
 }
 
+async function submitSundayMeasurements() {
+  var data = {
+    date: todayStr(),
+    weight: parseFloat(document.getElementById('sun-weight')?.value) || null,
+    waist: parseFloat(document.getElementById('sun-waist')?.value) || null,
+    chest: parseFloat(document.getElementById('sun-chest')?.value) || null,
+    hips: parseFloat(document.getElementById('sun-hips')?.value) || null,
+    neck: parseFloat(document.getElementById('sun-neck')?.value) || null,
+    bicep_left: parseFloat(document.getElementById('sun-bicep-l')?.value) || null,
+    bicep_right: parseFloat(document.getElementById('sun-bicep-r')?.value) || null,
+    thigh_left: parseFloat(document.getElementById('sun-thigh-l')?.value) || null,
+    thigh_right: parseFloat(document.getElementById('sun-thigh-r')?.value) || null,
+  };
+
+  // Save measurements
+  await apiPost('/api/measurements', data);
+
+  // Also save weight to bodyweight tracker
+  if (data.weight) {
+    await apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
+  }
+
+  // Transition to the Sunday review coach conversation
+  _showSundayReviewChat(data);
+}
+
+function _showSundayReviewChat(measurements) {
+  var el = document.getElementById('morning-checkin-overlay');
+  if (!el) return;
+  _mcExchangeCount = 0;
+
+  el.innerHTML = `<div class="morning-checkin-overlay">
+    <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
+      <div class="morning-briefing" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+        <div class="morning-briefing-label">Sunday Review with Erik</div>
+        <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px" onclick="finishMorningCheckin()">&times;</button>
+      </div>
+      <div id="mc-chat-messages" class="mc-coach-messages" style="flex:1;overflow-y:auto;padding:12px 0">
+        <div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>
+      </div>
+      <div style="flex-shrink:0;padding-top:8px">
+        <div class="mc-coach-input-bar">
+          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMcChat()">
+          <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
+          <button onclick="sendMcChat()">Send</button>
+        </div>
+        <button class="btn btn-primary mc-continue-btn" id="mc-continue-btn" style="display:none;width:100%;margin-top:8px" onclick="finishMorningCheckin()">Done</button>
+      </div>
+    </div>
+  </div>`;
+
+  // Build measurement summary string for the trigger
+  var measStr = 'Weight: ' + (measurements.weight || '?') + 'lb';
+  if (measurements.waist) measStr += ', Waist: ' + measurements.waist + '"';
+  if (measurements.chest) measStr += ', Chest: ' + measurements.chest + '"';
+  if (measurements.hips) measStr += ', Hips: ' + measurements.hips + '"';
+  if (measurements.neck) measStr += ', Neck: ' + measurements.neck + '"';
+  if (measurements.bicep_left) measStr += ', Bicep L: ' + measurements.bicep_left + '"';
+  if (measurements.bicep_right) measStr += ', Bicep R: ' + measurements.bicep_right + '"';
+  if (measurements.thigh_left) measStr += ', Thigh L: ' + measurements.thigh_left + '"';
+  if (measurements.thigh_right) measStr += ', Thigh R: ' + measurements.thigh_right + '"';
+
+  // Send Sunday review trigger with measurements — same streaming pattern as _startMcChat
+  var trigger = '[SUNDAY_REVIEW] ' + localTimeContext() + ' Measurements just submitted: ' + measStr + '. This is the weekly review session. Cover ALL of the following IN ORDER: 1) MEASUREMENTS — analyze each body part vs last week and baseline, explain hypertrophy vs fat loss indicators. 2) WEIGHT PROGRESS — on pace for target? If not, how far off? 3) WEEK IN REVIEW — each day completed, weights lifted, PRs, missed days. 4) NUTRITION COMPLIANCE — ask directly. 5) What went well. 6) What needs work. One topic at a time. Let me respond before moving on.';
+
+  _startSundayReviewStream(trigger);
+}
+
+async function _startSundayReviewStream(trigger) {
+  try {
+    var res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: trigger }),
+    });
+    var messagesEl = document.getElementById('mc-chat-messages');
+    if (!messagesEl) return;
+    var typing = messagesEl.querySelector('.mc-typing-indicator');
+    if (typing) typing.remove();
+
+    var bubble = document.createElement('div');
+    bubble.className = 'mc-coach-bubble';
+    messagesEl.appendChild(bubble);
+
+    var fullText = '';
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      var chunk = decoder.decode(result.value, { stream: true });
+      var lines = chunk.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('data: ')) {
+          var data = lines[i].slice(6);
+          if (data === '[DONE]' || data === '[ERROR]') break;
+          fullText += data;
+          bubble.textContent = fullText;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      }
+    }
+    if (_chatHistory) {
+      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+    }
+  } catch(e) {
+    var messagesEl = document.getElementById('mc-chat-messages');
+    if (messagesEl) {
+      var typing = messagesEl.querySelector('.mc-typing-indicator');
+      if (typing) typing.remove();
+      messagesEl.innerHTML += '<div class="mc-coach-bubble">Let\'s review your week. How are you feeling about your progress?</div>';
+    }
+  }
+  var input = document.getElementById('mc-chat-input');
+  if (input) setTimeout(function() { input.focus(); }, 100);
+}
+
 async function _startMcChat() {
-  const trigger = '[MORNING_CHECKIN] ' + localTimeContext() + ' Start the check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief. After 2-3 exchanges, transition to today\'s workout — tell me what we\'re doing, what to focus on, any technique cues or mindset notes for the session. End with energy and intent.';
+  var dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
+  var trigger;
+
+  if (dayOfWeek === 1) {
+    // Monday — weekly planning session
+    trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() + ' This is the Monday weekly planning session. Review last week\'s performance. Walk through this week\'s schedule day by day — muscle groups, focus areas, where to push harder. Ask about schedule changes (travel, appointments). Apply any changes via structured markers. Only debilitating injury justifies exercise swaps — YOU decide.';
+  } else {
+    // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat
+    // Normal day
+    trigger = '[MORNING_CHECKIN] ' + localTimeContext() + ' Start the check-in. Ask how I slept, how I feel physically, my mood and motivation. One question at a time. Be brief. After 2-3 exchanges, transition to today\'s workout — tell me what we\'re doing, what to focus on, any technique cues or mindset notes for the session. End with energy and intent.';
+  }
+
   try {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
@@ -6481,6 +6663,23 @@ async function renderDetail() {
       </div>`;
       panel.classList.add('visible');
       return;
+  }
+
+  // Future week gate — show locked placeholder if browsing ahead of actual week
+  if (_stateCache && _stateCache.start_date) {
+    const _startDt = new Date(_stateCache.start_date + 'T00:00:00');
+    const _nowDt = new Date();
+    const _diffDays = Math.floor((_nowDt - _startDt) / (1000 * 60 * 60 * 24));
+    const _actualWeek = Math.min(12, Math.max(1, Math.floor(_diffDays / 7) + 1));
+    if (currentWeek > _actualWeek) {
+      panel.innerHTML = '<div class="detail-inner" style="padding:2rem;text-align:center">' +
+          '<div style="font-size:48px;margin-bottom:1rem">&#128274;</div>' +
+          '<h3 style="color:var(--text);margin-bottom:0.5rem">Coming Soon</h3>' +
+          '<div style="color:var(--muted);font-size:14px">This week\'s plan will be set during Monday\'s check-in with Erik.</div>' +
+      '</div>';
+      panel.classList.add('visible');
+      return;
+    }
   }
 
   const weekData = workoutData[String(currentWeek)];

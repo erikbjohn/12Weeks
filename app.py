@@ -373,6 +373,110 @@ try:
 except Exception:
     pass
 
+def _parse_coach_markers(text, user_id, week):
+    """Parse structured markers from coach response and apply them."""
+    import re
+    # [SWAP: day=X, exercise=Name, replace_with=Name, reason=...]
+    for m in re.finditer(r'\[SWAP:\s*day=(\d+),\s*exercise=([^,]+),\s*replace_with=([^,]+),\s*reason=([^\]]+)\]', text):
+        try:
+            day_idx, exercise, replace_with, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+            existing = ExerciseSwap.query.filter_by(user_id=user_id, week=week, day_idx=day_idx, exercise_idx=0).first()
+            if not existing:
+                db.session.add(ExerciseSwap(user_id=user_id, week=week, day_idx=day_idx, exercise_idx=0, swapped_to=replace_with))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [SCHEDULE: day=X, time=3:00 PM, notes=...]
+    for m in re.finditer(r'\[SCHEDULE:\s*day=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
+        try:
+            day_idx, workout_time = int(m.group(1)), m.group(2).strip()
+            notes = m.group(3).strip() if m.group(3) else ''
+            existing = WeeklyScheduleOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+            if existing:
+                existing.workout_time = workout_time
+                existing.notes = notes
+            else:
+                db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, workout_time=workout_time, notes=notes))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [NUTRITION: day=X, meal_type=fast_day, reason=...]
+    for m in re.finditer(r'\[NUTRITION:\s*day=(\d+),\s*meal_type=([^,]+),\s*reason=([^\]]+)\]', text):
+        try:
+            day_idx, meal_type, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip()
+            existing = MealPlanOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+            if existing:
+                existing.meal_type = meal_type
+                existing.reason = reason
+            else:
+                db.session.add(MealPlanOverride(user_id=user_id, week=week, day_idx=day_idx, meal_type=meal_type, reason=reason))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [NUTRITION: daily_calories=XXXX, reason=...]
+    for m in re.finditer(r'\[NUTRITION:\s*daily_calories=(\d+),\s*reason=([^\]]+)\]', text):
+        try:
+            new_cals = int(m.group(1))
+            goal = TrainingGoal.query.filter_by(user_id=user_id).first()
+            if goal:
+                goal.daily_calories = new_cals
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [WEIGHT: exercise=Name, adjustment=+5, reason=...]
+    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*adjustment=([+-]?\d+),\s*reason=([^\]]+)\]', text):
+        try:
+            exercise, adj, reason = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
+            last_log = ExerciseLog.query.filter_by(user_id=user_id, exercise_name=exercise).order_by(ExerciseLog.logged_date.desc()).first()
+            base_weight = last_log.weight if last_log else 0
+            new_weight = base_weight + adj
+            log = ExerciseLog(user_id=user_id, exercise_name=exercise, weight=new_weight, week=week, day_idx=0, rpe=None, logged_date=_user_today())
+            db.session.add(log)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [RUN: day=X, duration=50 min, type=zone2, reason=...]
+    for m in re.finditer(r'\[RUN:\s*day=(\d+),\s*duration=([^,]+),\s*type=([^,]+),\s*reason=([^\]]+)\]', text):
+        try:
+            day_idx, duration, run_type, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+            existing = RunOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+            if existing:
+                existing.duration = duration
+                existing.run_type = run_type
+                existing.reason = reason
+            else:
+                db.session.add(RunOverride(user_id=user_id, week=week, day_idx=day_idx, duration=duration, run_type=run_type, reason=reason))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [BMR_UPDATE: new_bmr=XXXX, reason=...]
+    for m in re.finditer(r'\[BMR_UPDATE:\s*new_bmr=(\d+),\s*reason=([^\]]+)\]', text):
+        try:
+            new_bmr = int(m.group(1))
+            pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+            if pa:
+                pa.actual_bmr = new_bmr
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [LOCKOUT_WARNING: count=X, reason=...]
+    for m in re.finditer(r'\[LOCKOUT_WARNING:\s*count=([^,]+),\s*reason=([^\]]+)\]', text):
+        try:
+            count, reason = m.group(1).strip(), m.group(2).strip()
+            cm = CoachMemory(user_id=user_id, memory_type='lockout_warning', content=f'Warning {count}: {reason}', week=week)
+            db.session.add(cm)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
 
@@ -1700,12 +1804,33 @@ def api_measurements_record():
     if bm:
         if "waist" in data:
             bm.waist_inches = data["waist"]
+        if "chest" in data:
+            bm.chest = data["chest"]
+        if "hips" in data:
+            bm.hips = data["hips"]
+        if "neck" in data:
+            bm.neck = data["neck"]
+        if "bicep_left" in data:
+            bm.bicep_left = data["bicep_left"]
+        if "bicep_right" in data:
+            bm.bicep_right = data["bicep_right"]
+        if "thigh_left" in data:
+            bm.thigh_left = data["thigh_left"]
+        if "thigh_right" in data:
+            bm.thigh_right = data["thigh_right"]
         if "notes" in data:
             bm.notes = data["notes"]
     else:
         bm = BodyMeasurement(
             log_date=d,
             waist_inches=data.get("waist"),
+            chest=data.get("chest"),
+            hips=data.get("hips"),
+            neck=data.get("neck"),
+            bicep_left=data.get("bicep_left"),
+            bicep_right=data.get("bicep_right"),
+            thigh_left=data.get("thigh_left"),
+            thigh_right=data.get("thigh_right"),
             notes=data.get("notes"),
             user_id=current_user.id,
         )
@@ -2581,6 +2706,12 @@ def api_chat_stream():
                                 pass  # Memory extraction is best-effort
 
                     threading.Thread(target=_save_memories_stream, daemon=True).start()
+                except Exception:
+                    pass
+
+                # Parse structured markers from coach response
+                try:
+                    _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
                 except Exception:
                     pass
 
