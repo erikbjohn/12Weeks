@@ -102,87 +102,22 @@ let _coachPopupTimeout = null;
 let _coachPopupQueue = [];
 
 function showCoachPopup(message) {
-  // If a popup is already showing, queue this one
-  const existing = document.getElementById('coach-opener-panel');
-  if (existing) {
-    _coachPopupQueue.push(message);
-    return;
-  }
-
-  const panel = document.createElement('div');
-  panel.id = 'coach-opener-panel';
-  panel.className = 'coach-opener';
-  panel.innerHTML = `
-    <div class="coach-opener__inner">
-      <div class="coach-opener__header">
-        <div class="coach-opener__avatar">E</div>
-        <div class="coach-opener__meta">
-          <span class="coach-opener__name">Erik</span>
-          <span class="coach-opener__status">Online</span>
-        </div>
-        <button class="coach-opener__dismiss" onclick="dismissCoachPopup()" aria-label="Dismiss">&times;</button>
-      </div>
-      <div class="coach-opener__body">
-        <p class="coach-opener__message">${escapeHtml(message)}</p>
-      </div>
-      <div class="coach-opener__input">
-        <input type="text" id="opener-reply-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendOpenerReply()">
-        <button onclick="sendOpenerReply()">Send</button>
-      </div>
-    </div>`;
-
-  // Insert at top of page, after header
-  const header = document.querySelector('header');
-  if (header && header.nextSibling) {
-    header.parentNode.insertBefore(panel, header.nextSibling);
-  } else {
-    document.body.prepend(panel);
-  }
-
-  // Push to chat history
-  _chatHistory.push({ role: 'coach', text: message, time: new Date().toISOString(), date: todayStr() });
+    if (!message) return;
+    _chatHistory.push({ role: 'assistant', content: message, date: todayStr(), time: new Date().toISOString() });
+    renderDetail();
+    var accSection = document.getElementById('acc-coach');
+    if (accSection) {
+        if (!accSection.classList.contains('open')) toggleAccordion('coach');
+        accSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 function sendOpenerReply() {
-    const input = document.getElementById('opener-reply-input');
-    if (!input) return;
-    const text = (input.value || '').trim();
-    if (!text) return;
-    input.value = '';
-
-    // Dismiss the opener
-    dismissCoachPopup();
-
-    // Open the full chat and send the message there
-    _chatOverlayOpen = true;
-    renderChatOverlay();
-
-    // Wait for chat to render, then send the message
-    setTimeout(() => {
-        const chatInput = document.getElementById('chat-overlay-input');
-        if (chatInput) {
-            chatInput.value = text;
-            sendChatMessage('chat-overlay-input', 'chat-overlay-messages');
-        }
-    }, 200);
+    return;
 }
 
 function dismissCoachPopup() {
-  if (_coachPopupTimeout) { clearTimeout(_coachPopupTimeout); _coachPopupTimeout = null; }
-  const panel = document.getElementById('coach-opener-panel');
-  if (panel) {
-    panel.style.opacity = '0';
-    panel.style.maxHeight = '0';
-    setTimeout(() => {
-      panel.remove();
-      // Show next queued
-      if (_coachPopupQueue.length > 0) {
-        showCoachPopup(_coachPopupQueue.shift());
-      }
-    }, 300);
-  }
-  // Mark as dismissed
-  fetch('/api/coach/dismiss-opener', { method: 'POST' }).catch(() => {});
+    return;
 }
 
 // Dedup: prevent duplicate popups per day
@@ -4400,24 +4335,12 @@ async function triggerWeeklyPlanning() {
   const planKey = '12w_weekly_plan_' + todayStr();
   if (localStorage.getItem(planKey)) return;
 
-  // Open the chat overlay with a weekly planning prompt
-  toggleChatOverlay();
-
-  // Wait a beat for the overlay to render
-  await new Promise(r => setTimeout(r, 500));
-
   // Send the weekly planning trigger to Coach
   const weekNum = currentWeek;
   const nextWeek = Math.min(weekNum + 1, 12);
   const msg = `[WEEKLY_PLANNING] It's Sunday. Week ${weekNum} is done, week ${nextWeek} starts tomorrow. Review my week, then let's plan. Ask me about any travel, races, schedule changes, or injuries for the coming week. Adjust the plan based on what I tell you.`;
 
-  // Find the chat input and programmatically send
-  const inputEl = document.getElementById('chat-overlay-input') || document.getElementById('chat-input-field');
-  if (inputEl) {
-    inputEl.value = msg;
-  }
-
-  // Actually send it
+  // Send via API, then show result in Coach accordion
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -4431,8 +4354,9 @@ async function triggerWeeklyPlanning() {
       _chatHistory.push({ role: 'assistant', content: d.response, date: todayStr(), time: d.time });
     }
 
-    // Re-render the chat to show the response
-    if (typeof renderChatOverlay === 'function') renderChatOverlay();
+    // Show the response in the Coach accordion
+    renderDetail();
+    toggleChatOverlay();
 
     localStorage.setItem(planKey, '1');
   } catch(e) {
@@ -4521,88 +4445,29 @@ function _getChatOpener() {
 }
 
 function toggleChatOverlay() {
-  if (_chatOverlayOpen) {
-    const msgs = document.getElementById('chat-overlay-messages');
-    if (msgs) _chatScrollPos = msgs.scrollTop;
-  }
-  _chatOverlayOpen = !_chatOverlayOpen;
-  renderChatOverlay();
+    var accSection = document.getElementById('acc-coach');
+    if (accSection) {
+        if (!accSection.classList.contains('open')) {
+            toggleAccordion('coach');
+        }
+        accSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        var chatContainer = document.getElementById('coach-inline-chat');
+        if (chatContainer && chatContainer.querySelector('button')) {
+            openInlineCoachChat();
+        }
+    }
 }
 
 function closeChatOverlay() {
-  const msgs = document.getElementById('chat-overlay-messages');
-  if (msgs) _chatScrollPos = msgs.scrollTop;
-  _chatOverlayOpen = false;
-  renderChatOverlay();
+  return;
 }
 
 function renderChatOverlay() {
-  const el = document.getElementById('chat-overlay');
-  if (!el) return;
-  if (!_chatOverlayOpen) {
-    el.classList.remove('visible');
-    el.innerHTML = '';
-    return;
-  }
-
-  el.classList.add('visible');
-  el.innerHTML = `
-    <div class="chat-header">
-      <button class="chat-close" onclick="closeChatOverlay()">&larr;</button>
-      <h2>Coach Erik</h2>
-    </div>
-    <div class="chat-messages" id="chat-overlay-messages">
-      <div class="chat-bubble coach"><div class="chat-typing"><span></span><span></span><span></span></div></div>
-    </div>
-    <div class="chat-input-bar">
-      <input type="text" id="chat-overlay-input" placeholder="Message Coach..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendChatMessage('chat-overlay-input','chat-overlay-messages')">
-      <button onclick="sendChatMessage('chat-overlay-input','chat-overlay-messages')">Send</button>
-    </div>
-  `;
-
-  // Send context trigger so Erik gives a relevant greeting
-  _fetchChatOpener();
+  return;
 }
 
 async function _fetchChatOpener() {
-  const trigger = '[CHAT_OPENED] The athlete just opened the chat. FIRST: check the TODAY field for the current time. If it is evening, do NOT say good morning or talk about starting a workout. Match the time of day. THEN: look at workouts done, meals logged, timing compliance. Give a brief, relevant comment on where they are RIGHT NOW. If something stands out (early/late meal, great day, rest evening, etc.), address it. 1-3 sentences. Ask what is on their mind.';
-  const messagesEl = document.getElementById('chat-overlay-messages');
-  if (!messagesEl) return;
-  try {
-    const res = await fetch('/api/chat/stream', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ message: trigger }),
-    });
-    // Replace typing indicator with streamed response
-    const firstBubble = messagesEl.querySelector('.chat-bubble.coach');
-    if (firstBubble) firstBubble.innerHTML = '';
-    let fullText = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
-          if (firstBubble) firstBubble.textContent = fullText;
-          messagesEl.scrollTop = messagesEl.scrollHeight;
-        }
-      }
-    }
-    if (_chatHistory) {
-      _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
-    }
-  } catch(e) {
-    const firstBubble = messagesEl.querySelector('.chat-bubble.coach');
-    if (firstBubble) firstBubble.textContent = 'What\'s up?';
-  }
-  const input = document.getElementById('chat-overlay-input');
-  if (input) setTimeout(() => input.focus(), 100);
+  return;
 }
 
 function renderChatMessages(containerId) {
@@ -6124,12 +5989,12 @@ function renderInlineCoach() {
 function quickCoachReply(msg) {
   toggleChatOverlay();
   setTimeout(() => {
-    const input = document.getElementById('chat-overlay-input');
+    const input = document.getElementById('coach-inline-input');
     if (input) {
       input.value = msg;
-      sendChatMessage('chat-overlay-input', 'chat-overlay-messages');
+      sendInlineCoachMsg();
     }
-  }, 300);
+  }, 500);
 }
 
 function renderGarminBar() {

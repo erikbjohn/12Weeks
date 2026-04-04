@@ -1,8 +1,8 @@
-const CACHE_NAME = '12weeks-v20';
+const CACHE_NAME = '12weeks-v21';
 const STATIC_ASSETS = [
   '/',
-  '/static/style.css?v=127',
-  '/static/app.js?v=127',
+  '/static/style.css?v=128',
+  '/static/app.js?v=128',
   '/static/manifest.json',
 ];
 const DATA_CACHE = '12weeks-data-v6';
