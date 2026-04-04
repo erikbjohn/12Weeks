@@ -3886,11 +3886,19 @@ function renderTravelBanner() {
 
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
-  if (_morningCheckinDone) return; // Already unlocked this session
-  // If already dismissed today (survives reload)
+  if (_morningCheckinDone) return;
   var dismissKey = 'checkin_done_' + todayStr();
   if (localStorage.getItem(dismissKey)) {
     _morningCheckinDone = true;
+    return;
+  }
+  // If user has any activity today (sets, chat, meals), they've been using the app — skip
+  var hasActivity = (_chatHistory && _chatHistory.length > 0) ||
+    (_setCache && Object.keys(_setCache).some(function(k) { return k !== '_loadedDay' && _setCache[k] && _setCache[k].done; })) ||
+    (_mealsCache && _mealsCache[todayStr()]);
+  if (hasActivity) {
+    _morningCheckinDone = true;
+    localStorage.setItem(dismissKey, '1');
     return;
   }
   const today = todayStr();
@@ -3908,7 +3916,7 @@ async function checkMorningCheckin() {
     }
   } catch(e) {
     console.error('Morning checkin check failed', e);
-    _morningCheckinDone = true; // Don't block on network error
+    _morningCheckinDone = true;
   }
 }
 
