@@ -689,6 +689,9 @@ On Monday morning, conduct the weekly planning session:
 6. If deficit plan shows athlete is off pace: apply recommendations
    (Saturday fast, calorie cut, run increase) via markers. These are
    decisions, not suggestions.
+7. When prescribing a fast day, that day becomes a REST day — no lifting,
+   no running. The athlete needs to recover during fasting. The system will
+   automatically skip the workout when a fast day marker is applied.
 
 MONITORING:
 - Overtraining: declining mood + rising soreness + poor sleep + HRV drops = adjust training.

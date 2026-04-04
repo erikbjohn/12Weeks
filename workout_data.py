@@ -228,18 +228,19 @@ MEAL_PLANS = {
         ],
     },
     "fast_day": {
-        "label": "24h Fast Day",
-        "targetCal": 0,
-        "targetProtein": 0,
-        "targetCarbs": 0,
-        "targetFat": 0,
-        "note": "Full 24h fast. Water, black coffee, electrolytes only. Break fast Monday at 11am. Max 1x/week. Only do this if training readiness is good and sleep has been solid.",
+        "label": "Protein-Sparing Fast Day",
+        "targetCal": 130,
+        "targetProtein": 30,
+        "targetCarbs": 2,
+        "targetFat": 1,
+        "note": "Protein-sparing modified fast. One whey shake to protect muscle, otherwise water/coffee/electrolytes only. No workout today — rest and recover. Break fast Monday at 11am. Max 1x/week. Only do this if training readiness is good and sleep has been solid.",
         "meals": [
             {
                 "time": "All Day",
-                "name": "Fast - Liquids Only",
+                "name": "Fast - Liquids Only + Protein",
                 "optional": False,
                 "foods": [
+                    {"item": "Whey protein shake (water)", "portion": "1 scoop", "cal": 130, "protein": 30, "carbs": 2, "fat": 1},
                     {"item": "Water", "portion": "Unlimited", "cal": 0, "protein": 0, "carbs": 0, "fat": 0},
                     {"item": "Black coffee", "portion": "As needed", "cal": 5, "protein": 0, "carbs": 0, "fat": 0},
                     {"item": "Electrolytes (salt, potassium)", "portion": "As needed", "cal": 0, "protein": 0, "carbs": 0, "fat": 0},

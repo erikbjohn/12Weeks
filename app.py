@@ -412,6 +412,14 @@ def _parse_coach_markers(text, user_id, week):
                 existing.reason = reason
             else:
                 db.session.add(MealPlanOverride(user_id=user_id, week=week, day_idx=day_idx, meal_type=meal_type, reason=reason))
+            # If it's a fast day, also skip the workout for that day
+            if meal_type == 'fast_day':
+                sched = WeeklyScheduleOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+                if sched:
+                    sched.skip_day = True
+                    sched.notes = 'Fast day \u2014 no workout'
+                else:
+                    db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, skip_day=True, notes='Fast day \u2014 no workout'))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -459,10 +467,11 @@ def _parse_coach_markers(text, user_id, week):
     for m in re.finditer(r'\[BMR_UPDATE:\s*new_bmr=(\d+),\s*reason=([^\]]+)\]', text):
         try:
             new_bmr = int(m.group(1))
-            pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
-            if pa:
-                pa.actual_bmr = new_bmr
-                db.session.commit()
+            if 1000 <= new_bmr <= 3000:  # Sanity check
+                pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+                if pa:
+                    pa.actual_bmr = new_bmr
+                    db.session.commit()
         except Exception:
             db.session.rollback()
 
@@ -490,6 +499,26 @@ def _get_garmin(user_id=None):
         client = GarminClient(user_id=uid)
         _garmin_clients[uid] = client
     return _garmin_clients[uid]
+
+
+def _extract_age_from_intake(user_id):
+    """Extract age from psych intake conversation. Returns 30 as default."""
+    import re as _re
+    age = 30
+    try:
+        intake = PsychIntake.query.filter_by(user_id=user_id).first()
+        if intake and intake.conversation:
+            for msg in intake.conversation:
+                content = msg.get("content", "").lower().strip()
+                if msg.get("role") == "user":
+                    age_match = _re.search(r'\b(\d{1,2})\b', content)
+                    if age_match:
+                        num = int(age_match.group(1))
+                        if 13 <= num <= 80:
+                            age = num
+    except Exception:
+        pass
+    return age
 
 
 def _user_today():
@@ -4625,7 +4654,7 @@ def api_deficit_plan():
         # Mifflin-St Jeor (male): 10 x kg + 6.25 x cm - 5 x age - 5
         weight_kg = pa.bodyweight_lbs * 0.453592
         height_cm = pa.height_inches * 2.54
-        age = 30  # default
+        age = _extract_age_from_intake(current_user.id)
         bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 5
     else:
         bmr = current_weight * 10  # rough fallback
@@ -4641,8 +4670,9 @@ def api_deficit_plan():
         SetLog.logged_date >= week_start,
         SetLog.done == True
     ).all()
-    # Rough estimate: each set burns ~5-8 calories per set (weight x reps x 0.0003)
-    exercise_burn = sum((s.weight or 0) * (s.reps or 0) * 0.0003 for s in sets)
+    # Rough estimate: ~7 cal per completed set (conservative average for compound lifts)
+    # 100 sets/week x 7 = 700 cal/week, consistent with research (150-250 kcal/hour)
+    exercise_burn = len(sets) * 7
     exercise_burn = max(exercise_burn, 200)  # floor at 200 cal/week from lifting
 
     # Run burn estimate
@@ -4735,6 +4765,10 @@ def api_bmr_recalculate():
     actual_deficit = actual_loss * 3500
     actual_expenditure = weekly_intake + actual_deficit
     actual_bmr = (actual_expenditure - exercise_burn - run_burn) / 7
+
+    # Sanity bounds — BMR outside 1000-3000 for most adults is likely data error
+    if actual_bmr < 1000 or actual_bmr > 3000:
+        return jsonify({"error": "Computed BMR outside reasonable range", "computed": round(actual_bmr)}), 400
 
     # Save to DB
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
