@@ -18,6 +18,7 @@ let _mealOverrides = [];
 let _runOverrides = [];
 let _morningCheckinDone = false;
 let _focusExIdx = null;
+let _focusRealExIdx = null;
 let _focusSetIdx = null;
 let _focusSetCount = null;
 let _focusExName = '';
@@ -7773,6 +7774,13 @@ async function enterExerciseFocus(exIdx) {
   _focusRestSec = parseRestSeconds(ex.rest);
   _focusExName = displayName;
   _focusExIdx = exIdx;
+  // Compute the real exercise index (without warmups) for cache/DB keys
+  if (_workoutActive && _workoutExercises) {
+    var warmupCount = _workoutExercises.filter(function(e) { return e._isWarmup; }).length;
+    _focusRealExIdx = ex._isWarmup ? exIdx : exIdx - warmupCount;
+  } else {
+    _focusRealExIdx = exIdx;
+  }
 
   let suggestion = getWeightForExercise(displayName, currentWeek);
   _focusLastWeight = getLastWeight(displayName);
@@ -7867,7 +7875,7 @@ function renderExerciseFocus() {
     el.classList.add('visible');
   } else {
     // Get saved weight for this set (if previously entered)
-    const setKey = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
+    const setKey = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${_focusSetIdx}`;
     const setData = _setCache && _setCache[setKey];
     const wt = setData && setData.weight ? setData.weight : _focusWeightVal;
     const rp = setData && setData.reps ? setData.reps : '';
@@ -7878,7 +7886,8 @@ function renderExerciseFocus() {
         <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
         <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
         ${_focusInfoBar}
-        ${_focusLastWeight ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : '<div style="height:20px"></div>'}
+        <div style="font-family:'DM Mono',monospace;font-size:18px;color:var(--accent);text-align:center;margin:8px 0">${_focusWeightVal || '?'} lb &times; ${_focusTargetReps} reps</div>
+        ${_focusLastWeight && _focusLastWeight != _focusWeightVal ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : ''}
         ${window._focusReason ? `<div class="focus-reason"><span class="focus-indicator focus-${window._focusIndicator || 'hold'}">${{'up':'↑','hold':'—','deload':'○','weak':'⚑','down':'↓'}[window._focusIndicator] || '—'}</span> ${escapeHtml(window._focusReason)}</div>` : ''}
         <div class="focus-input-group">
           <input class="focus-input" type="number" inputmode="decimal" id="focus-wt" value="${wt}" placeholder="lb" autofocus>
@@ -7902,7 +7911,7 @@ function logFocusSet() {
   const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
   const reps = repsTyped || parseInt(_focusTargetReps) || 0;
 
-  const key = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
+  const key = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${_focusSetIdx}`;
   _setCache[key] = { done: true, weight, reps };
 
   // Carry weight forward to next set
@@ -7910,7 +7919,7 @@ function logFocusSet() {
 
   // Save to DB
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-  const isSwapped = !!swaps[`${currentWeek}_${currentDay}_${_focusExIdx}`];
+  const isSwapped = !!swaps[`${currentWeek}_${currentDay}_${_focusRealExIdx}`];
   apiPost('/api/sets', {
     exercise: _focusExName, week: currentWeek, day_idx: currentDay,
     set_number: _focusSetIdx, weight, reps, done: true, exercise_swapped: isSwapped
@@ -7926,7 +7935,7 @@ function logFocusSet() {
   // Check if all sets done
   let allDone = true;
   for (let s = 0; s < _focusSetCount; s++) {
-    if (!_setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`]) {
+    if (!_setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`]) {
       allDone = false; break;
     }
   }
@@ -7935,8 +7944,8 @@ function logFocusSet() {
     // Mark exercise complete
     if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
     if (!_completionsCache.exercises) _completionsCache.exercises = {};
-    _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusExIdx}`] = true;
-    apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusExIdx });
+    _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusRealExIdx}`] = true;
+    apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx });
 
     // Skip RPE for warm-up exercises
     const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
@@ -7959,7 +7968,7 @@ function logFocusSet() {
     let recWeight = 0;
     let recReps = 0;
     for (let s = 0; s < _focusSetCount; s++) {
-      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
+      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
       if (sd) {
         if (sd.weight > 0) recWeight = sd.weight;
         if (sd.reps > 0) recReps = sd.reps;
@@ -7969,8 +7978,8 @@ function logFocusSet() {
     let setsLabelRec = '';
     if (_workoutActive && _workoutExercises[_workoutExIdx]) {
       setsLabelRec = _workoutExercises[_workoutExIdx].sets || '';
-    } else if (weekDataRec && weekDataRec.days[currentDay] && weekDataRec.days[currentDay].exercises[_focusExIdx]) {
-      setsLabelRec = weekDataRec.days[currentDay].exercises[_focusExIdx].sets;
+    } else if (weekDataRec && weekDataRec.days[currentDay] && weekDataRec.days[currentDay].exercises[_focusRealExIdx]) {
+      setsLabelRec = weekDataRec.days[currentDay].exercises[_focusRealExIdx].sets;
     }
     recordWeight(_focusExName, recWeight, setsLabelRec, null, currentWeek, currentDay, null, recReps || null);
 
@@ -8023,7 +8032,7 @@ function startTimedSet(seconds) {
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 
       // Auto-log this timed set
-      const key = `${currentWeek}_${currentDay}_${_focusExIdx}_${_focusSetIdx}`;
+      const key = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${_focusSetIdx}`;
       _setCache[key] = { done: true, weight: 0, reps: seconds };
       apiPost('/api/sets', {
         exercise: _focusExName, week: currentWeek, day_idx: currentDay,
@@ -8033,14 +8042,14 @@ function startTimedSet(seconds) {
       // Check if all sets done
       let allDone = true;
       for (let s = 0; s < _focusSetCount; s++) {
-        if (!_setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`]) { allDone = false; break; }
+        if (!_setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`]) { allDone = false; break; }
       }
 
       if (allDone) {
         if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
         if (!_completionsCache.exercises) _completionsCache.exercises = {};
-        _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusExIdx}`] = true;
-        apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusExIdx });
+        _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusRealExIdx}`] = true;
+        apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx });
 
         // Skip RPE for warm-up exercises
         const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
@@ -8072,8 +8081,8 @@ function startTimedSet(seconds) {
         let timedSetsLabel = '';
         if (_workoutActive && _workoutExercises[_workoutExIdx]) {
           timedSetsLabel = _workoutExercises[_workoutExIdx].sets || '';
-        } else if (timedWeekData && timedWeekData.days[currentDay] && timedWeekData.days[currentDay].exercises[_focusExIdx]) {
-          timedSetsLabel = timedWeekData.days[currentDay].exercises[_focusExIdx].sets;
+        } else if (timedWeekData && timedWeekData.days[currentDay] && timedWeekData.days[currentDay].exercises[_focusRealExIdx]) {
+          timedSetsLabel = timedWeekData.days[currentDay].exercises[_focusRealExIdx].sets;
         }
         recordWeight(_focusExName, timedRecWeight, timedSetsLabel, null, currentWeek, currentDay, null, timedRecReps || null);
 
@@ -8129,7 +8138,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
     // Current exercise completed sets
     const completedSets = [];
     for (let s = 0; s < _focusSetIdx; s++) {
-      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${s}`];
+      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
       if (sd) {
         completedSets.push(`<span style="font-size:11px;color:var(--muted)">S${s+1}: ${sd.weight}×${sd.reps}</span>`);
       }
@@ -8151,11 +8160,11 @@ function showFocusRestTimer(seconds, showRpeAfter) {
       var nextWeight = _focusWeightVal;
       // Check if a previous set had a weight logged
       for (var s = _focusSetIdx; s >= 0; s--) {
-        var sd = _setCache[currentWeek + '_' + currentDay + '_' + _focusExIdx + '_' + s];
+        var sd = _setCache[currentWeek + '_' + currentDay + '_' + _focusRealExIdx + '_' + s];
         if (sd && sd.weight) { nextWeight = sd.weight; break; }
       }
       if (nextSetNum < _focusSetCount) {
-        html += '<div style="font-family:\'DM Mono\',monospace;font-size:15px;color:var(--text);margin-top:12px">Next: Set ' + (nextSetNum + 1) + ' \u2014 ' + nextWeight + ' lb \u00D7 ' + _focusTargetReps + '</div>';
+        html += '<div style="font-family:\'DM Mono\',monospace;font-size:15px;color:var(--text);margin-top:12px">Next: Set ' + nextSetNum + ' \u2014 ' + nextWeight + ' lb \u00D7 ' + _focusTargetReps + '</div>';
       }
     }
 
@@ -8317,6 +8326,7 @@ function exitExerciseFocus() {
     _focusTimerInterval = null;
   }
   _focusExIdx = null;
+  _focusRealExIdx = null;
   _focusSetIdx = null;
   _workoutActive = false;
 
