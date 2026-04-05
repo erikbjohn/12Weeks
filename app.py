@@ -1075,6 +1075,7 @@ def _get_user_food_ids():
 # Map meal plan food names → food catalog IDs
 _FOOD_NAME_TO_ID = {
     "Whey protein shake": "whey_protein",
+    "Whey protein shake (water)": "whey_protein",
     "Grilled chicken breast": "chicken_breast",
     "Baked chicken breast": "chicken_breast",
     "Eggs, scrambled": "eggs",
@@ -1171,6 +1172,29 @@ def _filter_meals_by_food_selections(days, user_food_ids):
                 elif food_id in user_food_ids:
                     filtered_foods.append(food)
                 # else: user didn't select this food — remove it
+
+            # Fast day protein substitution: if whey was removed, add user's preferred protein
+            has_caloric_food = any(f["item"] not in always_allowed and f.get("cal", 0) > 0 for f in filtered_foods)
+            is_fast_meal = "Fast" in meal.get("name", "") or "fast" in meal.get("name", "")
+            if is_fast_meal and not has_caloric_food and user_food_ids:
+                # Find user's first selected protein and add a small portion
+                _PROTEIN_OPTIONS = {
+                    "chicken_breast": {"item": "Grilled chicken breast", "portion": "4 oz", "cal": 130, "protein": 26, "carbs": 0, "fat": 3},
+                    "eggs": {"item": "Hard-boiled eggs", "portion": "3 eggs", "cal": 210, "protein": 18, "carbs": 0, "fat": 15},
+                    "egg_whites": {"item": "Egg whites", "portion": "6 whites", "cal": 100, "protein": 24, "carbs": 0, "fat": 0},
+                    "greek_yogurt": {"item": "Greek yogurt (plain)", "portion": "1 cup", "cal": 130, "protein": 22, "carbs": 8, "fat": 0},
+                    "cottage_cheese": {"item": "Cottage cheese", "portion": "1 cup", "cal": 160, "protein": 28, "carbs": 6, "fat": 2},
+                    "tuna_canned": {"item": "Canned tuna (water)", "portion": "1 can", "cal": 120, "protein": 28, "carbs": 0, "fat": 1},
+                    "salmon": {"item": "Baked salmon", "portion": "4 oz", "cal": 180, "protein": 25, "carbs": 0, "fat": 8},
+                    "whey_protein": {"item": "Whey protein shake", "portion": "1 scoop", "cal": 130, "protein": 30, "carbs": 2, "fat": 1},
+                    "plant_protein": {"item": "Plant protein shake", "portion": "1 scoop", "cal": 120, "protein": 24, "carbs": 4, "fat": 2},
+                }
+                for pid in ["chicken_breast", "eggs", "egg_whites", "greek_yogurt", "cottage_cheese", "tuna_canned", "salmon", "whey_protein", "plant_protein"]:
+                    if pid in user_food_ids:
+                        sub = _PROTEIN_OPTIONS.get(pid)
+                        if sub:
+                            filtered_foods.insert(0, dict(sub))
+                            break
 
             # If a meal has only zero-cal items, keep it (pre-workout coffee is fine)
             # If a meal has no foods left, drop it entirely
