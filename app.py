@@ -1862,10 +1862,22 @@ def api_bodyweight_delete(log_date):
 @app.route("/api/measurements")
 @login_required
 def api_measurements():
-    entries = BodyMeasurement.query.filter_by(user_id=current_user.id).order_by(BodyMeasurement.log_date).all()
+    d = request.args.get("date")
+    query = BodyMeasurement.query.filter_by(user_id=current_user.id)
+    if d:
+        query = query.filter_by(log_date=date.fromisoformat(d))
+    entries = query.order_by(BodyMeasurement.log_date).all()
     return jsonify([{
         "date": e.log_date.isoformat(),
         "waist": e.waist_inches,
+        "weight": getattr(e, 'weight', None),
+        "chest": getattr(e, 'chest', None),
+        "hips": getattr(e, 'hips', None),
+        "neck": getattr(e, 'neck', None),
+        "bicep_left": getattr(e, 'bicep_left', None),
+        "bicep_right": getattr(e, 'bicep_right', None),
+        "thigh_left": getattr(e, 'thigh_left', None),
+        "thigh_right": getattr(e, 'thigh_right', None),
         "notes": e.notes,
     } for e in entries])
 

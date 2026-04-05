@@ -3776,6 +3776,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
 
+    // Load today's measurements if already submitted (for Sunday display)
+    try {
+      var measRes = await fetch('/api/measurements?date=' + todayStr());
+      if (measRes.ok) {
+        var measData = await measRes.json();
+        if (measData && measData.length > 0) {
+          var latest = measData[measData.length - 1];
+          window._sundayMeasurements = {
+            weight: latest.weight, waist: latest.waist_inches || latest.waist,
+            chest: latest.chest, hips: latest.hips, neck: latest.neck,
+            bicep_left: latest.bicep_left, bicep_right: latest.bicep_right,
+            thigh_left: latest.thigh_left, thigh_right: latest.thigh_right,
+          };
+        }
+      }
+    } catch(e) {}
+
     // Morning check-in gate — check if already done today
     await checkMorningCheckin();
 
@@ -4047,6 +4064,7 @@ async function submitSundayMeasurements() {
 
   // Save measurements
   await apiPost('/api/measurements', data);
+  window._sundayMeasurements = data;
 
   // Also save weight to bodyweight tracker
   if (data.weight) {
@@ -5684,17 +5702,32 @@ async function sendRunCoachMsg() {
 function renderCheckinInner(dayData, dayIdx) {
   // Show on Sunday (index 6) or Saturday (index 5)
   if (dayIdx < 5) return '';
+  // Check if measurements already saved today (from Sunday morning flow)
+  var saved = window._sundayMeasurements || null;
   var fields = [
-    {id: 'checkin-weight', label: 'Weight (lb)', type: 'number', step: '0.1', placeholder: 'lbs'},
-    {id: 'checkin-waist', label: 'Waist (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-chest', label: 'Chest (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-hips', label: 'Hips (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-neck', label: 'Neck (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-bicep-l', label: 'Bicep L (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-bicep-r', label: 'Bicep R (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-thigh-l', label: 'Thigh L (in)', type: 'number', step: '0.25', placeholder: 'inches'},
-    {id: 'checkin-thigh-r', label: 'Thigh R (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-weight', label: 'Weight (lb)', key: 'weight', type: 'number', step: '0.1', placeholder: 'lbs'},
+    {id: 'checkin-waist', label: 'Waist (in)', key: 'waist', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-chest', label: 'Chest (in)', key: 'chest', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-hips', label: 'Hips (in)', key: 'hips', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-neck', label: 'Neck (in)', key: 'neck', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-bicep-l', label: 'Bicep L (in)', key: 'bicep_left', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-bicep-r', label: 'Bicep R (in)', key: 'bicep_right', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-thigh-l', label: 'Thigh L (in)', key: 'thigh_left', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-thigh-r', label: 'Thigh R (in)', key: 'thigh_right', type: 'number', step: '0.25', placeholder: 'inches'},
   ];
+  if (saved) {
+    // Already submitted — show read-only values
+    var readRows = fields.map(function(f) {
+      var val = saved[f.key] || '';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">' +
+        '<span style="color:var(--text);font-size:14px">' + f.label + '</span>' +
+        '<span style="color:var(--accent);font-family:\'DM Mono\',monospace;font-size:14px">' + (val || '--') + '</span>' +
+      '</div>';
+    }).join('');
+    return '<h3>Sunday Measurements</h3>' +
+      '<div style="font-size:12px;color:var(--accent);margin-bottom:8px">Submitted today</div>' +
+      readRows;
+  }
   var rows = fields.map(function(f) {
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">' +
       '<label style="color:var(--text);font-size:14px;min-width:90px">' + f.label + '</label>' +
