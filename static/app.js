@@ -3773,6 +3773,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Travel banner
     renderTravelBanner();
 
+    // Ensure current week has prescriptions seeded from template
+    await fetch('/api/prescription/seed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ week: currentWeek }),
+    }).catch(function() {});
+
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
 
@@ -4171,8 +4178,17 @@ async function _startMcChat() {
   var trigger;
 
   if (dayOfWeek === 1) {
+    // Monday — seed next week's prescriptions from template before planning
+    var nextWeek = currentWeek + 1;
+    if (nextWeek <= 12) {
+      await fetch('/api/prescription/seed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ week: nextWeek }),
+      }).catch(function() {});
+    }
     // Monday — weekly planning session
-    trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() + ' This is the Monday weekly planning session. Review last week\'s performance. Walk through this week\'s schedule day by day — muscle groups, focus areas, where to push harder. Ask about schedule changes (travel, appointments). Apply any changes via structured markers. Only debilitating injury justifies exercise swaps — YOU decide.';
+    trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() + ' This is the Monday weekly planning session. Review last week\'s performance. Walk through this week\'s schedule day by day — muscle groups, focus areas, where to push harder. Ask about schedule changes (travel, appointments). Apply any changes via structured markers. Only debilitating injury justifies exercise swaps — YOU decide. If you need to adjust any exercise prescriptions for next week, use [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s] markers.';
   } else {
     // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat
     // Normal day

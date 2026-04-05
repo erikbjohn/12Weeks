@@ -3442,6 +3442,22 @@ def _build_coach_context():
     except Exception:
         result["active_swaps"] = []
 
+    # Next week's prescriptions (for Monday planning)
+    try:
+        next_week = week + 1
+        if next_week <= 12:
+            next_rx = WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=next_week
+            ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
+            result["next_week_prescriptions"] = [
+                {"day_idx": rx.day_idx, "exercise": rx.exercise_name, "sets": rx.sets, "reps": rx.reps, "rest": rx.rest}
+                for rx in next_rx
+            ]
+        else:
+            result["next_week_prescriptions"] = []
+    except Exception:
+        result["next_week_prescriptions"] = []
+
     return result
 
 

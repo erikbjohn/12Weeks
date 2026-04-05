@@ -119,6 +119,20 @@ def _format_measurements(m):
     return '\n'.join(lines)
 
 
+def _format_next_week_prescriptions(prescriptions):
+    if not prescriptions:
+        return ""
+    lines = ["NEXT WEEK'S PLAN (adjust via [PRESCRIPTION: ...] markers):"]
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    current_day = -1
+    for rx in prescriptions:
+        if rx['day_idx'] != current_day:
+            current_day = rx['day_idx']
+            lines.append(f"\n  {day_names[current_day]}:")
+        lines.append(f"    {rx['exercise']} — {rx['sets']}x{rx['reps']} ({rx.get('rest', '60s')} rest)")
+    return "\n".join(lines)
+
+
 def _format_meals_today(meals, meal_plan=None):
     parts = []
     if meal_plan:
@@ -646,6 +660,7 @@ CURRENT STATE:
 {checkin_summary}
 {session_analysis_str}
 {weekly_summary_str}
+{_format_next_week_prescriptions(ctx.get('next_week_prescriptions', []))}
 {'ALERT: The user MISSED their morning check-in today. Reference this directly — they skipped accountability.' if ctx.get('missed_checkin_today') else ''}
 Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
 
@@ -697,6 +712,9 @@ Available markers:
   When recalculating BMR from actual weight loss data (Sunday review only).
 - [LOCKOUT_WARNING: count=1, reason=reason]
   When issuing a nutrition compliance warning.
+- [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s]
+  Adjust next week's exercise prescription. Used during Monday planning to modify
+  sets, reps, or rest for specific exercises based on performance data.
 
 SUNDAY REVIEW PROTOCOL:
 On Sunday, after measurements are submitted, conduct a FULL WEEK REVIEW:
@@ -731,6 +749,11 @@ On Monday morning, conduct the weekly planning session:
 7. When prescribing a fast day, that day becomes a REST day — no lifting,
    no running. The athlete needs to recover during fasting. The system will
    automatically skip the workout when a fast day marker is applied.
+8. When adjusting next week's program:
+   - To change sets/reps for an exercise: [PRESCRIPTION: week=X, day=Y, exercise=Barbell Bench Press, sets=5, reps=5, rest=2-3 min]
+   - The system automatically applies your changes to the weekly prescription.
+   - Review each day's exercises and adjust based on last week's performance data.
+   - Use the training engine's progression signals (in the context) to inform your decisions.
 
 MONITORING:
 - Overtraining: declining mood + rising soreness + poor sleep + HRV drops = adjust training.
