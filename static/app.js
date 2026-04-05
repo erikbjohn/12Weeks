@@ -6630,12 +6630,15 @@ async function _refreshCoachAccordionMsg() {
 
 function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling) {
     var html = '';
-    html += renderWarmupInner(d);
-    if (displayExercises.length > 0) {
-        if (!displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); })) {
-            html += '<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>';
+    // On rest days (Sunday), skip warmup/exercises — just show the run
+    if (!d.isRest) {
+        html += renderWarmupInner(d);
+        if (displayExercises.length > 0) {
+            if (!displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); })) {
+                html += '<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>';
+            }
+            html += bwToggleHtml + exRows;
         }
-        html += bwToggleHtml + exRows;
     }
     html += buildRunSubsection(d, runClass);
     return html;
@@ -6643,17 +6646,29 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
 
 function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, dayIdx) {
     var html = '';
-    html += weightSummaryHtml;
-    html += garminStatsHtml;
-    html += dailyGoalsHtml;
-    if (timingRows.length > 0) {
-        html += '<div style="margin-top:12px"><h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Session Timing</h4>' + timingRows.join('') + '</div>';
+    // On rest days (Sunday), skip e1RM, daily goals, and session timing
+    if (!d.isRest) {
+        html += weightSummaryHtml;
+        html += dailyGoalsHtml;
+        if (timingRows.length > 0) {
+            html += '<div style="margin-top:12px"><h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Session Timing</h4>' + timingRows.join('') + '</div>';
+        }
     }
+    // Garmin stats are always useful (HRV, sleep, etc.)
+    html += garminStatsHtml;
     html += renderCheckinInner(d, dayIdx);
     return html;
 }
 
 function buildFoodContent(d) {
+    // Sunday = fasting day — clean short-circuit
+    if (d.day === 'Sun') {
+        return '<div style="text-align:center;padding:2rem;color:var(--muted)">' +
+            '<div style="font-size:36px;margin-bottom:8px">&#127811;</div>' +
+            '<div style="font-size:16px;color:var(--text);margin-bottom:4px">Fasting Day</div>' +
+            '<div style="font-size:13px">Whey protein shake only. Stay hydrated.</div>' +
+        '</div>';
+    }
     // Check for meal override (e.g. fasting day)
     var mealOverride = _mealOverrides.find(function(o) { return o.day_idx === currentDay; });
     if (mealOverride && mealOverride.meal_type === 'fast_day') {
@@ -7047,11 +7062,8 @@ async function renderDetail() {
     </div>`;
   }
 
-  // Build Sunday section (async)
-  let sundaySectionHtml = '';
-  if (isSunday(d)) {
-    sundaySectionHtml = await renderSundaySection(d);
-  }
+  // Accordion label for Exercise — "Run" on rest days since that's all it shows
+  const exerciseLabel = d.isRest ? 'Run' : 'Exercise';
 
   panel.innerHTML = `<div class="detail-inner">
     <div class="detail-header">
@@ -7061,9 +7073,8 @@ async function renderDetail() {
         <span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
       </div>
     </div>
-    ${sundaySectionHtml}
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
-    ${renderAccordion('exercise', 'Exercise', buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
+    ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
   </div>`;
@@ -7073,10 +7084,7 @@ async function renderDetail() {
   // Init sliders if check-in is present
   initCheckinSliders();
 
-  // Load Sunday photo previews asynchronously
-  if (isSunday(d)) {
-    loadSundayPhotoPreviews();
-  }
+  // Sunday photo previews removed — photos handled by morning flow
 
   } catch(e) {
     console.error('renderDetail crashed:', e);
@@ -7271,79 +7279,8 @@ function togglePhotoCompare() {
 }
 
 async function renderSundaySection(dayData) {
-  if (!isSunday(dayData)) return '';
-
-  const bw = getTodayBodyweight();
-  const photos = await loadPhotos();
-  const currentWeekNum = currentWeek;
-
-  // Get this week's and last week's photos
-  const thisWeekPhotos = photos.filter(p => p.week === currentWeekNum);
-  const lastWeekPhotos = photos.filter(p => p.week === currentWeekNum - 1);
-
-  const poses = ['front', 'side', 'back'];
-
-  // Build photo slots
-  let photoSlotsHtml = '';
-  for (const pose of poses) {
-    const existing = thisWeekPhotos.find(p => p.pose === pose);
-    let slotContent;
-    if (existing && existing.has_photo) {
-      // We'll load the image async and fill it in
-      slotContent = `<div class="photo-loading"><div class="spinner"></div></div>`;
-    } else {
-      slotContent = renderPhotoUploadButton(pose);
-    }
-    let analysisHtml = '';
-    if (existing && existing.analysis) {
-      analysisHtml = `<div class="photo-analysis">
-        <div class="photo-analysis-label">AI Coach Analysis</div>
-        ${existing.analysis}
-      </div>`;
-    }
-    photoSlotsHtml += `<div class="photo-slot">
-      <div class="photo-slot-label">${pose}</div>
-      <div id="photo-slot-${pose}">${slotContent}</div>
-      ${analysisHtml}
-    </div>`;
-  }
-
-  // Build comparison section
-  let compareHtml = '';
-  if (lastWeekPhotos.length > 0) {
-    compareHtml = `<div class="photo-compare">
-      <button class="photo-compare-toggle${_sundayCompareOpen ? ' active' : ''}" id="photo-compare-toggle-btn" onclick="togglePhotoCompare()">
-        Compare with Last Week
-      </button>
-      <div class="photo-compare-grid${_sundayCompareOpen ? ' visible' : ''}" id="photo-compare-grid">
-      </div>
-    </div>`;
-  }
-
-  const html = `<div class="sunday-section">
-    <h3>Weekly Measurement &amp; Photos</h3>
-    <div class="sunday-subtitle">Sunday is reflection day. Track your progress and let your AI Coach assess your physique changes.</div>
-
-    <div class="measurement-form">
-      <label>
-        <span>Body Weight (lb)</span>
-        <input type="number" id="sunday-weight" inputmode="decimal" step="0.1" placeholder="e.g. 185.5" value="${bw}">
-      </label>
-      <label>
-        <span>Waist (inches)</span>
-        <input type="number" id="sunday-waist" inputmode="decimal" step="0.1" placeholder="e.g. 34.0">
-      </label>
-      <button class="btn-save-measurements" id="btn-save-measurements" onclick="saveMeasurements()">Save Measurements</button>
-    </div>
-
-    <h3 style="margin-top:20px">Progress Photos</h3>
-    <div class="photo-grid">
-      ${photoSlotsHtml}
-    </div>
-    ${compareHtml}
-  </div>`;
-
-  return html;
+  // Measurements handled by morning flow + Stats accordion; photos in morning flow
+  return '';
 }
 
 async function loadSundayPhotoPreviews() {
