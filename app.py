@@ -2898,14 +2898,24 @@ def _build_coach_context():
         MorningCheckIn.log_date >= since
     ).order_by(MorningCheckIn.log_date).all()]
 
-    # Chat history
+    # Chat history — full current week (Mon-Sun) + older context
+    week_start = local_today - timedelta(days=local_today.weekday())  # Monday of this week
     chat_history = [{
         "role": m.role,
         "content": m.content,
+        "date": m.log_date.isoformat() if m.log_date else None,
     } for m in ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= since
+        ChatMessage.log_date >= week_start  # Full current week, not just 14 days
     ).order_by(ChatMessage.created_at).all()]
+    # Also include older context (up to 14 days before this week) for continuity
+    older_msgs = ChatMessage.query.filter(
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.log_date >= since,
+        ChatMessage.log_date < week_start
+    ).order_by(ChatMessage.created_at).limit(50).all()
+    older_history = [{"role": m.role, "content": m.content, "date": m.log_date.isoformat() if m.log_date else None} for m in older_msgs]
+    chat_history = older_history + chat_history
 
     # Body weight — all entries (user weighs weekly, not daily)
     bw_entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()

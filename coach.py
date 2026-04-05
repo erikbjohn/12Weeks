@@ -148,7 +148,15 @@ def _format_memories(memories):
     if not memories:
         return ""
     lines = ["COACH MEMORY (persistent observations — survive across conversations):"]
-    for m in memories:
+    # Show exceptions and victories first (most important for consistency)
+    priority = [m for m in memories if m.get('type') in ('exception', 'victory', 'commitment')]
+    others = [m for m in memories if m.get('type') not in ('exception', 'victory', 'commitment')]
+    if priority:
+        lines.append("  CRITICAL — CHECK THESE BEFORE ANY COMPLIANCE JUDGMENT:")
+        for m in priority:
+            prefix = f"[wk{m.get('week', '?')}]" if m.get('week') else ""
+            lines.append(f"  {prefix} [{m.get('type', 'note').upper()}] {m['content']}")
+    for m in others:
         prefix = f"[wk{m.get('week', '?')}]" if m.get('week') else ""
         mtype = m.get('type', 'note')
         lines.append(f"  {prefix} [{mtype}] {m['content']}")
@@ -163,9 +171,9 @@ def extract_memories(user_message, coach_response, context):
     if not api_key:
         return []
 
-    # Only check every 5th message to avoid excessive API calls
+    # Check every 3rd message
     chat_len = len(context.get("chat_history", []))
-    if chat_len % 5 != 0 and chat_len > 1:
+    if chat_len % 3 != 0 and chat_len > 1:
         return []
 
     try:
@@ -177,14 +185,21 @@ def extract_memories(user_message, coach_response, context):
             system="""You extract coaching memories from athlete conversations. Return ONLY observations worth remembering across future sessions. If nothing is notable, return exactly: NONE
 
 Format each memory on its own line as: TYPE: content
-Types: injury, commitment, preference, observation, milestone
+Types: injury, commitment, preference, observation, milestone, exception, victory
 
-Examples:
-injury: Left shoulder pain during overhead press — monitor and avoid heavy OHP
-commitment: Committed to 5am workouts Mon/Wed/Fri
-preference: Hates running in heat — prefers early morning
-observation: Tends to sandbag on leg day — needs pushing
-milestone: First unassisted pull-up achieved week 3""",
+CRITICAL TYPES:
+exception: Coach GRANTED permission to deviate from the plan (holiday meals, schedule change, etc.)
+  Example: exception: Granted Passover exception — eat with family Thursday, back on plan Friday
+victory: Athlete resisted temptation or made a strong decision with coach help
+  Example: victory: Wanted ice cream Wednesday, coach talked through it, athlete chose discipline
+commitment: Athlete made a specific promise or the coach set a specific expectation
+  Example: commitment: Promised no more late-night snacking for the rest of the program
+
+Other types:
+injury: Physical issue to monitor
+preference: Training/food preference
+observation: Behavioral pattern worth noting
+milestone: Achievement or PR""",
             messages=[{
                 "role": "user",
                 "content": f"Athlete said: {user_message}\n\nCoach responded: {coach_response}\n\nExtract memories (or NONE):",
@@ -197,7 +212,7 @@ milestone: First unassisted pull-up achieved week 3""",
         memories = []
         for line in text.split("\n"):
             line = line.strip()
-            if ":" in line and line.split(":")[0].strip().lower() in ("injury", "commitment", "preference", "observation", "milestone"):
+            if ":" in line and line.split(":")[0].strip().lower() in ("injury", "commitment", "preference", "observation", "milestone", "exception", "victory"):
                 parts = line.split(":", 1)
                 memories.append({"type": parts[0].strip().lower(), "content": parts[1].strip()})
         return memories
@@ -521,6 +536,28 @@ NEVER suggest reducing volume — fewer sets, fewer exercises, shorter workouts.
 Volume is non-negotiable. If the athlete skips sets or wants to do less, confront
 it directly. Ask what's going on. Fatigue is expected — push through it.
 Only a debilitating injury justifies exercise modification, and YOU make that call.
+*** END ABSOLUTE RULE ***
+
+*** ABSOLUTE RULE — CONSISTENCY AND MEMORY ***
+Before making ANY compliance judgment, review your own messages from this week
+in the chat history. You have the FULL week's conversation available.
+
+1. NEVER CONTRADICT YOURSELF. If you granted an exception earlier this week
+   (e.g., "enjoy Passover with family", "take tonight off"), you MUST honor it.
+   You cannot give permission and then punish for using it. Ever.
+
+2. REMEMBER PIVOTAL MOMENTS. If you talked the athlete out of a bad decision
+   (e.g., they wanted ice cream and you helped them stay strong), reference it
+   later as reinforcement: "Remember Wednesday when you chose discipline over
+   comfort? That's who you are now." These moments build identity.
+
+3. REFERENCE YOUR OWN WORDS. When you made a strong statement or the athlete
+   made a commitment, bring it back. "You told me on Tuesday that nothing was
+   going to stop you this week. Hold that."
+
+4. CHECK BEFORE YOU JUDGE. Before saying "you didn't follow the plan," scan
+   the conversation history for any exception you granted. If you said it was
+   OK, it was OK. Period.
 *** END ABSOLUTE RULE ***
 
 PRINCIPLES:
