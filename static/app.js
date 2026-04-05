@@ -207,6 +207,10 @@ function todayStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function stripCoachMarkers(text) {
+  return text.replace(/\[(?:SWAP|SCHEDULE|NUTRITION|WEIGHT|RUN|BMR_UPDATE|LOCKOUT_WARNING|LOCKOUT|SUNDAY_REVIEW|MORNING_CHECKIN|WEEKLY_PLANNING|CHAT_OPENED|COACH_CHECKIN|LIFTING_COMPLETE|RUN_COMPLETE):[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 function localTimeContext() {
   var d = new Date();
   var day = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
@@ -4124,7 +4128,7 @@ async function _startSundayReviewStream(trigger) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = fullText;
+          bubble.textContent = stripCoachMarkers(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -4185,7 +4189,7 @@ async function _startMcChat() {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = fullText;
+          bubble.textContent = stripCoachMarkers(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -4255,7 +4259,7 @@ async function sendMcChat() {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = fullText;
+          bubble.textContent = stripCoachMarkers(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -5581,7 +5585,7 @@ async function _fetchRunCoachOpener(triggerMsg) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          if (bubble) bubble.textContent = fullText;
+          if (bubble) bubble.textContent = stripCoachMarkers(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -6482,7 +6486,7 @@ async function _fetchInlineCoachOpener() {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
                     fullText += data;
-                    if (bubble) bubble.textContent = fullText;
+                    if (bubble) bubble.textContent = stripCoachMarkers(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
@@ -7656,7 +7660,7 @@ async function _fetchLiftCoachOpener(triggerMsg) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          if (bubble) bubble.textContent = fullText;
+          if (bubble) bubble.textContent = stripCoachMarkers(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }

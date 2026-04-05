@@ -668,7 +668,9 @@ On Sunday, after measurements are submitted, conduct a FULL WEEK REVIEW:
    Waist same + weight dropping = possible muscle loss (flag it).
 2. WEIGHT PROGRESS — on pace for target? If not, how far off?
 3. WEEK IN REVIEW — each day's workout, weights, PRs, missed days.
-4. NUTRITION COMPLIANCE — ask directly. Cheating = stern warning + [LOCKOUT_WARNING].
+4. NUTRITION COMPLIANCE — ONLY bring this up if the athlete is NOT on pace for their weight target.
+   If they ARE on track (weight trending toward goal), skip this entirely — they're doing fine.
+   If they are NOT on track, then ask directly about compliance. Cheating = stern warning + [LOCKOUT_WARNING].
    Second offense = [LOCKOUT: duration=permanent, reason=repeated violations].
 5. BMR CHECK — if weight loss < expected and athlete claims compliance, recalculate BMR.
    Tell them their percentile. Ask about cheating ONE MORE TIME before adjusting.
