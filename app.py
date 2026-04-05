@@ -210,6 +210,41 @@ with app.app_context():
         except Exception:
             db.session.rollback()
 
+    # New BodyMeasurement columns (chest, biceps, thighs, hips, neck)
+    for col in ['chest', 'bicep_left', 'bicep_right', 'thigh_left', 'thigh_right', 'hips', 'neck']:
+        try:
+            db.session.execute(text(f'SELECT {col} FROM body_measurement LIMIT 1'))
+        except Exception:
+            db.session.rollback()
+            try:
+                db.session.execute(text(f'ALTER TABLE body_measurement ADD COLUMN {col} FLOAT'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+    # SetLog columns (target_weight, target_reps, modification_direction if missing)
+    for col, col_type in [('target_weight', 'FLOAT'), ('target_reps', 'INTEGER'), ('modification_direction', 'VARCHAR(30)'), ('user_modified', 'BOOLEAN'), ('exercise_swapped', 'BOOLEAN')]:
+        try:
+            db.session.execute(text(f'SELECT {col} FROM set_log LIMIT 1'))
+        except Exception:
+            db.session.rollback()
+            try:
+                db.session.execute(text(f'ALTER TABLE set_log ADD COLUMN {col} {col_type}'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+    # MealPlanOverride daily_calories column
+    try:
+        db.session.execute(text('SELECT daily_calories FROM meal_plan_override LIMIT 1'))
+    except Exception:
+        db.session.rollback()
+        try:
+            db.session.execute(text('ALTER TABLE meal_plan_override ADD COLUMN daily_calories INTEGER'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
     # Wipe all corrupted data, keep psych intake, restart from physical assessment
     try:
@@ -2670,7 +2705,12 @@ def api_chat_stream():
     _current_user_id = current_user.id
     _mode = mode
 
-    context = _build_coach_context()
+    try:
+        context = _build_coach_context()
+    except Exception as ctx_err:
+        import logging
+        logging.error("Coach context build failed: %s", ctx_err)
+        context = {"athlete_name": current_user.name or "Athlete", "user_timezone": getattr(current_user, 'timezone', 'UTC'), "chat_history": [], "week": 1}
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
