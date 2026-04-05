@@ -565,6 +565,17 @@ def _user_today():
     except Exception:
         return date.today()
 
+def _current_week():
+    """Compute current program week from start_date (not stale DB value)."""
+    try:
+        s = _get_state()
+        if s.start_date:
+            diff_days = (_user_today() - s.start_date).days
+            return min(12, max(1, diff_days // 7 + 1))
+        return s.current_week or 1
+    except Exception:
+        return 1
+
 def _user_now():
     """Get current datetime in the current user's local timezone."""
     try:
@@ -1467,7 +1478,7 @@ def api_get_day_sets(week, day_idx):
 @login_required
 def api_exercise_targets(exercise_name):
     s = _get_state()
-    week = s.current_week
+    week = _current_week()
     day_idx = _user_today().weekday()
     targets = compute_next_targets(current_user.id, exercise_name, week, day_idx)
     return jsonify(targets)
@@ -2903,7 +2914,7 @@ def _build_coach_context():
 
     # Current state — compute week from start_date using user's local timezone
     s = _get_state()
-    week = s.current_week
+    week = _current_week()
     local_today = _user_today()
     if s.start_date:
         diff_days = (local_today - s.start_date).days
@@ -3252,7 +3263,7 @@ def api_photo_upload():
         return jsonify({"error": "Photo data required"}), 400
 
     s = _get_state()
-    week = s.current_week
+    week = _current_week()
 
     # Save photo
     photo = ProgressPhoto(
@@ -3955,7 +3966,7 @@ def api_shopping_list():
     """Generate a weekly grocery list — raw ingredients you buy at the store."""
     import re
     s = _get_state()
-    week = s.current_week
+    week = _current_week()
     workouts = get_workouts(week)
 
     # Filter by user's food selections
@@ -4145,7 +4156,13 @@ def api_weekly_report_generate():
     from weekly_report import compute_weekly_metrics, generate_report_narrative
 
     s = _get_state()
-    week = s.current_week
+    # Compute week from start_date (not stale current_week DB value)
+    if s.start_date:
+        local_today = _user_today()
+        diff_days = (local_today - s.start_date).days
+        week = min(12, max(1, diff_days // 7 + 1))
+    else:
+        week = s.current_week or 1
 
     _current_user_id = current_user.id
     metrics = compute_weekly_metrics(week, user_id=_current_user_id)
@@ -4305,7 +4322,7 @@ def api_morning_briefing():
 
     # Get today's workout
     s = _get_state()
-    workouts = get_workouts(s.current_week)
+    workouts = get_workouts(_current_week())
     today_idx = _user_today().weekday()
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
     workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
@@ -4316,7 +4333,7 @@ def api_morning_briefing():
         checkin_summary += f" Notes: {data['notes']}"
 
     # Use full coach context + special trigger
-    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). Today is {workout_name} — Week {s.current_week}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
+    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). Today is {workout_name} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
     context = _build_coach_context()
     response_text = get_coach_response(briefing_msg, context)
@@ -4708,8 +4725,7 @@ def api_deficit_plan():
     current_weight = bw.weight
     target_weight = goal.target_weight
 
-    state = _get_state()
-    week = state.current_week if state else 1
+    week = _current_week()
     weeks_remaining = max(1, 12 - week + 1)
     required_weekly_loss = (current_weight - target_weight) / weeks_remaining
 
@@ -4856,7 +4872,7 @@ def api_bmr_recalculate():
 def api_schedule_overrides():
     """Get schedule overrides for a given week."""
     state = _get_state()
-    week = request.args.get("week", state.current_week, type=int)
+    week = request.args.get("week", _current_week(), type=int)
     overrides = WeeklyScheduleOverride.query.filter_by(user_id=current_user.id, week=week).all()
     return jsonify([{
         "day_idx": o.day_idx, "workout_time": o.workout_time,
@@ -4869,7 +4885,7 @@ def api_schedule_overrides():
 def api_meal_overrides():
     """Get meal plan overrides for a given week."""
     state = _get_state()
-    week = request.args.get("week", state.current_week, type=int)
+    week = request.args.get("week", _current_week(), type=int)
     overrides = MealPlanOverride.query.filter_by(user_id=current_user.id, week=week).all()
     return jsonify([{
         "day_idx": o.day_idx, "meal_type": o.meal_type, "reason": o.reason,
@@ -4881,7 +4897,7 @@ def api_meal_overrides():
 def api_run_overrides():
     """Get run overrides for a given week."""
     state = _get_state()
-    week = request.args.get("week", state.current_week, type=int)
+    week = request.args.get("week", _current_week(), type=int)
     overrides = RunOverride.query.filter_by(user_id=current_user.id, week=week).all()
     return jsonify([{
         "day_idx": o.day_idx, "duration": o.duration,
