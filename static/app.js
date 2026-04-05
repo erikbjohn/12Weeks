@@ -6661,14 +6661,7 @@ function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml
 }
 
 function buildFoodContent(d) {
-    // Sunday = fasting day — clean short-circuit
-    if (d.day === 'Sun') {
-        return '<div style="text-align:center;padding:2rem;color:var(--muted)">' +
-            '<div style="font-size:36px;margin-bottom:8px">&#127811;</div>' +
-            '<div style="font-size:16px;color:var(--text);margin-bottom:4px">Fasting Day</div>' +
-            '<div style="font-size:13px">Whey protein shake only. Stay hydrated.</div>' +
-        '</div>';
-    }
+    // Sunday uses the fast_day meal plan from workout data — render normally, not a shortcut
     // Check for meal override (e.g. fasting day)
     var mealOverride = _mealOverrides.find(function(o) { return o.day_idx === currentDay; });
     if (mealOverride && mealOverride.meal_type === 'fast_day') {
