@@ -5678,40 +5678,34 @@ async function sendRunCoachMsg() {
 
 // ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
 function renderCheckinInner(dayData, dayIdx) {
-  // Show on last day of week (index 6 = Sunday, or 5 = Saturday)
+  // Show on Sunday (index 6) or Saturday (index 5)
   if (dayIdx < 5) return '';
-  return `<h3>Weekly Check-In</h3>
-    <div class="checkin-form" id="checkin-form">
-      <div class="checkin-slider-row">
-        <label>Energy</label>
-        <input type="range" class="checkin-slider" id="checkin-energy" min="1" max="5" value="3">
-        <span class="checkin-val" id="checkin-energy-val">3</span>
-      </div>
-      <div class="checkin-slider-row">
-        <label>Sleep Quality</label>
-        <input type="range" class="checkin-slider" id="checkin-sleep" min="1" max="5" value="3">
-        <span class="checkin-val" id="checkin-sleep-val">3</span>
-      </div>
-      <div class="checkin-slider-row">
-        <label>Soreness</label>
-        <input type="range" class="checkin-slider" id="checkin-soreness" min="1" max="5" value="3">
-        <span class="checkin-val" id="checkin-soreness-val">3</span>
-      </div>
-      <div class="checkin-slider-row">
-        <label>Adherence</label>
-        <input type="range" class="checkin-slider" id="checkin-adherence" min="0" max="100" value="80" step="5">
-        <span class="checkin-val" id="checkin-adherence-val">80%</span>
-      </div>
-      <div class="checkin-slider-row">
-        <label>Waist (inches)</label>
-        <input type="number" inputmode="decimal" id="checkin-waist" class="checkin-waist-input" placeholder="e.g. 34.5" step="0.25">
-      </div>
-      <div class="checkin-slider-row">
-        <label>Notes</label>
-        <textarea id="checkin-notes" class="checkin-notes" placeholder="How did this week go?" rows="2"></textarea>
-      </div>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitCheckin()">Submit Check-In</button>
-    </div>`;
+  var fields = [
+    {id: 'checkin-weight', label: 'Weight (lb)', type: 'number', step: '0.1', placeholder: 'lbs'},
+    {id: 'checkin-waist', label: 'Waist (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-chest', label: 'Chest (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-hips', label: 'Hips (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-neck', label: 'Neck (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-bicep-l', label: 'Bicep L (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-bicep-r', label: 'Bicep R (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-thigh-l', label: 'Thigh L (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+    {id: 'checkin-thigh-r', label: 'Thigh R (in)', type: 'number', step: '0.25', placeholder: 'inches'},
+  ];
+  var rows = fields.map(function(f) {
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">' +
+      '<label style="color:var(--text);font-size:14px;min-width:90px">' + f.label + '</label>' +
+      '<input type="' + f.type + '" inputmode="decimal" id="' + f.id + '" class="weight-input" style="width:80px" placeholder="' + f.placeholder + '" step="' + f.step + '">' +
+    '</div>';
+  }).join('');
+  return '<h3>Sunday Measurements</h3>' +
+    '<div class="checkin-form" id="checkin-form">' +
+      '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Measure everything. Coach reviews on Sunday.</div>' +
+      rows +
+      '<div style="padding:6px 0"><label style="color:var(--text);font-size:14px">Notes</label>' +
+        '<textarea id="checkin-notes" class="checkin-notes" placeholder="How did this week go?" rows="2" style="width:100%;margin-top:4px"></textarea>' +
+      '</div>' +
+      '<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitWeeklyMeasurements()">Submit Measurements</button>' +
+    '</div>';
 }
 
 function renderCheckinSection(dayData, dayIdx) {
@@ -5734,23 +5728,35 @@ function initCheckinSliders() {
 }
 
 function submitCheckin() {
-  const energy = parseInt(document.getElementById('checkin-energy').value) || 3;
-  const sleep = parseInt(document.getElementById('checkin-sleep').value) || 3;
-  const soreness = parseInt(document.getElementById('checkin-soreness').value) || 3;
-  const adherence = parseInt(document.getElementById('checkin-adherence').value) || 80;
-  const notes = (document.getElementById('checkin-notes').value || '').trim();
-  const waist = parseFloat(document.getElementById('checkin-waist').value) || null;
+  // Legacy — kept for compatibility
+  submitWeeklyMeasurements();
+}
 
-  apiPost('/api/checkins', { week: currentWeek, energy, sleep, soreness, adherence, notes });
+function submitWeeklyMeasurements() {
+  var data = {
+    date: todayStr(),
+    weight: parseFloat(document.getElementById('checkin-weight')?.value) || null,
+    waist: parseFloat(document.getElementById('checkin-waist')?.value) || null,
+    chest: parseFloat(document.getElementById('checkin-chest')?.value) || null,
+    hips: parseFloat(document.getElementById('checkin-hips')?.value) || null,
+    neck: parseFloat(document.getElementById('checkin-neck')?.value) || null,
+    bicep_left: parseFloat(document.getElementById('checkin-bicep-l')?.value) || null,
+    bicep_right: parseFloat(document.getElementById('checkin-bicep-r')?.value) || null,
+    thigh_left: parseFloat(document.getElementById('checkin-thigh-l')?.value) || null,
+    thigh_right: parseFloat(document.getElementById('checkin-thigh-r')?.value) || null,
+    notes: (document.getElementById('checkin-notes')?.value || '').trim(),
+  };
 
-  if (waist) {
-    apiPost('/api/measurements', { date: todayStr(), waist, notes });
+  apiPost('/api/measurements', data);
+
+  if (data.weight) {
+    apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
   }
 
   // Visual feedback
-  const form = document.getElementById('checkin-form');
+  var form = document.getElementById('checkin-form');
   if (form) {
-    form.innerHTML = '<div style="text-align:center;color:var(--accent);padding:1rem;">Check-in submitted!</div>';
+    form.innerHTML = '<div style="text-align:center;color:var(--accent);padding:1rem">Measurements submitted!</div>';
   }
 }
 
