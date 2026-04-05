@@ -5554,13 +5554,14 @@ function _openInlineRunCoachChat(dist, hr, elev) {
 async function _fetchRunCoachOpener(triggerMsg) {
   var messagesEl = document.getElementById('run-coach-messages');
   if (!messagesEl) return;
+  var bubble = messagesEl.querySelector('.chat-bubble.coach');
   try {
     var res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ message: triggerMsg }),
     });
-    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     if (bubble) bubble.innerHTML = '';
     var fullText = '';
     var reader = res.body.getReader();
@@ -5580,11 +5581,13 @@ async function _fetchRunCoachOpener(triggerMsg) {
         }
       }
     }
-    if (_chatHistory) {
+    if (!fullText.trim()) {
+      if (bubble) bubble.textContent = 'Nice run! How did it feel out there?';
+    }
+    if (_chatHistory && fullText.trim()) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
     }
   } catch(e) {
-    var bubble = messagesEl.querySelector('.chat-bubble.coach');
     if (bubble) bubble.textContent = 'Nice run! How did it feel out there?';
   }
   var input = document.getElementById('run-coach-input');
@@ -7626,13 +7629,14 @@ async function completeWorkoutSession() {
 async function _fetchLiftCoachOpener(triggerMsg) {
   var messagesEl = document.getElementById('lift-coach-messages');
   if (!messagesEl) return;
+  var bubble = messagesEl.querySelector('.chat-bubble.coach');
   try {
     var res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ message: triggerMsg }),
     });
-    var bubble = messagesEl.querySelector('.chat-bubble.coach');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     if (bubble) bubble.innerHTML = '';
     var fullText = '';
     var reader = res.body.getReader();
@@ -7652,11 +7656,13 @@ async function _fetchLiftCoachOpener(triggerMsg) {
         }
       }
     }
-    if (_chatHistory) {
+    if (!fullText.trim()) {
+      if (bubble) bubble.textContent = 'Nice work! How did the session feel?';
+    }
+    if (_chatHistory && fullText.trim()) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
     }
   } catch(e) {
-    var bubble = messagesEl.querySelector('.chat-bubble.coach');
     if (bubble) bubble.textContent = 'Nice work! How did the session feel?';
   }
   var input = document.getElementById('lift-coach-input');
