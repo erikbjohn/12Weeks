@@ -3889,19 +3889,7 @@ async function checkMorningCheckin() {
     _morningCheckinDone = true;
     return;
   }
-  // Sunday and Monday check-ins are mandatory (measurements + weekly planning)
-  // Only skip on other days if user has activity
-  var dow = new Date().getDay(); // 0=Sun, 1=Mon
-  if (dow !== 0 && dow !== 1) {
-    var hasActivity = (_chatHistory && _chatHistory.length > 0) ||
-      (_setCache && Object.keys(_setCache).some(function(k) { return k !== '_loadedDay' && _setCache[k] && _setCache[k].done; })) ||
-      (_mealsCache && _mealsCache[todayStr()]);
-    if (hasActivity) {
-      _morningCheckinDone = true;
-      localStorage.setItem(dismissKey, '1');
-      return;
-    }
-  }
+  // All morning check-ins are mandatory — no activity-based skip
   const today = todayStr();
   try {
     const res = await fetch('/api/morning-checkin?date=' + today);
