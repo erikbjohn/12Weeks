@@ -15,7 +15,7 @@ from itsdangerous import URLSafeTimedSerializer
 
 from workout_data import (
     get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS,
-    TRAVEL_WORKOUTS, TRAVEL_DAY_MAP,
+    TRAVEL_WORKOUTS, TRAVEL_DAY_MAP, EXERCISES,
 )
 from garmin_client import GarminClient
 from overtraining import assess_readiness
@@ -42,6 +42,7 @@ from models import (
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
+    Exercise, WeeklyPrescription,
 )
 
 app = Flask(__name__)
@@ -307,6 +308,66 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # Seed Exercise catalog from workout_data (idempotent)
+    try:
+        from workout_data import EXERCISES
+        existing_count = Exercise.query.count()
+        if existing_count < len(EXERCISES):
+            for name, data in EXERCISES.items():
+                if not Exercise.query.filter_by(name=name).first():
+                    db.session.add(Exercise(
+                        name=name,
+                        muscle_group=data.get('muscle_group'),
+                        category=data.get('category'),
+                        equipment=data.get('equipment', []),
+                        video_cue=data.get('video'),
+                    ))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # ONE-TIME: Canonicalize exercise names in set_log and exercise_log
+    try:
+        from workout_data import NAME_ALIASES
+        for old_name, canonical in NAME_ALIASES.items():
+            if old_name != canonical:
+                db.session.execute(text(
+                    'UPDATE set_log SET exercise_name = :new WHERE exercise_name = :old'
+                ), {"new": canonical, "old": old_name})
+                db.session.execute(text(
+                    'UPDATE exercise_log SET exercise_name = :new WHERE exercise_name = :old'
+                ), {"new": canonical, "old": old_name})
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Seed WeeklyPrescription for existing users who don't have any
+    try:
+        from workout_data import PHASE_TEMPLATES, get_phase
+        users_with_state = db.session.query(AppState).filter(AppState.start_date.isnot(None)).all()
+        for state in users_with_state:
+            existing = WeeklyPrescription.query.filter_by(user_id=state.user_id, week=1).first()
+            if not existing:
+                phase = get_phase(1)
+                template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+                for day_idx in range(7):
+                    for order, ex in enumerate(template.get(day_idx, [])):
+                        db.session.add(WeeklyPrescription(
+                            user_id=state.user_id,
+                            week=1,
+                            day_idx=day_idx,
+                            exercise_order=order,
+                            exercise_name=ex['exercise'],
+                            sets=ex['sets'],
+                            reps=ex['reps'],
+                            rest=ex.get('rest', '60s'),
+                            note=ex.get('note', ''),
+                            source='template',
+                        ))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     # PRE-START COACH EMAIL: Send day before start date
     try:
         tomorrow = date.today() + timedelta(days=1)
@@ -516,6 +577,37 @@ def _parse_coach_markers(text, user_id, week):
             count, reason = m.group(1).strip(), m.group(2).strip()
             cm = CoachMemory(user_id=user_id, memory_type='lockout_warning', content=f'Warning {count}: {reason}', week=week)
             db.session.add(cm)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s]
+    for m in re.finditer(r'\[PRESCRIPTION:\s*week=(\d+),\s*day=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,]+)(?:,\s*rest=([^\]]+))?\]', text):
+        try:
+            p_week, p_day, p_exercise = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+            p_sets, p_reps = int(m.group(4)), m.group(5).strip()
+            p_rest = m.group(6).strip() if m.group(6) else '60s'
+            from workout_data import resolve_name
+            p_exercise = resolve_name(p_exercise)
+            # Upsert
+            existing = WeeklyPrescription.query.filter_by(
+                user_id=user_id, week=p_week, day_idx=p_day, exercise_name=p_exercise
+            ).first()
+            if existing:
+                existing.sets = p_sets
+                existing.reps = p_reps
+                existing.rest = p_rest
+                existing.source = 'coach'
+            else:
+                # Find max exercise_order for this day
+                max_order = db.session.query(db.func.max(WeeklyPrescription.exercise_order)).filter_by(
+                    user_id=user_id, week=p_week, day_idx=p_day
+                ).scalar() or -1
+                db.session.add(WeeklyPrescription(
+                    user_id=user_id, week=p_week, day_idx=p_day,
+                    exercise_order=max_order + 1, exercise_name=p_exercise,
+                    sets=p_sets, reps=p_reps, rest=p_rest, source='coach',
+                ))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -1224,6 +1316,32 @@ def api_workouts():
     for week in range(1, 13):
         phase = get_phase(week)
         days = get_workouts(week)
+
+        # Check for user-specific prescriptions
+        prescriptions = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=week
+        ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
+
+        if prescriptions:
+            rx_by_day = {}
+            for rx in prescriptions:
+                if rx.day_idx not in rx_by_day:
+                    rx_by_day[rx.day_idx] = []
+                ex_dict = {
+                    "name": rx.exercise_name,
+                    "sets": f"{rx.sets}x{rx.reps}",
+                    "rest": rx.rest or "60s",
+                    "note": rx.note or "",
+                }
+                ex_info = EXERCISES.get(rx.exercise_name, {})
+                if ex_info.get("video"):
+                    ex_dict["video"] = ex_info["video"]
+                rx_by_day[rx.day_idx].append(ex_dict)
+
+            for day_idx, exercises in rx_by_day.items():
+                if day_idx < len(days):
+                    days[day_idx]["exercises"] = exercises
+
         for day in days:
             if "exercises" in day:
                 day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
@@ -1248,6 +1366,32 @@ def api_week(week):
     user_food_ids = _get_user_food_ids()
     phase = get_phase(week)
     days = get_workouts(week)
+
+    # Check for user-specific prescriptions
+    prescriptions = WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=week
+    ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
+
+    if prescriptions:
+        rx_by_day = {}
+        for rx in prescriptions:
+            if rx.day_idx not in rx_by_day:
+                rx_by_day[rx.day_idx] = []
+            ex_dict = {
+                "name": rx.exercise_name,
+                "sets": f"{rx.sets}x{rx.reps}",
+                "rest": rx.rest or "60s",
+                "note": rx.note or "",
+            }
+            ex_info = EXERCISES.get(rx.exercise_name, {})
+            if ex_info.get("video"):
+                ex_dict["video"] = ex_info["video"]
+            rx_by_day[rx.day_idx].append(ex_dict)
+
+        for day_idx, exercises in rx_by_day.items():
+            if day_idx < len(days):
+                days[day_idx]["exercises"] = exercises
+
     for day in days:
         if "exercises" in day:
             day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
@@ -1481,6 +1625,41 @@ def api_get_sets():
             "reps": s.reps, "done": s.done,
         })
     return jsonify(result)
+
+
+@app.route("/api/prescription/seed", methods=["POST"])
+@login_required
+def api_prescription_seed():
+    """Seed WeeklyPrescription rows for a week from the phase template."""
+    data = request.get_json()
+    week = data.get("week", _current_week())
+    from workout_data import PHASE_TEMPLATES, get_phase
+
+    # Don't overwrite existing prescriptions
+    existing = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).first()
+    if existing:
+        return jsonify({"message": "Prescriptions already exist for this week", "count": WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()})
+
+    phase = get_phase(week)
+    template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+    count = 0
+    for day_idx in range(7):
+        for order, ex in enumerate(template.get(day_idx, [])):
+            db.session.add(WeeklyPrescription(
+                user_id=current_user.id,
+                week=week,
+                day_idx=day_idx,
+                exercise_order=order,
+                exercise_name=ex['exercise'],
+                sets=ex['sets'],
+                reps=ex['reps'],
+                rest=ex.get('rest', '60s'),
+                note=ex.get('note', ''),
+                source='template',
+            ))
+            count += 1
+    db.session.commit()
+    return jsonify({"seeded": count, "week": week})
 
 
 @app.route("/api/sets/<int:week>/<int:day_idx>")
