@@ -8013,9 +8013,10 @@ function startTimedSet(seconds) {
 
   if (_focusTimerInterval) clearInterval(_focusTimerInterval);
   _focusTimerInterval = setInterval(() => {
+    try {
     if (_timedSetPaused) return; // Skip tick when paused
     remaining--;
-    render(); // Always render current state (including "0s")
+    if (remaining > 0) render(); // Render countdown (but not 0 — completion handles that)
     if (remaining <= 0) {
       clearInterval(_focusTimerInterval);
       _focusTimerInterval = null;
@@ -8086,6 +8087,7 @@ function startTimedSet(seconds) {
         showFocusRestTimer(_focusRestSec, false); // Show next set after
       }
     }
+    } catch(timerErr) { console.error('Timer tick error:', timerErr); }
   }, 1000);
 }
 
