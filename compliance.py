@@ -42,9 +42,22 @@ def compute_compliance_score(user_id):
     if program_days <= 0:
         return {"score": 100, "grade": "A+", "breakdown": {}, "streak": 0}
 
-    # Cap lookback at 14 days — only score recent behavior, not historical gaps
-    # (Earlier days may have missing data due to app bugs, not user non-compliance)
-    lookback = min(program_days, 14)
+    # Only score days where the user had actual activity
+    # Find earliest logged activity (set, checkin, or meal) to avoid penalizing app bugs
+    first_activity = None
+    first_set = SetLog.query.filter_by(user_id=user_id, done=True).order_by(SetLog.logged_date).first()
+    first_checkin = MorningCheckIn.query.filter_by(user_id=user_id).order_by(MorningCheckIn.log_date).first()
+    first_meal = MealLog.query.filter_by(user_id=user_id).order_by(MealLog.log_date).first()
+    candidates = [x for x in [
+        first_set.logged_date if first_set else None,
+        first_checkin.log_date if first_checkin else None,
+        first_meal.log_date if first_meal else None,
+    ] if x is not None]
+    first_activity = min(candidates) if candidates else today
+
+    # Lookback from first activity, cap at 14 days
+    activity_days = (today - first_activity).days + 1
+    lookback = min(activity_days, 14)
     since = today - timedelta(days=lookback)
 
     # Fetch data
