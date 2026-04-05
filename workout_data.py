@@ -524,7 +524,7 @@ EX = {
     "kb_swing": {"name": "KB Swing", "sets": "3x15", "note": "Hip drive - not a squat. Explosive.", "rest": "60-90s", "video": "kettlebell swing form tutorial hip hinge"},
     "push_press": {"name": "Push Press", "sets": "3x8", "note": "Leg drive to initiate, lock out overhead", "rest": "60-90s", "video": "barbell push press technique tutorial"},
     "goblet": {"name": "Goblet Squat", "sets": "3x12", "note": "KB or DB at chest, upright torso", "rest": "60-90s", "video": "goblet squat form tutorial beginner"},
-    "inv_row": {"name": "Inverted Row", "sets": "3x12", "note": "Body straight, pull chest to bar", "rest": "60-90s", "video": "inverted row bodyweight form tutorial"},
+    "inv_row": {"name": "Ring Row", "sets": "3x12", "note": "Adjust angle for difficulty — more horizontal = harder", "rest": "60-90s", "video": "ring row form tutorial"},
     "plank": {"name": "Plank", "sets": "3x45s", "note": "Brace hard - don't sag", "rest": "60s", "video": "plank proper form core bracing tutorial"},
     # PHASE 2
     "deadlift5": {"name": "Conventional Deadlift", "sets": "5x5", "note": "RPE 8-9. Heavy and controlled. No bouncing.", "rest": "2-3 min", "video": "conventional deadlift form tutorial technique"},
