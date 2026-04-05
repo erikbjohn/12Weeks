@@ -3287,6 +3287,22 @@ def _build_coach_context():
             "actual_time": ml.actual_time if hasattr(ml, 'actual_time') else None,
         }
 
+    # Weekly meal logs (so coach knows which days had meals tracked)
+    week_monday = local_today - timedelta(days=local_today.weekday())
+    week_meals = MealLog.query.filter(
+        MealLog.user_id == current_user.id,
+        MealLog.log_date >= week_monday,
+        MealLog.log_date <= local_today
+    ).all()
+    weekly_meals_summary = []
+    for ml_entry in week_meals:
+        eaten_count = len(ml_entry.eaten) if isinstance(ml_entry.eaten, list) else 0
+        weekly_meals_summary.append({
+            "date": ml_entry.log_date.isoformat(),
+            "day": day_names[ml_entry.log_date.weekday()] if ml_entry.log_date.weekday() < 7 else "?",
+            "meals_logged": eaten_count,
+        })
+
     # Today's meal plan (what they're supposed to eat)
     todays_meal_plan = None
     if workout_today and workout_today.get("mealPlan"):
@@ -3406,6 +3422,7 @@ def _build_coach_context():
         "body_measurements": measurements,
         "equipment": equipment,
         "meals_today": meals_today,
+        "weekly_meals_summary": weekly_meals_summary,
         "meal_plan_today": todays_meal_plan,
         "completed_days_this_week": completed_days_enriched,
         "week_schedule": week_schedule,

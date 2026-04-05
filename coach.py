@@ -133,6 +133,17 @@ def _format_next_week_prescriptions(prescriptions):
     return "\n".join(lines)
 
 
+def _format_weekly_meals(weekly_meals):
+    if not weekly_meals:
+        return ""
+    lines = ["MEALS LOGGED THIS WEEK:"]
+    for m in weekly_meals:
+        lines.append(f"  {m.get('day', '?')} ({m.get('date', '?')}): {m.get('meals_logged', 0)} meals logged")
+    if not weekly_meals:
+        lines.append("  No meals logged this week")
+    return "\n".join(lines)
+
+
 def _format_meals_today(meals, meal_plan=None):
     parts = []
     if meal_plan:
@@ -141,7 +152,12 @@ def _format_meals_today(meals, meal_plan=None):
             foods = ", ".join(m.get("foods", []))
             parts.append(f"  {m.get('time', '?')} {m.get('name', '')}: {foods}")
     if not meals:
-        parts.append("Meal tracking: Not logged today")
+        # Check if today is a fasting day (Sunday or fast_day plan)
+        is_fast = meal_plan and ('fast' in meal_plan.get('type', '').lower() or 'Protein-Sparing' in meal_plan.get('type', ''))
+        if is_fast:
+            parts.append("Meal tracking: FASTING DAY — protein shake + water only. This is correct.")
+        else:
+            parts.append("Meal tracking: Not logged today")
     else:
         eaten = meals.get('eaten', [])
         fasting = meals.get('fasting', False)
@@ -542,7 +558,8 @@ and compliance data in your context. BEFORE making ANY claim about what the athl
 should or shouldn't do today, READ THE DATA. Specifically:
 
 1. CHECK workout_today before saying "no workout today" or "rest day"
-2. CHECK the run section before saying "no run" — EVERY day has a run except Sunday
+2. CHECK the run section before saying "no run" — EVERY day has a run (Sun = streak mile)
+3. Sunday IS a fasting day. If meals_today is empty on Sunday, that is CORRECT — do NOT say "no meals logged"
 3. CHECK exercise_history before making claims about weights or progress
 4. CHECK meals_today before making claims about nutrition compliance
 5. If the athlete corrects you, DO NOT just apologize and ask a deflecting question.
@@ -696,6 +713,7 @@ Supplements: {', '.join(supp_taken) if supp_taken else 'None logged'}
 Equipment available: {', '.join(ctx.get('equipment', [])) or 'Not specified'}
 
 {_format_meals_today(ctx.get('meals_today'), ctx.get('meal_plan_today'))}
+{_format_weekly_meals(ctx.get('weekly_meals_summary', []))}
 
 {_format_week_schedule(ctx.get('week_schedule', []), ctx.get('completed_days_this_week', []))}
 {f"Schedule notes: {ctx.get('schedule_notes')}" if ctx.get('schedule_notes') else ''}
