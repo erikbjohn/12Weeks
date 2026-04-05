@@ -489,3 +489,32 @@ class RunOverride(db.Model):
     run_type = db.Column(db.String(20))
     reason = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Exercise(db.Model):
+    """Canonical exercise catalog — one row per unique physical movement."""
+    __tablename__ = "exercise"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    muscle_group = db.Column(db.String(30))
+    category = db.Column(db.String(20))  # compound / isolation / core / power
+    equipment = db.Column(db.JSON, default=list)
+    video_cue = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class WeeklyPrescription(db.Model):
+    """Per-user, per-week exercise programming. Populated by template or coach."""
+    __tablename__ = "weekly_prescription"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    exercise_order = db.Column(db.Integer, nullable=False)
+    exercise_name = db.Column(db.String(100), nullable=False)
+    sets = db.Column(db.Integer, nullable=False)
+    reps = db.Column(db.String(20), nullable=False)
+    rest = db.Column(db.String(20))
+    note = db.Column(db.Text)
+    source = db.Column(db.String(20), default='template')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

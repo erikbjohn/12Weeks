@@ -8,6 +8,8 @@ from models import db, SetLog, MuscleGroupProfile, SessionAnalysis, ExerciseComp
 # Exercise → muscle group mapping (pulled from equipment_swaps at runtime)
 def _get_muscle_group(exercise_name):
     """Get the muscle group for an exercise."""
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
     try:
         from equipment_swaps import EXERCISE_SWAPS
         swap = EXERCISE_SWAPS.get(exercise_name)
@@ -61,6 +63,8 @@ def _get_progression_increment(exercise_name, muscle_group, is_weak):
 
 def _get_configured_reps(exercise_name, week, day_idx):
     """Look up the configured rep count from workout data for this exercise."""
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
     try:
         from workout_data import get_workouts
         days = get_workouts(week)
@@ -94,6 +98,8 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         progression_indicator: str  ('up', 'hold', 'deload', 'weak', 'down')
     }
     """
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
     phase = _get_phase(week)
     muscle_group = _get_muscle_group(exercise_name)
 

@@ -490,6 +490,572 @@ RUNS = {
     "min": {"type": "min", "label": "Min mile", "time": "1+ mile", "detail": "Easy, sub-HR 130. Streak day. This is the only obligation."},
 }
 
+# ─── NAME ALIASES ──────────────────────────────────────────────────────────
+# Maps variant / short names to canonical exercise names.
+# Every exercise in the program should resolve to exactly one canonical name.
+
+NAME_ALIASES = {
+    "Bench Press": "Barbell Bench Press",
+    "Back Squat": "Barbell Back Squat",
+    "Deadlift": "Conventional Deadlift",
+    "DB OHP": "DB Overhead Press",
+    "Cable Row": "Cable Seated Row",
+    "RDL": "Romanian Deadlift",
+    "Calf Raise": "Standing Calf Raise",
+    "Push-Up": "Push-Ups",
+    "DB Lateral Raise": "Lateral Raise",
+    "Heavy Lat Pulldown": "Lat Pulldown",
+    "Bent-Over Row": "Barbell Bent-Over Row",
+    "DB Row": "Single-Arm DB Row",
+    "DB Walking Lunge": "Walking Lunge",
+    "Bench Press - 1RM test": "Barbell Bench Press",
+    "Back Squat - 1RM test": "Barbell Back Squat",
+    "Deadlift - 1RM test": "Conventional Deadlift",
+    "Lat Pulldown - max weight": "Lat Pulldown",
+    "Inverted Row": "Ring Row",
+    "DB Bench Press": "DB Bench Press",  # Keep as-is (different from Barbell Bench)
+    "DB Bench": "DB Bench Press",
+    "Bench": "Barbell Bench Press",
+    "Squat": "Barbell Back Squat",
+    # Pump / test variants → canonical base exercise
+    "Goblet Squat (pump)": "Goblet Squat",
+    "DB Bench (pump)": "DB Bench Press",
+    "Cable Row (pump)": "Cable Seated Row",
+    "DB Curl (pump)": "DB Curl",
+    "Tricep Pushdown (pump)": "Cable Tricep Pushdown",
+    "Leg Press (pump)": "Leg Press",
+    "Calf Raise (pump)": "Standing Calf Raise",
+}
+
+
+def resolve_name(name):
+    """Resolve any exercise name variant to the canonical name."""
+    return NAME_ALIASES.get(name, name)
+
+
+# ─── EXERCISES CATALOG ─────────────────────────────────────────────────────
+# One entry per canonical exercise. Source of truth for muscle group, category,
+# equipment, and video search cue. ~40 exercises.
+
+EXERCISES = {
+    # ─── CHEST ─────────────────────────────────────────────
+    "Barbell Bench Press": {
+        "muscle_group": "chest",
+        "category": "compound",
+        "equipment": ["barbell", "flat_bench"],
+        "video": "barbell bench press form tutorial",
+    },
+    "Incline DB Press": {
+        "muscle_group": "chest",
+        "category": "compound",
+        "equipment": ["dumbbells", "incline_bench"],
+        "video": "incline dumbbell press form tutorial",
+    },
+    "DB Bench Press": {
+        "muscle_group": "chest",
+        "category": "compound",
+        "equipment": ["dumbbells", "flat_bench"],
+        "video": "dumbbell bench press form tutorial",
+    },
+    "Incline Cable Fly": {
+        "muscle_group": "chest",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "incline cable fly chest form tutorial",
+    },
+    "Cable Chest Fly": {
+        "muscle_group": "chest",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "cable chest fly form tutorial pec squeeze",
+    },
+    "Push-Ups": {
+        "muscle_group": "chest",
+        "category": "compound",
+        "equipment": [],
+        "video": "push up proper form tutorial full ROM",
+    },
+    "Weighted Dips": {
+        "muscle_group": "chest_triceps",
+        "category": "compound",
+        "equipment": ["dip_station"],
+        "video": "weighted dips chest tricep form tutorial",
+    },
+    # ─── BACK ──────────────────────────────────────────────
+    "Cable Seated Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["cable_machine"],
+        "video": "seated cable row proper form technique",
+    },
+    "Lat Pulldown": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["lat_pulldown"],
+        "video": "lat pulldown proper form tutorial",
+    },
+    "Wide-Grip Lat Pulldown": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["lat_pulldown"],
+        "video": "wide grip lat pulldown proper form tutorial",
+    },
+    "Barbell Bent-Over Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "barbell bent over row proper form technique",
+    },
+    "Single-Arm DB Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["dumbbells", "flat_bench"],
+        "video": "single arm dumbbell row proper form",
+    },
+    "Ring Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["trx"],
+        "video": "ring row form tutorial",
+    },
+    "DB Shrug": {
+        "muscle_group": "traps",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "dumbbell shrug proper form trap exercise",
+    },
+    # ─── SHOULDERS ─────────────────────────────────────────
+    "DB Overhead Press": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "dumbbell overhead press form tutorial",
+    },
+    "Barbell OHP": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "barbell overhead press strict form tutorial",
+    },
+    "Push Press": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "barbell push press technique tutorial",
+    },
+    "Lateral Raise": {
+        "muscle_group": "shoulders",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "dumbbell lateral raise proper form",
+    },
+    "Face Pull": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "face pull cable exercise form tutorial",
+    },
+    "Rear Delt Fly": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "rear delt fly form tutorial shoulder",
+    },
+    # ─── LEGS ──────────────────────────────────────────────
+    "Barbell Back Squat": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "barbell back squat proper form tutorial",
+    },
+    "Conventional Deadlift": {
+        "muscle_group": "posterior_chain",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "conventional deadlift form tutorial technique",
+    },
+    "Romanian Deadlift": {
+        "muscle_group": "hamstrings",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "romanian deadlift form guide technique",
+    },
+    "Barbell Hip Thrust": {
+        "muscle_group": "glutes",
+        "category": "compound",
+        "equipment": ["barbell", "flat_bench"],
+        "video": "barbell hip thrust glute form tutorial",
+    },
+    "Bulgarian Split Squat": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "bulgarian split squat proper form tutorial",
+    },
+    "Walking Lunge": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "walking lunge proper form technique",
+    },
+    "Goblet Squat": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "goblet squat form tutorial beginner",
+    },
+    "Leg Press": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["leg_press"],
+        "video": "leg press machine proper form foot placement",
+    },
+    "Lying Leg Curl": {
+        "muscle_group": "hamstrings",
+        "category": "isolation",
+        "equipment": ["leg_curl_ext"],
+        "video": "lying leg curl machine form tutorial",
+    },
+    "Standing Calf Raise": {
+        "muscle_group": "calves",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "standing calf raise proper form full ROM",
+    },
+    # ─── ARMS ──────────────────────────────────────────────
+    "EZ-Bar Curl": {
+        "muscle_group": "biceps",
+        "category": "isolation",
+        "equipment": ["ez_bar"],
+        "video": "ez bar curl proper form bicep tutorial",
+    },
+    "Hammer Curl": {
+        "muscle_group": "biceps",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "hammer curl proper form bicep tutorial",
+    },
+    "DB Curl": {
+        "muscle_group": "biceps",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "dumbbell bicep curl proper form tutorial",
+    },
+    "Cable Tricep Pushdown": {
+        "muscle_group": "triceps",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "cable tricep pushdown form tutorial",
+    },
+    "Skull Crusher": {
+        "muscle_group": "triceps",
+        "category": "isolation",
+        "equipment": ["ez_bar", "flat_bench"],
+        "video": "skull crusher ez bar tricep form tutorial",
+    },
+    "Tricep Dip": {
+        "muscle_group": "triceps",
+        "category": "compound",
+        "equipment": ["dip_station"],
+        "video": "tricep dip proper form bodyweight tutorial",
+    },
+    "Overhead Tricep Extension": {
+        "muscle_group": "triceps",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "overhead dumbbell tricep extension form tutorial",
+    },
+    # ─── POWER ─────────────────────────────────────────────
+    "Power Clean": {
+        "muscle_group": "full_body",
+        "category": "power",
+        "equipment": ["barbell"],
+        "video": "power clean technique tutorial beginner",
+    },
+    "Box Jump": {
+        "muscle_group": "power",
+        "category": "power",
+        "equipment": [],
+        "video": "box jump proper form landing technique",
+    },
+    "Med Ball Slam": {
+        "muscle_group": "power",
+        "category": "power",
+        "equipment": ["medicine_ball"],
+        "video": "medicine ball slam form tutorial explosive",
+    },
+    "KB Swing": {
+        "muscle_group": "posterior_chain",
+        "category": "power",
+        "equipment": ["kettlebells"],
+        "video": "kettlebell swing form tutorial hip hinge",
+    },
+    # ─── CORE ──────────────────────────────────────────────
+    "Plank": {
+        "muscle_group": "core",
+        "category": "core",
+        "equipment": [],
+        "video": "plank proper form core bracing tutorial",
+    },
+    "Ab Wheel Rollout": {
+        "muscle_group": "core",
+        "category": "core",
+        "equipment": ["ab_wheel"],
+        "video": "ab wheel rollout form tutorial beginner",
+    },
+}
+
+
+# ─── PHASE TEMPLATES ───────────────────────────────────────────────────────
+# Restructured from _phase1_week, _phase2_week, _phase3_week, _deload_week,
+# _test_week. Each phase maps day_idx (0=Mon) to a list of exercise dicts.
+# Uses CANONICAL names. sets is an int, reps is a string.
+
+PHASE_TEMPLATES = {
+    # ── Phase 1: Hypertrophy (weeks 1-3) ──────────────────────────────────
+    1: {
+        0: [  # Monday — Upper A - Chest & Back
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Control the eccentric, 2 sec down"},
+            {"exercise": "Cable Seated Row", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Elbows tight, squeeze at end"},
+            {"exercise": "Incline DB Press", "sets": 4, "reps": "10", "rest": "60-90s", "note": "45 deg incline, full ROM"},
+            {"exercise": "Lat Pulldown", "sets": 4, "reps": "8", "rest": "60-90s", "note": "Full stretch at top, pull to upper chest"},
+            {"exercise": "Face Pull", "sets": 3, "reps": "15", "rest": "45-60s", "note": "External rotation, pull to forehead"},
+            {"exercise": "Lateral Raise", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Slow and controlled, no swinging"},
+            {"exercise": "EZ-Bar Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Full ROM, squeeze at top"},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Elbows locked, full extension"},
+        ],
+        1: [  # Tuesday — Lower A - Squat Focus
+            {"exercise": "Barbell Back Squat", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Below parallel, controlled descent"},
+            {"exercise": "Romanian Deadlift", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Hip hinge, feel the hamstring stretch"},
+            {"exercise": "Leg Press", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Feet shoulder-width, full depth"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Each leg, maintain upright torso"},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+        ],
+        2: [  # Wednesday — Push & Pull - Chest, Shoulder, Back
+            {"exercise": "Weighted Dips", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Forward lean for chest, upright for tri"},
+            {"exercise": "Incline Cable Fly", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Slight bend in elbow, full stretch"},
+            {"exercise": "Wide-Grip Lat Pulldown", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Pull to upper chest, lean back slightly"},
+            {"exercise": "Single-Arm DB Row", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Each side, row to hip not chest"},
+            {"exercise": "DB Overhead Press", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Standing or seated, controlled"},
+            {"exercise": "DB Shrug", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Full elevation, 1 sec hold at top"},
+            {"exercise": "Hammer Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Neutral grip, both arms alternate"},
+            {"exercise": "Skull Crusher", "sets": 3, "reps": "12", "rest": "45-60s", "note": "EZ bar, elbows in, controlled"},
+        ],
+        3: [  # Thursday — Lower B - Hinge Focus
+            {"exercise": "Conventional Deadlift", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Hip-width stance, bar over mid-foot"},
+            {"exercise": "Barbell Hip Thrust", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Full extension, squeeze glutes at top"},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Each leg. Rear foot elevated, upright torso."},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+        ],
+        4: [  # Friday — Upper B - Shoulder & Arms
+            {"exercise": "DB Overhead Press", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Standing or seated, controlled"},
+            {"exercise": "Lateral Raise", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Slow and controlled, no swinging"},
+            {"exercise": "Face Pull", "sets": 3, "reps": "15", "rest": "45-60s", "note": "External rotation, pull to forehead"},
+            {"exercise": "Lat Pulldown", "sets": 4, "reps": "8", "rest": "60-90s", "note": "Full stretch at top, pull to upper chest"},
+            {"exercise": "Cable Seated Row", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Elbows tight, squeeze at end"},
+            {"exercise": "EZ-Bar Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Full ROM, squeeze at top"},
+            {"exercise": "Hammer Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Neutral grip, both arms alternate"},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Elbows locked, full extension"},
+            {"exercise": "Skull Crusher", "sets": 3, "reps": "12", "rest": "45-60s", "note": "EZ bar, elbows in, controlled"},
+        ],
+        5: [  # Saturday — Full Body - Compound Circuit
+            {"exercise": "KB Swing", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Hip drive - not a squat. Explosive."},
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "12", "rest": "60-90s", "note": "KB or DB at chest, upright torso"},
+            {"exercise": "Ring Row", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Adjust angle for difficulty - more horizontal = harder"},
+            {"exercise": "Push Press", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Leg drive to initiate, lock out overhead"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+            {"exercise": "Conventional Deadlift", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Hip-width stance, bar over mid-foot"},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Phase 2: Strength (weeks 5-7) ─────────────────────────────────────
+    2: {
+        0: [  # Monday — Lower Strength - Squat Focus
+            {"exercise": "Barbell Back Squat", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Heavy. Below parallel every rep."},
+            {"exercise": "Barbell Hip Thrust", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Full extension, squeeze glutes at top"},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Each leg. Rear foot elevated, upright torso."},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        ],
+        1: [  # Tuesday — Upper Strength - Pull Focus
+            {"exercise": "Lat Pulldown", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "Heavy. Full stretch, controlled pull to chest."},
+            {"exercise": "Barbell Bent-Over Row", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "45 deg torso, pull to belly button"},
+            {"exercise": "Lat Pulldown", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Full stretch at top"},
+            {"exercise": "Rear Delt Fly", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Bent over or cable, squeeze shoulder blades"},
+            {"exercise": "EZ-Bar Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Full ROM, squeeze at top"},
+            {"exercise": "Hammer Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Neutral grip, both arms alternate"},
+        ],
+        2: [  # Wednesday — Full Body - Power + Accessories
+            {"exercise": "Power Clean", "sets": 4, "reps": "5", "rest": "2-3 min", "note": "From floor. Explosive pull, high elbows."},
+            {"exercise": "Box Jump", "sets": 4, "reps": "5", "rest": "2-3 min", "note": "Max effort. Land soft. Reset each rep."},
+            {"exercise": "Conventional Deadlift", "sets": 3, "reps": "5", "rest": "2-3 min", "note": "RPE 9. Top set of the week."},
+            {"exercise": "Barbell Bench Press", "sets": 3, "reps": "5", "rest": "2-3 min", "note": "RPE 8. Push hard."},
+            {"exercise": "Barbell Bent-Over Row", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Controlled, heavy-ish"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Each leg, weighted"},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        ],
+        3: [  # Thursday — Lower Strength - Hinge Focus
+            {"exercise": "Conventional Deadlift", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Heavy and controlled. No bouncing."},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Each leg. Rear foot elevated, upright torso."},
+            {"exercise": "Leg Press", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Feet shoulder-width, full depth"},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+        ],
+        4: [  # Friday — Upper Strength - Press Focus
+            {"exercise": "Barbell Bench Press", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Spotter or use safeties."},
+            {"exercise": "Barbell OHP", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "Standing strict press. No leg drive."},
+            {"exercise": "Cable Chest Fly", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Arms wide, squeeze hard at center"},
+            {"exercise": "Tricep Dip", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Bodyweight or weighted"},
+            {"exercise": "Face Pull", "sets": 3, "reps": "15", "rest": "45-60s", "note": "External rotation, pull to forehead"},
+            {"exercise": "Lateral Raise", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Slow and controlled, no swinging"},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Elbows locked, full extension"},
+        ],
+        5: [  # Saturday — Full Body - Volume + Core
+            {"exercise": "Barbell Back Squat", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Below parallel, controlled descent"},
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Control the eccentric, 2 sec down"},
+            {"exercise": "Barbell Bent-Over Row", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "45 deg torso, pull to belly button"},
+            {"exercise": "Push Press", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Leg drive to initiate, lock out overhead"},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Phase 3: Power (weeks 9-11) ───────────────────────────────────────
+    3: {
+        0: [  # Monday — Lower Power - Squat + Jumps
+            {"exercise": "Box Jump", "sets": 4, "reps": "5", "rest": "2-3 min", "note": "Max height. Land quiet. Full reset."},
+            {"exercise": "Barbell Back Squat", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Max controllable speed on way up."},
+            {"exercise": "Barbell Hip Thrust", "sets": 3, "reps": "5", "rest": "3-5 min", "note": "Heavy. Power through glutes."},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Heavier than P2, explosive up"},
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, controlled, feel the burn"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "20", "rest": "45-60s", "note": "Full stretch, slow."},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        ],
+        1: [  # Tuesday — Upper Power - Pull + Push
+            {"exercise": "Power Clean", "sets": 4, "reps": "3", "rest": "2-3 min", "note": "Heaviest of the plan. Focus on speed off floor."},
+            {"exercise": "Lat Pulldown", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "Heavy. Max weight you can do cleanly for 3."},
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Explosive concentric."},
+            {"exercise": "Barbell OHP", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9. Strict press, no leg drive."},
+            {"exercise": "Cable Seated Row", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, full ROM, pause at end"},
+            {"exercise": "DB Curl", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Controlled, squeeze at top"},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Full extension, controlled"},
+        ],
+        2: [  # Wednesday — Full Body Power - All Patterns
+            {"exercise": "Med Ball Slam", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Overhead to floor, explosive. 15-20 lb ball."},
+            {"exercise": "Conventional Deadlift", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Lock out hard. Re-set each rep."},
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Explosive concentric."},
+            {"exercise": "Lat Pulldown", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "Heavy. Max weight you can do cleanly for 3."},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Each leg, weighted"},
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, squeeze, slow eccentric"},
+            {"exercise": "Cable Seated Row", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, full ROM, pause at end"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+        ],
+        3: [  # Thursday — Lower Power - Accessory + Pump
+            {"exercise": "Barbell Hip Thrust", "sets": 3, "reps": "5", "rest": "3-5 min", "note": "Heavy. Power through glutes."},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Heavier than P2, explosive up"},
+            {"exercise": "Leg Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light-moderate, full ROM"},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, controlled, feel the burn"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "20", "rest": "45-60s", "note": "Full stretch, slow."},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        ],
+        4: [  # Friday — Upper Power - Peak Press + Pump
+            {"exercise": "Med Ball Slam", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Overhead to floor, explosive. 15-20 lb ball."},
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Explosive concentric."},
+            {"exercise": "Barbell OHP", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9. Strict press, no leg drive."},
+            {"exercise": "Lat Pulldown", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "Heavy. Max weight you can do cleanly for 3."},
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, squeeze, slow eccentric"},
+            {"exercise": "Cable Seated Row", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, full ROM, pause at end"},
+            {"exercise": "DB Curl", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Controlled, squeeze at top"},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Full extension, controlled"},
+        ],
+        5: [  # Saturday — Full Body - Volume + Aerobic
+            {"exercise": "Barbell Back Squat", "sets": 4, "reps": "3", "rest": "3-5 min", "note": "RPE 9+. Max controllable speed on way up."},
+            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Control the eccentric, 2 sec down"},
+            {"exercise": "Barbell Bent-Over Row", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "45 deg torso, pull to belly button"},
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, controlled, feel the burn"},
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, squeeze, slow eccentric"},
+            {"exercise": "Cable Seated Row", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, full ROM, pause at end"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "20", "rest": "45-60s", "note": "Full stretch, slow."},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Deload (weeks 4, 8) ───────────────────────────────────────────────
+    "deload": {
+        0: [  # Monday — Deload Upper (60% load)
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "8", "rest": "60s", "note": "60% normal weight"},
+            {"exercise": "Cable Seated Row", "sets": 3, "reps": "8", "rest": "60s", "note": "Light - focus on squeeze"},
+            {"exercise": "DB Overhead Press", "sets": 3, "reps": "8", "rest": "60s", "note": "60% load"},
+            {"exercise": "Lat Pulldown", "sets": 3, "reps": "6", "rest": "60s", "note": "Bodyweight equivalent, light"},
+            {"exercise": "Face Pull", "sets": 2, "reps": "15", "rest": "60s", "note": "Shoulder health - feel it"},
+        ],
+        1: [  # Tuesday — Deload Lower (60% load)
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "8", "rest": "60s", "note": "Light KB or DB"},
+            {"exercise": "Romanian Deadlift", "sets": 3, "reps": "8", "rest": "60s", "note": "60% load, feel the hamstrings"},
+            {"exercise": "Leg Press", "sets": 3, "reps": "10", "rest": "60s", "note": "Light, full ROM"},
+            {"exercise": "Lying Leg Curl", "sets": 2, "reps": "10", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "12", "rest": "60s", "note": "Slow and controlled"},
+        ],
+        2: [  # Wednesday — Deload Full Body (60% load)
+            {"exercise": "Conventional Deadlift", "sets": 2, "reps": "5", "rest": "60s", "note": "60% 1RM. Focus on setup."},
+            {"exercise": "Barbell Bench Press", "sets": 2, "reps": "8", "rest": "60s", "note": "Light - move well"},
+            {"exercise": "Barbell Bent-Over Row", "sets": 2, "reps": "8", "rest": "60s", "note": "Light, controlled"},
+            {"exercise": "Plank", "sets": 2, "reps": "30s", "rest": "60s", "note": "Brace and breathe"},
+        ],
+        3: [],  # Thursday — Rest
+        4: [  # Friday — Deload Upper Light
+            {"exercise": "Push-Ups", "sets": 2, "reps": "15", "rest": "60s", "note": "Bodyweight. Just move."},
+            {"exercise": "Ring Row", "sets": 2, "reps": "12", "rest": "60s", "note": "Bodyweight, controlled"},
+            {"exercise": "Lateral Raise", "sets": 2, "reps": "15", "rest": "60s", "note": "Light"},
+            {"exercise": "Hammer Curl", "sets": 2, "reps": "12", "rest": "60s", "note": "Light"},
+        ],
+        5: [],  # Saturday — Rest
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Test Week (week 12) ───────────────────────────────────────────────
+    "test": {
+        0: [  # Monday — Strength Test - Lower
+            {"exercise": "Barbell Back Squat", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "5->3->2->1 ladder. Rest fully between."},
+            {"exercise": "Conventional Deadlift", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "5->3->2->1 ladder."},
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, controlled, feel the burn"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "20", "rest": "45-60s", "note": "Full stretch, slow."},
+        ],
+        1: [  # Tuesday — Strength Test - Upper
+            {"exercise": "Barbell Bench Press", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "Use safeties. Spotter ideal."},
+            {"exercise": "Lat Pulldown", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "Find your max single rep weight."},
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, squeeze, slow eccentric"},
+            {"exercise": "DB Curl", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Controlled, squeeze at top"},
+        ],
+        2: [  # Wednesday — Full Body - Moderate Finish
+            {"exercise": "Goblet Squat", "sets": 3, "reps": "12", "rest": "60s", "note": "Moderate weight"},
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "12", "rest": "60s", "note": "Moderate"},
+            {"exercise": "Single-Arm DB Row", "sets": 3, "reps": "12", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Solid brace"},
+        ],
+        3: [],  # Thursday — Rest
+        4: [  # Friday — Full Body - Final Session
+            {"exercise": "Barbell Back Squat", "sets": 3, "reps": "5", "rest": "60s", "note": "Moderate - not max"},
+            {"exercise": "Barbell Bench Press", "sets": 3, "reps": "5", "rest": "60s", "note": "Moderate"},
+            {"exercise": "Lat Pulldown", "sets": 3, "reps": "5", "rest": "60s", "note": "Light to moderate weight"},
+            {"exercise": "KB Swing", "sets": 3, "reps": "15", "rest": "60s", "note": "Explosive - feel the power"},
+        ],
+        5: [],  # Saturday — Rest
+        6: [],  # Sunday — Rest
+    },
+}
+
+
 # Exercise definitions
 EX = {
     # UPPER A

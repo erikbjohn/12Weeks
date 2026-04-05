@@ -664,6 +664,8 @@ def get_alternatives(exercise_name, user_equipment=None):
         list of alternative dicts, or empty list if no swaps needed/available
     """
     import re
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
 
     swap = EXERCISE_SWAPS.get(exercise_name)
 
@@ -711,6 +713,8 @@ def check_exercise_available(exercise_name, user_equipment):
     Returns True if equipment is available or exercise is not in the swap map.
     """
     import re
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
 
     swap = EXERCISE_SWAPS.get(exercise_name)
 

@@ -1343,7 +1343,9 @@ def api_weights():
 @app.route("/api/weights", methods=["POST"])
 @login_required
 def api_weights_record():
+    from workout_data import resolve_name
     data = request.get_json()
+    data["exercise"] = resolve_name(data["exercise"])
     weight = data.get("weight", 0)
     if weight < 0 or weight > 1500:
         return jsonify({"error": "Invalid weight"}), 400
@@ -1398,8 +1400,9 @@ def api_weights_record():
 @login_required
 def api_set_log():
     """Save individual set data — one row per set."""
+    from workout_data import resolve_name
     data = request.get_json()
-    exercise = data.get("exercise")
+    exercise = resolve_name(data.get("exercise"))
     week = data.get("week")
     day_idx = data.get("day_idx")
     set_number = data.get("set_number")
@@ -1501,6 +1504,8 @@ def api_get_day_sets(week, day_idx):
 @app.route("/api/targets/<path:exercise_name>")
 @login_required
 def api_exercise_targets(exercise_name):
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
     s = _get_state()
     week = _current_week()
     day_idx = _user_today().weekday()
@@ -1511,8 +1516,10 @@ def api_exercise_targets(exercise_name):
 @app.route("/api/weights/baseline", methods=["POST"])
 @login_required
 def api_weights_baseline():
+    from workout_data import resolve_name
     data = request.get_json()
     for entry in data.get("exercises", []):
+        entry["name"] = resolve_name(entry["name"])
         log = ExerciseLog(
             exercise_name=entry["name"],
             weight=entry["working_weight"],
@@ -3997,6 +4004,8 @@ def api_equipment_save():
 @app.route("/api/exercise/alternatives/<path:exercise_name>")
 @login_required
 def api_exercise_alternatives(exercise_name):
+    from workout_data import resolve_name
+    exercise_name = resolve_name(exercise_name)
     from equipment_swaps import get_alternatives
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
