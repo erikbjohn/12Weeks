@@ -3885,7 +3885,9 @@ function renderTravelBanner() {
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
   if (_morningCheckinDone) return;
-  var dismissKey = 'checkin_done_' + todayStr();
+  var dow = new Date().getDay();
+  // Sunday uses a separate key — measurements are mandatory even if check-in was dismissed
+  var dismissKey = dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
   if (localStorage.getItem(dismissKey)) {
     _morningCheckinDone = true;
     return;
@@ -4315,7 +4317,9 @@ async function finishMorningCheckin() {
   }
 
   // Mark as done in localStorage so it survives reload even if DB save failed
-  localStorage.setItem('checkin_done_' + todayStr(), '1');
+  var _dow = new Date().getDay();
+  var _dismissKey = _dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
+  localStorage.setItem(_dismissKey, '1');
   closeMorningCheckin();
 }
 
