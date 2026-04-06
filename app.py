@@ -1557,6 +1557,7 @@ def _filter_meals_by_food_selections(days, user_food_ids):
 @login_required
 def api_workouts():
     from equipment_swaps import auto_swap_workout
+    from workout_data import EXERCISES, NAME_ALIASES
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
     user_food_ids = _get_user_food_ids()
@@ -1651,7 +1652,6 @@ def api_workouts():
             "days": days,
         }
     try:
-        from workout_data import EXERCISES, NAME_ALIASES
         all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
     except Exception:
         all_weeks["_exerciseNames"] = []
