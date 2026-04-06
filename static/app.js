@@ -4242,8 +4242,11 @@ async function _startMcChat() {
   var trigger;
 
   // Weekly planning: Sunday afternoon (after noon) OR Monday morning
+  // BUT skip if next week's program already exists (already planned)
   var _hour = new Date().getHours();
-  var _doWeeklyPlanning = (dayOfWeek === 1) || (dayOfWeek === 0 && _hour >= 12);
+  var _nextWeekData = workoutData[String(currentWeek + 1)];
+  var _nextWeekHasExercises = _nextWeekData && _nextWeekData.days && _nextWeekData.days.some(function(d) { return d.exercises && d.exercises.length && d.exercises[0].target_weight; });
+  var _doWeeklyPlanning = ((dayOfWeek === 1) || (dayOfWeek === 0 && _hour >= 12)) && !_nextWeekHasExercises;
 
   if (_doWeeklyPlanning) {
     var nextWeek = currentWeek + 1;
