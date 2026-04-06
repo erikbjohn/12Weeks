@@ -1186,11 +1186,15 @@ def assemble_prompt(agent_name, context):
     agent = AGENTS.get(agent_name, AGENTS.get("conversation"))
     requires = agent.get("requires", ["base"])
 
-    # Anger level
+    # Anger level — "good enough" in message forces Lombardi mode (demo)
     try:
-        from coach_state import get_anger_label, get_anger_instruction
-        anger_label = get_anger_label(current_user.id)
-        anger_instruction = get_anger_instruction(current_user.id)
+        from coach_state import get_anger_label, get_anger_instruction, ANGER_LEVELS
+        if context.get("_force_angry"):
+            anger_label = ANGER_LEVELS[3]["label"]
+            anger_instruction = ANGER_LEVELS[3]["instruction"]
+        else:
+            anger_label = get_anger_label(current_user.id)
+            anger_instruction = get_anger_instruction(current_user.id)
     except Exception:
         anger_label = "Baseline — Saban process mode"
         anger_instruction = "Standard coaching intensity. Process-focused. Direct."

@@ -3629,6 +3629,9 @@ def api_chat():
     # Build context for the AI coach
     from coach_assembler import build_filtered_context
     context = build_filtered_context(_route_info["agent_name"])
+    # "good enough" triggers Lombardi mode (demo keyword)
+    if "good enough" in user_msg.lower():
+        context["_force_angry"] = True
 
     # Get AI response
     from coach_assembler import assemble_prompt
@@ -3784,6 +3787,9 @@ def api_chat_stream():
     try:
         from coach_assembler import build_filtered_context
         context = build_filtered_context(_route_info["agent_name"])
+        # "good enough" triggers Lombardi mode (demo keyword)
+        if "good enough" in user_msg.lower():
+            context["_force_angry"] = True
     except Exception as ctx_err:
         import logging
         logging.error("Coach context build failed: %s", ctx_err)
