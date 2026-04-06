@@ -3656,11 +3656,45 @@ def api_chat():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
+    # Route trigger and build context (V2 on by default, legacy fallback)
+    _use_v2 = os.environ.get("COACH_V2", "1")
+    _route_info = None
+    if _use_v2:
+        try:
+            from coach_router import route_trigger
+            _route_info = route_trigger(user_msg)
+        except Exception:
+            _use_v2 = False
+
     # Build context for the AI coach
-    context = _build_coach_context()
+    if _use_v2 and _route_info:
+        from coach_assembler import build_filtered_context
+        context = build_filtered_context(_route_info["agent_name"])
+    else:
+        context = _build_coach_context()
 
     # Get AI response
-    response_text = get_coach_response(user_msg, context)
+    if _use_v2 and _route_info:
+        from coach_assembler import assemble_prompt
+        from coach import _build_messages
+        from coach_agents import AGENTS
+        import anthropic
+
+        system_prompt = assemble_prompt(_route_info["agent_name"], context)
+        messages = _build_messages(user_msg, context.get("chat_history", []))
+        agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model="claude-opus-4-20250514",
+            max_tokens=agent_config["max_tokens"],
+            temperature=agent_config["temperature"],
+            system=system_prompt,
+            messages=messages,
+        )
+        response_text = response.content[0].text
+    else:
+        response_text = get_coach_response(user_msg, context)
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -3670,6 +3704,18 @@ def api_chat():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+
+    # Fire compliance events (V2)
+    if _use_v2 and _route_info:
+        try:
+            from coach_state import update_anger_level
+            trigger = _route_info.get("trigger")
+            if trigger == "WORKOUT_COMPLETE":
+                update_anger_level(current_user.id, "completed_workout")
+            elif trigger == "MEALS_COMPLETE":
+                update_anger_level(current_user.id, "completed_workout")  # partial compliance
+        except Exception:
+            pass
 
     # Extract and save memories (runs in background, non-blocking)
     uid = current_user.id
@@ -3778,8 +3824,8 @@ def api_chat_stream():
     _current_user_id = current_user.id
     _mode = mode
 
-    # Route trigger and build context (V2 or legacy)
-    _use_v2 = os.environ.get("COACH_V2")
+    # Route trigger and build context (V2 on by default, legacy fallback)
+    _use_v2 = os.environ.get("COACH_V2", "1")
     _route_info = None
     if _use_v2:
         try:
@@ -3891,6 +3937,16 @@ def api_chat_stream():
                     _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
                 except Exception:
                     pass
+
+                # Fire compliance events (V2)
+                if _use_v2 and _route_info:
+                    try:
+                        from coach_state import update_anger_level
+                        trigger = _route_info.get("trigger")
+                        if trigger == "WORKOUT_COMPLETE":
+                            update_anger_level(_current_user_id, "completed_workout")
+                    except Exception:
+                        pass
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
