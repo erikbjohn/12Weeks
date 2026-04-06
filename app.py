@@ -37,7 +37,7 @@ from models import (
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
-    ComplianceScore, MuscleGroupProfile, SessionAnalysis,
+    ComplianceScore, ComplianceState, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,

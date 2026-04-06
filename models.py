@@ -79,6 +79,20 @@ class ComplianceScore(db.Model):
     streak_days = db.Column(db.Integer, default=0)
 
 
+class ComplianceState(db.Model):
+    """Running compliance state for anger level and coaching tone adaptation.
+    One row per user, upserted by the state machine after each interaction."""
+    __tablename__ = "compliance_state"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, unique=True, index=True)
+    anger_level = db.Column(db.Integer, default=0)  # 0=baseline, 1=warning, 2=stern, 3=lombardi
+    consecutive_misses = db.Column(db.Integer, default=0)
+    last_miss_date = db.Column(db.Date, nullable=True)
+    last_escalation_date = db.Column(db.Date, nullable=True)
+    last_deescalation_date = db.Column(db.Date, nullable=True)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class MuscleGroupProfile(db.Model):
     """Per-muscle-group strength tracking."""
     __tablename__ = "muscle_group_profile"
