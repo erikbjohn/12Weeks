@@ -3961,6 +3961,16 @@ def _build_coach_context():
     today_idx = local_today.weekday()  # 0=Mon
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
 
+    # Overlay DB meal plan onto workout_today (templates have stale data)
+    try:
+        _db_meal = WeeklyMealPlan.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=today_idx
+        ).order_by(WeeklyMealPlan.id.desc()).first()
+        if _db_meal and _db_meal.meal_data and workout_today:
+            workout_today["mealPlan"] = _db_meal.meal_data
+    except Exception:
+        pass
+
     # Full week schedule — so coach knows which day is which muscle group
     week_schedule = []
     for i, w in enumerate(workouts):
