@@ -3727,16 +3727,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } catch(e) {}
 
-    _stateCache = await stateRes.json();
-    _weightsCache = await weightsRes.json();
-    _completionsCache = await compRes.json();
-    _supplementsCache = await suppRes.json();
-    _bodyweightCache = await bwRes.json();
-    try {
-      workoutData = await workoutRes.json();
-    } catch(e) {
-      workoutData = {};
-    }
+    // Parse all API responses with error handling
+    var _parseErrs = [];
+    try { _stateCache = await stateRes.json(); } catch(e) { _stateCache = {}; _parseErrs.push('state:' + stateRes.status); }
+    try { _weightsCache = await weightsRes.json(); } catch(e) { _weightsCache = {}; _parseErrs.push('weights:' + weightsRes.status); }
+    try { _completionsCache = await compRes.json(); } catch(e) { _completionsCache = {exercises:{},days:{}}; _parseErrs.push('completions:' + compRes.status); }
+    try { _supplementsCache = await suppRes.json(); } catch(e) { _supplementsCache = []; _parseErrs.push('supplements:' + suppRes.status); }
+    try { _bodyweightCache = await bwRes.json(); } catch(e) { _bodyweightCache = []; _parseErrs.push('bodyweight:' + bwRes.status); }
+    try { workoutData = await workoutRes.json(); } catch(e) { workoutData = {}; _parseErrs.push('workouts:' + workoutRes.status); }
+    if (_parseErrs.length) console.error('API errors:', _parseErrs.join(', '));
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
 

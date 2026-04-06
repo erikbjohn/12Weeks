@@ -889,6 +889,26 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
     }
 
 
+# ─── DIAGNOSTIC ───────────────────────────────────────────────────────────
+
+@app.route("/api/debug/health")
+def debug_health():
+    """Quick health check — returns status of key tables."""
+    results = {}
+    try:
+        from sqlalchemy import text as _t
+        for tbl in ['user', 'psych_intake', 'physical_assessment', 'training_goal', 'app_state', 'weekly_prescription', 'exercise_log']:
+            try:
+                row = db.session.execute(_t(f'SELECT COUNT(*) FROM "{tbl}"')).scalar()
+                results[tbl] = row
+            except Exception as e:
+                results[tbl] = f"ERROR: {str(e)[:80]}"
+                db.session.rollback()
+    except Exception as e:
+        results["_fatal"] = str(e)[:200]
+    return jsonify(results)
+
+
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
