@@ -945,10 +945,10 @@ def api_regenerate_meals():
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
 
+        # Delete ALL meal plans for today+future (including coach-modified ones)
         WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=target_week
         ).filter(
-            WeeklyMealPlan.source != 'coach',
             WeeklyMealPlan.day_idx >= _user_today().weekday()
         ).delete()
 

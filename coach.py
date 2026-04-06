@@ -168,14 +168,10 @@ def _format_meals_today(meals, meal_plan=None):
     parts = []
     if meal_plan:
         plan_meals = meal_plan.get("meals", [])
-        parts.append(f"TODAY'S MEAL PLAN — EXACTLY {len(plan_meals)} meals (target {meal_plan.get('target_cal', '?')} cal, {meal_plan.get('target_protein', '?')}g protein):")
-        parts.append(f"⚠️ ONLY these {len(plan_meals)} meals exist. Do NOT reference any meal not listed here.")
-        for i, m in enumerate(plan_meals):
+        parts.append(f"TODAY'S MEAL PLAN ({meal_plan.get('type', '?')}, target {meal_plan.get('target_cal', '?')} cal, {meal_plan.get('target_protein', '?')}g protein):")
+        for m in plan_meals:
             foods = ", ".join(m.get("foods", []))
-            parts.append(f"  Meal {i+1}: {m.get('time', '?')} — {m.get('name', '')}: {foods}")
-        has_shake = any('shake' in (m.get('name', '') or '').lower() or 'whey' in ', '.join(m.get('foods', [])).lower() for m in plan_meals)
-        if not has_shake:
-            parts.append("  ⚠️ NO post-workout shake in this plan. Do NOT mention one.")
+            parts.append(f"  {m.get('time', '?')} {m.get('name', '')}: {foods}")
     if not meals:
         # Check if today is a fasting day (fast_day plan)
         is_fast = meal_plan and ('fast' in meal_plan.get('type', '').lower() or 'Protein-Sparing' in meal_plan.get('type', ''))
