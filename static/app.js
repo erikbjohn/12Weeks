@@ -3316,7 +3316,8 @@ async function recomputeGoal() {
       alert('Calories recomputed: ' + (data.calories || '?') + ' cal/day (deficit: ' + (data.daily_deficit || '?') + ' cal/day, ' + (data.weekly_loss_lbs || '?') + ' lb/week). Now re-plan your week to update meals.');
       renderAll();
     } else {
-      alert('Failed to recompute. Make sure intake + physical assessment are complete.');
+      var errData = await res.json().catch(function() { return {}; });
+      alert('Failed: ' + (errData.error || 'Unknown error. Status ' + res.status));
     }
   } catch(e) {
     alert('Error: ' + e.message);

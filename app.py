@@ -201,7 +201,12 @@ with app.app_context():
         from sqlalchemy import inspect as sa_inspect
         first_user = User.query.first()
         if first_user:
-            for tbl in ['psych_intake', 'physical_assessment', 'app_state']:
+            for tbl in ['psych_intake', 'physical_assessment', 'app_state',
+                        'training_goal', 'user_constraints', 'user_food_selections',
+                        'user_equipment', 'exercise_log', 'set_log', 'meal_log',
+                        'morning_checkin', 'body_weight', 'body_measurement',
+                        'weekly_prescription', 'weekly_meal_plan', 'coach_memory',
+                        'chat_message', 'compliance_score']:
                 try:
                     db.session.execute(text(
                         f'UPDATE "{tbl}" SET user_id = :uid WHERE user_id IS NULL'
