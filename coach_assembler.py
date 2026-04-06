@@ -1117,8 +1117,6 @@ def _format_athlete_data(ctx, requires):
 
 def _format_food_safety_block(ctx):
     """Build the food_safety block from context."""
-    from coach import _compute_template_vars  # reuse the food ID map
-
     parts = []
 
     # Restrictions / allergies

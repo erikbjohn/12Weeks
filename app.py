@@ -21,9 +21,6 @@ from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
-# compliance scoring removed — kept as no-op stubs for any remaining call sites
-def compute_compliance_score(user_id): return {"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0}
-def get_improvement_tip(grade, breakdown): return "Stay consistent."
 try:
     from training_engine import compute_next_targets, compute_muscle_strength, generate_session_analysis
 except Exception:
@@ -37,7 +34,7 @@ from models import (
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
-    ComplianceScore, ComplianceState, MuscleGroupProfile, SessionAnalysis,
+    ComplianceState, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
@@ -981,25 +978,6 @@ def api_regenerate_meals():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/debug/prompt-test")
-@login_required
-def debug_prompt_test():
-    """Test the coach prompt template rendering."""
-    try:
-        from coach import _build_system_prompt, _build_coach_context
-        ctx = _build_coach_context()
-        prompt = _build_system_prompt(ctx)
-        return jsonify({
-            "length": len(prompt),
-            "first_200": prompt[:200],
-            "last_200": prompt[-200:],
-            "has_user_rules": "<user_rules>" in prompt,
-        })
-    except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
 @app.route("/api/debug/workouts-error")
@@ -3236,18 +3214,6 @@ def api_morning_checkin_save():
     return jsonify({"ok": True})
 
 
-@app.route("/api/compliance")
-@login_required
-def api_compliance():
-    return jsonify({"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0})
-
-
-@app.route("/api/compliance/refresh", methods=["POST"])
-@login_required
-def api_compliance_refresh():
-    return jsonify({"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0})
-
-
 @app.route("/api/morning-checkin/history")
 @login_required
 def api_morning_checkin_history():
@@ -3656,45 +3622,33 @@ def api_chat():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
-    # Route trigger and build context (V2 on by default, legacy fallback)
-    _use_v2 = os.environ.get("COACH_V2", "1")
-    _route_info = None
-    if _use_v2:
-        try:
-            from coach_router import route_trigger
-            _route_info = route_trigger(user_msg)
-        except Exception:
-            _use_v2 = False
+    # Route trigger and build context
+    from coach_router import route_trigger
+    _route_info = route_trigger(user_msg)
 
     # Build context for the AI coach
-    if _use_v2 and _route_info:
-        from coach_assembler import build_filtered_context
-        context = build_filtered_context(_route_info["agent_name"])
-    else:
-        context = _build_coach_context()
+    from coach_assembler import build_filtered_context
+    context = build_filtered_context(_route_info["agent_name"])
 
     # Get AI response
-    if _use_v2 and _route_info:
-        from coach_assembler import assemble_prompt
-        from coach import _build_messages
-        from coach_agents import AGENTS
-        import anthropic
+    from coach_assembler import assemble_prompt
+    from coach import _build_messages
+    from coach_agents import AGENTS
+    import anthropic
 
-        system_prompt = assemble_prompt(_route_info["agent_name"], context)
-        messages = _build_messages(user_msg, context.get("chat_history", []))
-        agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+    system_prompt = assemble_prompt(_route_info["agent_name"], context)
+    messages = _build_messages(user_msg, context.get("chat_history", []))
+    agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
-            model="claude-opus-4-20250514",
-            max_tokens=agent_config["max_tokens"],
-            temperature=agent_config["temperature"],
-            system=system_prompt,
-            messages=messages,
-        )
-        response_text = response.content[0].text
-    else:
-        response_text = get_coach_response(user_msg, context)
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=agent_config["max_tokens"],
+        temperature=agent_config["temperature"],
+        system=system_prompt,
+        messages=messages,
+    )
+    response_text = response.content[0].text
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -3705,17 +3659,16 @@ def api_chat():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
-    # Fire compliance events (V2)
-    if _use_v2 and _route_info:
-        try:
-            from coach_state import update_anger_level
-            trigger = _route_info.get("trigger")
-            if trigger == "WORKOUT_COMPLETE":
-                update_anger_level(current_user.id, "completed_workout")
-            elif trigger == "MEALS_COMPLETE":
-                update_anger_level(current_user.id, "completed_workout")  # partial compliance
-        except Exception:
-            pass
+    # Fire compliance events
+    try:
+        from coach_state import update_anger_level
+        trigger = _route_info.get("trigger")
+        if trigger == "WORKOUT_COMPLETE":
+            update_anger_level(current_user.id, "completed_workout")
+        elif trigger == "MEALS_COMPLETE":
+            update_anger_level(current_user.id, "completed_workout")  # partial compliance
+    except Exception:
+        pass
 
     # Extract and save memories (runs in background, non-blocking)
     uid = current_user.id
@@ -3824,22 +3777,13 @@ def api_chat_stream():
     _current_user_id = current_user.id
     _mode = mode
 
-    # Route trigger and build context (V2 on by default, legacy fallback)
-    _use_v2 = os.environ.get("COACH_V2", "1")
-    _route_info = None
-    if _use_v2:
-        try:
-            from coach_router import route_trigger
-            _route_info = route_trigger(user_msg)
-        except Exception:
-            _use_v2 = False
+    # Route trigger and build context
+    from coach_router import route_trigger
+    _route_info = route_trigger(user_msg)
 
     try:
-        if _use_v2 and _route_info:
-            from coach_assembler import build_filtered_context
-            context = build_filtered_context(_route_info["agent_name"])
-        else:
-            context = _build_coach_context()
+        from coach_assembler import build_filtered_context
+        context = build_filtered_context(_route_info["agent_name"])
     except Exception as ctx_err:
         import logging
         logging.error("Coach context build failed: %s", ctx_err)
@@ -3857,26 +3801,17 @@ def api_chat_stream():
             import anthropic
             client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
 
-            if _use_v2 and _route_info:
-                from coach_assembler import assemble_prompt
-                from coach import _build_messages
-                from coach_agents import AGENTS
-                system_prompt = assemble_prompt(_route_info["agent_name"], context)
-                messages = _build_messages(user_msg, context.get("chat_history", []))
-                _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
-            else:
-                from coach import _build_system_prompt, _build_messages
-                system_prompt = _build_system_prompt(context)
-                messages = _build_messages(user_msg, context.get("chat_history", []))
-                _agent_config = None
-
-            _max_tokens = _agent_config["max_tokens"] if _agent_config else 20000
-            _temperature = _agent_config["temperature"] if _agent_config else 1.0
+            from coach_assembler import assemble_prompt
+            from coach import _build_messages
+            from coach_agents import AGENTS
+            system_prompt = assemble_prompt(_route_info["agent_name"], context)
+            messages = _build_messages(user_msg, context.get("chat_history", []))
+            _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
             with client.messages.stream(
                 model="claude-opus-4-20250514",
-                max_tokens=_max_tokens,
-                temperature=_temperature,
+                max_tokens=_agent_config["max_tokens"],
+                temperature=_agent_config["temperature"],
                 system=system_prompt,
                 messages=messages,
             ) as stream:
@@ -3938,15 +3873,14 @@ def api_chat_stream():
                 except Exception:
                     pass
 
-                # Fire compliance events (V2)
-                if _use_v2 and _route_info:
-                    try:
-                        from coach_state import update_anger_level
-                        trigger = _route_info.get("trigger")
-                        if trigger == "WORKOUT_COMPLETE":
-                            update_anger_level(_current_user_id, "completed_workout")
-                    except Exception:
-                        pass
+                # Fire compliance events
+                try:
+                    from coach_state import update_anger_level
+                    trigger = _route_info.get("trigger")
+                    if trigger == "WORKOUT_COMPLETE":
+                        update_anger_level(_current_user_id, "completed_workout")
+                except Exception:
+                    pass
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

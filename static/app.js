@@ -207,7 +207,8 @@ function todayStr() {
 }
 
 function stripCoachMarkers(text) {
-  return text.replace(/\[(?:SWAP|SCHEDULE|NUTRITION|WEIGHT|RUN|BMR_UPDATE|LOCKOUT_WARNING|LOCKOUT|SUNDAY_REVIEW|MORNING_CHECKIN|WEEKLY_PLANNING|CHAT_OPENED|COACH_CHECKIN|LIFTING_COMPLETE|RUN_COMPLETE|DAY_SCHEDULE|PRESCRIPTION):[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  // Strip ALL [TAG: ...] and [TAG] markers from coach output
+  return text.replace(/\[[A-Z_]+(?::[^\]]*)?\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 function renderCoachMarkdown(text) {

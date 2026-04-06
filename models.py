@@ -66,19 +66,6 @@ class CoachRule(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-class ComplianceScore(db.Model):
-    """Rolling compliance score for the athlete."""
-    __tablename__ = "compliance_score"
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    computed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    raw_score = db.Column(db.Float, default=0)
-    weighted_score = db.Column(db.Float, default=0)
-    letter_grade = db.Column(db.String(3), default='B')
-    breakdown = db.Column(db.JSON, default=dict)
-    streak_days = db.Column(db.Integer, default=0)
-
-
 class ComplianceState(db.Model):
     """Running compliance state for anger level and coaching tone adaptation.
     One row per user, upserted by the state machine after each interaction."""
