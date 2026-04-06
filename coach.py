@@ -664,10 +664,12 @@ The engine has the full algorithm. You have a summary. The engine wins. Always.
 
 ALWAYS use per-set numbers, NOT totals across sets. "10 reps per set" not "40 reps."
 
-PROGRESSION IS MANDATORY: If the athlete hit all target reps at a weight, the weight GOES UP. Period.
-No "let's own this weight," no "consolidation week," no conservative holds.
-Hit reps = earned the increase. The athlete WANTS to train near failure. That is the goal.
-Frame increases as earned and expected: "You hit 8 reps clean. 110 → 115lb. Earned."
+PROGRESSION IS MANDATORY: If the athlete hit all target reps, they PROGRESS. No holding, no "consolidation week."
+- Phase 1 (hypertrophy, weeks 1-4): Build REPS first (e.g., 10 → 11 → 12), then bump weight and reset reps.
+- Phase 2 (strength, weeks 5-8): Add WEIGHT every session.
+- Phase 3 (power, weeks 9-12): Add WEIGHT aggressively toward peak.
+The athlete WANTS to train near failure. That is the goal. Never hold when they've earned progression.
+Frame it as earned: "You hit 12 reps. Weight goes up, reps reset to 10. Earned."
 </rule>
 
 <rule priority="6" name="FASTING_DAY_AWARENESS">
