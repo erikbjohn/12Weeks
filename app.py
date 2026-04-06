@@ -3647,6 +3647,10 @@ def api_chat():
     if not user_msg:
         return jsonify({"error": "Message required"}), 400
 
+    # Handle /rule commands before normal chat processing
+    if user_msg.startswith('/rule'):
+        return _handle_rule_command(user_msg)
+
     # Double-send protection
     import time as _time
     _now = _time.time()
@@ -3691,11 +3695,16 @@ def api_chat():
             try:
                 memories = extract_memories(user_msg, response_text, context)
                 for mem in memories:
-                    cm = CoachMemory(
-                        user_id=uid, content=mem["content"],
-                        memory_type=mem["type"], week=week,
-                    )
-                    db.session.add(cm)
+                    if mem.get('type') == 'rule':
+                        existing = CoachRule.query.filter_by(user_id=uid, rule_text=mem['content'], active=True).first()
+                        if not existing:
+                            db.session.add(CoachRule(user_id=uid, rule_text=mem['content'], category='correction', source='auto'))
+                    else:
+                        cm = CoachMemory(
+                            user_id=uid, content=mem["content"],
+                            memory_type=mem["type"], week=week,
+                        )
+                        db.session.add(cm)
                 if memories:
                     db.session.commit()
             except Exception:
@@ -3710,6 +3719,47 @@ def api_chat():
     })
 
 
+def _handle_rule_command(msg):
+    """Handle /rule commands: list, delete, or add rules."""
+    parts = msg.strip().split(None, 2)
+    cmd = parts[1] if len(parts) > 1 else ""
+
+    if cmd == "delete" and len(parts) > 2:
+        try:
+            rule_id = int(parts[2])
+        except ValueError:
+            return jsonify({"response": "Usage: /rule delete <id>"})
+        rule = CoachRule.query.filter_by(id=rule_id, user_id=current_user.id).first()
+        if rule:
+            rule.active = False
+            db.session.commit()
+            return jsonify({"response": f"Rule #{rule_id} deactivated."})
+        return jsonify({"response": "Rule not found."}), 404
+
+    if not cmd or cmd == "list":
+        rules = CoachRule.query.filter_by(user_id=current_user.id, active=True).all()
+        if not rules:
+            return jsonify({"response": "No active rules."})
+        lines = [f"#{r.id}: {r.rule_text} [{r.category}]" for r in rules]
+        return jsonify({"response": "Active rules:\n" + "\n".join(lines)})
+
+    # Anything else is a new rule
+    rule_text = msg[len('/rule '):].strip()
+    if rule_text:
+        db.session.add(CoachRule(user_id=current_user.id, rule_text=rule_text, category='preference', source='manual'))
+        db.session.commit()
+        return jsonify({"response": f'Rule saved: "{rule_text}"'})
+    return jsonify({"response": "Usage: /rule <text> | /rule list | /rule delete <id>"})
+
+
+@app.route("/api/rules")
+@login_required
+def api_rules():
+    """List all active coaching rules for the current user."""
+    rules = CoachRule.query.filter_by(user_id=current_user.id, active=True).order_by(CoachRule.created_at).all()
+    return jsonify([{"id": r.id, "rule": r.rule_text, "category": r.category, "source": r.source} for r in rules])
+
+
 @app.route("/api/chat/stream", methods=["POST"])
 @login_required
 def api_chat_stream():
@@ -3718,6 +3768,10 @@ def api_chat_stream():
     user_msg = data.get("message", "").strip()
     if not user_msg:
         return jsonify({"error": "Message required"}), 400
+
+    # Handle /rule commands before normal chat processing
+    if user_msg.startswith('/rule'):
+        return _handle_rule_command(user_msg)
 
     # Double-send protection
     import time as _time
@@ -3800,11 +3854,16 @@ def api_chat_stream():
                             try:
                                 memories = extract_memories(user_msg, full_text, context)
                                 for mem in memories:
-                                    cm = CoachMemory(
-                                        user_id=_current_user_id, content=mem["content"],
-                                        memory_type=mem["type"], week=context.get("week", 1),
-                                    )
-                                    db.session.add(cm)
+                                    if mem.get('type') == 'rule':
+                                        existing = CoachRule.query.filter_by(user_id=_current_user_id, rule_text=mem['content'], active=True).first()
+                                        if not existing:
+                                            db.session.add(CoachRule(user_id=_current_user_id, rule_text=mem['content'], category='correction', source='auto'))
+                                    else:
+                                        cm = CoachMemory(
+                                            user_id=_current_user_id, content=mem["content"],
+                                            memory_type=mem["type"], week=context.get("week", 1),
+                                        )
+                                        db.session.add(cm)
                                 if memories:
                                     db.session.commit()
                             except Exception:
