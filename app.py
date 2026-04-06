@@ -908,9 +908,21 @@ def debug_health():
             except Exception as e:
                 results[tbl] = f"ERROR: {str(e)[:80]}"
                 db.session.rollback()
+
     except Exception as e:
         results["_fatal"] = str(e)[:200]
     return jsonify(results)
+
+
+@app.route("/api/debug/workouts-error")
+@login_required
+def debug_workouts_error():
+    """Call api_workouts and return the error if it crashes."""
+    try:
+        return api_workouts()
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────
