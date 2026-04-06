@@ -914,6 +914,70 @@ def debug_health():
     return jsonify(results)
 
 
+@app.route("/api/meals/regenerate", methods=["POST"])
+@login_required
+def api_regenerate_meals():
+    """Regenerate meal plans for a week using current goal calories. Does NOT touch exercises."""
+    try:
+        from meal_generator import generate_meal_plan
+        from goal_engine import compute_day_calories
+        from workout_data import MEAL_PLANS
+
+        data = request.get_json() or {}
+        target_week = data.get("week", _current_week())
+
+        goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+        bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+        fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
+
+        if not goal:
+            return jsonify({"error": "No goal computed yet"}), 400
+        if not fs or not fs.selected_foods:
+            return jsonify({"error": "No food selections"}), 400
+
+        current_weight = bw.weight_lbs if bw else 200
+        base_calories = goal.daily_calories
+        fasting_protocol = goal.fasting_protocol or "16_8"
+
+        _cal_day_type_map = {
+            "heavy_lift": "heavy", "long_run": "long_run",
+            "moderate": "training", "fast_day": "rest",
+        }
+        day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
+
+        WeeklyMealPlan.query.filter_by(
+            user_id=current_user.id, week=target_week
+        ).filter(WeeklyMealPlan.source != 'coach').delete()
+
+        meal_summary = []
+        for day_idx in range(7):
+            day_type = day_types[day_idx]
+            if day_type == 'fast_day':
+                meal_plan = MEAL_PLANS.get('fast_day', {})
+            else:
+                cal_day_type = _cal_day_type_map.get(day_type, "training")
+                day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+                meal_plan = generate_meal_plan(
+                    selected_foods=fs.selected_foods, day_type=day_type,
+                    targets=day_macros, fasting_protocol=fasting_protocol,
+                )
+
+            db.session.add(WeeklyMealPlan(
+                user_id=current_user.id, week=target_week, day_idx=day_idx,
+                meal_data=meal_plan,
+                daily_calories=meal_plan.get('targetCal', 0),
+                daily_protein=meal_plan.get('targetProtein', 0),
+                day_type=day_type, source='generator',
+            ))
+            meal_summary.append({"day": day_idx, "type": day_type, "calories": meal_plan.get('targetCal', 0)})
+
+        db.session.commit()
+        return jsonify({"ok": True, "meals": meal_summary, "daily_calories": base_calories})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/debug/workouts-error")
 @login_required
 def debug_workouts_error():

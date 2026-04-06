@@ -3313,7 +3313,24 @@ async function recomputeGoal() {
     const res = await fetch('/api/goal/compute', { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
-      alert('Calories recomputed: ' + (data.calories || '?') + ' cal/day (deficit: ' + (data.daily_deficit || '?') + ' cal/day, ' + (data.weekly_loss_lbs || '?') + ' lb/week). Now re-plan your week to update meals.');
+      // Auto-regenerate meal plans with new calories (doesn't touch exercises)
+      try {
+        var mealRes = await fetch('/api/meals/regenerate', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ week: currentWeek }),
+        });
+        var mealData = mealRes.ok ? await mealRes.json() : null;
+      } catch(e) {}
+      // Reload workout data to pick up new meals
+      try {
+        var wRes = await fetch('/api/workouts');
+        if (wRes.ok) {
+          workoutData = await wRes.json();
+          window._exerciseNames = workoutData._exerciseNames || [];
+          delete workoutData._exerciseNames;
+        }
+      } catch(e) {}
+      alert('Calories: ' + (data.calories || '?') + ' cal/day. Deficit: ' + (data.daily_deficit || '?') + ' cal/day (' + (data.weekly_loss_lbs || '?') + ' lb/week). Meals regenerated.');
       renderAll();
     } else {
       var errData = await res.json().catch(function() { return {}; });
