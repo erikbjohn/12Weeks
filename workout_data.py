@@ -525,6 +525,9 @@ NAME_ALIASES = {
     "Tricep Pushdown (pump)": "Cable Tricep Pushdown",
     "Leg Press (pump)": "Leg Press",
     "Calf Raise (pump)": "Standing Calf Raise",
+    "Kettlebell Swing": "KB Swing",
+    "Kettlebell Swings": "KB Swing",
+    "KB Swings": "KB Swing",
 }
 
 

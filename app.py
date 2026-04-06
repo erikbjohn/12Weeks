@@ -154,6 +154,9 @@ with app.app_context():
         ("day_completion", "workout_started_at", "TEXT"),
         ("day_completion", "workout_ended_at", "TEXT"),
         ("day_completion", "workout_duration_min", "INTEGER"),
+        ("weekly_prescription", "target_weight", "FLOAT"),
+        ("weekly_prescription", "progression_indicator", "VARCHAR(20)"),
+        ("weekly_prescription", "adjustment_reason", "TEXT"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -1966,19 +1969,21 @@ def api_generate_weekly_program():
                     adjusted_sets = targets.get('target_sets', base_sets)
                     reason = targets.get('adjustment_reason', '')
                     weight = targets.get('target_weight')
-                    note = f"{base_note} | Target: {weight}lb — {reason}" if reason else base_note
+                    note = base_note
                     source = 'engine'
                 else:
                     adjusted_reps = base_reps
                     adjusted_sets = base_sets
                     note = base_note
                     weight = None
+                    reason = None
                     source = 'template'
             except Exception:
                 adjusted_reps = base_reps
                 adjusted_sets = base_sets
                 note = base_note
                 weight = None
+                reason = None
                 source = 'template'
 
             db.session.add(WeeklyPrescription(
@@ -1992,6 +1997,9 @@ def api_generate_weekly_program():
                 rest=base_rest,
                 note=note,
                 source=source,
+                target_weight=weight,
+                progression_indicator=targets.get('progression_indicator', 'hold') if source == 'engine' else None,
+                adjustment_reason=reason,
             ))
 
             program_summary.append({
@@ -3827,11 +3835,13 @@ def _build_coach_context():
     exercise_logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
         ExerciseLog.logged_date.desc(), ExerciseLog.id.desc()
     ).limit(200).all()
+    from workout_data import resolve_name
     exercise_history = {}
     for log in exercise_logs:
-        if log.exercise_name not in exercise_history:
-            exercise_history[log.exercise_name] = []
-        if len(exercise_history[log.exercise_name]) < 3:
+        canonical = resolve_name(log.exercise_name)
+        if canonical not in exercise_history:
+            exercise_history[canonical] = []
+        if len(exercise_history[canonical]) < 3:
             entry = {
                 "weight": log.weight, "rpe": log.rpe,
                 "reps_completed": log.reps_completed,
@@ -3840,7 +3850,7 @@ def _build_coach_context():
             }
             if log.estimated_1rm:
                 entry["estimated_1rm"] = log.estimated_1rm
-            exercise_history[log.exercise_name].append(entry)
+            exercise_history[canonical].append(entry)
 
     # Per-set data for today — use date-based query, not week number
     today_idx = local_today.weekday()
@@ -3851,9 +3861,10 @@ def _build_coach_context():
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
     for s in today_sets:
-        if s.exercise_name not in set_data:
-            set_data[s.exercise_name] = []
-        set_data[s.exercise_name].append({
+        canonical = resolve_name(s.exercise_name)
+        if canonical not in set_data:
+            set_data[canonical] = []
+        set_data[canonical].append({
             "set": s.set_number + 1, "weight": s.weight,
             "reps": s.reps, "done": s.done,
             "target_weight": getattr(s, 'target_weight', None),
@@ -4093,13 +4104,43 @@ def _build_coach_context():
                 user_id=current_user.id, week=next_week
             ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
             result["next_week_prescriptions"] = [
-                {"day_idx": rx.day_idx, "exercise": rx.exercise_name, "sets": rx.sets, "reps": rx.reps, "rest": rx.rest}
+                {
+                    "day_idx": rx.day_idx,
+                    "exercise": rx.exercise_name,
+                    "sets": rx.sets,
+                    "reps": rx.reps,
+                    "rest": rx.rest,
+                    "target_weight": getattr(rx, 'target_weight', None),
+                    "adjustment_reason": getattr(rx, 'adjustment_reason', None),
+                    "progression_indicator": getattr(rx, 'progression_indicator', None),
+                }
                 for rx in next_rx
             ]
         else:
             result["next_week_prescriptions"] = []
     except Exception:
         result["next_week_prescriptions"] = []
+
+    # Pre-computed engine analysis per exercise — authoritative progression decisions
+    exercise_analysis = {}
+    try:
+        from training_engine import compute_next_targets
+        for ex_name in list(exercise_history.keys()):
+            try:
+                analysis = compute_next_targets(current_user.id, ex_name, week, today_idx)
+                exercise_analysis[ex_name] = {
+                    "target_weight": analysis.get("target_weight"),
+                    "target_reps": analysis.get("target_reps"),
+                    "target_sets": analysis.get("target_sets"),
+                    "adjustment_reason": analysis.get("adjustment_reason", ""),
+                    "progression_indicator": analysis.get("progression_indicator", "hold"),
+                    "coach_alert": analysis.get("coach_alert"),
+                }
+            except Exception:
+                pass
+    except Exception:
+        pass
+    result["exercise_analysis"] = exercise_analysis
 
     return result
 

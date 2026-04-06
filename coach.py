@@ -28,7 +28,7 @@ def _format_goal(goal):
 def _format_exercise_history(history):
     if not history:
         return "EXERCISE HISTORY: No lifts logged yet."
-    lines = ["EXERCISE HISTORY (last 3 sessions per exercise — shows progression):"]
+    lines = ["EXERCISE HISTORY (raw log for reference — see EXERCISE ANALYSIS for authoritative interpretation):"]
     for name, entries in sorted(history.items()):
         if isinstance(entries, dict):
             entries = [entries]  # Legacy single-entry format
@@ -40,6 +40,23 @@ def _format_exercise_history(history):
             session_strs.append(f"wk{e.get('week','?')}:{wt}lb{'x'+str(reps) if reps else ''}{rpe_str}")
         lines.append(f"  {name}: {' → '.join(session_strs)}")
     return '\n'.join(lines[:30])  # Cap to prevent prompt bloat
+
+
+def _format_exercise_analysis(analysis):
+    """Format the training engine's pre-computed analysis for each exercise."""
+    if not analysis:
+        return ""
+    lines = ["EXERCISE ANALYSIS (from training engine — authoritative, do NOT re-interpret raw data):"]
+    indicators = {"up": "PROGRESS", "hold": "HOLD", "deload": "DELOAD", "weak": "CAUTIOUS", "down": "REDUCE"}
+    for name, data in sorted(analysis.items()):
+        ind = indicators.get(data.get("progression_indicator", "hold"), "HOLD")
+        weight_str = f"{data['target_weight']}lb" if data.get('target_weight') else "TBD"
+        reps = data.get('target_reps', '?')
+        sets = data.get('target_sets', '?')
+        reason = data.get('adjustment_reason', '')
+        alert = f" [ALERT: {data['coach_alert']}]" if data.get('coach_alert') else ""
+        lines.append(f"  {name}: [{ind}] target {weight_str} {sets}x{reps} — {reason}{alert}")
+    return '\n'.join(lines)
 
 
 def _format_today_sets(sets):
@@ -122,14 +139,16 @@ def _format_measurements(m):
 def _format_next_week_prescriptions(prescriptions):
     if not prescriptions:
         return ""
-    lines = ["NEXT WEEK'S PLAN (adjust via [PRESCRIPTION: ...] markers):"]
+    lines = ["NEXT WEEK'S PLAN (engine-computed targets — announce these, do not re-derive):"]
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     current_day = -1
     for rx in prescriptions:
         if rx['day_idx'] != current_day:
             current_day = rx['day_idx']
             lines.append(f"\n  {day_names[current_day]}:")
-        lines.append(f"    {rx['exercise']} — {rx['sets']}x{rx['reps']} ({rx.get('rest', '60s')} rest)")
+        weight_str = f" @ {rx['target_weight']}lb" if rx.get('target_weight') else ""
+        reason_str = f" — {rx['adjustment_reason']}" if rx.get('adjustment_reason') else ""
+        lines.append(f"    {rx['exercise']}: {rx['sets']}x{rx['reps']}{weight_str}{reason_str}")
     return "\n".join(lines)
 
 
@@ -627,13 +646,23 @@ Fasted training is safe and common. You do NOT get to veto their schedule based 
 The athlete knows their body. Apply the schedule, move on.
 </rule>
 
-<rule priority="5b" name="DATA_INTERPRETATION">
-HIGH REPS = TOO EASY, NOT STRUGGLING. If an athlete does 40 reps at a weight, the weight is TOO LIGHT.
-Do NOT say they are "struggling" or had "mixed feedback" when the data shows high reps.
-- 40 reps at 60lb = weight needs to go UP significantly, not "let's own this weight"
-- Missed reps (8 out of 10) = weight might be too heavy, hold or reduce
-- Hit all target reps = on track, standard progression
-ALWAYS interpret rep counts correctly. More reps than target = too easy. Fewer = too hard.
+<rule priority="5b" name="TRUST_ENGINE_ANALYSIS">
+The <exercise_analysis> section contains pre-computed progression decisions from the training engine.
+These are AUTHORITATIVE. You MUST use them exactly as stated. You are FORBIDDEN from:
+- Re-interpreting raw numbers in <exercise_history> to reach a different conclusion
+- Saying an athlete "reduced" or "decreased" weight when the engine says PROGRESS
+- Saying an athlete is "struggling" when the engine says weight should go UP
+- Self-correcting mid-response ("My error reading the data", "My mistake")
+- Computing your own rep totals or weight changes from raw data
+
+When discussing an exercise during weekly planning, read <exercise_analysis> and state the verdict directly:
+  "Deadlift: 145 → 150lb — you earned the bump."
+  "Push Press: hit your 8-rep target. 55 → 60lb."
+
+If <exercise_analysis> and raw <exercise_history> appear to conflict, TRUST <exercise_analysis>.
+The engine has the full algorithm. You have a summary. The engine wins. Always.
+
+ALWAYS use per-set numbers, NOT totals across sets. "10 reps per set" not "40 reps."
 </rule>
 
 <rule priority="6" name="FASTING_DAY_AWARENESS">
@@ -667,6 +696,19 @@ All pre-computed time values in <athlete_data> are already in the athlete's loca
 The training plan was built specifically for this athlete. If they ask to modify it, tell them:
 "Follow the plan. It's built for a reason." If their suggestion would cause overtraining or injury, name it and refuse.
 compute_next_targets() is the source of truth for weight prescriptions. NEVER contradict the engine's targets.
+</rule>
+
+<rule priority="10b" name="NO_CONFIRMATION_QUESTIONS">
+NEVER ask the athlete to confirm changes or ready-state. NEVER say:
+- "Want me to update that?"
+- "Should I adjust your targets?"
+- "Ready to discuss running and nutrition targets?"
+- "Ready to cover X?"
+- "Shall I change the plan?"
+- "How does that sound?"
+The training engine has computed the targets. You ANNOUNCE decisions. You do not REQUEST permission.
+If the athlete disagrees, they will say so. Do not preemptively ask.
+When finishing a topic, TRANSITION directly: "Now for running:" not "Ready to discuss running?"
 </rule>
 
 <rule priority="11" name="NO_AI_DISCLOSURE">
@@ -720,6 +762,10 @@ Week {week} of 12, Phase {phase.get('label', '?')}
 <exercise_history>
 {_format_exercise_history(ctx.get('exercise_history', {}))}
 </exercise_history>
+
+<exercise_analysis>
+{_format_exercise_analysis(ctx.get('exercise_analysis', {}))}
+</exercise_analysis>
 
 <today_sets>
 {_format_today_sets(ctx.get('today_sets', {}))}
@@ -830,7 +876,7 @@ Check <scheduled_activities> for races or events.
 </monday_planning>
 
 <workout_feedback trigger="[WORKOUT_COMPLETE]">
-Reference specific exercises and weights from <today_sets>. Compare to <exercise_history>.
+Reference <exercise_analysis> for the engine's progression verdict on each exercise. State the verdict directly — do NOT re-derive from raw numbers.
 Call out PRs. Call out sandbagging. Be specific and direct.
 End with recovery directive. Only reference tomorrow if the plan exists in <next_week> or <week_schedule>.
 If tomorrow's plan doesn't exist yet (e.g., Sunday evening before Monday planning), say "We plan tomorrow morning." NEVER hallucinate a workout that isn't in the data.

@@ -6984,13 +6984,14 @@ async function renderDetail() {
       return;
   }
 
-  // Future week gate — show locked placeholder if browsing ahead of actual week
+  // Future week gate — show locked placeholder if browsing ahead AND no plan generated yet
   if (_stateCache && _stateCache.start_date) {
     const _startDt = new Date(_stateCache.start_date + 'T00:00:00');
     const _nowDt = new Date();
     const _diffDays = Math.floor((_nowDt - _startDt) / (1000 * 60 * 60 * 24));
     const _actualWeek = Math.min(12, Math.max(1, Math.floor(_diffDays / 7) + 1));
-    if (currentWeek > _actualWeek) {
+    const _futureWeekData = workoutData[String(currentWeek)];
+    if (currentWeek > _actualWeek && (!_futureWeekData || !_futureWeekData.days || !_futureWeekData.days.length)) {
       panel.innerHTML = '<div class="detail-inner" style="padding:2rem;text-align:center">' +
           '<div style="font-size:48px;margin-bottom:1rem">&#128274;</div>' +
           '<h3 style="color:var(--text);margin-bottom:0.5rem">Coming Soon</h3>' +
