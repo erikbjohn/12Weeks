@@ -3961,8 +3961,23 @@ def _build_coach_context():
     today_idx = local_today.weekday()  # 0=Mon
     workout_today = workouts[today_idx] if today_idx < len(workouts) else None
 
-    # Overlay DB meal plan onto workout_today (templates have stale data)
+    # Overlay ALL DB data onto workout_today (templates are stale defaults)
     try:
+        # Exercises from WeeklyPrescription
+        _db_rx = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=today_idx
+        ).order_by(WeeklyPrescription.exercise_order).all()
+        if _db_rx and workout_today:
+            workout_today["exercises"] = [
+                {"name": rx.exercise_name, "sets": f"{rx.sets}x{rx.reps}",
+                 "rest": rx.rest or "60s", "note": rx.note or "",
+                 "target_weight": getattr(rx, 'target_weight', None)}
+                for rx in _db_rx
+            ]
+    except Exception:
+        pass
+    try:
+        # Meal plan from WeeklyMealPlan
         _db_meal = WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=week, day_idx=today_idx
         ).order_by(WeeklyMealPlan.id.desc()).first()
@@ -3970,16 +3985,51 @@ def _build_coach_context():
             workout_today["mealPlan"] = _db_meal.meal_data
     except Exception:
         pass
+    try:
+        # Run plan from WeeklyRunPlan
+        _db_run = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=today_idx
+        ).first()
+        if _db_run and workout_today:
+            workout_today["run"] = {"type": _db_run.run_type, "label": _db_run.label,
+                                     "time": _db_run.duration, "detail": _db_run.detail or ""}
+    except Exception:
+        pass
+    try:
+        # Warmup from WeeklyWarmup
+        _db_warmup = WeeklyWarmup.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=today_idx
+        ).first()
+        if _db_warmup and _db_warmup.warmup_data and workout_today:
+            workout_today["warmup"] = _db_warmup.warmup_data
+    except Exception:
+        pass
 
-    # Full week schedule — so coach knows which day is which muscle group
+    # Full week schedule from DB (not templates)
     week_schedule = []
-    for i, w in enumerate(workouts):
-        week_schedule.append({
-            "day_idx": i,
-            "day": day_names[i],
-            "liftName": w.get("liftName", "Rest"),
-            "isRest": w.get("isRest", False),
-        })
+    try:
+        _db_schedules = WeeklyDaySchedule.query.filter_by(
+            user_id=current_user.id, week=week
+        ).order_by(WeeklyDaySchedule.day_idx).all()
+        if _db_schedules:
+            for ds in _db_schedules:
+                week_schedule.append({
+                    "day_idx": ds.day_idx,
+                    "day": day_names[ds.day_idx] if ds.day_idx < 7 else "?",
+                    "liftName": ds.lift_name or "Rest",
+                    "isRest": ds.is_rest or False,
+                })
+    except Exception:
+        pass
+    if not week_schedule:
+        # Fallback to templates if no DB schedule exists
+        for i, w in enumerate(workouts):
+            week_schedule.append({
+                "day_idx": i,
+                "day": day_names[i],
+                "liftName": w.get("liftName", "Rest"),
+                "isRest": w.get("isRest", False),
+            })
 
     # Supplements today
     supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=local_today).all()
