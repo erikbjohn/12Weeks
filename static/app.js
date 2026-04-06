@@ -4652,6 +4652,10 @@ async function sendMorningCoachReply() {
 
 function closeMorningCheckin() {
   _morningCheckinDone = true;
+  // Persist dismiss key BEFORE re-rendering so lock screen can't reappear
+  var _dow = new Date().getDay();
+  var _dk = _dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
+  localStorage.setItem(_dk, '1');
   document.getElementById('morning-checkin-overlay').innerHTML = '';
   renderCheckinSummaryBar();
   renderDetail(); // Unlock the daily view
