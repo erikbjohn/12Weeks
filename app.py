@@ -947,10 +947,18 @@ def api_regenerate_meals():
 
         WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=target_week
-        ).filter(WeeklyMealPlan.source != 'coach').delete()
+        ).filter(
+            WeeklyMealPlan.source != 'coach',
+            WeeklyMealPlan.day_idx >= _user_today().weekday()
+        ).delete()
 
+        # Only regenerate today and future days
+        week_monday = _user_today() - timedelta(days=_user_today().weekday())
         meal_summary = []
         for day_idx in range(7):
+            day_date = week_monday + timedelta(days=day_idx)
+            if day_date < _user_today():
+                continue  # Skip past days — don't overwrite eaten meals
             day_type = day_types[day_idx]
             if day_type == 'fast_day':
                 meal_plan = MEAL_PLANS.get('fast_day', {})

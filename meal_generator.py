@@ -35,11 +35,11 @@ _MEAL_SPLITS = {
 
 # Day-type carb/calorie multipliers applied to the user's base targets.
 _DAY_MODIFIERS = {
-    "heavy_lift": {"carbs": 1.20, "calories": 1.0},
-    "long_run":   {"carbs": 1.30, "calories": 1.0},
-    "moderate":   {"carbs": 1.0,  "calories": 1.0},
-    "rest":       {"carbs": 0.80, "calories": 0.90},
-    "deload":     {"carbs": 1.10, "calories": 1.0},
+    "heavy_lift": {"carbs": 1.0, "calories": 1.0},
+    "long_run":   {"carbs": 1.0, "calories": 1.0},
+    "moderate":   {"carbs": 1.0, "calories": 1.0},
+    "rest":       {"carbs": 1.0, "calories": 1.0},
+    "deload":     {"carbs": 1.0, "calories": 1.0},
 }
 
 # Day-type labels and notes

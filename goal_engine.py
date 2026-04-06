@@ -160,8 +160,9 @@ def compute_targets(tdee, goal_type, weight_lbs, age=None, target_weight=None, w
             Protein, carbs, fat are in grams.
     """
     if goal_type == "cut":
-        protein = round(1.2 * weight_lbs)
-        fat = round(0.35 * weight_lbs)
+        # Use 1.0g/lb for aggressive cuts, 1.2g/lb for moderate cuts
+        protein = round(1.0 * weight_lbs)
+        fat = round(0.3 * weight_lbs)
         # Compute deficit from actual weight loss goal
         if target_weight and target_weight < weight_lbs and weeks > 0:
             weight_to_lose = weight_lbs - target_weight
