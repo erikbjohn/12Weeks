@@ -201,10 +201,7 @@ def extract_memories(user_message, coach_response, context):
     if not api_key:
         return []
 
-    # Check every 3rd message
-    chat_len = len(context.get("chat_history", []))
-    if chat_len % 3 != 0 and chat_len > 1:
-        return []
+    # Run on every message — memories are critical for coach consistency
 
     try:
         import anthropic
@@ -904,8 +901,18 @@ def _build_messages(user_message, chat_history):
     """Build the messages array from chat history + new message."""
     messages = []
 
-    # Include recent history (last 20 messages to keep context manageable)
-    for msg in chat_history[-20:]:
+    # Filter out system trigger messages — they eat context slots
+    # Keep real conversation, skip [MORNING_CHECKIN], [CHAT_OPENED], etc.
+    filtered = []
+    for msg in chat_history:
+        content = msg.get("content", "")
+        # Skip system triggers (user-role messages that start with [TAG])
+        if msg["role"] == "user" and content.startswith("[") and "] " in content[:50]:
+            continue
+        filtered.append(msg)
+
+    # Include last 40 messages (was 20 — too few for weekly context)
+    for msg in filtered[-40:]:
         messages.append({
             "role": msg["role"],
             "content": msg["content"],
