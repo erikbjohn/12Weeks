@@ -3215,7 +3215,7 @@ def api_chat_stream():
 
             with client.messages.stream(
                 model="claude-opus-4-20250514",
-                max_tokens=800,
+                max_tokens=1500,
                 system=system_prompt,
                 messages=messages,
             ) as stream:
