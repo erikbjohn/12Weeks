@@ -3585,7 +3585,10 @@ def api_chat_stream():
             ) as stream:
                 for text in stream.text_stream:
                     full_text += text
-                    yield f"data: {text}\n\n"
+                    # SSE data field cannot contain raw newlines — they break the parser
+                    # Replace \n with a placeholder, client converts back
+                    safe_text = text.replace('\n', '\\n')
+                    yield f"data: {safe_text}\n\n"
 
             yield f"data: [DONE]\n\n"
         except GeneratorExit:

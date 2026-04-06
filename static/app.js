@@ -4172,7 +4172,7 @@ async function _startSundayReviewStream(trigger) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -4310,7 +4310,7 @@ async function _startMcChat() {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -4380,7 +4380,7 @@ async function sendMcChat() {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -4585,7 +4585,7 @@ async function sendMorningCoachReply() {
             fullText = fullText || 'Connection issue. Try again.';
             break;
           }
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           if (streamBubble) {
             streamBubble.textContent = fullText;
             if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -4934,7 +4934,7 @@ async function sendChatMessage(inputId, containerId) {
                         fullText = fullText || 'Erik stepped away. He\'ll be back in a moment.';
                         break;
                     }
-                    fullText += data;
+                    fullText += data.replace(/\\n/g, '\n');
                     if (streamBubble) {
                         streamBubble.textContent = fullText;
                         if (container) container.scrollTop = container.scrollHeight;
@@ -5706,7 +5706,7 @@ async function _fetchRunCoachOpener(triggerMsg) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -5767,7 +5767,7 @@ async function sendRunCoachMsg() {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -6664,7 +6664,7 @@ async function launchWeeklyPlanning() {
                 if (lines[li].startsWith('data: ')) {
                     var data = lines[li].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
-                    fullText += data;
+                    fullText += data.replace(/\\n/g, '\n');
                     if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
@@ -6721,7 +6721,7 @@ async function _fetchInlineCoachOpener() {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
-                    fullText += data;
+                    fullText += data.replace(/\\n/g, '\n');
                     if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
@@ -6780,7 +6780,7 @@ async function sendInlineCoachMsg() {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
-                    fullText += data;
+                    fullText += data.replace(/\\n/g, '\n');
                     typingBubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
@@ -6822,7 +6822,7 @@ async function _refreshCoachAccordionMsg() {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
-                    fullText += data;
+                    fullText += data.replace(/\\n/g, '\n');
                     el.textContent = fullText;
                 }
             }
@@ -7825,7 +7825,7 @@ async function _fetchLiftCoachOpener(triggerMsg) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
@@ -7886,7 +7886,7 @@ async function sendLiftCoachMsg() {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
-          fullText += data;
+          fullText += data.replace(/\\n/g, '\n');
           typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
