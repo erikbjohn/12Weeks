@@ -7014,7 +7014,10 @@ async function renderDetail() {
   // Morning check-in gate — lock until done
   const todayJsDay = new Date().getDay();
   const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
-  if (currentDay === todayMonIdx && !_morningCheckinDone) {
+  // Sync from localStorage — authoritative, survives any variable reset
+  var _checkinDismissKey = todayJsDay === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
+  if (localStorage.getItem(_checkinDismissKey)) _morningCheckinDone = true;
+  if (currentDay === todayMonIdx && !_morningCheckinDone && !localStorage.getItem(_checkinDismissKey)) {
       panel.innerHTML = `<div class="detail-inner" style="padding:2rem;text-align:center">
           <div style="font-size:48px;margin-bottom:1rem">&#x1F512;</div>
           <h3 style="color:var(--text);margin-bottom:0.5rem">Morning Check-In Required</h3>
