@@ -7109,6 +7109,10 @@ async function renderDetail() {
       suggestion = getWeightForExercise(ex.name, currentWeek);
       if (!lastWt) lastWt = getLastWeight(ex.name);
     }
+    // Priority: use engine-computed target_weight from prescription if available
+    if (ex.target_weight && (!suggestion.weight || suggestion.weight === 0)) {
+      suggestion = { weight: ex.target_weight, reason: 'engine' };
+    }
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
     // RPE removed — progression driven by actual data

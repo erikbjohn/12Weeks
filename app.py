@@ -1495,6 +1495,8 @@ def api_workouts():
                     "rest": rx.rest or "60s",
                     "note": rx.note or "",
                 }
+                if getattr(rx, 'target_weight', None):
+                    ex_dict["target_weight"] = rx.target_weight
                 ex_info = EXERCISES.get(rx.exercise_name, {})
                 if ex_info.get("video"):
                     ex_dict["video"] = ex_info["video"]
