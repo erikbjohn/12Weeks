@@ -4178,17 +4178,47 @@ async function _startMcChat() {
   var trigger;
 
   if (dayOfWeek === 1) {
-    // Monday — seed next week's prescriptions from template before planning
     var nextWeek = currentWeek + 1;
+    var programData = null;
     if (nextWeek <= 12) {
-      await fetch('/api/prescription/seed', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ week: nextWeek }),
-      }).catch(function() {});
+        try {
+            var progRes = await fetch('/api/weekly-program/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ week: nextWeek }),
+            });
+            if (progRes.ok) programData = await progRes.json();
+        } catch(e) {}
     }
-    // Monday — weekly planning session
-    trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() + ' This is the Monday weekly planning session. Review last week\'s performance. Walk through this week\'s schedule day by day — muscle groups, focus areas, where to push harder. Ask about schedule changes (travel, appointments). Apply any changes via structured markers. Only debilitating injury justifies exercise swaps — YOU decide. If you need to adjust any exercise prescriptions for next week, use [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s] markers.';
+
+    var programSummary = '';
+    if (programData && programData.program) {
+        var dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        var currentDayP = -1;
+        for (var pi = 0; pi < programData.program.length; pi++) {
+            var p = programData.program[pi];
+            if (p.day !== currentDayP) {
+                currentDayP = p.day;
+                programSummary += '\n' + dayNames[p.day] + ':';
+            }
+            var weightStr = p.target_weight ? ' -> ' + p.target_weight + 'lb' : '';
+            var reasonStr = p.reason ? ' (' + p.reason + ')' : '';
+            programSummary += '\n  ' + p.exercise + ': ' + p.sets + 'x' + p.reps + weightStr + reasonStr;
+        }
+    }
+
+    var deficitStr = '';
+    if (programData && programData.deficit) {
+        var dd = programData.deficit;
+        deficitStr = '\nDEFICIT: ' + dd.current_weight + 'lb -> ' + dd.target_weight + 'lb, ' +
+                     dd.weeks_remaining + ' weeks left, need ' + dd.required_weekly_loss + ' lb/week.';
+    }
+
+    trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
+        '\nThis is the Monday weekly planning session.' +
+        '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
+        deficitStr +
+        '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs] markers.';
   } else {
     // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat
     // Normal day

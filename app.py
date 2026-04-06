@@ -1662,6 +1662,124 @@ def api_prescription_seed():
     return jsonify({"seeded": count, "week": week})
 
 
+@app.route("/api/weekly-program/generate", methods=["POST"])
+@login_required
+def api_generate_weekly_program():
+    """Generate personalized weekly program using training engine + deficit plan."""
+    data = request.get_json() or {}
+    target_week = data.get("week", _current_week() + 1)
+
+    # Don't overwrite coach-modified prescriptions
+    existing = WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=target_week, source='coach'
+    ).first()
+    if existing:
+        return jsonify({"message": "Coach-modified prescriptions exist", "week": target_week})
+
+    # Get the phase template as baseline
+    from workout_data import PHASE_TEMPLATES, get_phase, EXERCISES, resolve_name
+    phase = get_phase(target_week)
+    template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+
+    # Delete any existing template-sourced prescriptions for this week
+    WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=target_week, source='template'
+    ).delete()
+    WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=target_week, source='engine'
+    ).delete()
+
+    program_summary = []
+
+    for day_idx in range(7):
+        exercises = template.get(day_idx, [])
+        for order, ex_template in enumerate(exercises):
+            exercise_name = resolve_name(ex_template['exercise'])
+            base_sets = ex_template['sets']
+            base_reps = ex_template['reps']
+            base_rest = ex_template.get('rest', '60s')
+            base_note = ex_template.get('note', '')
+
+            # Run training engine for this exercise
+            try:
+                targets = compute_next_targets(
+                    current_user.id, exercise_name, target_week, day_idx
+                )
+                if targets.get('target_weight'):
+                    # Engine has a recommendation
+                    adjusted_reps = str(targets.get('target_reps', base_reps))
+                    adjusted_sets = targets.get('target_sets', base_sets)
+                    reason = targets.get('adjustment_reason', '')
+                    weight = targets.get('target_weight')
+                    note = f"{base_note} | Target: {weight}lb — {reason}" if reason else base_note
+                    source = 'engine'
+                else:
+                    adjusted_reps = base_reps
+                    adjusted_sets = base_sets
+                    note = base_note
+                    weight = None
+                    source = 'template'
+            except Exception:
+                adjusted_reps = base_reps
+                adjusted_sets = base_sets
+                note = base_note
+                weight = None
+                source = 'template'
+
+            db.session.add(WeeklyPrescription(
+                user_id=current_user.id,
+                week=target_week,
+                day_idx=day_idx,
+                exercise_order=order,
+                exercise_name=exercise_name,
+                sets=adjusted_sets,
+                reps=adjusted_reps,
+                rest=base_rest,
+                note=note,
+                source=source,
+            ))
+
+            program_summary.append({
+                "day": day_idx,
+                "exercise": exercise_name,
+                "sets": adjusted_sets,
+                "reps": adjusted_reps,
+                "target_weight": weight,
+                "reason": reason if source == 'engine' else None,
+            })
+
+    db.session.commit()
+
+    # Also run deficit plan
+    deficit = None
+    try:
+        # Inline deficit calculation (same logic as api_deficit_plan)
+        goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+        bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+        if goal and goal.target_weight and bw:
+            current_weight = bw.weight_lbs
+            target_weight = goal.target_weight
+            weeks_remaining = max(1, 12 - target_week + 1)
+            required_weekly = (current_weight - target_weight) / weeks_remaining
+            if required_weekly > 0:
+                deficit = {
+                    "current_weight": current_weight,
+                    "target_weight": target_weight,
+                    "weeks_remaining": weeks_remaining,
+                    "required_weekly_loss": round(required_weekly, 1),
+                }
+    except Exception:
+        pass
+
+    return jsonify({
+        "week": target_week,
+        "phase": phase,
+        "exercises_generated": len(program_summary),
+        "program": program_summary,
+        "deficit": deficit,
+    })
+
+
 @app.route("/api/sets/<int:week>/<int:day_idx>")
 @login_required
 def api_get_day_sets(week, day_idx):
