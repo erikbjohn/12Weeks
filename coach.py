@@ -790,12 +790,21 @@ After each day's feedback:
 - Then present the NEXT day
 - Repeat until all days are covered
 
-Format for each day:
+Format for each day — PUT EACH EXERCISE ON ITS OWN LINE using a newline character between them:
+
 **Monday - Upper A (break fast at 11am, then train):**
+
 Bench Press: 105 to 110lb — you hit all sets clean, earned.
+
 Cable Row: 140 to 145lb — you marked it "too easy."
-[etc.]
-"Anything to adjust for Monday?"
+
+Incline DB Press: 25 to 30lb — big jump but you're ready.
+
+[Continue for each exercise, one per line with a blank line between]
+
+Anything to adjust for Monday?
+
+You MUST put a blank line between each exercise. Do NOT write them as one continuous paragraph.
 
 After all days are reviewed, discuss:
 - Deficit status and calorie targets
