@@ -3983,7 +3983,8 @@ function showMorningCheckinOverlay() {
   if (!el) return;
   _mcExchangeCount = 0;
   var dayOfWeek = new Date().getDay();
-  var buttonText = dayOfWeek === 1 ? "Let's Start This Week" : "Start Today's Workout";
+  var _planningDay = (dayOfWeek === 1) || (dayOfWeek === 0 && new Date().getHours() >= 12);
+  var buttonText = _planningDay ? "Let's Start This Week" : "Start Today's Workout";
 
   if (dayOfWeek === 0) {
     // Sunday — show measurement form first, then transition to coach review
@@ -4183,7 +4184,11 @@ async function _startMcChat() {
   var dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
   var trigger;
 
-  if (dayOfWeek === 1) {
+  // Weekly planning: Sunday afternoon (after noon) OR Monday morning
+  var _hour = new Date().getHours();
+  var _doWeeklyPlanning = (dayOfWeek === 1) || (dayOfWeek === 0 && _hour >= 12);
+
+  if (_doWeeklyPlanning) {
     var nextWeek = currentWeek + 1;
     var programData = null;
     if (nextWeek <= 12) {
@@ -6552,10 +6557,117 @@ function buildCoachContent(d) {
     // Always show fresh message — auto-refresh every time
     html += '<div id="coach-accordion-refresh" style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
     setTimeout(function() { _refreshCoachAccordionMsg(); }, 100);
+    // Show "Plan Next Week" button on Sunday afternoon or Monday
+    var _cDow = new Date().getDay();
+    var _cHour = new Date().getHours();
+    var _showPlanBtn = (_cDow === 0 && _cHour >= 12) || _cDow === 1;
     html += '<div id="coach-inline-chat" style="margin-top:12px">' +
       '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
+      (_showPlanBtn ? '<button class="btn btn-secondary" style="width:100%;font-size:14px;padding:10px;margin-top:8px" onclick="launchWeeklyPlanning()">Plan Next Week</button>' : '') +
     '</div>';
     return html;
+}
+
+async function launchWeeklyPlanning() {
+    // Manually trigger the weekly planning flow (same as Monday morning)
+    var container = document.getElementById('coach-inline-chat');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:8px">Generating next week\'s program...</div></div>';
+
+    var nextWeek = currentWeek + 1;
+    var programData = null;
+    if (nextWeek <= 12) {
+        try {
+            var progRes = await fetch('/api/weekly-program/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ week: nextWeek }),
+            });
+            if (progRes.ok) programData = await progRes.json();
+        } catch(e) {}
+    }
+
+    // Build the program summary for the coach
+    var programSummary = '';
+    if (programData && programData.program) {
+        var dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        var currentDayP = -1;
+        for (var pi = 0; pi < programData.program.length; pi++) {
+            var p = programData.program[pi];
+            if (p.day !== currentDayP) { currentDayP = p.day; programSummary += '\n' + dayNames[p.day] + ':'; }
+            var weightStr = p.target_weight ? ' -> ' + p.target_weight + 'lb' : '';
+            var reasonStr = p.reason ? ' (' + p.reason + ')' : '';
+            programSummary += '\n  ' + p.exercise + ': ' + p.sets + 'x' + p.reps + weightStr + reasonStr;
+        }
+    }
+    var deficitStr = '';
+    if (programData && programData.deficit) {
+        var dd = programData.deficit;
+        deficitStr = '\nDEFICIT: ' + dd.current_weight + 'lb -> ' + dd.target_weight + 'lb, ' + dd.weeks_remaining + ' weeks left, need ' + dd.required_weekly_loss + ' lb/week.';
+    }
+    var mealStr = '';
+    if (programData && programData.meal_summary) {
+        mealStr = '\n\nMEAL PLAN:';
+        var dn = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        for (var mi = 0; mi < programData.meal_summary.length; mi++) {
+            var md = programData.meal_summary[mi];
+            mealStr += '\n  ' + dn[md.day] + ': ' + md.calories + ' cal, ' + md.protein + 'g protein (' + md.type + ')';
+        }
+    }
+
+    var trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
+        '\nThis is the weekly planning session.' +
+        '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
+        deficitStr + mealStr +
+        '\n\nReview this program with the athlete. Explain WHY weights changed. Ask about schedule. Use [PRESCRIPTION:] markers for adjustments.';
+
+    // Now open the inline chat with the planning trigger
+    container.innerHTML =
+      '<div id="coach-inline-messages" style="max-height:50vh;overflow-y:auto;padding:8px 0">' +
+        '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" onkeydown="if(event.key===\'Enter\')sendInlineCoachMsg()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
+        '<button onclick="sendInlineCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
+      '</div>';
+
+    // Stream the coach's planning response
+    try {
+        var res = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: trigger }),
+        });
+        var messagesEl = document.getElementById('coach-inline-messages');
+        var bubble = messagesEl ? messagesEl.querySelector('.chat-bubble.coach') : null;
+        if (bubble) bubble.innerHTML = '';
+        var fullText = '';
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        while (true) {
+            var result = await reader.read();
+            if (result.done) break;
+            var chunk = decoder.decode(result.value, { stream: true });
+            var lines = chunk.split('\n');
+            for (var li = 0; li < lines.length; li++) {
+                if (lines[li].startsWith('data: ')) {
+                    var data = lines[li].slice(6);
+                    if (data === '[DONE]' || data === '[ERROR]') break;
+                    fullText += data;
+                    if (bubble) bubble.textContent = stripCoachMarkers(fullText);
+                    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+            }
+        }
+        if (_chatHistory) {
+            _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+        }
+    } catch(e) {
+        var bubble2 = document.querySelector('#coach-inline-messages .chat-bubble.coach');
+        if (bubble2) bubble2.textContent = 'Let\'s plan next week. What\'s on your schedule?';
+    }
+    var input = document.getElementById('coach-inline-input');
+    if (input) setTimeout(function() { input.focus(); }, 100);
 }
 
 function openInlineCoachChat() {
