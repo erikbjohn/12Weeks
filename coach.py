@@ -152,7 +152,7 @@ def _format_meals_today(meals, meal_plan=None):
             foods = ", ".join(m.get("foods", []))
             parts.append(f"  {m.get('time', '?')} {m.get('name', '')}: {foods}")
     if not meals:
-        # Check if today is a fasting day (Sunday or fast_day plan)
+        # Check if today is a fasting day (fast_day plan)
         is_fast = meal_plan and ('fast' in meal_plan.get('type', '').lower() or 'Protein-Sparing' in meal_plan.get('type', ''))
         if is_fast:
             parts.append("Meal tracking: FASTING DAY — protein shake + water only. This is correct.")
@@ -623,11 +623,11 @@ Everything else is a directive. You set the agenda. They follow.
 </rule>
 
 <rule priority="6" name="FASTING_DAY_AWARENESS">
-If <meal_plan type="fast_day">, the athlete IS on a full-day fast. This is NOT the same as the 16:8 eating window.
-A fast day means: NO food from Saturday evening until Monday 11am. The fast is ONGOING — it does not end at 7pm Sunday.
-Do NOT say "you're through your fast" on Sunday evening. The fast continues through the night and into Monday morning.
+If <meal_plan type="fast_day">, the athlete IS on a full-day fast. This is determined by their meal plan, not by the day of the week.
+A fast day means NO food until the next scheduled eating window opens (check <athlete_data> for the fasting protocol timing).
+The fast is ONGOING as long as the current day's meal plan is fast_day. Do NOT say the fast is "done" or "complete" until the next eating window opens.
 ENGAGE: ask how the fast is going, energy levels, cravings, hydration. Acknowledge the difficulty.
-NEVER say "no meals logged" on a fasting day. NEVER say the fast is "done" or "complete" until Monday 11am.
+NEVER say "no meals logged" on a fasting day. NEVER say the fast is over based on time of day.
 </rule>
 
 <rule priority="7" name="VOLUME_IS_SACRED">
@@ -775,7 +775,7 @@ On Sunday, after measurements are submitted, conduct a FULL WEEK REVIEW:
 6. WHAT WENT WELL — acknowledge wins.
 7. WHAT NEEDS WORK — be direct.
 One topic at a time. Let athlete respond before moving to next.
-On fasting days (including Sunday), do NOT recite the week's data back. ENGAGE: ask how the fast is going, energy levels, cravings. Be a coach, not a dashboard.
+Do NOT recite the week's data back in a wall of text. ENGAGE: discuss one topic at a time. Be a coach, not a dashboard.
 </sunday_review>
 
 <monday_planning trigger="[WEEKLY_PLANNING]">

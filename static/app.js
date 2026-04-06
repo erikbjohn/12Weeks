@@ -441,8 +441,8 @@ function renderMealInner(dayData) {
   const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
   const isViewingToday = currentDay === todayMonIdx;
 
-  // Sunday = automatic fast day (no toggle — it's the plan)
-  const isSundayFast = dayData.day === 'Sun';
+  // Fast day based on meal type (no toggle — it's the plan)
+  const isSundayFast = dayData.mealType && dayData.mealType.toLowerCase().includes('fast');
   const activePlan = isSundayFast ? ((window._mealPlansCache || {}).fast_day || plan) : plan;
 
   let totalEaten = { cal: 0, protein: 0, carbs: 0, fat: 0 };
@@ -6653,9 +6653,11 @@ async function sendInlineCoachMsg() {
 async function _refreshCoachAccordionMsg() {
     var el = document.getElementById('coach-accordion-refresh');
     if (!el) return;
-    var _dow = new Date().getDay();
-    var _isSunday = _dow === 0;
-    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + (_isSunday ? ' TODAY IS SUNDAY — A FULL-DAY WATER FAST. The fast is NOT over. It continues through the night until Monday 11am. Do NOT say the athlete is "through" the fast or that the fast is complete. The fast is ONGOING right now. Ask how they are feeling. Do NOT mention tomorrow at all — tomorrow has not been planned yet.' : '') + ' Do NOT mention tomorrow or what happens next unless the data explicitly contains it. If you do not have tomorrow\'s plan, do not reference it. Check your data carefully before speaking. Be specific and accurate. 1-2 sentences.';
+    var _todayMonIdx = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+    var _todayDayData = workoutData && workoutData[String(currentWeek)] && workoutData[String(currentWeek)].days
+        ? workoutData[String(currentWeek)].days[_todayMonIdx] : null;
+    var _isFastDay = _todayDayData && _todayDayData.mealType && _todayDayData.mealType.toLowerCase().includes('fast');
+    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + (_isFastDay ? ' TODAY IS A FASTING DAY. The fast is ONGOING and continues until the next eating window opens. Do NOT say the athlete is "through" the fast or that it is complete. Ask how they are feeling.' : '') + ' Do NOT mention tomorrow unless the data explicitly contains it. Check your data carefully before speaking. Be specific and accurate. 1-2 sentences.';
     try {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',
@@ -7151,7 +7153,7 @@ let _photoImagesCache = {};
 let _sundayCompareOpen = false;
 
 function isSunday(dayData) {
-  return dayData && dayData.day === 'Sun';
+  return dayData && dayData.mealType && dayData.mealType.toLowerCase().includes('fast');
 }
 
 function getTodayBodyweight() {

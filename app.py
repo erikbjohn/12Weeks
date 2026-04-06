@@ -689,6 +689,21 @@ def _user_now():
     except Exception:
         return datetime.now()
 
+def _get_day_meal_type(user_id, week, day_idx):
+    """Get actual meal type for a day — DB first, template fallback."""
+    try:
+        override = MealPlanOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+        if override and override.meal_type:
+            return override.meal_type
+        wmp = WeeklyMealPlan.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+        if wmp and wmp.day_type:
+            return wmp.day_type
+    except Exception:
+        pass
+    from workout_data import DAY_MEAL_TYPES
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    return DAY_MEAL_TYPES.get(day_names[day_idx] if day_idx < 7 else "Mon", "moderate")
+
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1844,7 +1859,7 @@ def api_generate_weekly_program():
             "moderate": "training",
             "fast_day": "rest",
         }
-        day_types = ["heavy_lift", "long_run", "heavy_lift", "moderate", "heavy_lift", "moderate", "fast_day"]
+        day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"
 
         # Delete existing non-coach meal plans for this week
@@ -3690,6 +3705,7 @@ def _build_coach_context():
         "missed_checkin_today": missed_today,
         "session_analysis": session_analysis,
         "weekly_summary": weekly_summary,
+        "today_meal_type": _get_day_meal_type(current_user.id, week, today_idx),
         # Skipped sets today
         "skipped_sets_today": [{"exercise": s.exercise_name, "set": s.set_number}
                                for s in today_sets if not s.done],

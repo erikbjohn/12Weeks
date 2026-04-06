@@ -4,6 +4,37 @@ from datetime import date, datetime, timedelta, timezone
 from models import db, MorningCheckIn, MealLog, DayCompletion, SetLog, ComplianceScore
 import math
 
+_DAY_NAMES_LIST = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _is_fast_day(check_date, uid, state):
+    """Check if a specific date is a fasting day for this user."""
+    dow = check_date.weekday()
+    # Check WeeklyMealPlan / MealPlanOverride first
+    try:
+        from models import WeeklyMealPlan, MealPlanOverride
+        # Compute week number for this date
+        if state and state.start_date:
+            diff = (check_date - state.start_date).days
+            check_week = min(12, max(1, diff // 7 + 1))
+        else:
+            check_week = 1
+        override = MealPlanOverride.query.filter_by(
+            user_id=uid, week=check_week, day_idx=dow
+        ).first()
+        if override and override.meal_type:
+            return 'fast' in override.meal_type.lower()
+        wmp = WeeklyMealPlan.query.filter_by(
+            user_id=uid, week=check_week, day_idx=dow
+        ).first()
+        if wmp and wmp.day_type:
+            return 'fast' in wmp.day_type.lower()
+    except Exception:
+        pass
+    # Template fallback
+    from workout_data import DAY_MEAL_TYPES
+    return DAY_MEAL_TYPES.get(_DAY_NAMES_LIST[dow], "moderate") == "fast_day"
+
 
 def compute_compliance_score(user_id):
     """Compute weighted compliance score from all tracking data.
@@ -117,7 +148,7 @@ def compute_compliance_score(user_id):
 
         # Day of week (0=Mon)
         dow = d.weekday()
-        is_sunday = dow == 6
+        is_fast_day = _is_fast_day(d, user_id, state)
 
         # Morning checkin: +5 done, -10 missed
         day_max += 5
@@ -135,7 +166,7 @@ def compute_compliance_score(user_id):
             checkin_points -= 10
 
         # Meals: scored PER-MEAL by timing compliance
-        if not is_sunday:  # Sunday is fast day
+        if not is_fast_day:  # Skip meal scoring on fasting days
             meals_expected = 3
             day_max += meals_expected * 10
             food_max += meals_expected * 10
@@ -195,8 +226,8 @@ def compute_compliance_score(user_id):
                 day_points -= meals_expected * 15
                 food_points -= meals_expected * 15
 
-        # Workout: +10 if completed, -20 if missed (skip Sunday)
-        if not is_sunday:
+        # Workout: +10 if completed, -20 if missed (skip fast days)
+        if not is_fast_day:
             day_max += 10
             workout_max += 10
             if d in completed_days:
@@ -211,7 +242,7 @@ def compute_compliance_score(user_id):
 
         # Streak tracking
         if d < today:
-            if d in checkin_dates and (d in meal_dates or is_sunday) and (d in completed_days or is_sunday):
+            if d in checkin_dates and (d in meal_dates or is_fast_day) and (d in completed_days or is_fast_day):
                 current_streak += 1
             else:
                 if current_streak > streak:
