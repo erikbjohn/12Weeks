@@ -6554,9 +6554,7 @@ function buildCoachContent(d) {
             break;
         }
     }
-    // Always show fresh message — auto-refresh every time
-    html += '<div id="coach-accordion-refresh" style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
-    setTimeout(function() { _refreshCoachAccordionMsg(); }, 100);
+    // No auto-refresh — coach only speaks when you tap "Talk to Erik"
     // Show "Plan Next Week" button on Sunday afternoon or Monday
     var _cDow = new Date().getDay();
     var _cHour = new Date().getHours();
