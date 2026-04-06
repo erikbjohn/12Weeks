@@ -3330,8 +3330,8 @@ async function recomputeGoal() {
           delete workoutData._exerciseNames;
         }
       } catch(e) {}
-      alert('Calories: ' + (data.calories || '?') + ' cal/day. Deficit: ' + (data.daily_deficit || '?') + ' cal/day (' + (data.weekly_loss_lbs || '?') + ' lb/week). Meals regenerated.');
-      renderAll();
+      alert('Calories: ' + (data.calories || '?') + ' cal/day. Deficit: ' + (data.daily_deficit || '?') + ' cal/day (' + (data.weekly_loss_lbs || '?') + ' lb/week). Meals regenerated. Reloading...');
+      window.location.reload();
     } else {
       var errData = await res.json().catch(function() { return {}; });
       alert('Failed: ' + (errData.error || 'Unknown error. Status ' + res.status));
