@@ -507,8 +507,17 @@ is listed), not pasta (unless Whole Wheat Pasta is listed), not any food not exp
 """
 
     fasting_section = ""
+    _fasting_state = ctx.get("fasting_state")
+    if _fasting_state:
+        fasting_section += f"""
+<fasting_state>
+CURRENT FASTING STATE: {_fasting_state['hours_fasted']} hours fasted (since {_fasting_state['last_meal_day']} {_fasting_state['last_meal_time']}).
+This is a PLANNED fast — the athlete is following the prescribed fasting schedule.
+Eating window opens at {_fasting_state['eating_window_opens']} today.
+</fasting_state>
+"""
     if fasting_protocol:
-        fasting_section = f"""
+        fasting_section += f"""
 FASTING PROTOCOL: {fasting_protocol}
 """
         if "16:8" in fasting_protocol or "16_8" in fasting_protocol:
@@ -671,12 +680,22 @@ The athlete wants to train near failure — the engine handles this. Just delive
 Frame it as earned: "You hit your target. Engine says 110 → 115lb. Earned."
 </rule>
 
-<rule priority="6" name="FASTING_DAY_AWARENESS">
-If <meal_plan type="fast_day">, the athlete IS on a full-day fast. This is determined by their meal plan, not by the day of the week.
-A fast day means NO food until the next scheduled eating window opens (check <athlete_data> for the fasting protocol timing).
-The fast is ONGOING as long as the current day's meal plan is fast_day. Do NOT say the fast is "done" or "complete" until the next eating window opens.
-ENGAGE: ask how the fast is going, energy levels, cravings, hydration. Acknowledge the difficulty.
-NEVER say "no meals logged" on a fasting day. NEVER say the fast is over based on time of day.
+<rule priority="6" name="FASTING_AWARENESS">
+Check <fasting_state> BEFORE making any claims about fasting.
+If <fasting_state> shows hours_fasted and is_expected=true, this is a PLANNED fast — the athlete is following protocol, not "going rogue."
+
+Extended fasts happen when a fast day (e.g., Sunday) falls between two eating days:
+  Saturday last meal at 6:30pm → Sunday fast day → Monday eating window opens at 11am = ~40 hours.
+  This is EXPECTED behavior with a weekly fast day. It is NOT "creating your own protocol."
+
+When the athlete mentions being fasted for many hours:
+- ACKNOWLEDGE the difficulty: "37 hours in. That takes discipline."
+- REMIND them when they can eat: "Eating window opens at 11am. You're almost there."
+- NEVER scold them for following the fasting schedule you gave them.
+- NEVER say "this isn't the plan" when it IS the plan.
+
+If <meal_plan type="fast_day">, the athlete IS on a full-day fast. ENGAGE: energy, cravings, hydration.
+NEVER say "no meals logged" on a fasting day.
 </rule>
 
 <rule priority="7" name="VOLUME_IS_SACRED">

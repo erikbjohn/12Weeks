@@ -4039,6 +4039,52 @@ def _build_coach_context():
                       for m in mp.get("meals", [])],
         }
 
+    # Fasting state — compute hours since last meal for coach context
+    fasting_state = None
+    try:
+        _fasting_protocol = goal.fasting_protocol if goal else "16_8"
+        from meal_generator import _FASTING_PROTOCOLS
+        _proto = _FASTING_PROTOCOLS.get(_fasting_protocol, _FASTING_PROTOCOLS["16_8"])
+        _eating_end = _proto["end"]  # e.g., "6:30pm"
+        # Parse end time
+        _end_parts = _eating_end.replace("am", "").replace("pm", "")
+        _end_h = int(_end_parts.split(":")[0])
+        _end_m = int(_end_parts.split(":")[1]) if ":" in _end_parts else 0
+        if "pm" in _eating_end and _end_h != 12:
+            _end_h += 12
+        # Look back: find the last day that had meals (not a fast day)
+        _last_eating_day = None
+        for _lookback in range(7):
+            _check_date = local_today - timedelta(days=_lookback)
+            _check_day_idx = _check_date.weekday()
+            _day_meal_type = _get_day_meal_type(current_user.id, week, _check_day_idx)
+            if _day_meal_type != 'fast_day':
+                if _lookback == 0:
+                    # Today is an eating day — not in an extended fast from a fast day
+                    break
+                _last_eating_day = _check_date
+                break
+        if _last_eating_day:
+            from datetime import datetime as _dt
+            _last_meal_time = _dt(_last_eating_day.year, _last_eating_day.month, _last_eating_day.day, _end_h, _end_m)
+            _now = _dt.now()
+            try:
+                from utils_time import user_local_now
+                _now = user_local_now(current_user.id)
+            except Exception:
+                pass
+            _hours_fasted = (_now - _last_meal_time).total_seconds() / 3600
+            _eating_start = _proto["start"]  # e.g., "11:00am"
+            fasting_state = {
+                "hours_fasted": round(_hours_fasted, 1),
+                "last_meal_day": _last_eating_day.strftime("%A"),
+                "last_meal_time": _eating_end,
+                "eating_window_opens": _eating_start,
+                "is_expected": True,  # This IS the planned fast
+            }
+    except Exception:
+        pass
+
     # Day completion status (this week) — use DATE-BASED query, not week number
     # The week number in SetLog may not match _current_week() due to frontend/backend mismatch
     week_monday = local_today - timedelta(days=local_today.weekday())
@@ -4142,6 +4188,7 @@ def _build_coach_context():
         "custom_allergies": custom_allergies,
         "selected_foods": selected_foods_summary,
         "fasting_protocol": fasting_protocol,
+        "fasting_state": fasting_state,
         # NEW — full athlete profile
         "goal": goal_data,
         "exercise_history": exercise_history,
