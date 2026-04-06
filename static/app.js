@@ -215,7 +215,21 @@ function renderCoachMarkdown(text) {
   var clean = stripCoachMarkers(text);
   // Unescape literal \n sequences (from SSE transport)
   clean = clean.replace(/\\n/g, '\n');
-  // Escape HTML first
+
+  // Smart line breaks: insert before exercise names after sentence endings
+  // Catches: "earned. Cable Row: 140" → "earned.\n\nCable Row: 140"
+  clean = clean.replace(/\.\s+(?=[A-Z][a-zA-Z\s\-\']+(?:Press|Row|Curl|Pulldown|Raise|Pull|Squat|Deadlift|Thrust|Lunge|Swing|Dips?|Shrugs?|Extension|Pushdown|Fly|Jump|Slam|Clean|Plank|Wheel|Rollout|Stretch|Circle)s?(?:\s*[\(:]|\s*—|\s*:))/g, '.\n\n');
+
+  // Break before day headers: "Monday -" "Tuesday:" etc.
+  clean = clean.replace(/\.\s+(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, '.\n\n');
+
+  // Break before "Anything you want" / "Any injuries" / "Schedule conflicts" questions
+  clean = clean.replace(/\.\s+(?=(?:Anything|Any injuries|Schedule conflicts|Any schedule))/g, '.\n\n');
+
+  // Break before deficit/weight target lines
+  clean = clean.replace(/\.\s+(?=(?:You need|Your target|After dropping|Deficit))/g, '.\n\n');
+
+  // Escape HTML
   var safe = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // Bold: **text** → <strong>text</strong>
   safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
