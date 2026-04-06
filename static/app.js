@@ -6655,7 +6655,7 @@ async function _refreshCoachAccordionMsg() {
     if (!el) return;
     var _dow = new Date().getDay();
     var _isSunday = _dow === 0;
-    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + (_isSunday ? ' TODAY IS SUNDAY — A FULL-DAY WATER FAST. The fast is NOT over. It continues through the night until Monday 11am. Do NOT say the athlete is "through" the fast or that the fast is complete. The fast is ONGOING right now. Ask how they are feeling.' : '') + ' Check your data carefully before speaking. Be specific and accurate. 1-2 sentences.';
+    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + (_isSunday ? ' TODAY IS SUNDAY — A FULL-DAY WATER FAST. The fast is NOT over. It continues through the night until Monday 11am. Do NOT say the athlete is "through" the fast or that the fast is complete. The fast is ONGOING right now. Ask how they are feeling. Do NOT mention tomorrow at all — tomorrow has not been planned yet.' : '') + ' Do NOT mention tomorrow or what happens next unless the data explicitly contains it. If you do not have tomorrow\'s plan, do not reference it. Check your data carefully before speaking. Be specific and accurate. 1-2 sentences.';
     try {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',
