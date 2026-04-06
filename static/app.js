@@ -3296,6 +3296,8 @@ function showSettingsMenu() {
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="recomputeGoal()">Recompute Calories</button>
+    <button onclick="if(confirm('Re-plan this week? Exercises will be regenerated.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
+    <button onclick="if(confirm('Plan next week? This generates the full program.'))launchWeeklyPlanning()">Plan Next Week</button>
     <button onclick="regenerateProfile()">Regenerate Profile</button>
     <button onclick="restartFromReveal()">Restart from Plan Review</button>
     <button onclick="showGroceryList()">Grocery List</button>
@@ -6648,8 +6650,6 @@ function buildCoachContent(d) {
     var _showPlanBtn = (_cDow === 0 && _cHour >= 12) || _cDow === 1;
     html += '<div id="coach-inline-chat" style="margin-top:12px">' +
       '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
-      (_showPlanBtn ? '<button class="btn btn-secondary" style="width:100%;font-size:14px;padding:10px;margin-top:8px" onclick="launchWeeklyPlanning()">Plan Next Week</button>' : '') +
-      '<button class="btn btn-secondary" style="width:100%;font-size:14px;padding:10px;margin-top:8px;opacity:0.8" onclick="launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>' +
     '</div>';
     return html;
 }
