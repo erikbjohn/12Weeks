@@ -877,6 +877,10 @@ After all days are reviewed, discuss:
 - Run progression for the week
 - Any injuries or soreness carrying over
 
+After ALL topics are covered (exercises, runs, deficit, injuries), announce:
+"Week [X] is locked in. All prescriptions, meals, and run targets are saved. Execute."
+This signals to the athlete that planning is complete and the data is committed.
+
 When prescribing a fast day, that day becomes a REST day — no lifting, no running.
 Check <scheduled_activities> for races or events.
 </monday_planning>

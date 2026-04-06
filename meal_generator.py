@@ -381,8 +381,6 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             if pid in ("whey_protein", "plant_protein"):
                 shake_id = pid
                 break
-        if shake_id is None and get_food("whey_protein"):
-            shake_id = "whey_protein"
         if shake_id:
             shake = _scale_food(shake_id, 1.0)
             if shake:
@@ -407,9 +405,6 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             if pid in ("whey_protein", "plant_protein"):
                 shake_id = pid
                 break
-        if shake_id is None and get_food("whey_protein"):
-            shake_id = "whey_protein"
-
         if shake_id:
             shake = _scale_food(shake_id, 1.0)
             if shake:
@@ -419,8 +414,6 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
         if day_type == "long_run":
             banana_id = None
             if "banana" in selected_foods.get("carbs", []):
-                banana_id = "banana"
-            elif get_food("banana"):
                 banana_id = "banana"
             if banana_id:
                 b = _scale_food(banana_id, 1.0)

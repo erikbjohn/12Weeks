@@ -216,9 +216,14 @@ function renderCoachMarkdown(text) {
   // Unescape literal \n sequences (from SSE transport)
   clean = clean.replace(/\\n/g, '\n');
 
-  // Smart line breaks: insert before exercise names after periods OR colons
-  // Catches: "earned. Cable Row: 140" AND "train): Bench Press: 105"
-  clean = clean.replace(/[.:]\s*(?=[A-Z][a-zA-Z\s\-\']+(?:Press|Row|Curl|Pulldown|Raise|Pull|Squat|Deadlift|Thrust|Lunge|Swing|Dips?|Shrugs?|Extension|Pushdown|Fly|Jump|Slam|Clean|Plank|Wheel|Rollout|Stretch|Circle)s?(?:\s*[\(:]|\s*—|\s*:))/g, function(m) { return m[0] + '\n\n'; });
+  // Insert line breaks before known exercise names
+  if (window._exerciseNames && window._exerciseNames.length) {
+      for (var _en = 0; _en < window._exerciseNames.length; _en++) {
+          var exName = window._exerciseNames[_en];
+          var escaped = exName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          clean = clean.replace(new RegExp('([.:])\\s+(' + escaped + '\\s*[:—→])', 'g'), '$1\n\n$2');
+      }
+  }
 
   // Break before day headers: "Monday -" "Tuesday:" etc.
   clean = clean.replace(/[.:]\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, function(m) { return m[0] + '\n\n'; });
@@ -3710,6 +3715,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     _supplementsCache = await suppRes.json();
     _bodyweightCache = await bwRes.json();
     workoutData = await workoutRes.json();
+    window._exerciseNames = workoutData._exerciseNames || [];
+    delete workoutData._exerciseNames;
 
     try {
       const mealsData = await mealsRes.json();

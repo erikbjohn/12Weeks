@@ -1590,6 +1590,8 @@ def api_workouts():
             "phaseInfo": PHASES[phase],
             "days": days,
         }
+    from workout_data import EXERCISES, NAME_ALIASES
+    all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
     return jsonify(all_weeks)
 
 
