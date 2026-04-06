@@ -4230,12 +4230,35 @@ async function _startMcChat() {
         }
     }
 
+    var runSummaryStr = '';
+    if (programData && programData.run_summary) {
+        runSummaryStr = '\n\nRUN PLAN:';
+        var dayNamesR = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        for (var ri = 0; ri < programData.run_summary.length; ri++) {
+            var rd = programData.run_summary[ri];
+            runSummaryStr += '\n  ' + dayNamesR[rd.day] + ': ' + rd.label + ' ' + rd.duration + ' (' + rd.type + ')';
+        }
+    }
+
+    var scheduleSummaryStr = '';
+    if (programData && programData.schedule_summary) {
+        scheduleSummaryStr = '\n\nDAY SCHEDULE:';
+        var dayNamesS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        for (var si = 0; si < programData.schedule_summary.length; si++) {
+            var sd = programData.schedule_summary[si];
+            var mgStr = sd.muscle_groups && sd.muscle_groups.length ? ' [' + sd.muscle_groups.join(', ') + ']' : '';
+            scheduleSummaryStr += '\n  ' + dayNamesS[sd.day] + ': ' + sd.lift_name + (sd.is_rest ? ' (REST)' : '') + mgStr;
+        }
+    }
+
     trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
         '\nThis is the Monday weekly planning session.' +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         deficitStr +
         mealSummaryStr +
-        '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs] markers.';
+        runSummaryStr +
+        scheduleSummaryStr +
+        '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Cover the run plan progression and day schedule. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs] markers. Use [DAY_SCHEDULE: day=X, lift_name=Name, muscle_groups=a,b,c] to adjust the daily split.';
   } else {
     // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat
     // Normal day

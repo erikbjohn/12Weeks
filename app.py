@@ -43,6 +43,7 @@ from models import (
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
+    WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
 )
 
 app = Flask(__name__)
@@ -257,6 +258,14 @@ with app.app_context():
                 db.session.commit()
             except Exception:
                 db.session.rollback()
+
+    # Ensure new dynamic tables exist (db.create_all handles creation above)
+    for tbl in ["weekly_run_plan", "weekly_warmup", "weekly_day_schedule"]:
+        try:
+            db.session.execute(text(f'SELECT 1 FROM "{tbl}" LIMIT 1'))
+        except Exception:
+            db.session.rollback()
+            # Table will be created by db.create_all() above
 
     # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
     # Wipe all corrupted data, keep psych intake, restart from physical assessment
@@ -624,6 +633,25 @@ def _parse_coach_markers(text, user_id, week):
         except Exception:
             db.session.rollback()
 
+    # [DAY_SCHEDULE: day=X, lift_name=Upper A - Chest & Back, muscle_groups=chest,back,triceps, is_rest=false]
+    for m in re.finditer(r'\[DAY_SCHEDULE:\s*day=(\d+),\s*lift_name=([^,]+)(?:,\s*muscle_groups=([^,\]]+))?(?:,\s*is_rest=(true|false))?\]', text):
+        try:
+            day_idx = int(m.group(1))
+            lift_name = m.group(2).strip()
+            muscle_groups = [g.strip() for g in m.group(3).split(',')] if m.group(3) else []
+            is_rest = m.group(4) == 'true' if m.group(4) else False
+            existing = WeeklyDaySchedule.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+            if existing:
+                existing.lift_name = lift_name
+                existing.muscle_groups = muscle_groups
+                existing.is_rest = is_rest
+                existing.source = 'coach'
+            else:
+                db.session.add(WeeklyDaySchedule(user_id=user_id, week=week, day_idx=day_idx, lift_name=lift_name, muscle_groups=muscle_groups, is_rest=is_rest, source='coach'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
 
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
@@ -703,6 +731,110 @@ def _get_day_meal_type(user_id, week, day_idx):
     from workout_data import DAY_MEAL_TYPES
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     return DAY_MEAL_TYPES.get(day_names[day_idx] if day_idx < 7 else "Mon", "moderate")
+
+
+def _generate_run_plan(user_id, week, day_idx, template_run):
+    """Progress run based on week number. Returns dict with type/label/time/detail."""
+    base_type = template_run.get('type', 'z2')
+    base_time = template_run.get('time', '30 min')
+    match = re.search(r'\d+', base_time)
+    base_minutes = int(match.group()) if match else 30
+
+    if week <= 1:
+        return template_run  # Week 1: use template as-is
+
+    # Progression rules by run type
+    weeks_completed = week - 1
+    if base_type in ('z2', 'long'):
+        extra = weeks_completed * 5
+        cap = 90 if base_type == 'long' else 60
+        new_minutes = min(base_minutes + extra, cap)
+    elif base_type == 'tempo':
+        extra = (weeks_completed // 2) * 5
+        new_minutes = min(base_minutes + extra, 45)
+    elif base_type == 'hiit':
+        extra = (weeks_completed // 2) * 2
+        new_minutes = min(base_minutes + extra, 35)
+    else:
+        new_minutes = base_minutes
+
+    return {
+        'type': base_type,
+        'label': template_run.get('label', 'Run'),
+        'time': f"{new_minutes} min" if base_type != 'min' else base_time,
+        'detail': template_run.get('detail', ''),
+    }
+
+
+def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
+    """Build a warmup that matches today's exercises and addresses soreness."""
+    steps = []
+
+    # 1. General mobility (always)
+    steps.append({"name": "Arm circles", "duration": "30s", "note": "15s forward, 15s backward"})
+
+    # 2. Target muscle activation based on today's muscle groups
+    MUSCLE_WARMUPS = {
+        "chest": [
+            {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps, light band"},
+            {"name": "Push-up to downward dog", "duration": "60s", "note": "8 reps, slow"},
+        ],
+        "back": [
+            {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps"},
+            {"name": "Cat-cow stretch", "duration": "30s", "note": "8 reps, breathe"},
+        ],
+        "quads": [
+            {"name": "Bodyweight squats", "duration": "45s", "note": "15 reps, full depth"},
+            {"name": "Walking lunges", "duration": "45s", "note": "8 each leg"},
+        ],
+        "hamstrings": [
+            {"name": "Leg swings (front-back)", "duration": "30s", "note": "10 each leg"},
+            {"name": "Glute bridges", "duration": "30s", "note": "15 reps, squeeze at top"},
+        ],
+        "shoulders": [
+            {"name": "Band dislocates", "duration": "30s", "note": "10 slow reps"},
+            {"name": "Lateral raises (light)", "duration": "30s", "note": "10 reps, very light"},
+        ],
+        "glutes": [
+            {"name": "Hip circles", "duration": "30s", "note": "8 each direction"},
+            {"name": "Glute bridges", "duration": "30s", "note": "15 reps"},
+        ],
+    }
+
+    seen = set()
+    for mg in muscle_groups:
+        for step in MUSCLE_WARMUPS.get(mg, []):
+            if step["name"] not in seen:
+                steps.append(step)
+                seen.add(step["name"])
+
+    # 3. Soreness-specific stretches
+    if soreness_data:
+        sore_area = soreness_data.get("area", "").lower()
+        SORENESS_STRETCHES = {
+            "shoulders": {"name": "Shoulder cross-body stretch", "duration": "30s", "note": "Hold 15s each side -- gentle, don't force"},
+            "lower back": {"name": "Child's pose", "duration": "45s", "note": "Breathe deep, relax into it"},
+            "quads": {"name": "Standing quad stretch", "duration": "30s", "note": "15s each leg, hold wall"},
+            "hamstrings": {"name": "Standing hamstring stretch", "duration": "30s", "note": "15s each leg, slight bend"},
+            "chest": {"name": "Doorway chest stretch", "duration": "30s", "note": "15s each side"},
+        }
+        if sore_area in SORENESS_STRETCHES:
+            s = SORENESS_STRETCHES[sore_area]
+            if s["name"] not in seen:
+                steps.append(s)
+
+    # 4. Movement prep with empty bar (if lifting day)
+    bar_exercises = [e for e in day_exercises if "barbell" in e.get("exercise", "").lower() or "bench" in e.get("exercise", "").lower()]
+    if bar_exercises:
+        first_bar = bar_exercises[0]["exercise"]
+        steps.append({"name": f"Empty bar {first_bar.split()[-1].lower()}", "duration": "60s", "note": "15 reps, feel the groove"})
+
+    return {
+        "label": "Dynamic Warm-Up",
+        "time": f"{max(5, len(steps) * 1)} min",
+        "steps": steps[:8],  # Cap at 8 steps
+    }
+
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
@@ -1387,6 +1519,39 @@ def api_workouts():
         except Exception:
             pass  # Fall back to hardcoded meal plans
 
+        # Run plan overlay
+        try:
+            run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
+            if run_plans:
+                for rp in run_plans:
+                    if rp.day_idx < len(days):
+                        days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
+        except Exception:
+            pass
+
+        # Warmup overlay
+        try:
+            warmups = WeeklyWarmup.query.filter_by(user_id=current_user.id, week=week).all()
+            if warmups:
+                for wu in warmups:
+                    if wu.day_idx < len(days) and wu.warmup_data:
+                        days[wu.day_idx]["warmup"] = wu.warmup_data
+        except Exception:
+            pass
+
+        # Day schedule overlay
+        try:
+            day_schedules = WeeklyDaySchedule.query.filter_by(user_id=current_user.id, week=week).all()
+            if day_schedules:
+                for ds in day_schedules:
+                    if ds.day_idx < len(days):
+                        days[ds.day_idx]["liftName"] = ds.lift_name
+                        if ds.is_rest:
+                            days[ds.day_idx]["isRest"] = True
+                            days[ds.day_idx]["exercises"] = []
+        except Exception:
+            pass
+
         days = _filter_meals_by_food_selections(days, user_food_ids)
         all_weeks[str(week)] = {
             "week": week,
@@ -1451,6 +1616,39 @@ def api_week(week):
                     days[day_idx]["mealType"] = meal_data.get("label", "custom")
     except Exception:
         pass  # Fall back to hardcoded meal plans
+
+    # Run plan overlay
+    try:
+        run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
+        if run_plans:
+            for rp in run_plans:
+                if rp.day_idx < len(days):
+                    days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
+    except Exception:
+        pass
+
+    # Warmup overlay
+    try:
+        warmups = WeeklyWarmup.query.filter_by(user_id=current_user.id, week=week).all()
+        if warmups:
+            for wu in warmups:
+                if wu.day_idx < len(days) and wu.warmup_data:
+                    days[wu.day_idx]["warmup"] = wu.warmup_data
+    except Exception:
+        pass
+
+    # Day schedule overlay
+    try:
+        day_schedules = WeeklyDaySchedule.query.filter_by(user_id=current_user.id, week=week).all()
+        if day_schedules:
+            for ds in day_schedules:
+                if ds.day_idx < len(days):
+                    days[ds.day_idx]["liftName"] = ds.lift_name
+                    if ds.is_rest:
+                        days[ds.day_idx]["isRest"] = True
+                        days[ds.day_idx]["exercises"] = []
+    except Exception:
+        pass
 
     days = _filter_meals_by_food_selections(days, user_food_ids)
     return jsonify({
@@ -1916,6 +2114,155 @@ def api_generate_weekly_program():
     except Exception:
         db.session.rollback()
 
+    # --- RUN PLAN GENERATION ---
+    run_summary = []
+    try:
+        from workout_data import get_workouts as _get_template_workouts
+        template_days = _get_template_workouts(target_week)
+
+        # Delete existing engine-sourced run plans for this week
+        WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=target_week
+        ).filter(WeeklyRunPlan.source != 'coach').delete()
+
+        for day_idx in range(7):
+            template_run = template_days[day_idx].get("run") if day_idx < len(template_days) else None
+            if not template_run:
+                continue
+
+            progressed = _generate_run_plan(current_user.id, target_week, day_idx, template_run)
+
+            db.session.add(WeeklyRunPlan(
+                user_id=current_user.id,
+                week=target_week,
+                day_idx=day_idx,
+                run_type=progressed.get('type', 'z2'),
+                label=progressed.get('label', 'Run'),
+                duration=progressed.get('time', '30 min'),
+                detail=progressed.get('detail', ''),
+                source='engine',
+            ))
+
+            run_summary.append({
+                "day": day_idx,
+                "type": progressed.get('type'),
+                "label": progressed.get('label'),
+                "duration": progressed.get('time'),
+            })
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # --- WARMUP GENERATION ---
+    try:
+        from workout_data import EXERCISES as _EXERCISES
+
+        # Get latest soreness data from morning check-in
+        soreness_data = None
+        latest_checkin = MorningCheckIn.query.filter_by(
+            user_id=current_user.id
+        ).order_by(MorningCheckIn.created_at.desc()).first()
+        if latest_checkin and latest_checkin.soreness and latest_checkin.soreness >= 6:
+            # High soreness — try to infer area from notes
+            area = "shoulders"  # Default for this user's known tightness
+            if latest_checkin.notes:
+                notes_lower = latest_checkin.notes.lower()
+                for a in ["lower back", "hamstrings", "quads", "shoulders", "chest"]:
+                    if a in notes_lower:
+                        area = a
+                        break
+            soreness_data = {"area": area, "level": latest_checkin.soreness}
+
+        # Delete existing engine-sourced warmups for this week
+        WeeklyWarmup.query.filter_by(
+            user_id=current_user.id, week=target_week
+        ).filter(WeeklyWarmup.source != 'coach').delete()
+
+        if not template_days:
+            template_days = _get_template_workouts(target_week)
+
+        for day_idx in range(7):
+            day_data = template_days[day_idx] if day_idx < len(template_days) else {}
+            day_exercises = day_data.get("exercises", [])
+
+            # Extract muscle groups from exercises
+            muscle_groups = set()
+            for ex in day_exercises:
+                ex_name = ex.get("name", ex.get("exercise", ""))
+                ex_info = _EXERCISES.get(ex_name, {})
+                mg = ex_info.get("muscle_group", "")
+                if mg:
+                    # Normalize compound groups like "chest_triceps" -> ["chest", "triceps"]
+                    for part in mg.split("_"):
+                        if part in ("chest", "back", "quads", "hamstrings", "shoulders", "glutes"):
+                            muscle_groups.add(part)
+
+            if not muscle_groups and not day_exercises:
+                continue  # Rest day with no exercises, skip warmup
+
+            warmup = _generate_warmup(day_exercises, list(muscle_groups), soreness_data)
+
+            db.session.add(WeeklyWarmup(
+                user_id=current_user.id,
+                week=target_week,
+                day_idx=day_idx,
+                warmup_data=warmup,
+                source='engine',
+            ))
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # --- DAY SCHEDULE SEEDING ---
+    schedule_summary = []
+    try:
+        # Delete existing engine-sourced schedules for this week
+        WeeklyDaySchedule.query.filter_by(
+            user_id=current_user.id, week=target_week
+        ).filter(WeeklyDaySchedule.source != 'coach').delete()
+
+        if not template_days:
+            template_days = _get_template_workouts(target_week)
+
+        for day_idx in range(7):
+            day_data = template_days[day_idx] if day_idx < len(template_days) else {}
+            lift_name = day_data.get("liftName", "Rest")
+            is_rest = "rest" in lift_name.lower() and not day_data.get("exercises")
+
+            # Extract muscle groups from the day's exercises
+            muscle_groups = set()
+            for ex in day_data.get("exercises", []):
+                ex_name = ex.get("name", ex.get("exercise", ""))
+                ex_info = _EXERCISES.get(ex_name, {})
+                mg = ex_info.get("muscle_group", "")
+                if mg:
+                    for part in mg.split("_"):
+                        if part in ("chest", "back", "quads", "hamstrings", "shoulders", "glutes", "biceps", "triceps", "core"):
+                            muscle_groups.add(part)
+
+            db.session.add(WeeklyDaySchedule(
+                user_id=current_user.id,
+                week=target_week,
+                day_idx=day_idx,
+                lift_name=lift_name,
+                muscle_groups=list(muscle_groups),
+                is_rest=is_rest,
+                source='engine',
+            ))
+
+            schedule_summary.append({
+                "day": day_idx,
+                "lift_name": lift_name,
+                "muscle_groups": list(muscle_groups),
+                "is_rest": is_rest,
+            })
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     return jsonify({
         "week": target_week,
         "phase": phase,
@@ -1923,6 +2270,8 @@ def api_generate_weekly_program():
         "program": program_summary,
         "deficit": deficit,
         "meal_summary": meal_summary,
+        "run_summary": run_summary,
+        "schedule_summary": schedule_summary,
     })
 
 
