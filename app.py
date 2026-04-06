@@ -196,6 +196,22 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # Fix orphaned records with NULL user_id — assign to the first user
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        first_user = User.query.first()
+        if first_user:
+            for tbl in ['psych_intake', 'physical_assessment', 'app_state']:
+                try:
+                    db.session.execute(text(
+                        f'UPDATE "{tbl}" SET user_id = :uid WHERE user_id IS NULL'
+                    ), {"uid": first_user.id})
+                except Exception:
+                    db.session.rollback()
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     # Ensure override tables exist (db.create_all handles creation above)
     for tbl in ["weekly_schedule_override", "meal_plan_override", "run_override"]:
         try:

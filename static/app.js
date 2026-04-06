@@ -4840,6 +4840,11 @@ function _getChatOpener() {
 }
 
 function toggleChatOverlay() {
+    // If morning check-in isn't done, start it directly
+    if (!_morningCheckinDone) {
+        showMorningCheckinOverlay();
+        return;
+    }
     var accSection = document.getElementById('acc-coach');
     if (accSection) {
         if (!accSection.classList.contains('open')) {
