@@ -62,19 +62,20 @@ def _format_exercise_analysis(analysis):
 def _format_today_sets(sets):
     if not sets:
         return ""
-    lines = ["TODAY'S SETS:"]
+    lines = ["TODAY'S SETS (per-set data — DO NOT sum reps across sets):"]
     for ex_name, set_list in sets.items():
-        set_strs = []
-        for s in set_list:
-            wt = s.get('weight', 0)
-            reps = s.get('reps', 0)
-            target_wt = s.get('target_weight')
-            target_reps = s.get('target_reps')
-            mod = s.get('modification_direction', '')
-            marker = '\u2713' if mod == 'as_prescribed' else '\u2191' if mod == 'increased_weight' else '\u2193' if 'decreased' in (mod or '') else ''
-            target_str = f" (target: {target_wt}\u00d7{target_reps})" if target_wt else ""
-            set_strs.append(f"{wt}lb\u00d7{reps}{target_str} {marker}")
-        lines.append(f"  {ex_name}: {' | '.join(set_strs)}")
+        weights = [s.get('weight', 0) for s in set_list]
+        reps_list = [s.get('reps', 0) for s in set_list]
+        num_sets = len(set_list)
+        avg_reps = round(sum(r for r in reps_list if r) / max(num_sets, 1))
+        last_wt = weights[-1] if weights else 0
+        # Show summary format to prevent LLM from summing reps
+        target_wt = set_list[0].get('target_weight') if set_list else None
+        target_reps = set_list[0].get('target_reps') if set_list else None
+        target_str = f" (target: {target_wt}lb×{target_reps}/set)" if target_wt else ""
+        mod = set_list[-1].get('modification_direction', '') if set_list else ''
+        marker = '\u2713' if mod == 'as_prescribed' else '\u2191' if mod == 'increased_weight' else '\u2193' if 'decreased' in (mod or '') else ''
+        lines.append(f"  {ex_name}: {last_wt}lb, {num_sets} sets, {avg_reps} reps/set{target_str} {marker}")
     return "\n".join(lines)
 
 
