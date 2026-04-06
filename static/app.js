@@ -7120,8 +7120,8 @@ async function renderDetail() {
       suggestion = getWeightForExercise(ex.name, currentWeek);
       if (!lastWt) lastWt = getLastWeight(ex.name);
     }
-    // Priority: use engine-computed target_weight from prescription if available
-    if (ex.target_weight && (!suggestion.weight || suggestion.weight === 0)) {
+    // Priority: prescription target_weight ALWAYS wins over history
+    if (ex.target_weight) {
       suggestion = { weight: ex.target_weight, reason: 'engine' };
     }
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
@@ -7166,7 +7166,7 @@ async function renderDetail() {
         </div>
         <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}${suggestion.reason && suggestion.reason !== 'estimated' ? `<span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
       </div>
-      ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${suggestion.reason && suggestion.reason !== 'estimated' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
+      ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${ex.target_weight && ex.target_weight !== lastWt ? ' → ' + ex.target_weight + ' lb' : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason && suggestion.reason !== 'engine' ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
       <div id="swap-container-${i}"></div>
@@ -7995,7 +7995,12 @@ async function enterExerciseFocus(exIdx) {
     suggestion = getWeightForExercise(ex.name, currentWeek);
     if (!_focusLastWeight) _focusLastWeight = getLastWeight(ex.name);
   }
-  _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+  // Priority: prescription target_weight ALWAYS wins over history
+  if (ex.target_weight) {
+    _focusWeightVal = roundWeight(ex.target_weight, displayName);
+  } else {
+    _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
+  }
 
   // Fetch adaptive targets from training engine
   try {
