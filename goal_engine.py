@@ -399,7 +399,7 @@ def determine_fasting_protocol(goal_type, daily_calories):
             "notes": "Calorie target high enough that fasting is optional. "
                      "Eat across a normal window.",
         }
-    elif daily_calories >= 1800:
+    elif daily_calories >= 1500:
         return {
             "protocol": "16_8",
             "eating_window_hours": 8,
@@ -408,14 +408,11 @@ def determine_fasting_protocol(goal_type, daily_calories):
                      "Two to three meals in the window.",
         }
     elif daily_calories >= 1200:
-        aggressive = daily_calories < 1500
-        protocol = "20_4" if aggressive else "18_6"
-        window = 4 if aggressive else 6
         return {
-            "protocol": protocol,
-            "eating_window_hours": window,
+            "protocol": "18_6",
+            "eating_window_hours": 6,
             "electrolytes": True,
-            "notes": f"{20 if aggressive else 18}:{window} fasting. "
+            "notes": "18:6 fasting. "
                      "Electrolyte supplementation required: sodium, potassium, "
                      "magnesium. Black coffee ok. Keeps meals dense and satisfying "
                      "at low calorie targets.",

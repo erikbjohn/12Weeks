@@ -814,21 +814,21 @@ function getLastRPEs(exName, count) {
 
 // Fallback weight estimates for exercises without history
 const WEIGHT_ESTIMATES = {
-  "Incline DB Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : null; },
-  "Cable Seated Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.8) : null; },
+  "Incline DB Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : 20; },
+  "Cable Seated Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.8) : 40; },
   "Face Pull": () => 25,
   "Lateral Raise": () => 15,
-  "EZ-Bar Curl": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : null; },
-  "Cable Tricep Pushdown": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.4) : null; },
-  "Leg Press": (cache) => { const squat = cache["Barbell Back Squat"]; return squat ? Math.round(squat.current * 1.5) : null; },
-  "Romanian Deadlift": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.65) : null; },
+  "EZ-Bar Curl": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : 30; },
+  "Cable Tricep Pushdown": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.4) : 30; },
+  "Leg Press": (cache) => { const squat = cache["Barbell Back Squat"]; return squat ? Math.round(squat.current * 1.5) : 135; },
+  "Romanian Deadlift": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.65) : 95; },
   "Leg Curl": () => 50,
   "Leg Extension": () => 50,
   "Calf Raise": () => 100,
-  "Dumbbell Shoulder Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.3) : null; },
+  "Dumbbell Shoulder Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.3) : 20; },
   "Cable Lateral Raise": () => 10,
-  "Barbell Row": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.5) : null; },
-  "Dumbbell Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.4) : null; },
+  "Barbell Row": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.5) : 65; },
+  "Dumbbell Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.4) : 25; },
   "Hammer Curl": () => 25,
   "Overhead Tricep Extension": () => 25,
   "Walking Lunge": () => 20,
@@ -4292,7 +4292,7 @@ async function _startMcChat() {
         mealSummaryStr +
         runSummaryStr +
         scheduleSummaryStr +
-        '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Cover the run plan progression and day schedule. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs] markers. Use [DAY_SCHEDULE: day=X, lift_name=Name, muscle_groups=a,b,c] to adjust the daily split.';
+        '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Cover the run plan progression and day schedule. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs, weight=X] markers. Use [DAY_SCHEDULE: day=X, lift_name=Name, muscle_groups=a,b,c] to adjust the daily split.';
   } else {
     // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat
     // Normal day

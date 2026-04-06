@@ -16,7 +16,7 @@ _WATER = {"item": "Water", "portion": "16 oz", "cal": 0, "protein": 0, "carbs": 
 
 # Fasting protocol definitions
 _FASTING_PROTOCOLS = {
-    "16_8":  {"start": "11:00am", "end": "7:00pm", "meals": 3, "fasted_preworkout": True},
+    "16_8":  {"start": "11:00am", "end": "6:30pm", "meals": 3, "fasted_preworkout": True},
     "18_6":  {"start": "12:00pm", "end": "6:00pm", "meals": 2, "fasted_preworkout": True},
     "20_4":  {"start": "2:00pm",  "end": "6:00pm", "meals": 2, "fasted_preworkout": True},
     "omad":  {"start": "5:00pm",  "end": "6:00pm", "meals": 1, "fasted_preworkout": True},
@@ -254,6 +254,9 @@ def _build_meal_foods(protein_key, carb_key, veg_keys, fat_key, meal_targets):
             default_protein = food_info["protein"] * food_info["default_portion"]
             scale = remaining["protein"] / default_protein if default_protein > 0 else 1.0
             scale = max(0.5, min(scale, 3.0))  # Clamp to reasonable range
+            if food_info.get("max_portion"):
+                max_scale = food_info["max_portion"] / food_info["default_portion"]
+                scale = min(scale, max_scale)
             food_item = _scale_food(protein_key, scale)
             if food_item:
                 foods.append(food_item)
@@ -266,7 +269,10 @@ def _build_meal_foods(protein_key, carb_key, veg_keys, fat_key, meal_targets):
         if food_info and food_info["carbs"] > 0:
             default_carbs = food_info["carbs"] * food_info["default_portion"]
             scale = remaining["carbs"] / default_carbs if default_carbs > 0 else 1.0
-            scale = max(0.25, min(scale, 3.0))
+            scale = max(0.25, min(scale, 2.0))
+            if food_info.get("max_portion"):
+                max_scale = food_info["max_portion"] / food_info["default_portion"]
+                scale = min(scale, max_scale)
             food_item = _scale_food(carb_key, scale)
             if food_item:
                 foods.append(food_item)
@@ -289,6 +295,9 @@ def _build_meal_foods(protein_key, carb_key, veg_keys, fat_key, meal_targets):
             default_fat = food_info["fat"] * food_info["default_portion"]
             scale = remaining["fat"] / default_fat if default_fat > 0 else 1.0
             scale = max(0.25, min(scale, 3.0))
+            if food_info.get("max_portion"):
+                max_scale = food_info["max_portion"] / food_info["default_portion"]
+                scale = min(scale, max_scale)
             food_item = _scale_food(fat_key, scale)
             if food_item:
                 foods.append(food_item)

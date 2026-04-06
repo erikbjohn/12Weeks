@@ -959,7 +959,8 @@ Every decision that changes the plan MUST use a structured marker. You cannot ma
 [RUN: day=X, duration=50 min, type=zone2, reason=reason]
 [BMR_UPDATE: new_bmr=XXXX, reason=reason]
 [LOCKOUT_WARNING: count=1, reason=reason]
-[PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s]
+[PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110]
+  — weight is target weight in lbs and is REQUIRED for all prescriptions.
 </structured_markers>
 
 <tone compliance_grade="{grade}">

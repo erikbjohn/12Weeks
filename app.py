@@ -392,6 +392,28 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
+    # ONE-TIME: Backfill target_weight for existing prescriptions
+    try:
+        from training_engine import compute_next_targets
+        rx_null = WeeklyPrescription.query.filter(
+            WeeklyPrescription.target_weight == None
+        ).all()
+        if rx_null:
+            filled = 0
+            for rx in rx_null:
+                try:
+                    targets = compute_next_targets(rx.user_id, rx.exercise_name, rx.week, rx.day_idx)
+                    if targets.get('target_weight'):
+                        rx.target_weight = targets['target_weight']
+                        filled += 1
+                except Exception:
+                    pass
+            if filled:
+                db.session.commit()
+                print(f"[migration] Backfilled {filled} prescription target_weights")
+    except Exception as e:
+        print(f"[migration] target_weight backfill skipped: {e}")
+
     # PRE-START COACH EMAIL: Send day before start date
     try:
         tomorrow = date.today() + timedelta(days=1)
@@ -605,12 +627,13 @@ def _parse_coach_markers(text, user_id, week):
         except Exception:
             db.session.rollback()
 
-    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s]
-    for m in re.finditer(r'\[PRESCRIPTION:\s*week=(\d+),\s*day=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,]+)(?:,\s*rest=([^\]]+))?\]', text):
+    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110]
+    for m in re.finditer(r'\[PRESCRIPTION:\s*week=(\d+),\s*day=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,]+?)(?:,\s*rest=([^\],]+?))?(?:,\s*weight=([^\]]+))?\]', text):
         try:
             p_week, p_day, p_exercise = int(m.group(1)), int(m.group(2)), m.group(3).strip()
             p_sets, p_reps = int(m.group(4)), m.group(5).strip()
             p_rest = m.group(6).strip() if m.group(6) else '60s'
+            p_weight = float(m.group(7)) if m.group(7) else None
             from workout_data import resolve_name
             p_exercise = resolve_name(p_exercise)
             # Upsert
@@ -622,6 +645,8 @@ def _parse_coach_markers(text, user_id, week):
                 existing.reps = p_reps
                 existing.rest = p_rest
                 existing.source = 'coach'
+                if p_weight is not None:
+                    existing.target_weight = p_weight
             else:
                 # Find max exercise_order for this day
                 max_order = db.session.query(db.func.max(WeeklyPrescription.exercise_order)).filter_by(
@@ -631,6 +656,7 @@ def _parse_coach_markers(text, user_id, week):
                     user_id=user_id, week=p_week, day_idx=p_day,
                     exercise_order=max_order + 1, exercise_name=p_exercise,
                     sets=p_sets, reps=p_reps, rest=p_rest, source='coach',
+                    target_weight=p_weight,
                 ))
             db.session.commit()
         except Exception:
