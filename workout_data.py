@@ -309,7 +309,7 @@ DAY_MEAL_TYPES = {
     "Thu": "moderate",
     "Fri": "heavy_lift",
     "Sat": "moderate",
-    "Sun": "rest",
+    "Sun": "fast_day",
 }
 
 
