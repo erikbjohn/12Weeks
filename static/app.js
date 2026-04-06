@@ -6479,15 +6479,9 @@ function buildCoachContent(d) {
             break;
         }
     }
-    // If last message is older than 10 min, auto-refresh when accordion opens
-    var isStale = !lastCoachMsg || (Date.now() - lastCoachTime > 10 * 60 * 1000);
-    if (isStale) {
-        html += '<div id="coach-accordion-refresh" style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
-        setTimeout(function() { _refreshCoachAccordionMsg(); }, 100);
-    } else if (lastCoachMsg) {
-        var truncated = lastCoachMsg.length > 200 ? lastCoachMsg.substring(0, 200) + '...' : lastCoachMsg;
-        html += '<div style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5">' + escapeHtml(truncated) + '</div>';
-    }
+    // Always show fresh message — auto-refresh every time
+    html += '<div id="coach-accordion-refresh" style="font-size:14px;color:var(--text);padding:8px 0;line-height:1.5"><div class="chat-typing"><span></span><span></span><span></span></div></div>';
+    setTimeout(function() { _refreshCoachAccordionMsg(); }, 100);
     html += '<div id="coach-inline-chat" style="margin-top:12px">' +
       '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
