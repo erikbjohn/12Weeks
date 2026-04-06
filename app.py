@@ -4683,7 +4683,8 @@ def api_goal_compute():
     if goal_type == "bulk":
         target_weight = max(target_weight, weight + 10)
 
-    targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age)
+    targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age,
+                              target_weight=target_weight, weeks=12)
 
     if is_minor:
         # Override: NO deficit for minors — eat at TDEE or above

@@ -112,11 +112,11 @@ def detect_goal(actor_answer, sex="male", current_weight=None, current_bf_estima
     }
 
 
-def compute_tdee(weight_lbs, height_in, age, sex, activity_multiplier=1.7):
+def compute_tdee(weight_lbs, height_in, age, sex, activity_multiplier=1.55):
     """Compute TDEE using Mifflin-St Jeor equation.
 
-    Default activity multiplier of 1.7 assumes 6 days lifting + daily
-    running, which is the standard 12Weeks protocol.
+    Default activity multiplier of 1.55 assumes moderate activity
+    (desk job + 4-6 training sessions/week).
 
     Args:
         weight_lbs: Body weight in pounds.
@@ -141,10 +141,10 @@ def compute_tdee(weight_lbs, height_in, age, sex, activity_multiplier=1.7):
     return {"bmr": int(round(bmr)), "tdee": int(round(tdee))}
 
 
-def compute_targets(tdee, goal_type, weight_lbs, age=None):
+def compute_targets(tdee, goal_type, weight_lbs, age=None, target_weight=None, weeks=12):
     """Compute daily macro targets based on goal type.
 
-    For CUT: aggressive deficit, high protein to preserve muscle.
+    For CUT: deficit computed from weight loss goal, not a fixed percentage.
     For BULK: moderate surplus, solid protein, higher carbs for fuel.
     For RECOMP: slight deficit, high protein, balanced macros.
 
@@ -152,6 +152,8 @@ def compute_targets(tdee, goal_type, weight_lbs, age=None):
         tdee: Total daily energy expenditure in calories.
         goal_type: "cut", "bulk", or "recomp".
         weight_lbs: Current body weight in pounds.
+        target_weight: Goal weight in lbs (used to compute deficit for cuts).
+        weeks: Weeks remaining in program (default 12).
 
     Returns:
         dict: {"calories": int, "protein": int, "carbs": int, "fat": int}
@@ -160,10 +162,15 @@ def compute_targets(tdee, goal_type, weight_lbs, age=None):
     if goal_type == "cut":
         protein = round(1.2 * weight_lbs)
         fat = round(0.35 * weight_lbs)
-        # Deficit: whatever it takes. Floor at 1000 cal for safety.
-        # The deficit is computed from target weight in compute_phase_plan;
-        # here we use a standard aggressive deficit of 35%.
-        calories = max(int(round(tdee * 0.65)), 1000)
+        # Compute deficit from actual weight loss goal
+        if target_weight and target_weight < weight_lbs and weeks > 0:
+            weight_to_lose = weight_lbs - target_weight
+            required_weekly = weight_to_lose / weeks
+            required_daily_deficit = (required_weekly * 3500) / 7
+            calories = max(int(round(tdee - required_daily_deficit)), 1200)
+        else:
+            # Fallback: 35% deficit
+            calories = max(int(round(tdee * 0.65)), 1200)
         protein_cal = protein * 4
         fat_cal = fat * 9
         remaining_cal = max(calories - protein_cal - fat_cal, 0)
