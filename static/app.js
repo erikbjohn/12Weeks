@@ -3790,8 +3790,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         var measData = await measRes.json();
         if (measData && measData.length > 0) {
           var latest = measData[measData.length - 1];
+          // Weight comes from bodyweight cache, not measurements
+          var todayBw = '';
+          if (Array.isArray(_bodyweightCache)) {
+            var bwEntry = _bodyweightCache.find(function(e) { return e.date === todayStr(); });
+            if (bwEntry) todayBw = bwEntry.weight;
+          }
           window._sundayMeasurements = {
-            weight: latest.weight, waist: latest.waist_inches || latest.waist,
+            weight: todayBw || latest.weight || '', waist: latest.waist_inches || latest.waist,
             chest: latest.chest, hips: latest.hips, neck: latest.neck,
             bicep_left: latest.bicep_left, bicep_right: latest.bicep_right,
             thigh_left: latest.thigh_left, thigh_right: latest.thigh_right,
