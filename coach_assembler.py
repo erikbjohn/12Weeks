@@ -241,35 +241,53 @@ def _build_exercise_history():
 
 @section_builder("exercise_analysis")
 def _build_exercise_analysis():
-    from models import ExerciseLog
+    """Read pre-computed analysis from WeeklyPrescription (set by training engine during
+    program generation). Falls back to live compute_next_targets only if no prescriptions exist."""
+    from models import WeeklyPrescription
     from workout_data import resolve_name
     week = _current_week()
     today_idx = _user_today().weekday()
-    # Need exercise names first
-    rows = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
-        ExerciseLog.logged_date.desc()
-    ).limit(200).all()
-    names = set()
-    for log in rows:
-        names.add(resolve_name(log.exercise_name))
     analysis = {}
-    try:
-        from training_engine import compute_next_targets
-        for ex_name in names:
-            try:
-                result = compute_next_targets(current_user.id, ex_name, week, today_idx)
-                analysis[ex_name] = {
-                    "target_weight": result.get("target_weight"),
-                    "target_reps": result.get("target_reps"),
-                    "target_sets": result.get("target_sets"),
-                    "adjustment_reason": result.get("adjustment_reason", ""),
-                    "progression_indicator": result.get("progression_indicator", "hold"),
-                    "coach_alert": result.get("coach_alert"),
+    # Read from pre-generated prescriptions (authoritative)
+    rx_list = WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=week
+    ).all()
+    if rx_list:
+        for rx in rx_list:
+            name = resolve_name(rx.exercise_name)
+            if name not in analysis and getattr(rx, 'target_weight', None):
+                analysis[name] = {
+                    "target_weight": rx.target_weight,
+                    "target_reps": int(rx.reps) if rx.reps and rx.reps.isdigit() else 10,
+                    "target_sets": rx.sets,
+                    "adjustment_reason": getattr(rx, 'adjustment_reason', '') or '',
+                    "progression_indicator": getattr(rx, 'progression_indicator', 'hold') or 'hold',
+                    "coach_alert": None,
                 }
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # Fallback: if no prescriptions, compute live
+    if not analysis:
+        try:
+            from models import ExerciseLog
+            from training_engine import compute_next_targets
+            rows = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
+                ExerciseLog.logged_date.desc()
+            ).limit(200).all()
+            names = set(resolve_name(log.exercise_name) for log in rows)
+            for ex_name in names:
+                try:
+                    result = compute_next_targets(current_user.id, ex_name, week, today_idx)
+                    analysis[ex_name] = {
+                        "target_weight": result.get("target_weight"),
+                        "target_reps": result.get("target_reps"),
+                        "target_sets": result.get("target_sets"),
+                        "adjustment_reason": result.get("adjustment_reason", ""),
+                        "progression_indicator": result.get("progression_indicator", "hold"),
+                        "coach_alert": result.get("coach_alert"),
+                    }
+                except Exception:
+                    pass
+        except Exception:
+            pass
     return {"exercise_analysis": analysis}
 
 
