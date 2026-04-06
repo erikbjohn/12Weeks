@@ -4214,10 +4214,21 @@ async function _startMcChat() {
                      dd.weeks_remaining + ' weeks left, need ' + dd.required_weekly_loss + ' lb/week.';
     }
 
+    var mealSummaryStr = '';
+    if (programData && programData.meal_summary) {
+        mealSummaryStr = '\n\nMEAL PLAN:';
+        var dayNamesM = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        for (var mi = 0; mi < programData.meal_summary.length; mi++) {
+            var md = programData.meal_summary[mi];
+            mealSummaryStr += '\n  ' + dayNamesM[md.day] + ': ' + md.calories + ' cal, ' + md.protein + 'g protein (' + md.type + ')';
+        }
+    }
+
     trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
         '\nThis is the Monday weekly planning session.' +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         deficitStr +
+        mealSummaryStr +
         '\n\nReview this program with the athlete. For each key exercise, explain WHY the weight/reps changed from last week. Ask about schedule changes. Apply adjustments via [PRESCRIPTION: week=' + nextWeek + ', day=X, exercise=Name, sets=N, reps=R, rest=Xs] markers.';
   } else {
     // Sunday is handled by measurement form + _startSundayReviewStream, so this branch covers Tue-Sat

@@ -42,7 +42,7 @@ from models import (
     UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
-    Exercise, WeeklyPrescription,
+    Exercise, WeeklyPrescription, WeeklyMealPlan,
 )
 
 app = Flask(__name__)
@@ -245,6 +245,18 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
+
+    # WeeklyMealPlan new columns (daily_calories, daily_protein, day_type, source)
+    for col, col_type in [('daily_calories', 'INTEGER'), ('daily_protein', 'INTEGER'), ('day_type', 'VARCHAR(20)'), ('source', "VARCHAR(20) DEFAULT 'generator'")]:
+        try:
+            db.session.execute(text(f'SELECT {col} FROM weekly_meal_plan LIMIT 1'))
+        except Exception:
+            db.session.rollback()
+            try:
+                db.session.execute(text(f'ALTER TABLE weekly_meal_plan ADD COLUMN {col} {col_type}'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
     # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
     # Wipe all corrupted data, keep psych intake, restart from physical assessment
@@ -1345,6 +1357,21 @@ def api_workouts():
         for day in days:
             if "exercises" in day:
                 day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+
+        # Check for user-specific meal plans
+        try:
+            meal_plans = WeeklyMealPlan.query.filter_by(
+                user_id=current_user.id, week=week
+            ).all()
+            if meal_plans:
+                mp_by_day = {mp.day_idx: mp.meal_data for mp in meal_plans}
+                for day_idx, meal_data in mp_by_day.items():
+                    if day_idx < len(days) and meal_data:
+                        days[day_idx]["mealPlan"] = meal_data
+                        days[day_idx]["mealType"] = meal_data.get("label", "custom")
+        except Exception:
+            pass  # Fall back to hardcoded meal plans
+
         days = _filter_meals_by_food_selections(days, user_food_ids)
         all_weeks[str(week)] = {
             "week": week,
@@ -1395,6 +1422,21 @@ def api_week(week):
     for day in days:
         if "exercises" in day:
             day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+
+    # Check for user-specific meal plans
+    try:
+        meal_plans = WeeklyMealPlan.query.filter_by(
+            user_id=current_user.id, week=week
+        ).all()
+        if meal_plans:
+            mp_by_day = {mp.day_idx: mp.meal_data for mp in meal_plans}
+            for day_idx, meal_data in mp_by_day.items():
+                if day_idx < len(days) and meal_data:
+                    days[day_idx]["mealPlan"] = meal_data
+                    days[day_idx]["mealType"] = meal_data.get("label", "custom")
+    except Exception:
+        pass  # Fall back to hardcoded meal plans
+
     days = _filter_meals_by_food_selections(days, user_food_ids)
     return jsonify({
         "week": week, "phase": phase,
@@ -1771,12 +1813,101 @@ def api_generate_weekly_program():
     except Exception:
         pass
 
+    # --- MEAL PLAN GENERATION ---
+    meal_summary = []
+    try:
+        from meal_generator import generate_meal_plan
+        from goal_engine import compute_day_calories
+        from workout_data import MEAL_PLANS
+
+        # Get user's food selections
+        fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
+        user_foods = fs.selected_foods if fs and fs.selected_foods else None
+
+        # Get user's goal for calorie computation
+        if not goal:
+            goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+        if not bw:
+            bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+        current_weight = bw.weight_lbs if bw else 200
+
+        base_calories = goal.daily_calories if goal else 1800
+        # Use deficit-adjusted calories if available
+        if deficit and deficit.get('required_weekly_loss'):
+            # Deficit already computed above; keep base_calories from goal
+            pass
+
+        # Map DAY_MEAL_TYPES day types to compute_day_calories day types
+        _cal_day_type_map = {
+            "heavy_lift": "heavy",
+            "long_run": "long_run",
+            "moderate": "training",
+            "fast_day": "rest",
+        }
+        day_types = ["heavy_lift", "long_run", "heavy_lift", "moderate", "heavy_lift", "moderate", "fast_day"]
+        fasting_protocol = goal.fasting_protocol if goal else "16_8"
+
+        # Delete existing non-coach meal plans for this week
+        WeeklyMealPlan.query.filter_by(
+            user_id=current_user.id, week=target_week
+        ).filter(WeeklyMealPlan.source != 'coach').delete()
+
+        for day_idx in range(7):
+            day_type = day_types[day_idx]
+
+            if day_type == 'fast_day':
+                # Use the hardcoded fast_day plan directly
+                meal_plan = MEAL_PLANS.get('fast_day', {})
+            elif user_foods:
+                # Compute day-specific calorie/macro targets
+                cal_day_type = _cal_day_type_map.get(day_type, "training")
+                day_macros = compute_day_calories(
+                    base_calories,
+                    goal.goal_type if goal else 'cut',
+                    cal_day_type,
+                    current_weight,
+                )
+
+                # Generate personalized meal plan
+                meal_plan = generate_meal_plan(
+                    selected_foods=user_foods,
+                    day_type=day_type,
+                    targets=day_macros,
+                    fasting_protocol=fasting_protocol,
+                )
+            else:
+                # No food selections yet — skip meal generation
+                continue
+
+            db.session.add(WeeklyMealPlan(
+                user_id=current_user.id,
+                week=target_week,
+                day_idx=day_idx,
+                meal_data=meal_plan,
+                daily_calories=meal_plan.get('targetCal', 0),
+                daily_protein=meal_plan.get('targetProtein', 0),
+                day_type=day_type,
+                source='generator',
+            ))
+
+            meal_summary.append({
+                "day": day_idx,
+                "type": day_type,
+                "calories": meal_plan.get('targetCal', 0),
+                "protein": meal_plan.get('targetProtein', 0),
+            })
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     return jsonify({
         "week": target_week,
         "phase": phase,
         "exercises_generated": len(program_summary),
         "program": program_summary,
         "deficit": deficit,
+        "meal_summary": meal_summary,
     })
 
 
