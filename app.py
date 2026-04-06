@@ -925,6 +925,17 @@ def debug_workouts_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/goal-error", methods=["POST"])
+@login_required
+def debug_goal_error():
+    """Call api_goal_compute and return the error if it crashes."""
+    try:
+        return api_goal_compute()
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
+
+
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
