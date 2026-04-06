@@ -3295,6 +3295,7 @@ function showSettingsMenu() {
     <button onclick="if(confirm('This will reset your psych intake. Continue?'))redoPsychIntake()">Redo Psych Intake</button>
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
+    <button onclick="recomputeGoal()">Recompute Calories</button>
     <button onclick="regenerateProfile()">Regenerate Profile</button>
     <button onclick="restartFromReveal()">Restart from Plan Review</button>
     <button onclick="showGroceryList()">Grocery List</button>
@@ -3304,6 +3305,22 @@ function showSettingsMenu() {
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
+}
+
+async function recomputeGoal() {
+  closeSettingsMenu();
+  try {
+    const res = await fetch('/api/goal/compute', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      alert('Calories recomputed: ' + (data.calories || '?') + ' cal/day (deficit: ' + (data.daily_deficit || '?') + ' cal/day, ' + (data.weekly_loss_lbs || '?') + ' lb/week). Now re-plan your week to update meals.');
+      renderAll();
+    } else {
+      alert('Failed to recompute. Make sure intake + physical assessment are complete.');
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 async function showGroceryList() {
