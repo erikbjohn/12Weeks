@@ -172,8 +172,43 @@ def _format_meals_today(meals, meal_plan=None):
         for m in plan_meals:
             foods = ", ".join(m.get("foods", []))
             parts.append(f"  {m.get('time', '?')} {m.get('name', '')}: {foods}")
+
+        # Pre-compute next meal so the coach doesn't have to do time math
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            try:
+                from utils_time import user_local_now
+                now = user_local_now(None)  # uses current request context
+            except Exception:
+                pass
+            now_minutes = now.hour * 60 + now.minute
+            next_meal = None
+            for m in plan_meals:
+                t = m.get("time", "")
+                t_lower = t.lower().replace("am", "").replace("pm", "")
+                try:
+                    h, mn = t_lower.split(":")
+                    h = int(h)
+                    mn = int(mn)
+                    if "pm" in t.lower() and h != 12:
+                        h += 12
+                    if "am" in t.lower() and h == 12:
+                        h = 0
+                    meal_min = h * 60 + mn
+                    if meal_min > now_minutes:
+                        next_meal = m
+                        break
+                except Exception:
+                    pass
+            if next_meal:
+                parts.append(f"  NEXT MEAL: {next_meal.get('time', '?')} — {next_meal.get('name', '')}. Athlete is ON SCHEDULE between meals.")
+            else:
+                parts.append(f"  All meals for today are past their scheduled time.")
+        except Exception:
+            pass
+
     if not meals:
-        # Check if today is a fasting day (fast_day plan)
         is_fast = meal_plan and ('fast' in meal_plan.get('type', '').lower() or 'Protein-Sparing' in meal_plan.get('type', ''))
         if is_fast:
             parts.append("Meal tracking: FASTING DAY — protein shake + water only. This is correct.")
@@ -188,10 +223,6 @@ def _format_meals_today(meals, meal_plan=None):
             parts.append(f"Meals eaten: {len(eaten)} of {len(meal_plan.get('meals', [])) if meal_plan else '?'}")
         else:
             parts.append("Meals eaten: None yet")
-    sched = meals.get('scheduled_time') if meals else None
-    actual = meals.get('actual_time') if meals else None
-    if sched and actual:
-        parts.append(f"  Meal timing: scheduled={sched}, actual={actual}")
     return '\n'.join(parts) if parts else "Meals today: Not tracked"
 
 
@@ -612,6 +643,9 @@ CHECK <workout_today> before saying "no workout today" or "rest day."
 CHECK the run section before saying "no run" — EVERY day has a run (Sun = streak mile).
 CHECK <exercise_history> before making claims about weights or progress.
 CHECK <meal_plan> before making claims about nutrition compliance.
+If <meal_plan> says "NEXT MEAL: 3:00pm" and it's currently 1:40pm, the athlete is ON SCHEDULE.
+Do NOT say they're "missing" meals or ask "what's keeping you from eating" when they're between scheduled meals.
+The gap between meals IS the plan. Do not treat normal meal spacing as a problem.
 NEVER mention a "post-workout shake" unless it explicitly appears in <meal_plan>. If the meal plan has no shake, do NOT invent one.
 ONLY reference meals that are ACTUALLY in the plan. Count the meals in <meal_plan> — that is the real number. Do not say "5 meals" if the plan only has 4.
 If the plan says "Zone 2 run 40 min" then say "Zone 2 run, 40 minutes" — not "What time are you hitting it?"
