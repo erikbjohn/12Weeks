@@ -4241,15 +4241,9 @@ async function _startMcChat() {
   var dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
   var trigger;
 
-  // Weekly planning: Sunday afternoon (after noon) OR Monday morning
-  // BUT skip if this week or next week already has target_weight (already planned)
-  var _hour = new Date().getHours();
-  var _hasTargetWeights = function(wk) {
-    var wd = workoutData[String(wk)];
-    return wd && wd.days && wd.days.some(function(d) { return d.exercises && d.exercises.length && d.exercises.some(function(e) { return e.target_weight; }); });
-  };
-  var _alreadyPlanned = _hasTargetWeights(currentWeek) || _hasTargetWeights(currentWeek + 1);
-  var _doWeeklyPlanning = ((dayOfWeek === 1) || (dayOfWeek === 0 && _hour >= 12)) && !_alreadyPlanned;
+  // Weekly planning is NEVER auto-triggered from morning check-in.
+  // Use "Plan Next Week" or "Re-plan This Week" buttons instead.
+  var _doWeeklyPlanning = false;
 
   if (_doWeeklyPlanning) {
     var nextWeek = currentWeek + 1;
