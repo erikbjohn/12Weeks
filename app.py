@@ -4833,7 +4833,7 @@ def api_goal_compute():
     day_types = ["heavy_lift", "long_run", "moderate", "rest", "deload"]
     cal_by_day = {}
     for dt in day_types:
-        cal_by_day[dt] = compute_day_calories(targets["calories"], goal_type, dt)
+        cal_by_day[dt] = compute_day_calories(targets["calories"], goal_type, dt, weight_lbs=weight)
 
     # Save to DB
     goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
