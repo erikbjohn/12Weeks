@@ -544,7 +544,9 @@ is listed), not pasta (unless Whole Wheat Pasta is listed), not any food not exp
         fasting_section += f"""
 <fasting_state>
 CURRENT FASTING STATE: {_fasting_state['hours_fasted']} hours fasted (since {_fasting_state['last_meal_day']} {_fasting_state['last_meal_time']}).
-This is a PLANNED fast — the athlete is following the prescribed fasting schedule.
+YOU PRESCRIBED THIS FAST. Sunday is a fast day in the program YOU created.
+Saturday {_fasting_state['last_meal_time']} to Monday {_fasting_state['eating_window_opens']} = ~40 hours. This is YOUR program, not freelancing.
+NEVER call this "freelancing" or "going rogue" or "creating your own protocol."
 Eating window opens at {_fasting_state['eating_window_opens']} today.
 </fasting_state>
 """
