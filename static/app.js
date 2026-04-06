@@ -3732,7 +3732,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     _completionsCache = await compRes.json();
     _supplementsCache = await suppRes.json();
     _bodyweightCache = await bwRes.json();
-    workoutData = await workoutRes.json();
+    try {
+      workoutData = await workoutRes.json();
+    } catch(e) {
+      workoutData = {};
+    }
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
 

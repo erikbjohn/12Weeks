@@ -198,22 +198,24 @@ with app.app_context():
 
     # Fix orphaned records with NULL user_id — assign to the first user
     try:
-        from sqlalchemy import inspect as sa_inspect
         first_user = User.query.first()
         if first_user:
-            for tbl in ['psych_intake', 'physical_assessment', 'app_state',
-                        'training_goal', 'user_constraints', 'user_food_selections',
-                        'user_equipment', 'exercise_log', 'set_log', 'meal_log',
-                        'morning_checkin', 'body_weight', 'body_measurement',
-                        'weekly_prescription', 'weekly_meal_plan', 'coach_memory',
-                        'chat_message', 'compliance_score']:
+            _tables_with_user_id = []
+            for tbl in inspector.get_table_names():
+                try:
+                    cols = {c["name"] for c in inspector.get_columns(tbl)}
+                    if "user_id" in cols:
+                        _tables_with_user_id.append(tbl)
+                except Exception:
+                    pass
+            for tbl in _tables_with_user_id:
                 try:
                     db.session.execute(text(
                         f'UPDATE "{tbl}" SET user_id = :uid WHERE user_id IS NULL'
                     ), {"uid": first_user.id})
+                    db.session.commit()
                 except Exception:
                     db.session.rollback()
-            db.session.commit()
     except Exception:
         db.session.rollback()
 
@@ -1611,8 +1613,11 @@ def api_workouts():
             "phaseInfo": PHASES[phase],
             "days": days,
         }
-    from workout_data import EXERCISES, NAME_ALIASES
-    all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
+    try:
+        from workout_data import EXERCISES, NAME_ALIASES
+        all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
+    except Exception:
+        all_weeks["_exerciseNames"] = []
     return jsonify(all_weeks)
 
 
