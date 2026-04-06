@@ -3223,10 +3223,12 @@ def _build_coach_context():
                 entry["estimated_1rm"] = log.estimated_1rm
             exercise_history[log.exercise_name].append(entry)
 
-    # Per-set data for today
+    # Per-set data for today — use date-based query, not week number
     today_idx = local_today.weekday()
-    today_sets = SetLog.query.filter_by(
-        user_id=current_user.id, week=week, day_idx=today_idx
+    today_sets = SetLog.query.filter(
+        SetLog.user_id == current_user.id,
+        SetLog.logged_date == local_today,
+        SetLog.done == True
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
     for s in today_sets:
@@ -3314,30 +3316,26 @@ def _build_coach_context():
                       for m in mp.get("meals", [])],
         }
 
-    # Day completion status (this week)
+    # Day completion status (this week) — use DATE-BASED query, not week number
+    # The week number in SetLog may not match _current_week() due to frontend/backend mismatch
+    week_monday = local_today - timedelta(days=local_today.weekday())
+    completed_days = []
+
+    # Check DayCompletion by both week number AND date range
     day_completions = DayCompletion.query.filter_by(
         user_id=current_user.id, week=week
     ).all()
-    completed_days = [dc.day_idx for dc in day_completions if dc.done]
+    for dc in day_completions:
+        if dc.done and dc.day_idx not in completed_days:
+            completed_days.append(dc.day_idx)
 
-    # Also count days with logged sets as completed (user may not have toggled day checkbox)
-    sets_by_day = {}
-    recent_sets = SetLog.query.filter_by(user_id=current_user.id, week=week, done=True).all()
-    for s in recent_sets:
-        sets_by_day[s.day_idx] = True
-    for day_idx in sets_by_day:
-        if day_idx not in completed_days:
-            completed_days.append(day_idx)
-
-    # Fallback: also check by calendar week date range to catch any week number mismatch
-    # (DST or timezone can cause frontend week != backend week)
-    week_monday = local_today - timedelta(days=local_today.weekday())
-    date_based_sets = SetLog.query.filter(
+    # Check SetLog by date range (catches ALL week number mismatches)
+    week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.done == True,
         SetLog.logged_date >= week_monday
     ).all()
-    for s in date_based_sets:
+    for s in week_sets:
         if s.day_idx not in completed_days:
             completed_days.append(s.day_idx)
 
