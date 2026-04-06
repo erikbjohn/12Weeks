@@ -216,12 +216,12 @@ function renderCoachMarkdown(text) {
   // Unescape literal \n sequences (from SSE transport)
   clean = clean.replace(/\\n/g, '\n');
 
-  // Smart line breaks: insert before exercise names after sentence endings
-  // Catches: "earned. Cable Row: 140" → "earned.\n\nCable Row: 140"
-  clean = clean.replace(/\.\s+(?=[A-Z][a-zA-Z\s\-\']+(?:Press|Row|Curl|Pulldown|Raise|Pull|Squat|Deadlift|Thrust|Lunge|Swing|Dips?|Shrugs?|Extension|Pushdown|Fly|Jump|Slam|Clean|Plank|Wheel|Rollout|Stretch|Circle)s?(?:\s*[\(:]|\s*—|\s*:))/g, '.\n\n');
+  // Smart line breaks: insert before exercise names after periods OR colons
+  // Catches: "earned. Cable Row: 140" AND "train): Bench Press: 105"
+  clean = clean.replace(/[.:]\s*(?=[A-Z][a-zA-Z\s\-\']+(?:Press|Row|Curl|Pulldown|Raise|Pull|Squat|Deadlift|Thrust|Lunge|Swing|Dips?|Shrugs?|Extension|Pushdown|Fly|Jump|Slam|Clean|Plank|Wheel|Rollout|Stretch|Circle)s?(?:\s*[\(:]|\s*—|\s*:))/g, function(m) { return m[0] + '\n\n'; });
 
   // Break before day headers: "Monday -" "Tuesday:" etc.
-  clean = clean.replace(/\.\s+(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, '.\n\n');
+  clean = clean.replace(/[.:]\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, function(m) { return m[0] + '\n\n'; });
 
   // Break before "Anything you want" / "Any injuries" / "Schedule conflicts" questions
   clean = clean.replace(/\.\s+(?=(?:Anything|Any injuries|Schedule conflicts|Any schedule))/g, '.\n\n');
