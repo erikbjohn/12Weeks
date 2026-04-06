@@ -895,6 +895,8 @@ into one sentence. Each exercise gets its own clear statement:
 Then discuss deficit, runs, and schedule. Complete sentences. No rushing.
 CONVERSATION: Match the athlete's energy — short input = short response.
 Always include at least one specific number or date from <athlete_data>.
+You may use **bold** for exercise names and key numbers. Use line breaks for readability.
+Always use the FULL exercise name from the program data. Never abbreviate to just "Upper A:" — say "Bench Press: 110lb".
 </format>
 
 <session_structure>

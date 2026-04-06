@@ -208,7 +208,20 @@ function todayStr() {
 }
 
 function stripCoachMarkers(text) {
-  return text.replace(/\[(?:SWAP|SCHEDULE|NUTRITION|WEIGHT|RUN|BMR_UPDATE|LOCKOUT_WARNING|LOCKOUT|SUNDAY_REVIEW|MORNING_CHECKIN|WEEKLY_PLANNING|CHAT_OPENED|COACH_CHECKIN|LIFTING_COMPLETE|RUN_COMPLETE):[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  return text.replace(/\[(?:SWAP|SCHEDULE|NUTRITION|WEIGHT|RUN|BMR_UPDATE|LOCKOUT_WARNING|LOCKOUT|SUNDAY_REVIEW|MORNING_CHECKIN|WEEKLY_PLANNING|CHAT_OPENED|COACH_CHECKIN|LIFTING_COMPLETE|RUN_COMPLETE|DAY_SCHEDULE|PRESCRIPTION):[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+function renderCoachMarkdown(text) {
+  var clean = stripCoachMarkers(text);
+  // Escape HTML first
+  var safe = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Bold: **text** → <strong>text</strong>
+  safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Italic: *text* → <em>text</em>
+  safe = safe.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Line breaks: newlines → <br>
+  safe = safe.replace(/\n/g, '<br>');
+  return safe;
 }
 
 function localTimeContext() {
@@ -4160,7 +4173,7 @@ async function _startSundayReviewStream(trigger) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = stripCoachMarkers(fullText);
+          bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -4298,7 +4311,7 @@ async function _startMcChat() {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = stripCoachMarkers(fullText);
+          bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -4368,7 +4381,7 @@ async function sendMcChat() {
           const data = line.slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          bubble.textContent = stripCoachMarkers(fullText);
+          bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -5694,7 +5707,7 @@ async function _fetchRunCoachOpener(triggerMsg) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          if (bubble) bubble.textContent = stripCoachMarkers(fullText);
+          if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -5755,7 +5768,7 @@ async function sendRunCoachMsg() {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          typingBubble.textContent = fullText;
+          typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -6652,7 +6665,7 @@ async function launchWeeklyPlanning() {
                     var data = lines[li].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
                     fullText += data;
-                    if (bubble) bubble.textContent = stripCoachMarkers(fullText);
+                    if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
@@ -6709,7 +6722,7 @@ async function _fetchInlineCoachOpener() {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
                     fullText += data;
-                    if (bubble) bubble.textContent = stripCoachMarkers(fullText);
+                    if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
@@ -6768,7 +6781,7 @@ async function sendInlineCoachMsg() {
                     var data = lines[i].slice(6);
                     if (data === '[DONE]' || data === '[ERROR]') break;
                     fullText += data;
-                    typingBubble.textContent = fullText;
+                    typingBubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
@@ -7813,7 +7826,7 @@ async function _fetchLiftCoachOpener(triggerMsg) {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          if (bubble) bubble.textContent = stripCoachMarkers(fullText);
+          if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
@@ -7874,7 +7887,7 @@ async function sendLiftCoachMsg() {
           var data = lines[i].slice(6);
           if (data === '[DONE]' || data === '[ERROR]') break;
           fullText += data;
-          typingBubble.textContent = fullText;
+          typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
