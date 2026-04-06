@@ -39,7 +39,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory,
+    UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
     ComplianceScore, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
@@ -4314,6 +4314,7 @@ def _build_coach_context():
         pass
 
     result = {
+        "user_id": current_user.id,
         "checkins": checkins,
         "chat_history": chat_history,
         "garmin": garmin_data,

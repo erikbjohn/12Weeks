@@ -53,6 +53,19 @@ class CoachMemory(db.Model):
     week = db.Column(db.Integer)  # Which week this was recorded
 
 
+class CoachRule(db.Model):
+    """Per-user coaching rules — persistent directives that override default coach behavior.
+    Created when user corrects the coach or manually adds a rule via /rule command."""
+    __tablename__ = "coach_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    rule_text = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(30), default="correction")
+    source = db.Column(db.String(20), default="auto")
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class ComplianceScore(db.Model):
     """Rolling compliance score for the athlete."""
     __tablename__ = "compliance_score"
