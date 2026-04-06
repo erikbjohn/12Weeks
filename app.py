@@ -198,12 +198,13 @@ with app.app_context():
 
     # Fix orphaned records with NULL user_id — assign to the first user
     try:
+        _orphan_inspector = db.inspect(db.engine)
         first_user = User.query.first()
         if first_user:
             _tables_with_user_id = []
-            for tbl in inspector.get_table_names():
+            for tbl in _orphan_inspector.get_table_names():
                 try:
-                    cols = {c["name"] for c in inspector.get_columns(tbl)}
+                    cols = {c["name"] for c in _orphan_inspector.get_columns(tbl)}
                     if "user_id" in cols:
                         _tables_with_user_id.append(tbl)
                 except Exception:
