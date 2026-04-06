@@ -6591,17 +6591,20 @@ function buildCoachContent(d) {
     html += '<div id="coach-inline-chat" style="margin-top:12px">' +
       '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
       (_showPlanBtn ? '<button class="btn btn-secondary" style="width:100%;font-size:14px;padding:10px;margin-top:8px" onclick="launchWeeklyPlanning()">Plan Next Week</button>' : '') +
+      '<button class="btn btn-secondary" style="width:100%;font-size:14px;padding:10px;margin-top:8px;opacity:0.8" onclick="launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>' +
     '</div>';
     return html;
 }
 
-async function launchWeeklyPlanning() {
-    // Manually trigger the weekly planning flow (same as Monday morning)
+async function launchWeeklyPlanning(weekOverride) {
+    // Manually trigger the weekly planning flow
     var container = document.getElementById('coach-inline-chat');
     if (!container) return;
-    container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:8px">Generating next week\'s program...</div></div>';
+    var targetWeek = weekOverride || currentWeek + 1;
+    var isReplan = targetWeek === currentWeek;
+    container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:8px">' + (isReplan ? 'Re-generating this week\'s program...' : 'Generating next week\'s program...') + '</div></div>';
 
-    var nextWeek = currentWeek + 1;
+    var nextWeek = targetWeek;
     var programData = null;
     if (nextWeek <= 12) {
         try {
@@ -6643,10 +6646,11 @@ async function launchWeeklyPlanning() {
     }
 
     var trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
-        '\nThis is the weekly planning session.' +
+        (isReplan ? '\nThis is a RE-PLAN of the CURRENT week (Week ' + nextWeek + '). Do NOT review last week. Do NOT plan a future week. Just present THIS week\'s program day by day with weights.' :
+        '\nThis is the weekly planning session.') +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         deficitStr + mealStr +
-        '\n\nReview this program with the athlete. Explain WHY weights changed. Ask about schedule. Use [PRESCRIPTION:] markers for adjustments.';
+        '\n\nPresent this program day by day. Explain WHY weights changed. Use [PRESCRIPTION: ..., weight=X] markers for adjustments. Include weight= in EVERY prescription.';
 
     // Now open the inline chat with the planning trigger
     container.innerHTML =
