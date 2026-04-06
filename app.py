@@ -212,7 +212,7 @@ with app.app_context():
             db.session.rollback()
 
     # New BodyMeasurement columns (chest, biceps, thighs, hips, neck)
-    for col in ['chest', 'bicep_left', 'bicep_right', 'thigh_left', 'thigh_right', 'hips', 'neck']:
+    for col in ['weight_lbs', 'chest', 'bicep_left', 'bicep_right', 'thigh_left', 'thigh_right', 'hips', 'neck']:
         try:
             db.session.execute(text(f'SELECT {col} FROM body_measurement LIMIT 1'))
         except Exception:
@@ -2329,7 +2329,7 @@ def api_measurements():
     return jsonify([{
         "date": e.log_date.isoformat(),
         "waist": e.waist_inches,
-        "weight": getattr(e, 'weight', None),
+        "weight": getattr(e, 'weight_lbs', None),
         "chest": getattr(e, 'chest', None),
         "hips": getattr(e, 'hips', None),
         "neck": getattr(e, 'neck', None),
@@ -2348,6 +2348,8 @@ def api_measurements_record():
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bm:
+        if "weight" in data:
+            bm.weight_lbs = data["weight"]
         if "waist" in data:
             bm.waist_inches = data["waist"]
         if "chest" in data:
@@ -2369,6 +2371,7 @@ def api_measurements_record():
     else:
         bm = BodyMeasurement(
             log_date=d,
+            weight_lbs=data.get("weight"),
             waist_inches=data.get("waist"),
             chest=data.get("chest"),
             hips=data.get("hips"),
@@ -3578,7 +3581,7 @@ def _build_coach_context():
         if dc.done and dc.day_idx not in completed_days:
             completed_days.append(dc.day_idx)
 
-    # Check SetLog by date range (catches ALL week number mismatches)
+    # Check SetLog by date range AND by any week number (catches ALL mismatches)
     week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.done == True,
@@ -3587,6 +3590,16 @@ def _build_coach_context():
     for s in week_sets:
         if s.day_idx not in completed_days:
             completed_days.append(s.day_idx)
+    # Also check by ALL week numbers user might have used (old stale week values)
+    all_week_sets = SetLog.query.filter(
+        SetLog.user_id == current_user.id,
+        SetLog.done == True,
+    ).all()
+    for s in all_week_sets:
+        # Map logged_date to day_idx if within this calendar week
+        if s.logged_date and s.logged_date >= week_monday and s.logged_date <= local_today:
+            if s.day_idx not in completed_days:
+                completed_days.append(s.day_idx)
 
     # Enrich completed_days with day name and workout name
     completed_days_enriched = []
