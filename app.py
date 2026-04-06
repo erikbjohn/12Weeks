@@ -100,9 +100,10 @@ def _safe_next_url(next_url):
         return next_url
     return '/'
 
+from sqlalchemy import inspect as sa_inspect, text
+
 with app.app_context():
     # Drop and recreate psych_intake if it's missing the locked_until column
-    from sqlalchemy import inspect as sa_inspect, text
     try:
         inspector = sa_inspect(db.engine)
         tables = inspector.get_table_names()
@@ -115,7 +116,10 @@ with app.app_context():
                     db.session.commit()
     except Exception:
         pass
-    db.create_all()
+    try:
+        db.create_all()
+    except Exception as e:
+        print(f"[STARTUP] db.create_all() failed: {e}")
 
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
@@ -198,7 +202,7 @@ with app.app_context():
 
     # Fix orphaned records with NULL user_id — assign to the first user
     try:
-        _orphan_inspector = db.inspect(db.engine)
+        _orphan_inspector = sa_inspect(db.engine)
         first_user = User.query.first()
         if first_user:
             _tables_with_user_id = []
