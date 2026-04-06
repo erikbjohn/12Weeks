@@ -4586,12 +4586,15 @@ def api_goal_compute():
 
     intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if not intake or not pa:
+    existing_goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if not intake and not existing_goal:
         return jsonify({"error": "Intake and physical assessment required"}), 400
+    if not pa and not existing_goal:
+        return jsonify({"error": "Physical assessment required"}), 400
 
     # Extract actor answer from conversation
     actor_answer = ""
-    convo = intake.conversation or []
+    convo = (intake.conversation if intake else None) or []
     for i, msg in enumerate(convo):
         if msg.get("role") == "user" and i > 0:
             prev = convo[i-1].get("content", "")
@@ -4628,13 +4631,21 @@ def api_goal_compute():
         # Sync to BodyWeight table so it's there for next time
         db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=current_user.id))
         db.session.commit()
+    elif existing_goal and existing_goal.target_weight:
+        # Use a reasonable estimate from existing goal
+        weight = existing_goal.target_weight + 30  # rough fallback
     else:
         return jsonify({"error": "No weight data found. Complete physical assessment first."}), 400
     height = (pa.height_inches if pa else None) or 70
 
-    goal_info = detect_goal(actor_answer)
-    goal_type = goal_info["goal_type"]
-    target_bf = goal_info["target_bf"]
+    # Use existing goal type if recomputing, otherwise detect from intake
+    if existing_goal and not actor_answer:
+        goal_type = existing_goal.goal_type or "cut"
+        target_bf = existing_goal.target_bf_pct or 0.12
+    else:
+        goal_info = detect_goal(actor_answer)
+        goal_type = goal_info["goal_type"]
+        target_bf = goal_info["target_bf"]
 
     # *** SAFETY: Minors (under 18) — NO calorie deficit, NO cut, NO fasting ***
     is_minor = age < 18

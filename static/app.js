@@ -4031,6 +4031,10 @@ function buildMorningBriefing() {
 
 let _mcExchangeCount = 0;
 
+function startMorningCheckin() {
+  showMorningCheckinOverlay();
+}
+
 function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
@@ -7006,7 +7010,7 @@ async function renderDetail() {
           <div style="font-size:48px;margin-bottom:1rem">&#x1F512;</div>
           <h3 style="color:var(--text);margin-bottom:0.5rem">Morning Check-In Required</h3>
           <div style="color:var(--muted);font-size:14px;margin-bottom:1.5rem">Complete your morning session with Erik to unlock today's tracking.</div>
-          <button class="btn btn-primary" onclick="toggleChatOverlay()">Talk to Erik</button>
+          <button class="btn btn-primary" onclick="startMorningCheckin()">Talk to Erik</button>
       </div>`;
       panel.classList.add('visible');
       return;
