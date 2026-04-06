@@ -6606,7 +6606,9 @@ async function sendInlineCoachMsg() {
 async function _refreshCoachAccordionMsg() {
     var el = document.getElementById('coach-accordion-refresh');
     if (!el) return;
-    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + ' Briefly comment on where the athlete is right now — workouts done, meals, timing. 1-2 sentences. Be relevant to the current moment.';
+    var _dow = new Date().getDay();
+    var _isSunday = _dow === 0;
+    var trigger = '[COACH_CHECKIN] ' + localTimeContext() + (_isSunday ? ' TODAY IS SUNDAY — A FASTING DAY. Do NOT say the athlete missed meals or that it is not a fasting day.' : '') + ' Check your data carefully before speaking. Comment on where the athlete is right now. Be specific and accurate. 1-2 sentences.';
     try {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',
