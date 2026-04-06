@@ -575,8 +575,13 @@ def _compute_template_vars(ctx):
 
     minor_warning = is_minor
 
-    # Fixed coaching tone — anger_level will replace this in the new architecture
-    tone = "Direct, process-focused coaching. Name what happened. State what's next. No drama."
+    # Tone from anger level state machine (works on both V1 and V2 paths)
+    try:
+        from coach_state import get_anger_instruction
+        user_id = ctx.get('user_id')
+        tone = get_anger_instruction(user_id) if user_id else "Direct, process-focused coaching. Name what happened. State what's next. No drama."
+    except Exception:
+        tone = "Direct, process-focused coaching. Name what happened. State what's next. No drama."
 
     # Determine meal plan type explicitly for XML attribute
     meal_plan = ctx.get('meal_plan_today')

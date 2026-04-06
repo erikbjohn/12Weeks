@@ -3778,8 +3778,22 @@ def api_chat_stream():
     _current_user_id = current_user.id
     _mode = mode
 
+    # Route trigger and build context (V2 or legacy)
+    _use_v2 = os.environ.get("COACH_V2")
+    _route_info = None
+    if _use_v2:
+        try:
+            from coach_router import route_trigger
+            _route_info = route_trigger(user_msg)
+        except Exception:
+            _use_v2 = False
+
     try:
-        context = _build_coach_context()
+        if _use_v2 and _route_info:
+            from coach_assembler import build_filtered_context
+            context = build_filtered_context(_route_info["agent_name"])
+        else:
+            context = _build_coach_context()
     except Exception as ctx_err:
         import logging
         logging.error("Coach context build failed: %s", ctx_err)
@@ -3797,13 +3811,26 @@ def api_chat_stream():
             import anthropic
             client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
 
-            from coach import _build_system_prompt, _build_messages
-            system_prompt = _build_system_prompt(context)
-            messages = _build_messages(user_msg, context.get("chat_history", []))
+            if _use_v2 and _route_info:
+                from coach_assembler import assemble_prompt
+                from coach import _build_messages
+                from coach_agents import AGENTS
+                system_prompt = assemble_prompt(_route_info["agent_name"], context)
+                messages = _build_messages(user_msg, context.get("chat_history", []))
+                _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+            else:
+                from coach import _build_system_prompt, _build_messages
+                system_prompt = _build_system_prompt(context)
+                messages = _build_messages(user_msg, context.get("chat_history", []))
+                _agent_config = None
+
+            _max_tokens = _agent_config["max_tokens"] if _agent_config else 20000
+            _temperature = _agent_config["temperature"] if _agent_config else 1.0
 
             with client.messages.stream(
                 model="claude-opus-4-20250514",
-                max_tokens=20000,
+                max_tokens=_max_tokens,
+                temperature=_temperature,
                 system=system_prompt,
                 messages=messages,
             ) as stream:
