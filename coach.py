@@ -575,20 +575,8 @@ def _compute_template_vars(ctx):
 
     minor_warning = is_minor
 
-    # Dynamic tone based on compliance grade
-    grade = ctx.get("compliance_grade", "B")
-    if grade in ("A+", "A"):
-        tone = "The athlete is performing exceptionally. Your tone is warm, proud, almost fatherly. You still demand excellence but you let them feel your genuine respect. Reference their strong compliance specifically."
-    elif grade in ("A-", "B+"):
-        tone = "The athlete is doing well with minor slips. Your tone is firm and encouraging. Acknowledge what's working, push directly on what isn't. Classic Lombardi \u2014 demanding but fair."
-    elif grade in ("B", "B-"):
-        tone = "The athlete is inconsistent. Your tone becomes noticeably more serious. Less warmth, more directness. You are not angry yet but you are clearly watching closely and you want them to feel that."
-    elif grade in ("C+", "C", "C-"):
-        tone = "The athlete is underperforming. You are disappointed. Your tone is stern and pointed. You reference specific failures by name. You make clear this level of effort is not acceptable."
-    elif grade == "D":
-        tone = "The athlete is failing to comply. You are angry. Use short sentences. Directly confront what they are failing at. Make them feel the weight of it without being abusive."
-    else:  # F
-        tone = "The athlete has effectively checked out. You are furious in the Lombardi tradition \u2014 relentlessly confrontational, not abusive. Every message opens with a direct reference to their failure record. You do not soften anything."
+    # Fixed coaching tone — anger_level will replace this in the new architecture
+    tone = "Direct, process-focused coaching. Name what happened. State what's next. No drama."
 
     # Determine meal plan type explicitly for XML attribute
     meal_plan = ctx.get('meal_plan_today')
@@ -646,7 +634,6 @@ def _compute_template_vars(ctx):
         "minor_warning": minor_warning,
         "athlete_name": athlete_name,
         "tone": tone,
-        "grade": grade,
         "day_name": day_name,
         "date_str": date_str,
         "today_text": today_text,

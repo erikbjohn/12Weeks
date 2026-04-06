@@ -21,12 +21,9 @@ from garmin_client import GarminClient
 from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
-# Lazy import — compliance.py may fail on first deploy before table exists
-try:
-    from compliance import compute_compliance_score, get_improvement_tip
-except Exception:
-    def compute_compliance_score(user_id): return {"score": 50, "grade": "B", "breakdown": {}, "streak": 0}
-    def get_improvement_tip(grade, breakdown): return "Stay consistent."
+# compliance scoring removed — kept as no-op stubs for any remaining call sites
+def compute_compliance_score(user_id): return {"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0}
+def get_improvement_tip(grade, breakdown): return "Stay consistent."
 try:
     from training_engine import compute_next_targets, compute_muscle_strength, generate_session_analysis
 except Exception:
@@ -2053,11 +2050,6 @@ def api_set_log():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
-    # Recompute compliance score
-    try:
-        compute_compliance_score(current_user.id)
-    except Exception:
-        pass
     return jsonify({"ok": True, "id": existing.id})
 
 
@@ -2740,11 +2732,6 @@ def api_toggle_day():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
-    # Recompute compliance score
-    try:
-        compute_compliance_score(current_user.id)
-    except Exception:
-        pass
     try:
         generate_session_analysis(current_user.id, w, d)
         compute_muscle_strength(current_user.id)
@@ -2825,11 +2812,6 @@ def api_meals_update():
             db.session.commit()
         except Exception:
             db.session.rollback()  # Don't fail the whole save for timing
-    # Recompute compliance score
-    try:
-        compute_compliance_score(current_user.id)
-    except Exception:
-        pass
     return jsonify({"ok": True})
 
 
@@ -3251,34 +3233,19 @@ def api_morning_checkin_save():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
-    # Recompute compliance score
-    try:
-        compute_compliance_score(current_user.id)
-    except Exception:
-        pass
     return jsonify({"ok": True})
 
 
 @app.route("/api/compliance")
 @login_required
 def api_compliance():
-    cs = ComplianceScore.query.filter_by(user_id=current_user.id).first()
-    if not cs:
-        result = compute_compliance_score(current_user.id)
-        return jsonify(result)
-    return jsonify({
-        "score": cs.weighted_score,
-        "grade": cs.letter_grade,
-        "breakdown": cs.breakdown or {},
-        "streak": cs.streak_days,
-    })
+    return jsonify({"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0})
 
 
 @app.route("/api/compliance/refresh", methods=["POST"])
 @login_required
 def api_compliance_refresh():
-    result = compute_compliance_score(current_user.id)
-    return jsonify(result)
+    return jsonify({"score": 0, "grade": "N/A", "breakdown": {}, "streak": 0})
 
 
 @app.route("/api/morning-checkin/history")
@@ -4356,12 +4323,7 @@ def _build_coach_context():
     ).limit(20).all()
     coach_memories = [{"type": m.memory_type, "content": m.content, "week": m.week} for m in memories]
 
-    # Compliance grade for coach tone
-    try:
-        cs = ComplianceScore.query.filter_by(user_id=current_user.id).first()
-        compliance_grade = cs.letter_grade if cs else "B"
-    except Exception:
-        compliance_grade = "B"
+    # Compliance grade removed — tone is now fixed in coach.py
 
     # Check if missed morning checkin today
     missed_today = False
@@ -4426,7 +4388,6 @@ def _build_coach_context():
         "week_schedule": week_schedule,
         "schedule_notes": schedule_notes,
         "coach_memories": coach_memories,
-        "compliance_grade": compliance_grade,
         "missed_checkin_today": missed_today,
         "session_analysis": session_analysis,
         "weekly_summary": weekly_summary,
