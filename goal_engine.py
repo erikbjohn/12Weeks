@@ -367,8 +367,9 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
     remaining_cal = max(calories - protein_cal - fat_cal, 0)
     carbs = max(int(remaining_cal / 4), 20)
 
-    # Heavy lift / long run days get +100 carbs
-    if day_type in ("heavy", "long_run"):
+    # For cuts: flat calories across all eating days to maximize deficit
+    # For bulk/recomp: heavy days get extra carbs for training fuel
+    if goal_type != "cut" and day_type in ("heavy", "long_run"):
         carbs += 100
         calories += 400  # 100 carbs * 4 cal/g
 
