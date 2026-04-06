@@ -213,6 +213,8 @@ function stripCoachMarkers(text) {
 
 function renderCoachMarkdown(text) {
   var clean = stripCoachMarkers(text);
+  // Unescape literal \n sequences (from SSE transport)
+  clean = clean.replace(/\\n/g, '\n');
   // Escape HTML first
   var safe = clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // Bold: **text** → <strong>text</strong>
