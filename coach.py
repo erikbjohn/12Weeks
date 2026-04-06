@@ -691,17 +691,27 @@ def _compute_template_vars(ctx):
 
 def _render_prompt_template(template_vars):
     """Load and render the Jinja2 coach prompt template."""
-    from jinja2 import Environment, FileSystemLoader, StrictUndefined
+    from jinja2 import Environment, FileSystemLoader, Undefined
     prompt_dir = os.path.join(os.path.dirname(__file__), 'prompts')
-    env = Environment(loader=FileSystemLoader(prompt_dir), autoescape=False, undefined=StrictUndefined)
+    env = Environment(loader=FileSystemLoader(prompt_dir), autoescape=False, undefined=Undefined)
     template = env.get_template('coach_system.jinja2')
     return template.render(**template_vars)
 
 
 def _build_system_prompt(ctx):
     """Build the full system prompt."""
-    template_vars = _compute_template_vars(ctx)
-    return _render_prompt_template(template_vars)
+    try:
+        template_vars = _compute_template_vars(ctx)
+        result = _render_prompt_template(template_vars)
+        if not result or len(result) < 100:
+            print(f"[COACH] WARNING: Prompt too short ({len(result) if result else 0} chars)")
+        return result
+    except Exception as e:
+        import traceback
+        print(f"[COACH] FATAL: Prompt template failed: {e}")
+        traceback.print_exc()
+        # Emergency fallback — basic coach identity so the response isn't blank
+        return f"You are Coach Erik. The athlete's name is {ctx.get('athlete_name', 'Athlete')}. Be direct, data-driven, and coach them through their 12-week program."
 
 
 def _summarize_checkins(checkins):

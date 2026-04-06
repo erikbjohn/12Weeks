@@ -986,6 +986,25 @@ def api_regenerate_meals():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/debug/prompt-test")
+@login_required
+def debug_prompt_test():
+    """Test the coach prompt template rendering."""
+    try:
+        from coach import _build_system_prompt, _build_coach_context
+        ctx = _build_coach_context()
+        prompt = _build_system_prompt(ctx)
+        return jsonify({
+            "length": len(prompt),
+            "first_200": prompt[:200],
+            "last_200": prompt[-200:],
+            "has_user_rules": "<user_rules>" in prompt,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
+
+
 @app.route("/api/debug/workouts-error")
 @login_required
 def debug_workouts_error():
