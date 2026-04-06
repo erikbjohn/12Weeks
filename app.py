@@ -3092,8 +3092,11 @@ def api_coach_today_history():
 
 def _build_coach_context():
     """Gather all relevant data for the AI coach."""
+    local_today = _user_today()
+    week = _current_week()
+
     # Recent morning check-ins
-    since = _user_today() - timedelta(days=14)
+    since = local_today - timedelta(days=14)
     checkins = [{
         "date": e.log_date.isoformat(),
         "sleep_quality": e.sleep_quality,
@@ -3144,13 +3147,8 @@ def _build_coach_context():
         garmin_data = gc.get_today_summary()
         readiness_data = assess_readiness(garmin_data)
 
-    # Current state — compute week from start_date using user's local timezone
+    # Current state
     s = _get_state()
-    week = _current_week()
-    local_today = _user_today()
-    if s.start_date:
-        diff_days = (local_today - s.start_date).days
-        week = min(12, max(1, diff_days // 7 + 1))
     phase = get_phase(week)
     phase_info = PHASES[phase]
 
