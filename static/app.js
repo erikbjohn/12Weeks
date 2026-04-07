@@ -6912,7 +6912,9 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
     // On rest days (Sunday), skip warmup/exercises — just show the run
     if (!d.isRest) {
         if (displayExercises.length > 0) {
-            if (!displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); })) {
+            var allExDone = displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); });
+            var dayDone = isDayDone(currentWeek, currentDay);
+            if (!allExDone && !dayDone) {
                 html += '<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>';
             }
         }
