@@ -7438,9 +7438,14 @@ async function renderDetail() {
   }
   if (d.timing) {
     for (let i = 0; i < d.timing.length; i += 2) {
+      var desc = d.timing[i+1];
+      // Replace template run duration with actual run plan duration
+      if (d.run && desc && (desc.toLowerCase().includes('run') || desc.toLowerCase().includes('hiit'))) {
+        desc = d.run.label + ' ' + d.run.time;
+      }
       timingRows.push(`<div class="timing-row">
         <div class="timing-time">${d.timing[i]}</div>
-        <div class="timing-desc">${d.timing[i+1]}</div>
+        <div class="timing-desc">${desc}</div>
       </div>`);
     }
   }
