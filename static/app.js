@@ -8549,7 +8549,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
         var sd = _setCache[currentWeek + '_' + currentDay + '_' + _focusRealExIdx + '_' + s];
         if (sd && sd.weight) { nextWeight = sd.weight; break; }
       }
-      if (nextSetNum < _focusSetCount) {
+      if (_focusSetIdx < _focusSetCount) {
         html += '<div style="font-family:\'DM Mono\',monospace;font-size:15px;color:var(--text);margin-top:12px">Next: Set ' + nextSetNum + ' \u2014 ' + nextWeight + ' lb \u00D7 ' + _focusTargetReps + '</div>';
       }
     }
