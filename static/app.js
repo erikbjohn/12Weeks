@@ -7553,8 +7553,8 @@ async function renderDetail() {
     </div>
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
     ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
-    ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
+    ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
   </div>`;
 
   panel.classList.add('visible');
