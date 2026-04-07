@@ -7028,22 +7028,61 @@ function buildRunSubsection(d, runClass) {
 let _hiitInterval = null;
 let _hiitAudioCtx = null;
 
-function _parseHiitDetail(detail) {
-    // Parse "10x 30 sec all-out / 90 sec walk" or "8x 30:90"
-    var rounds = 10, work = 30, rest = 90;
-    var roundMatch = detail.match(/(\d+)\s*x/);
-    if (roundMatch) rounds = parseInt(roundMatch[1]);
-    var workMatch = detail.match(/(\d+)\s*sec\s*all/i);
-    if (workMatch) work = parseInt(workMatch[1]);
-    var restMatch = detail.match(/(\d+)\s*sec\s*(?:walk|rest|recovery)/i);
-    if (restMatch) rest = parseInt(restMatch[1]);
-    // Also try "30:90" format
+function _parseHiitDetail(detail, totalTime) {
+    // Parse structured part: "5 min warmup, 8x 30:90, 3 min cooldown"
+    var work = 30, rest = 90, rounds = 8, warmup = 300, cooldown = 180;
+
+    // Parse warmup: "5 min warmup" or "5 min warm"
+    var warmupMatch = detail.match(/(\d+)\s*min\s*warm/i);
+    if (warmupMatch) warmup = parseInt(warmupMatch[1]) * 60;
+
+    // Parse cooldown: "3 min cooldown" or "3 min cool"
+    var cooldownMatch = detail.match(/(\d+)\s*min\s*cool/i);
+    if (cooldownMatch) cooldown = parseInt(cooldownMatch[1]) * 60;
+
+    // Parse work:rest ratio from "30:90" format (most reliable)
     var ratioMatch = detail.match(/(\d+):(\d+)/);
-    if (ratioMatch && !workMatch) {
+    if (ratioMatch) {
         work = parseInt(ratioMatch[1]);
         rest = parseInt(ratioMatch[2]);
+    } else {
+        // Fallback: "30 sec all-out / 90 sec walk"
+        var workMatch = detail.match(/(\d+)\s*sec\s*all/i);
+        if (workMatch) work = parseInt(workMatch[1]);
+        var restMatch = detail.match(/(\d+)\s*sec\s*(?:walk|rest|recovery)/i);
+        if (restMatch) rest = parseInt(restMatch[1]);
     }
-    return { rounds: rounds, work: work, rest: rest, warmup: 300, cooldown: 180 };
+
+    // Parse rounds: prefer the one near the ratio format "8x 30:90"
+    // Look for "Nx" pattern closest to the ratio
+    var structuredPart = detail.includes('warmup') ? detail.substring(detail.indexOf('warmup')) : detail;
+    var roundMatch = structuredPart.match(/(\d+)\s*x\s*\d/);
+    if (roundMatch) {
+        rounds = parseInt(roundMatch[1]);
+    } else {
+        // Fallback: first "Nx" in the string
+        var fallbackRound = detail.match(/(\d+)\s*x/);
+        if (fallbackRound) rounds = parseInt(fallbackRound[1]);
+    }
+
+    // Validate against total time if provided (e.g., "20 min")
+    if (totalTime) {
+        var totalMin = parseInt(totalTime);
+        if (totalMin) {
+            var computed = warmup + rounds * (work + rest) + cooldown;
+            var targetSec = totalMin * 60;
+            // If computed is way off, adjust rounds to fit
+            if (Math.abs(computed - targetSec) > 120) {
+                var intervalSec = work + rest;
+                var availableForIntervals = targetSec - warmup - cooldown;
+                if (availableForIntervals > 0 && intervalSec > 0) {
+                    rounds = Math.max(1, Math.round(availableForIntervals / intervalSec));
+                }
+            }
+        }
+    }
+
+    return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: cooldown };
 }
 
 function _playBeep(freq, duration) {
@@ -7078,7 +7117,7 @@ function startHiitTimer() {
     var d = weekData.days[currentDay];
     if (!d || !d.run || d.run.type !== 'hiit') return;
 
-    var cfg = _parseHiitDetail(d.run.detail || '');
+    var cfg = _parseHiitDetail(d.run.detail || '', d.run.time || '');
     var phases = [];
     phases.push({ name: 'WARMUP', duration: cfg.warmup, color: '#3b82f6' });
     for (var r = 0; r < cfg.rounds; r++) {
