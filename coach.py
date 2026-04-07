@@ -484,11 +484,22 @@ def _build_messages(user_message, chat_history):
             continue
         filtered.append(msg)
 
-    # Include last 40 messages (was 20 — too few for weekly context)
+    # Include last 40 messages with timestamps so coach knows WHEN things happened
     for msg in filtered[-40:]:
+        content = msg["content"]
+        # Prepend timestamp if available so coach understands time ordering
+        msg_time = msg.get("time")
+        if msg_time:
+            try:
+                from datetime import datetime as _dt
+                t = _dt.fromisoformat(msg_time.replace('Z', '+00:00'))
+                time_label = t.strftime('%I:%M %p').lstrip('0')
+                content = f"[{time_label}] {content}"
+            except Exception:
+                pass
         messages.append({
             "role": msg["role"],
-            "content": msg["content"],
+            "content": content,
         })
 
     # Deduplicate: chat_history (from DB) may already contain the just-committed

@@ -104,10 +104,11 @@ def _build_chat_history():
     local_today = _user_today()
     week_start = local_today - timedelta(days=local_today.weekday())
     since = local_today - timedelta(days=14)
-    # Full current week
+    # Full current week — include created_at for time awareness
     this_week = [{
         "role": m.role, "content": m.content,
         "date": m.log_date.isoformat() if m.log_date else None,
+        "time": m.created_at.isoformat() if m.created_at else None,
     } for m in ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= week_start
@@ -116,6 +117,7 @@ def _build_chat_history():
     older = [{
         "role": m.role, "content": m.content,
         "date": m.log_date.isoformat() if m.log_date else None,
+        "time": m.created_at.isoformat() if m.created_at else None,
     } for m in ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
         ChatMessage.log_date >= since,
