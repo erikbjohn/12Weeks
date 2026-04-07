@@ -1,5 +1,6 @@
 """Flask app for 12 Weeks Tracker with Garmin integration."""
 
+import logging
 import os
 import re
 import secrets
@@ -42,6 +43,10 @@ from models import (
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+
+# ─── MODEL CONSTANTS ──────────────────────────────────────────────────────
+CLAUDE_OPUS = "claude-opus-4-20250514"
+CLAUDE_SONNET = "claude-sonnet-4-20250514"
 
 
 # CSRF token helper
@@ -113,7 +118,7 @@ with app.app_context():
     try:
         db.create_all()
     except Exception as e:
-        print(f"[STARTUP] db.create_all() failed: {e}")
+        logging.error("[STARTUP] db.create_all() failed: %s", e)
 
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
@@ -292,53 +297,6 @@ with app.app_context():
             db.session.rollback()
             # Table will be created by db.create_all() above
 
-    # ONE-TIME FIX: Full rebuild for siggijohnson226@gmail.com
-    # Wipe all corrupted data, keep psych intake, restart from physical assessment
-    try:
-        _fix_user = User.query.filter_by(email="siggijohnson226@gmail.com").first()
-        if _fix_user:
-            _uid = _fix_user.id
-            # Check if already rebuilt (has no TrainingGoal = already wiped)
-            _existing_goal = TrainingGoal.query.filter_by(user_id=_uid).first()
-            if _existing_goal:
-                # Wipe everything except User and PsychIntake
-                for _model in [TrainingGoal, UserFoodSelections, ExerciseLog, SetLog,
-                               ExerciseCompletion, DayCompletion, MealLog, WeeklyReport,
-                               CoachMemory, ChatMessage, RunLog, WarmupCompletion,
-                               BodyWeight, BodyMeasurement, PhysicalAssessment,
-                               UserEquipment, ExerciseSwap]:
-                    try:
-                        _model.query.filter_by(user_id=_uid).delete()
-                    except Exception:
-                        db.session.rollback()
-                # Reset AppState
-                _state = AppState.query.filter_by(user_id=_uid).first()
-                if _state:
-                    _state.baseline_done = False
-                    _state.start_date = None
-                    _state.current_week = 1
-                db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-    # ONE-TIME FIX: Backfill 0-rep sets with target reps from workout data
-    try:
-        _zero_rep_sets = SetLog.query.filter_by(reps=0, done=True).all()
-        if _zero_rep_sets:
-            # Target reps by exercise from workout data
-            _target_reps = {
-                "Barbell Bench Press": 10, "Lat Pulldown": 8, "Incline DB Press": 10,
-                "Face Pull": 15, "Lateral Raise": 15, "EZ-Bar Curl": 12,
-                "Cable Tricep Pushdown": 12, "Barbell Bent-Over Row": 10,
-                "Cable Seated Row": 10, "Dumbbell Shoulder Press": 10,
-            }
-            for s in _zero_rep_sets:
-                target = _target_reps.get(s.exercise_name, 10)
-                s.reps = target
-            db.session.commit()
-    except Exception:
-        db.session.rollback()
-
     # Seed muscle group profiles
     try:
         _erik = User.query.filter_by(email="erikbjohn@gmail.com").first()
@@ -432,9 +390,9 @@ with app.app_context():
                     pass
             if filled:
                 db.session.commit()
-                print(f"[migration] Backfilled {filled} prescription target_weights")
+                logging.info("[migration] Backfilled %d prescription target_weights", filled)
     except Exception as e:
-        print(f"[migration] target_weight backfill skipped: {e}")
+        logging.warning("[migration] target_weight backfill skipped: %s", e)
 
     # PRE-START COACH EMAIL: Send day before start date
     try:
@@ -508,7 +466,7 @@ def _generate_prestart_email_body(name, intake_report):
         import anthropic
         client = anthropic.Anthropic(api_key=anthropic_key, timeout=15.0)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_SONNET,
             max_tokens=300,
             system="""You are Coach Erik. Write a brief, powerful pre-start email for an athlete whose program begins TOMORROW.
 Lombardi voice — direct, no fluff, no warmth. State facts. Set expectations.
@@ -2838,8 +2796,12 @@ def api_bodyweight_record():
 def api_bodyweight_delete(log_date):
     bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=date.fromisoformat(log_date)).first()
     if bw:
-        db.session.delete(bw)
-        db.session.commit()
+        try:
+            db.session.delete(bw)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return jsonify({"error": "Delete failed"}), 500
     return jsonify({"ok": True})
 
 
@@ -3645,7 +3607,7 @@ def api_chat():
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     response = client.messages.create(
-        model="claude-opus-4-20250514",
+        model=CLAUDE_OPUS,
         max_tokens=agent_config["max_tokens"],
         temperature=agent_config["temperature"],
         system=system_prompt,
@@ -3815,7 +3777,7 @@ def api_chat_stream():
             _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
             with client.messages.stream(
-                model="claude-opus-4-20250514",
+                model=CLAUDE_OPUS,
                 max_tokens=_agent_config["max_tokens"],
                 temperature=_agent_config["temperature"],
                 system=system_prompt,
@@ -4661,7 +4623,7 @@ Be direct and honest. This person wants real feedback, not flattery. They're usi
 
     try:
         response = client.messages.create(
-            model="claude-opus-4-20250514",
+            model=CLAUDE_OPUS,
             max_tokens=1000,
             messages=[{"role": "user", "content": content}],
         )

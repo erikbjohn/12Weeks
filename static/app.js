@@ -7840,7 +7840,6 @@ async function initPushNotifications(reg) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: sub.toJSON() }),
     });
-    console.log('Push subscription registered');
   } catch (e) {
     console.warn('Push setup failed:', e);
   }

@@ -6,6 +6,9 @@ from datetime import date, timedelta
 
 log = logging.getLogger(__name__)
 
+CLAUDE_OPUS = "claude-opus-4-20250514"
+CLAUDE_SONNET = "claude-sonnet-4-20250514"
+
 
 def _format_goal(goal):
     if not goal:
@@ -259,7 +262,7 @@ def extract_memories(user_message, coach_response, context):
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=15.0)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_SONNET,
             max_tokens=300,
             system="""You extract coaching memories from athlete conversations. Return ONLY observations worth remembering across future sessions. If nothing is notable, return exactly: NONE
 
@@ -340,7 +343,7 @@ def get_coach_response(user_message, context):
 
     try:
         response = client.messages.create(
-            model="claude-opus-4-20250514",
+            model=CLAUDE_OPUS,
             max_tokens=800,
             system=system_prompt,
             messages=messages,

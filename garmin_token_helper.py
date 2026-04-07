@@ -16,9 +16,10 @@ It will:
 
 import getpass
 import json
+import os
 import sys
 
-APP_URL = "https://one2weeks-9ewf.onrender.com"
+APP_URL = os.environ.get("APP_URL", "https://one2weeks-9ewf.onrender.com")
 
 
 def main():

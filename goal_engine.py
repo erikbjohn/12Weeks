@@ -9,6 +9,8 @@ what it takes to hit the goal.
 
 import math
 
+CLAUDE_SONNET = "claude-sonnet-4-20250514"
+
 # ---------------------------------------------------------------------------
 # Actor lookup table
 # ---------------------------------------------------------------------------
@@ -32,7 +34,7 @@ def classify_physique_goal(actor_answer):
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_SONNET,
             max_tokens=10,
             system="Classify the physique goal into exactly one word: cut, bulk, or recomp.\n\ncut = lean, low body fat, defined muscles, visible abs (Brad Pitt Fight Club, Bruce Lee, Daniel Craig)\nbulk = big, massive, powerful, heavy muscle (The Rock, Thor, Arnold, Hulk)\nrecomp = athletic, balanced, functional muscle without extreme leanness or mass (Captain America, Iron Man, Spider-Man, Batman)\n\nRespond with ONLY one word: cut, bulk, or recomp",
             messages=[{"role": "user", "content": f"Physique goal: {actor_answer}"}],

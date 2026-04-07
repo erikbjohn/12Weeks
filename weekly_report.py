@@ -6,6 +6,8 @@ from datetime import date, timedelta
 
 log = logging.getLogger(__name__)
 
+CLAUDE_OPUS = "claude-opus-4-20250514"
+
 REPORT_PROMPT = """You are Erik — high-performance coach. Lombardi voice. Direct. Invested. Blunt. Never cruel.
 
 Write a 3-5 sentence weekly review for your athlete. Address them as "you." Reference specific numbers from the data below. Structure:
@@ -176,7 +178,7 @@ def generate_report_narrative(metrics):
     try:
         full_text = ""
         with client.messages.stream(
-            model="claude-opus-4-20250514",
+            model=CLAUDE_OPUS,
             max_tokens=300,
             system=REPORT_PROMPT,
             messages=[{"role": "user", "content": "\n".join(data_lines)}],
