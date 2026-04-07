@@ -167,7 +167,7 @@ def _format_weekly_meals(weekly_meals):
     return "\n".join(lines)
 
 
-def _format_meals_today(meals, meal_plan=None):
+def _format_meals_today(meals, meal_plan=None, user_timezone=None):
     parts = []
     if meal_plan:
         plan_meals = meal_plan.get("meals", [])
@@ -182,7 +182,7 @@ def _format_meals_today(meals, meal_plan=None):
             now = datetime.now()
             try:
                 from utils_time import user_local_now
-                now = user_local_now(None)  # uses current request context
+                now = user_local_now(user_timezone or 'America/Los_Angeles')
             except Exception:
                 pass
             now_minutes = now.hour * 60 + now.minute
@@ -412,11 +412,11 @@ def _get_date_str(ctx):
         return date.today().isoformat()
 
 
-def _format_meals_today_xml(meals, meal_plan, meal_plan_type):
+def _format_meals_today_xml(meals, meal_plan, meal_plan_type, user_timezone=None):
     """Format meals with explicit fasting day callouts."""
     if meal_plan_type == 'fast_day':
         return "THIS IS A FASTING DAY. There are ZERO regular meals. Protein shake + water only. Do not ask about meals. Do not count meals. Do not say the athlete missed meals."
-    return _format_meals_today(meals, meal_plan)
+    return _format_meals_today(meals, meal_plan, user_timezone=user_timezone)
 
 
 def _summarize_checkins(checkins):

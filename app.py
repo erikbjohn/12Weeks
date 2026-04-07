@@ -4243,7 +4243,7 @@ def _build_coach_context():
             _now = _dt.now()
             try:
                 from utils_time import user_local_now
-                _now = user_local_now(current_user.id)
+                _now = user_local_now(getattr(current_user, 'timezone', None) or 'UTC')
             except Exception:
                 pass
             _hours_fasted = (_now - _last_meal_time).total_seconds() / 3600

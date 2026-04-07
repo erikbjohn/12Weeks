@@ -418,12 +418,21 @@ def _build_fasting():
                 last_eating_day = check_date
                 break
         if last_eating_day:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from pytz import timezone as _ptz
+                class ZoneInfo:
+                    def __new__(cls, key):
+                        return _ptz(key)
+            _tz_str = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
             last_meal_time = datetime(last_eating_day.year, last_eating_day.month,
-                                     last_eating_day.day, end_h, end_m)
+                                     last_eating_day.day, end_h, end_m, tzinfo=ZoneInfo(_tz_str))
             now = datetime.now()
             try:
                 from utils_time import user_local_now
-                now = user_local_now(current_user.id)
+                _tz = current_user.timezone if hasattr(current_user, 'timezone') and current_user.timezone else 'UTC'
+                now = user_local_now(_tz)
             except Exception:
                 pass
             hours_fasted = (now - last_meal_time).total_seconds() / 3600
@@ -1048,7 +1057,7 @@ def _format_athlete_data(ctx, requires):
         if 'fast' in raw_type or 'protein-sparing' in raw_type:
             meal_plan_type = "fast_day"
     if ctx.get("meals_today") is not None or meal_plan:
-        parts.append(_format_meals_today_xml(ctx.get("meals_today"), meal_plan, meal_plan_type))
+        parts.append(_format_meals_today_xml(ctx.get("meals_today"), meal_plan, meal_plan_type, user_timezone=ctx.get("user_timezone")))
     if ctx.get("weekly_meals_summary"):
         parts.append(_format_weekly_meals(ctx["weekly_meals_summary"]))
 
