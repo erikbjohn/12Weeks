@@ -7401,7 +7401,7 @@ async function renderDetail() {
       const setReps = setData && setData.reps ? setData.reps : '';
       // Carry this set's weight forward to next set
       if (setData && setData.weight) carryWeight = setData.weight;
-      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}" ${!setDone ? `onclick="enterExerciseFocus(${i})"` : ''} style="${!setDone ? 'cursor:pointer' : ''}">
+      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}" >
         <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
           ${setDone ? '&#10003;' : ''}
         </button>
