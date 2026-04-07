@@ -6927,12 +6927,10 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
     return html;
 }
 
-function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, dayIdx) {
+function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, dayIdx) {
     var html = '';
-    // On rest days (Sunday), skip e1RM, daily goals, and session timing
     if (!d.isRest) {
         html += weightSummaryHtml;
-        html += dailyGoalsHtml;
         if (timingRows.length > 0) {
             html += '<div style="margin-top:12px"><h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Session Timing</h4>' + timingRows.join('') + '</div>';
         }
@@ -7475,26 +7473,7 @@ async function renderDetail() {
     garminStatsHtml += '</div>';
   }
 
-  // Daily Goals
-  let goalsItems = '';
-  if (displayExercises.length > 0) {
-    goalsItems += `<div class="dg-item">${isTraveling ? 'Complete all bodyweight exercises.' : 'Complete all exercises. Rest times matter - don\'t rush heavy sets.'}</div>`;
-  }
-  goalsItems += `<div class="dg-item">Run: ${d.run.label} &middot; ${d.run.time}${d.run.detail ? ' &middot; ' + d.run.detail : ''}</div>`;
-
-  let adjustmentHtml = '';
-  if (readinessData && (readinessData.risk_level === 'moderate' || readinessData.risk_level === 'high') && readinessData.suggestion) {
-    adjustmentHtml = `<div class="adjustment-banner risk-${readinessData.risk_level}">
-      <div class="ab-label">Adjustment Suggested</div>
-      ${readinessData.suggestion}
-    </div>`;
-  }
-
-  const dailyGoalsHtml = `<div class="daily-goals">
-    <div class="dg-title">Daily Goals</div>
-    ${goalsItems}
-    ${adjustmentHtml}
-  </div>`;
+  // Daily Goals section removed
 
   // AI Coach chat
   // Chat history removed from accordion — full chat lives in overlay only
@@ -7556,7 +7535,7 @@ async function renderDetail() {
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
     ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
-    ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, dailyGoalsHtml, timingRows, currentDay), false)}
+    ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, currentDay), false)}
   </div>`;
 
   panel.classList.add('visible');
