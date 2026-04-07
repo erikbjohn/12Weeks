@@ -30,6 +30,7 @@ let _workoutActive = false;
 let _workoutStartTime = null;
 let _workoutExercises = [];
 let _workoutExIdx = 0;
+let _advancePending = false;
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let workoutData = {};
@@ -671,7 +672,7 @@ function saveWeightInput(week, dayIdx, exIdx, exName) {
 }
 
 function parseRestSeconds(rest) {
-  if (!rest) return 60;
+  if (!rest) return 0;
   // Handle "60-90s" → use the lower bound
   const m = rest.match(/(\d+)/);
   return m ? parseInt(m[1]) : 60;
@@ -691,6 +692,7 @@ function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
 }
 
 function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
+  event.stopPropagation();
   const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
@@ -7742,12 +7744,15 @@ function startWorkoutSession() {
 }
 
 function advanceWorkoutSession() {
+  if (_advancePending) return;
+  _advancePending = true;
   _workoutExIdx++;
   if (_workoutExIdx < _workoutExercises.length) {
     enterExerciseFocus(_workoutExIdx);
   } else {
     completeWorkoutSession();
   }
+  _advancePending = false;
 }
 
 async function completeWorkoutSession() {
@@ -7989,6 +7994,7 @@ async function enterExerciseFocus(exIdx) {
               _focusWeightVal = roundWeight(targets.target_weight, displayName);
           }
           window._focusTargetReps = targets.target_reps || _focusTargetReps;
+          _focusTargetReps = window._focusTargetReps;  // sync local variable
           window._focusReason = targets.adjustment_reason || '';
           window._focusIndicator = targets.progression_indicator || 'hold';
       }
@@ -8000,7 +8006,7 @@ async function enterExerciseFocus(exIdx) {
   if (!isWarmupEx) {
     // Carry forward from earlier completed sets in this session
     for (let s = 0; s < (_focusSetCount || 4); s++) {
-      const sd = _setCache[`${currentWeek}_${currentDay}_${exIdx}_${s}`];
+      const sd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
       if (sd && sd.weight) _focusWeightVal = sd.weight;
     }
   }
@@ -8009,7 +8015,7 @@ async function enterExerciseFocus(exIdx) {
   _focusSetIdx = 0;
   if (!isWarmupEx) {
     for (let s = 0; s < _focusSetCount; s++) {
-      const key = `${currentWeek}_${currentDay}_${exIdx}_${s}`;
+      const key = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`;
       if (!_setCache[key] || !_setCache[key].done) {
         _focusSetIdx = s;
         break;
@@ -8260,7 +8266,7 @@ function startTimedSet(seconds) {
         let timedRecWeight = 0;
         let timedRecReps = 0;
         for (let ts = 0; ts < _focusSetCount; ts++) {
-          const tsd = _setCache[`${currentWeek}_${currentDay}_${_focusExIdx}_${ts}`];
+          const tsd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${ts}`];
           if (tsd) {
             if (tsd.weight > 0) timedRecWeight = tsd.weight;
             if (tsd.reps > 0) timedRecReps = tsd.reps;
