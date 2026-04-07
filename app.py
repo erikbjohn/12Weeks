@@ -3602,7 +3602,7 @@ def api_chat():
     import anthropic
 
     system_prompt = assemble_prompt(_route_info["agent_name"], context)
-    messages = _build_messages(user_msg, context.get("chat_history", []))
+    messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
     agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -3773,7 +3773,7 @@ def api_chat_stream():
             from coach import _build_messages
             from coach_agents import AGENTS
             system_prompt = assemble_prompt(_route_info["agent_name"], context)
-            messages = _build_messages(user_msg, context.get("chat_history", []))
+            messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
             _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
             with client.messages.stream(

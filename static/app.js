@@ -209,7 +209,11 @@ function todayStr() {
 
 function stripCoachMarkers(text) {
   // Strip ALL [TAG: ...] and [TAG] markers from coach output
-  return text.replace(/\[[A-Z_]+(?::[^\]]*)?\]/g, '').replace(/\s{2,}/g, ' ').trim();
+  // Also strip timestamp prefixes like [Apr 07 03:32 PM] or (sent Apr 07 8:32 AM)
+  return text.replace(/\[[A-Z_]+(?::[^\]]*)?\]/g, '')
+    .replace(/\[\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}\s*(?:AM|PM)\]/gi, '')
+    .replace(/\(sent\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}\s*(?:AM|PM)\)/gi, '')
+    .replace(/\s{2,}/g, ' ').trim();
 }
 
 function renderCoachMarkdown(text) {

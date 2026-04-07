@@ -470,7 +470,7 @@ def _summarize_checkins(checkins):
     return "\n".join(lines)
 
 
-def _build_messages(user_message, chat_history):
+def _build_messages(user_message, chat_history, user_timezone=None):
     """Build the messages array from chat history + new message."""
     messages = []
 
@@ -489,12 +489,19 @@ def _build_messages(user_message, chat_history):
         content = msg["content"]
         # Prepend timestamp if available so coach understands time ordering
         msg_time = msg.get("time")
-        if msg_time:
+        if msg_time and msg["role"] == "user":
+            # Only timestamp USER messages (coach responses don't need timestamps)
             try:
                 from datetime import datetime as _dt
+                from utils_time import to_user_local
                 t = _dt.fromisoformat(msg_time.replace('Z', '+00:00'))
+                # Convert from UTC to user's local timezone
+                try:
+                    t = to_user_local(t, user_timezone or 'UTC')
+                except Exception:
+                    pass
                 time_label = t.strftime('%b %d %I:%M %p').lstrip('0')
-                content = f"[{time_label}] {content}"
+                content = f"(sent {time_label}) {content}"
             except Exception:
                 pass
         messages.append({
