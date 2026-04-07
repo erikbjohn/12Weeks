@@ -493,7 +493,7 @@ def _build_messages(user_message, chat_history):
             try:
                 from datetime import datetime as _dt
                 t = _dt.fromisoformat(msg_time.replace('Z', '+00:00'))
-                time_label = t.strftime('%I:%M %p').lstrip('0')
+                time_label = t.strftime('%b %d %I:%M %p').lstrip('0')
                 content = f"[{time_label}] {content}"
             except Exception:
                 pass
