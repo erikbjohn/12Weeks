@@ -7006,6 +7006,10 @@ function buildRunSubsection(d, runClass) {
             '<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveRunLog()">Log Run</button>' +
           '</div>';
     }
+    var hiitBtn = '';
+    if (d.run && d.run.type === 'hiit') {
+        hiitBtn = '<button class="btn btn-primary" style="width:100%;margin-top:10px;font-size:15px;padding:12px" onclick="startHiitTimer()">Start HIIT Timer</button>';
+    }
     return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
         '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
         '<div class="run-detail-box">' +
@@ -7013,8 +7017,165 @@ function buildRunSubsection(d, runClass) {
             '<div class="rdt"><span class="run-pill ' + runClass + '">' + d.run.label + ' &middot; ' + d.run.time + '</span></div>' +
             '<div class="rdd" style="margin-top:8px">' + d.run.detail + '</div>' +
         '</div>' +
+        hiitBtn +
+        '<div id="hiit-timer-container"></div>' +
         runFormHtml +
     '</div>';
+}
+
+// ─── HIIT TIMER ──────────────────────────────────────────────────────────
+
+let _hiitInterval = null;
+let _hiitAudioCtx = null;
+
+function _parseHiitDetail(detail) {
+    // Parse "10x 30 sec all-out / 90 sec walk" or "8x 30:90"
+    var rounds = 10, work = 30, rest = 90;
+    var roundMatch = detail.match(/(\d+)\s*x/);
+    if (roundMatch) rounds = parseInt(roundMatch[1]);
+    var workMatch = detail.match(/(\d+)\s*sec\s*all/i);
+    if (workMatch) work = parseInt(workMatch[1]);
+    var restMatch = detail.match(/(\d+)\s*sec\s*(?:walk|rest|recovery)/i);
+    if (restMatch) rest = parseInt(restMatch[1]);
+    // Also try "30:90" format
+    var ratioMatch = detail.match(/(\d+):(\d+)/);
+    if (ratioMatch && !workMatch) {
+        work = parseInt(ratioMatch[1]);
+        rest = parseInt(ratioMatch[2]);
+    }
+    return { rounds: rounds, work: work, rest: rest, warmup: 300, cooldown: 180 };
+}
+
+function _playBeep(freq, duration) {
+    try {
+        if (!_hiitAudioCtx) _hiitAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = _hiitAudioCtx.createOscillator();
+        var gain = _hiitAudioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(_hiitAudioCtx.destination);
+        osc.frequency.value = freq;
+        gain.gain.value = 0.5;
+        osc.start();
+        setTimeout(function() { osc.stop(); }, duration);
+    } catch(e) {}
+}
+
+function _hiitFlash(color) {
+    var el = document.getElementById('hiit-timer-container');
+    if (!el) return;
+    el.style.transition = 'none';
+    el.style.boxShadow = '0 0 60px ' + color + ', inset 0 0 60px ' + color;
+    setTimeout(function() {
+        el.style.transition = 'box-shadow 1s ease';
+        el.style.boxShadow = 'none';
+    }, 300);
+    if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+}
+
+function startHiitTimer() {
+    var weekData = workoutData[String(currentWeek)];
+    if (!weekData) return;
+    var d = weekData.days[currentDay];
+    if (!d || !d.run || d.run.type !== 'hiit') return;
+
+    var cfg = _parseHiitDetail(d.run.detail || '');
+    var phases = [];
+    phases.push({ name: 'WARMUP', duration: cfg.warmup, color: '#3b82f6' });
+    for (var r = 0; r < cfg.rounds; r++) {
+        phases.push({ name: 'ALL OUT', round: r + 1, total: cfg.rounds, duration: cfg.work, color: '#ef4444' });
+        if (r < cfg.rounds - 1) {
+            phases.push({ name: 'WALK', round: r + 1, total: cfg.rounds, duration: cfg.rest, color: '#22c55e' });
+        }
+    }
+    phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
+
+    var phaseIdx = 0;
+    var remaining = phases[0].duration;
+    var paused = false;
+
+    function renderTimer() {
+        var el = document.getElementById('hiit-timer-container');
+        if (!el) { clearInterval(_hiitInterval); return; }
+        var p = phases[phaseIdx];
+        var mins = Math.floor(remaining / 60);
+        var secs = remaining % 60;
+        var timeStr = mins + ':' + (secs < 10 ? '0' : '') + secs;
+        var roundStr = p.round ? 'Round ' + p.round + '/' + p.total : '';
+        var totalPhases = phases.length;
+        var progress = ((phaseIdx / totalPhases) * 100).toFixed(0);
+
+        el.innerHTML = '<div style="background:var(--surface2);border:2px solid ' + p.color + ';border-radius:16px;padding:24px;margin-top:12px;text-align:center">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+                '<span style="font-size:12px;color:var(--muted)">' + roundStr + '</span>' +
+                '<span style="font-size:12px;color:var(--muted)">' + progress + '% complete</span>' +
+            '</div>' +
+            '<div style="font-family:\'DM Mono\',monospace;font-size:14px;text-transform:uppercase;letter-spacing:0.15em;color:' + p.color + ';margin-bottom:4px">' + p.name + '</div>' +
+            '<div style="font-family:\'DM Mono\',monospace;font-size:64px;font-weight:700;color:var(--text);line-height:1">' + timeStr + '</div>' +
+            '<div style="display:flex;gap:8px;justify-content:center;margin-top:16px">' +
+                '<button class="btn btn-secondary" style="padding:8px 24px" onclick="toggleHiitPause()">' + (paused ? 'Resume' : 'Pause') + '</button>' +
+                '<button class="btn btn-secondary" style="padding:8px 24px;opacity:0.6" onclick="stopHiitTimer()">Stop</button>' +
+            '</div>' +
+            '<div style="background:var(--border);border-radius:4px;height:4px;margin-top:16px;overflow:hidden">' +
+                '<div style="background:' + p.color + ';height:100%;width:' + ((1 - remaining / p.duration) * 100) + '%;transition:width 1s linear"></div>' +
+            '</div>' +
+        '</div>';
+    }
+
+    if (_hiitInterval) clearInterval(_hiitInterval);
+    renderTimer();
+    _playBeep(800, 500);
+
+    _hiitInterval = setInterval(function() {
+        if (paused) return;
+        remaining--;
+        if (remaining <= 0) {
+            phaseIdx++;
+            if (phaseIdx >= phases.length) {
+                clearInterval(_hiitInterval);
+                _hiitInterval = null;
+                _playBeep(440, 1000);
+                _hiitFlash('#22c55e');
+                var el = document.getElementById('hiit-timer-container');
+                if (el) el.innerHTML = '<div style="background:var(--surface2);border:2px solid #22c55e;border-radius:16px;padding:24px;margin-top:12px;text-align:center">' +
+                    '<div style="font-size:48px;margin-bottom:8px">&#127942;</div>' +
+                    '<div style="font-family:\'DM Mono\',monospace;font-size:18px;color:#22c55e">HIIT COMPLETE</div>' +
+                    '<div style="color:var(--muted);font-size:14px;margin-top:8px">' + cfg.rounds + ' rounds done</div>' +
+                '</div>';
+                return;
+            }
+            remaining = phases[phaseIdx].duration;
+            var p = phases[phaseIdx];
+            if (p.name === 'ALL OUT') {
+                _playBeep(1200, 300);
+                setTimeout(function() { _playBeep(1200, 300); }, 400);
+                setTimeout(function() { _playBeep(1200, 500); }, 800);
+                _hiitFlash('#ef4444');
+            } else if (p.name === 'WALK') {
+                _playBeep(600, 500);
+                _hiitFlash('#22c55e');
+            } else if (p.name === 'COOLDOWN') {
+                _playBeep(440, 800);
+                _hiitFlash('#3b82f6');
+            }
+        }
+        // 3-2-1 countdown beeps
+        if (remaining <= 3 && remaining > 0) {
+            _playBeep(1000, 100);
+        }
+        renderTimer();
+    }, 1000);
+
+    window._hiitPauseToggle = function() { paused = !paused; renderTimer(); };
+}
+
+function toggleHiitPause() {
+    if (window._hiitPauseToggle) window._hiitPauseToggle();
+}
+
+function stopHiitTimer() {
+    if (_hiitInterval) { clearInterval(_hiitInterval); _hiitInterval = null; }
+    var el = document.getElementById('hiit-timer-container');
+    if (el) el.innerHTML = '';
 }
 
 async function renderDetail() {
