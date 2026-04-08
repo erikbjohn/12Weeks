@@ -155,18 +155,32 @@ def _build_workout_today():
     today_idx = local_today.weekday()
     workouts = get_workouts(week)
     wt = workouts[today_idx] if today_idx < len(workouts) else None
-    # Overlay DB prescriptions
+    # Overlay DB prescriptions + apply exercise swaps
     try:
         rx_rows = WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=week, day_idx=today_idx
         ).order_by(WeeklyPrescription.exercise_order).all()
         if rx_rows and wt:
-            wt["exercises"] = [
-                {"name": rx.exercise_name, "sets": f"{rx.sets}x{rx.reps}",
-                 "rest": rx.rest or "60s", "note": rx.note or "",
-                 "target_weight": getattr(rx, 'target_weight', None)}
-                for rx in rx_rows
-            ]
+            # Load exercise swaps for this day
+            from models import ExerciseSwap
+            swaps = {}
+            try:
+                swap_rows = ExerciseSwap.query.filter_by(
+                    user_id=current_user.id, week=week, day_idx=today_idx
+                ).all()
+                for sw in swap_rows:
+                    swaps[sw.exercise_idx] = sw.swapped_to
+            except Exception:
+                pass
+            exercises = []
+            for i, rx in enumerate(rx_rows):
+                name = swaps.get(i, rx.exercise_name)
+                exercises.append({
+                    "name": name, "sets": f"{rx.sets}x{rx.reps}",
+                    "rest": rx.rest or "60s", "note": rx.note or "",
+                    "target_weight": getattr(rx, 'target_weight', None),
+                })
+            wt["exercises"] = exercises
     except Exception:
         pass
     try:
