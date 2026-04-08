@@ -201,12 +201,12 @@ EXERCISE_SWAPS = {
         "muscle_group": "chest_triceps",
         "requires": ["dip_station"],
         "alternatives": [
-            {"name": "Cable Tricep Pushdown", "requires": ["cable_machine"], "note": "Tricep isolation, constant tension"},
-            {"name": "Close-Grip Bench Press", "requires": ["barbell", "flat_bench"], "note": "Heavy tricep compound"},
-            {"name": "Skull Crusher", "requires": ["ez_bar", "flat_bench"], "note": "Lying tricep extension"},
-            {"name": "Overhead Dumbbell Tricep Extension", "requires": ["dumbbells"], "note": "Long head stretch"},
-            {"name": "Diamond Push-Ups", "requires": [], "note": "Bodyweight, hands together"},
-            {"name": "Machine Dip", "requires": ["chest_press_machine"], "note": "Guided path, adjustable weight"},
+            {"name": "Decline Push-Ups", "requires": [], "note": "Bodyweight, feet elevated — mimics dip angle for chest"},
+            {"name": "Close-Grip Bench Press", "requires": ["barbell", "flat_bench"], "note": "Chest + triceps compound"},
+            {"name": "Machine Dip", "requires": ["chest_press_machine"], "note": "Guided path, chest focus with forward lean"},
+            {"name": "Diamond Push-Ups", "requires": [], "note": "Bodyweight, chest + triceps"},
+            {"name": "DB Bench Press", "requires": ["dumbbells", "flat_bench"], "note": "Chest compound, similar push pattern"},
+            {"name": "Skull Crusher", "requires": ["ez_bar", "flat_bench"], "note": "Tricep isolation — less chest involvement"},
         ],
     },
 
