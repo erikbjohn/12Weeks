@@ -7940,10 +7940,12 @@ function advanceWorkoutSession() {
   _workoutExIdx++;
   if (_workoutExIdx < _workoutExercises.length) {
     enterExerciseFocus(_workoutExIdx);
+    // Reset after a delay to prevent race conditions
+    setTimeout(function() { _advancePending = false; }, 1000);
   } else {
     completeWorkoutSession();
+    _advancePending = false;
   }
-  _advancePending = false;
 }
 
 async function completeWorkoutSession() {
@@ -7965,10 +7967,12 @@ async function completeWorkoutSession() {
   // Build exercise summary for coach trigger (non-warmup only)
   var exerciseSummaryText = '';
   var swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+  var realIdx = 0;
   for (var i = 0; i < _workoutExercises.length; i++) {
     var ex = _workoutExercises[i];
     if (ex._isWarmup) continue;
-    var name = swaps[currentWeek + '_' + currentDay + '_' + i] || ex.name;
+    var name = swaps[currentWeek + '_' + currentDay + '_' + realIdx] || ex.name;
+    realIdx++;
     var exData = getExerciseData(name);
     var wt = exData ? exData.current : 0;
     if (wt > 0) exerciseSummaryText += name + ': ' + wt + 'lb. ';
@@ -8145,7 +8149,13 @@ async function enterExerciseFocus(exIdx) {
     ex = dayData.exercises[exIdx];
   }
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-  const swapKey = currentWeek + '_' + currentDay + '_' + exIdx;
+  // Compute real index early for swap key (warmups don't have swap entries)
+  let earlyRealIdx = exIdx;
+  if (_workoutActive && _workoutExercises) {
+    var earlyWarmupCount = _workoutExercises.filter(function(e) { return e._isWarmup; }).length;
+    earlyRealIdx = (ex && ex._isWarmup) ? exIdx : exIdx - earlyWarmupCount;
+  }
+  const swapKey = currentWeek + '_' + currentDay + '_' + earlyRealIdx;
   const displayName = swaps[swapKey] || ex.name;
 
   const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
@@ -8181,7 +8191,7 @@ async function enterExerciseFocus(exIdx) {
       const targetRes = await fetch('/api/targets/' + encodeURIComponent(displayName));
       if (targetRes.ok) {
           const targets = await targetRes.json();
-          if (targets.target_weight) {
+          if (targets.target_weight && !ex.target_weight) {
               _focusWeightVal = roundWeight(targets.target_weight, displayName);
           }
           window._focusTargetReps = targets.target_reps || _focusTargetReps;
@@ -8291,6 +8301,8 @@ function renderExerciseFocus() {
 }
 
 function logFocusSet() {
+  if (window._focusSaving) return;
+  window._focusSaving = true;
   const wtInput = document.getElementById('focus-wt');
   const repsInput = document.getElementById('focus-reps');
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
@@ -8383,6 +8395,7 @@ function logFocusSet() {
       renderExerciseFocus();
     }
   }
+  setTimeout(function() { window._focusSaving = false; }, 500);
 }
 
 let _timedSetPaused = false;
@@ -8510,10 +8523,13 @@ function showFocusRestTimer(seconds, showRpeAfter) {
     // Previous exercises (completed)
     if (_workoutActive && _workoutExercises) {
       const completedExs = [];
+      let completedRealIdx = 0;
       for (let i = 0; i < _workoutExIdx; i++) {
         const ex = _workoutExercises[i];
         const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-        const name = swaps[`${currentWeek}_${currentDay}_${i}`] || ex.name;
+        const realKey = ex._isWarmup ? null : completedRealIdx;
+        if (!ex._isWarmup) completedRealIdx++;
+        const name = (realKey !== null ? swaps[`${currentWeek}_${currentDay}_${realKey}`] : null) || ex.name;
         completedExs.push(`<div style="font-size:12px;color:var(--muted);padding:2px 0">&check; ${escapeHtml(name)}</div>`);
       }
       if (completedExs.length > 0) {
@@ -8563,7 +8579,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
     // Coming up exercises
     if (_workoutActive && _workoutExercises) {
       const upcoming = [];
-      const startIdx = showRpeAfter ? _workoutExIdx + 1 : _workoutExIdx + 1;
+      const startIdx = _workoutExIdx + 1;
       for (let i = startIdx; i < Math.min(_workoutExercises.length, startIdx + 3); i++) {
         const ex = _workoutExercises[i];
         upcoming.push(`<div style="font-size:11px;color:var(--dim);padding:1px 0">${ex.name} · ${ex.sets}</div>`);
