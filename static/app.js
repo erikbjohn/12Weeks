@@ -7135,12 +7135,22 @@ function startHiitTimer() {
     phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
 
     var phaseIdx = 0;
-    var remaining = phases[0].duration;
     var paused = false;
+    var pausedAt = 0;
+    var pausedRemaining = 0;
+    // Wall clock: compute end time so timer works when app is backgrounded
+    var phaseEndTime = Date.now() + phases[0].duration * 1000;
+    var lastBeepAt = -1; // track which second we last beeped at
+
+    function getRemaining() {
+        if (paused) return pausedRemaining;
+        return Math.max(0, Math.ceil((phaseEndTime - Date.now()) / 1000));
+    }
 
     function renderTimer() {
         var el = document.getElementById('hiit-timer-container');
         if (!el) { clearInterval(_hiitInterval); return; }
+        var remaining = getRemaining();
         var p = phases[phaseIdx];
         var mins = Math.floor(remaining / 60);
         var secs = remaining % 60;
@@ -7161,9 +7171,42 @@ function startHiitTimer() {
                 '<button class="btn btn-secondary" style="padding:8px 24px;opacity:0.6" onclick="stopHiitTimer()">Stop</button>' +
             '</div>' +
             '<div style="background:var(--border);border-radius:4px;height:4px;margin-top:16px;overflow:hidden">' +
-                '<div style="background:' + p.color + ';height:100%;width:' + ((1 - remaining / p.duration) * 100) + '%;transition:width 1s linear"></div>' +
+                '<div style="background:' + p.color + ';height:100%;width:' + ((1 - remaining / p.duration) * 100) + '%"></div>' +
             '</div>' +
         '</div>';
+    }
+
+    function advancePhase() {
+        phaseIdx++;
+        if (phaseIdx >= phases.length) {
+            clearInterval(_hiitInterval);
+            _hiitInterval = null;
+            _playBeep(440, 1000);
+            _hiitFlash('#22c55e');
+            var el = document.getElementById('hiit-timer-container');
+            if (el) el.innerHTML = '<div style="background:var(--surface2);border:2px solid #22c55e;border-radius:16px;padding:24px;margin-top:12px;text-align:center">' +
+                '<div style="font-size:48px;margin-bottom:8px">&#127942;</div>' +
+                '<div style="font-family:\'DM Mono\',monospace;font-size:18px;color:#22c55e">HIIT COMPLETE</div>' +
+                '<div style="color:var(--muted);font-size:14px;margin-top:8px">' + cfg.rounds + ' rounds done</div>' +
+            '</div>';
+            return false;
+        }
+        phaseEndTime = Date.now() + phases[phaseIdx].duration * 1000;
+        lastBeepAt = -1;
+        var p = phases[phaseIdx];
+        if (p.name === 'ALL OUT') {
+            _playBeep(1200, 300);
+            setTimeout(function() { _playBeep(1200, 300); }, 400);
+            setTimeout(function() { _playBeep(1200, 500); }, 800);
+            _hiitFlash('#ef4444');
+        } else if (p.name === 'WALK') {
+            _playBeep(600, 500);
+            _hiitFlash('#22c55e');
+        } else if (p.name === 'COOLDOWN') {
+            _playBeep(440, 800);
+            _hiitFlash('#3b82f6');
+        }
+        return true;
     }
 
     if (_hiitInterval) clearInterval(_hiitInterval);
@@ -7172,45 +7215,32 @@ function startHiitTimer() {
 
     _hiitInterval = setInterval(function() {
         if (paused) return;
-        remaining--;
-        if (remaining <= 0) {
-            phaseIdx++;
-            if (phaseIdx >= phases.length) {
-                clearInterval(_hiitInterval);
-                _hiitInterval = null;
-                _playBeep(440, 1000);
-                _hiitFlash('#22c55e');
-                var el = document.getElementById('hiit-timer-container');
-                if (el) el.innerHTML = '<div style="background:var(--surface2);border:2px solid #22c55e;border-radius:16px;padding:24px;margin-top:12px;text-align:center">' +
-                    '<div style="font-size:48px;margin-bottom:8px">&#127942;</div>' +
-                    '<div style="font-family:\'DM Mono\',monospace;font-size:18px;color:#22c55e">HIIT COMPLETE</div>' +
-                    '<div style="color:var(--muted);font-size:14px;margin-top:8px">' + cfg.rounds + ' rounds done</div>' +
-                '</div>';
-                return;
-            }
-            remaining = phases[phaseIdx].duration;
-            var p = phases[phaseIdx];
-            if (p.name === 'ALL OUT') {
-                _playBeep(1200, 300);
-                setTimeout(function() { _playBeep(1200, 300); }, 400);
-                setTimeout(function() { _playBeep(1200, 500); }, 800);
-                _hiitFlash('#ef4444');
-            } else if (p.name === 'WALK') {
-                _playBeep(600, 500);
-                _hiitFlash('#22c55e');
-            } else if (p.name === 'COOLDOWN') {
-                _playBeep(440, 800);
-                _hiitFlash('#3b82f6');
-            }
+        var remaining = getRemaining();
+        // Advance through phases that may have elapsed while backgrounded
+        while (remaining <= 0 && phaseIdx < phases.length) {
+            if (!advancePhase()) return;
+            remaining = getRemaining();
         }
-        // 3-2-1 countdown beeps
-        if (remaining <= 3 && remaining > 0) {
+        // 3-2-1 countdown beeps (only beep once per second)
+        if (remaining <= 3 && remaining > 0 && remaining !== lastBeepAt) {
+            lastBeepAt = remaining;
             _playBeep(1000, 100);
         }
         renderTimer();
-    }, 1000);
+    }, 250); // Check 4x/second for responsive UI when returning from background
 
-    window._hiitPauseToggle = function() { paused = !paused; renderTimer(); };
+    window._hiitPauseToggle = function() {
+        if (!paused) {
+            // Pausing: save remaining time
+            paused = true;
+            pausedRemaining = Math.max(0, Math.ceil((phaseEndTime - Date.now()) / 1000));
+        } else {
+            // Resuming: set new end time from saved remaining
+            paused = false;
+            phaseEndTime = Date.now() + pausedRemaining * 1000;
+        }
+        renderTimer();
+    };
 }
 
 function toggleHiitPause() {
