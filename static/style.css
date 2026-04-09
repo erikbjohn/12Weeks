@@ -434,6 +434,7 @@ header .subtitle {
 .exercise-block {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
+  text-align: left;
 }
 .exercise-block:last-child { border-bottom: none; }
 
@@ -447,10 +448,12 @@ header .subtitle {
 
 .ex-name-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 8px;
   width: 100%;
   margin-bottom: 2px;
+  text-align: left;
 }
 .ex-name-row .ex-name {
   font-size: 16px;
@@ -468,6 +471,10 @@ header .subtitle {
   color: var(--accent);
   margin-bottom: 2px;
   width: 100%;
+  text-align: left;
+}
+.ex-note {
+  text-align: left;
 }
 
 .ex-last-weight {
