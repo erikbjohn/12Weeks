@@ -3811,7 +3811,10 @@ footer {
 
 /* ─── SAFE AREA SUPPORT (notch/Dynamic Island) ─── */
 @supports (padding-top: env(safe-area-inset-top)) {
-  header { padding-top: calc(1.25rem + env(safe-area-inset-top)); }
+  body { padding-top: env(safe-area-inset-top); }
+  header { padding-top: calc(0.5rem + env(safe-area-inset-top)); }
+  .morning-checkin-overlay { padding-top: env(safe-area-inset-top); }
+  .progress-overlay { padding-top: env(safe-area-inset-top); }
   .chat-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .psych-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .mc-coach-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
