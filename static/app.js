@@ -7413,14 +7413,12 @@ async function renderDetail() {
     }
 
     return `<div class="exercise-block">
-      <div class="exercise-header">
-        <div class="ex-info">
-          <div class="ex-name">${displayName}${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></div>
-          ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
-        </div>
-        <div class="ex-sets">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}${suggestion.reason && suggestion.reason !== 'estimated' ? `<span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
+      <div class="ex-name-row">
+        <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
+        <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span>${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}</span>
       </div>
-      ${lastWt != null ? `<div class="ex-last-weight">Last: ${lastWt} lb${ex.target_weight && ex.target_weight !== lastWt ? ' → ' + ex.target_weight + ' lb' : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ' · ' + suggestion.reason : ''}</div>` : (suggestion.reason && suggestion.reason !== 'engine' ? `<div class="ex-last-weight">${suggestion.reason}</div>` : '')}
+      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null ? ' · Last: ' + lastWt + ' lb' : ''}${ex.target_weight ? ' → ' + ex.target_weight + ' lb' : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
+      ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
       <div id="swap-container-${i}"></div>

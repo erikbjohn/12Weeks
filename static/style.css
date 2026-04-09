@@ -445,6 +445,31 @@ header .subtitle {
   margin-bottom: 4px;
 }
 
+.ex-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.ex-name-row .ex-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+.ex-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ex-detail-row {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 2px;
+  width: 100%;
+}
+
 .ex-last-weight {
   font-size: 12px;
   color: var(--muted);
