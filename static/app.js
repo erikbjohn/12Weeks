@@ -6915,13 +6915,6 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
     var html = '';
     // On rest days (Sunday), skip warmup/exercises — just show the run
     if (!d.isRest) {
-        if (displayExercises.length > 0) {
-            var allExDone = displayExercises.every(function(_, i) { return isExDone(currentWeek, currentDay, i); });
-            var dayDone = isDayDone(currentWeek, currentDay);
-            if (!allExDone && !dayDone) {
-                html += '<button class="btn btn-primary" style="width:100%;margin-bottom:12px;font-size:16px;padding:14px" onclick="startWorkoutSession()">START WORKOUT</button>';
-            }
-        }
         html += renderWarmupInner(d);
         if (displayExercises.length > 0) {
             html += bwToggleHtml + exRows;
@@ -7445,7 +7438,7 @@ async function renderDetail() {
     return `<div class="exercise-block">
       <div class="ex-name-row">
         <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
-        <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span>${!done ? ` <button class="ex-start-btn" onclick="enterExerciseFocus(${i})">START</button>` : ''}</span>
+        <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></span>
       </div>
       <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null ? ' · Last: ' + lastWt + ' lb' : ''}${ex.target_weight ? ' → ' + ex.target_weight + ' lb' : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
       ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
