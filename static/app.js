@@ -791,6 +791,47 @@ function formatTimer(sec) {
   return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
 }
 
+// ─── INLINE TIMED SET TIMER (for planks, etc.) ──────────────────────────
+function startInlineTimer(seconds, btn, exName, week, dayIdx, exIdx, setIdx, restSec) {
+    var el = document.getElementById('inline-timer-' + exIdx + '-' + setIdx);
+    if (!el) return;
+    btn.style.display = 'none';
+    var endTime = Date.now() + seconds * 1000;
+    el.textContent = formatTimer(seconds);
+    if (navigator.vibrate) navigator.vibrate(100);
+    var iv = setInterval(function() {
+        var rem = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+        el.textContent = formatTimer(rem);
+        if (rem <= 3 && rem > 0) {
+            el.style.color = '#ef4444';
+        }
+        if (rem <= 0) {
+            clearInterval(iv);
+            el.textContent = 'DONE';
+            el.style.color = '#22c55e';
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            // Auto-check the set as done
+            var checkBtn = document.querySelector('#wu-step-' + exIdx + ' .set-check') ||
+                           el.closest('.set-row')?.querySelector('.set-check');
+            // Mark set done via toggleSet
+            var cacheKey = week + '_' + dayIdx + '_' + exIdx + '_' + setIdx;
+            if (!_setCache[cacheKey]) {
+                _setCache[cacheKey] = { done: true, weight: 0, reps: seconds };
+                apiPost('/api/sets', { exercise: exName, week: week, day_idx: dayIdx, set_number: setIdx, weight: 0, reps: seconds, done: true });
+                var row = el.closest('.set-row');
+                if (row) {
+                    row.classList.add('set-done');
+                    var cb = row.querySelector('.set-check');
+                    if (cb) { cb.classList.add('done'); cb.innerHTML = '&#10003;'; }
+                }
+            }
+            // Start rest timer
+            if (restSec > 0) startRestTimer(exIdx, restSec);
+            setTimeout(function() { el.textContent = ''; }, 3000);
+        }
+    }, 250);
+}
+
 // ─── WEIGHT ROUNDING (valid plate combinations) ─────────────────────────
 function isBarbell(exName) {
   const nl = exName.toLowerCase();
@@ -7412,27 +7453,43 @@ async function renderDetail() {
     const restSeconds = parseRestSeconds(ex.rest);
     const escapedName = displayName.replace(/'/g, "\\'");
 
-    // Build per-set rows — carry weight forward from earlier sets
+    // Detect timed exercises (reps like "45s", "60s")
+    const isTimedEx = /^\d+s$/i.test(targetReps);
+    const timedSeconds = isTimedEx ? parseInt(targetReps) : 0;
+
+    // Build per-set rows
     let setRowsHtml = '';
-    let carryWeight = weightVal; // Start with suggestion, override with actual logged weights
+    let carryWeight = weightVal;
     for (let s = 0; s < setCount; s++) {
       const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
       const setData = _setCache && _setCache[setKey];
       const setDone = !!(setData && setData.done);
-      // Priority: 1) this set's saved weight, 2) previous set's weight, 3) suggestion
       const setWeight = setData && setData.weight ? setData.weight : carryWeight;
       const setReps = setData && setData.reps ? setData.reps : '';
-      // Carry this set's weight forward to next set
       if (setData && setData.weight) carryWeight = setData.weight;
-      setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}" >
-        <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
-          ${setDone ? '&#10003;' : ''}
-        </button>
-        <span class="set-label">Set ${s + 1}</span>
-        <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
-        <span class="set-x">&times;</span>
-        <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
-      </div>`;
+
+      if (isTimedEx) {
+        // Timed exercise: checkbox + set label + timer button (no weight/reps inputs)
+        setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
+          <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
+            ${setDone ? '&#10003;' : ''}
+          </button>
+          <span class="set-label">Set ${s + 1}</span>
+          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})">${targetReps}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetReps} &#10003;</span>`}
+          <div id="inline-timer-${i}-${s}" style="margin-left:8px;font-family:'DM Mono',monospace;font-size:15px;color:var(--accent)"></div>
+        </div>`;
+      } else {
+        // Normal exercise: checkbox + set label + weight × reps
+        setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
+          <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
+            ${setDone ? '&#10003;' : ''}
+          </button>
+          <span class="set-label">Set ${s + 1}</span>
+          <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
+          <span class="set-x">&times;</span>
+          <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
+        </div>`;
+      }
     }
 
     return `<div class="exercise-block">
