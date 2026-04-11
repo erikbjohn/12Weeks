@@ -7736,15 +7736,17 @@ async function renderDetail() {
                         '<span class="ws-trend-same">\u2192</span>';
       const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
       // Estimate 1RM — take the BEST of: best logged e1RM ever, OR latest prescription's e1RM.
-      // Walk full history to find the max logged e1RM, but ONLY for weeks ≤ user's actual
-      // program week (so a stray future-week SetLog row doesn't inflate the display).
+      // Walk history for weeks 1..maxWk only. Drop entries with NO week tag — they're
+      // legacy/untrusted (no time anchor) and have caused phantom highs in the row that
+      // contradicted the API timeline.
       const _maxWk = getActualProgramWeek() || currentWeek || 12;
       const exData = getExerciseData(name);
       let est1rm = '';
       let loggedRM = 0;
       if (exData && exData.history && exData.history.length > 0) {
         for (const h of exData.history) {
-          if (h.week && h.week > _maxWk) continue;
+          const wkN = parseInt(h.week);
+          if (!wkN || wkN < 1 || wkN > _maxWk) continue;
           const hw = h.weight || 0;
           const hr = h.reps_completed || h.reps || 10;
           if (hw > 0) {
