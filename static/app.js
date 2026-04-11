@@ -7736,13 +7736,15 @@ async function renderDetail() {
                         '<span class="ws-trend-same">\u2192</span>';
       const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
       // Estimate 1RM — take the BEST of: best logged e1RM ever, OR latest prescription's e1RM.
-      // Walk full history to find the max logged e1RM (not just the most recent set,
-      // which might be a warmup or test weight).
+      // Walk full history to find the max logged e1RM, but ONLY for weeks ≤ user's actual
+      // program week (so a stray future-week SetLog row doesn't inflate the display).
+      const _maxWk = getActualProgramWeek() || currentWeek || 12;
       const exData = getExerciseData(name);
       let est1rm = '';
       let loggedRM = 0;
       if (exData && exData.history && exData.history.length > 0) {
         for (const h of exData.history) {
+          if (h.week && h.week > _maxWk) continue;
           const hw = h.weight || 0;
           const hr = h.reps_completed || h.reps || 10;
           if (hw > 0) {
@@ -7758,7 +7760,6 @@ async function renderDetail() {
       let latestPrescribedWk = 0;
       let latestTarget = 0;
       let latestRepsStr = '10';
-      const _maxWk = getActualProgramWeek() || currentWeek || 12;
       if (workoutData) {
         for (const wkKey of Object.keys(workoutData)) {
           const wkNum = parseInt(wkKey);
