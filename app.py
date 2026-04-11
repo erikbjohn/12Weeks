@@ -498,13 +498,26 @@ except Exception:
 def _parse_coach_markers(text, user_id, week):
     """Parse structured markers from coach response and apply them."""
     import re
-    # [SWAP: day=X, exercise=Name, replace_with=Name, reason=...]
-    for m in re.finditer(r'\[SWAP:\s*day=(\d+),\s*exercise=([^,]+),\s*replace_with=([^,]+),\s*reason=([^\]]+)\]', text):
+    # [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
+    # (CORE_PROMPT format — see coach_assembler.py CORE_PROMPT <markers>)
+    for m in re.finditer(
+        r'\[SWAP:\s*day_idx=(\d+),\s*exercise_idx=(\d+),\s*old=([^,]+),\s*new=([^,]+),\s*reason=([^\]]+)\]',
+        text,
+    ):
         try:
-            day_idx, exercise, replace_with, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
-            existing = ExerciseSwap.query.filter_by(user_id=user_id, week=week, day_idx=day_idx, exercise_idx=0).first()
-            if not existing:
-                db.session.add(ExerciseSwap(user_id=user_id, week=week, day_idx=day_idx, exercise_idx=0, swapped_to=replace_with))
+            day_idx = int(m.group(1))
+            exercise_idx = int(m.group(2))
+            new_name = m.group(4).strip()
+            existing = ExerciseSwap.query.filter_by(
+                user_id=user_id, week=week, day_idx=day_idx, exercise_idx=exercise_idx
+            ).first()
+            if existing:
+                existing.swapped_to = new_name
+            else:
+                db.session.add(ExerciseSwap(
+                    user_id=user_id, week=week, day_idx=day_idx,
+                    exercise_idx=exercise_idx, swapped_to=new_name,
+                ))
             db.session.commit()
         except Exception:
             db.session.rollback()
@@ -2706,19 +2719,30 @@ def api_exercise_swaps():
 @app.route("/api/exercise-swap", methods=["POST"])
 @login_required
 def api_exercise_swap():
-    """Save an exercise swap."""
+    """Save or delete an exercise swap. Empty swapped_to means "revert" (delete row)."""
     data = request.get_json()
     week = data.get("week")
     day_idx = data.get("day_idx")
     exercise_idx = data.get("exercise_idx")
-    swapped_to = data.get("swapped_to", "").strip()
+    swapped_to = (data.get("swapped_to") or "").strip()
 
-    if week is None or day_idx is None or exercise_idx is None or not swapped_to:
+    if week is None or day_idx is None or exercise_idx is None:
         return jsonify({"error": "Missing fields"}), 400
 
     existing = ExerciseSwap.query.filter_by(
         user_id=current_user.id, week=week, day_idx=day_idx, exercise_idx=exercise_idx
     ).first()
+
+    # Empty swapped_to → revert: delete the row
+    if not swapped_to:
+        if existing:
+            db.session.delete(existing)
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "reverted": True})
 
     if existing:
         existing.swapped_to = swapped_to

@@ -225,6 +225,7 @@ EXERCISE_SWAPS = {
         "requires": ["barbell"],
         "alternatives": [
             {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Lighter, easier to control"},
+            {"name": "Nordic Hamstring Curl", "requires": [], "note": "Bodyweight, brutal eccentric — pad knees"},
             {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Unilateral balance work"},
             {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Machine isolation"},
         ],
