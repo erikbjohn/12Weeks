@@ -1076,7 +1076,8 @@ async function toggleWeightDetail(exerciseName, rowEl) {
             html += '<div class="ws-timeline">';
             for (const e of data.timeline) {
                 if (!e.est_1rm) continue; // Skip entries with no data
-                const isCurrent = e === data.timeline[data.timeline.length - 1];
+                // is_current comes from the API (matches user's actual program week)
+                const isCurrent = !!e.is_current;
                 const sourceTag = e.source === 'scheduled' ? '<span class="ws-tl-tag" style="background:var(--accent-bg);color:var(--accent)">scheduled</span>' : '';
                 html += `<div class="ws-timeline-entry${isCurrent ? ' ws-baseline-entry' : ''}">
                     <span class="ws-tl-week">Wk ${e.week}</span>
@@ -5388,6 +5389,16 @@ function setDay(d) {
   renderDetail();
 }
 
+// User's actual program week — computed from start_date, NOT the week the user is viewing.
+// Returns the week number (1-12) or null if state not loaded.
+function getActualProgramWeek() {
+  if (!_stateCache || !_stateCache.start_date) return null;
+  const startDt = new Date(_stateCache.start_date + 'T00:00:00');
+  const nowDt = new Date();
+  const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
+  return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+}
+
 // Used by swipe gestures — always navigates (no toggle), clamps at week boundaries
 function navigateDay(direction) {
   if (currentDay === null) return;
@@ -7740,17 +7751,18 @@ async function renderDetail() {
           }
         }
       }
-      // Walk ALL weeks of workoutData (not just currentWeek) to find the LATEST
-      // prescription for this exercise. This way, if the user is viewing week 1
-      // but they're actually on week 3, we show the week 3 training level.
+      // Walk weeks of workoutData (capped at user's ACTUAL program week — not viewed week,
+      // and not future weeks which may have stale stub prescriptions) to find the LATEST
+      // real prescription for this exercise.
       let prescribedRM = 0;
       let latestPrescribedWk = 0;
       let latestTarget = 0;
       let latestRepsStr = '10';
+      const _maxWk = getActualProgramWeek() || currentWeek || 12;
       if (workoutData) {
         for (const wkKey of Object.keys(workoutData)) {
           const wkNum = parseInt(wkKey);
-          if (!wkNum || wkNum < 1 || wkNum > 12) continue;
+          if (!wkNum || wkNum < 1 || wkNum > _maxWk) continue;
           const wkData = workoutData[wkKey];
           const days = (wkData && wkData.days) || [];
           for (const day of days) {

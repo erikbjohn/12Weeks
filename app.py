@@ -2567,10 +2567,14 @@ def api_weight_detail(exercise_name):
         if p.week not in prescribed_e1rm or e1rm > prescribed_e1rm[p.week]:
             prescribed_e1rm[p.week] = e1rm
 
-    # Build timeline — merge logged and prescribed, prescription wins if user hasn't caught up
+    # Build timeline — merge logged and prescribed, prescription wins if user hasn't caught up.
+    # Only include weeks ≤ user's current week so future stub prescriptions don't appear.
+    user_current_week = _current_week()
     all_weeks = sorted(set(weekly_e1rm.keys()) | set(prescribed_e1rm.keys()))
     timeline = []
     for wk in all_weeks:
+        if wk > user_current_week:
+            continue  # Don't show future weeks — they may have stub prescriptions
         logged = weekly_e1rm.get(wk, 0)
         scheduled = prescribed_e1rm.get(wk, 0)
         # Use the higher of the two — prescription wins if user hasn't caught up
@@ -2583,6 +2587,7 @@ def api_weight_detail(exercise_name):
             "logged_1rm": logged or None,
             "scheduled_1rm": scheduled or None,
             "source": "logged" if logged >= scheduled else "scheduled",
+            "is_current": wk == user_current_week,
         })
 
     # Also check ExerciseLog for baseline data
