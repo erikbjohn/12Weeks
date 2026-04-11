@@ -496,6 +496,16 @@ header .subtitle {
 }
 .set-row.set-done { opacity: 0.5; }
 
+.bw-row .bw-tag {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  background: var(--lift-bg);
+  border: 1px solid var(--lift-border);
+  border-radius: 4px;
+}
+
 .set-check {
   width: 24px; height: 24px; min-width: 24px;
   border: 1px solid var(--border2); border-radius: 5px;
@@ -869,6 +879,45 @@ footer {
   font-family: 'DM Mono', monospace;
   padding: 8px 0;
   text-align: center;
+}
+
+/* ─── MEASUREMENTS (Stats accordion) ─── */
+.measurements-section h4 {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+}
+.m-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.m-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.m-label {
+  color: var(--muted);
+}
+.m-val {
+  font-family: 'DM Mono', monospace;
+  color: var(--text);
+  text-align: right;
+}
+.m-delta {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  text-align: right;
+  min-width: 40px;
 }
 
 /* ─── DAILY GOALS ─── */
@@ -1986,46 +2035,11 @@ footer {
   color: var(--text);
 }
 
-.warmup-step-duration {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--accent);
-  background: var(--lift-bg);
-  border: 1px solid var(--lift-border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  flex-shrink: 0;
-}
-
-.wu-start-btn {
+.warmup-step-reps {
   font-family: 'DM Mono', monospace;
   font-size: 13px;
   color: var(--accent);
-  background: var(--lift-bg);
-  border: 1px solid var(--lift-border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  min-height: 36px;
-  transition: all 0.15s;
-}
-.wu-start-btn:active { background: var(--accent); color: var(--bg); }
-
-.wu-timer {
-  flex-shrink: 0;
-}
-
-.wu-countdown {
-  font-family: 'DM Mono', monospace;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent);
-  animation: pulse-timer 1s infinite;
-}
-.wu-countdown.wu-done {
-  color: var(--lift);
-  animation: none;
+  margin-top: 2px;
 }
 
 .warmup-step-note {

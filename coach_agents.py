@@ -9,7 +9,7 @@ Each agent specifies:
 AGENTS = {
     "conversation": {
         "max_tokens": 800,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "checkins", "chat_history", "workout_today", "week_schedule",
             "meals_today", "bodyweight", "coach_memories", "goal",
@@ -19,7 +19,7 @@ AGENTS = {
     },
     "morning_checkin": {
         "max_tokens": 300,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "checkins", "chat_history", "workout_today", "week_schedule",
             "bodyweight", "garmin", "coach_memories", "missed_checkin",
@@ -28,7 +28,7 @@ AGENTS = {
     },
     "morning_briefing": {
         "max_tokens": 200,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "checkins", "workout_today", "garmin", "user_rules",
         ],
@@ -57,7 +57,7 @@ AGENTS = {
     },
     "workout_feedback": {
         "max_tokens": 800,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "chat_history", "workout_today", "today_sets",
             "exercise_history", "exercise_analysis",
@@ -66,14 +66,14 @@ AGENTS = {
     },
     "meals_complete": {
         "max_tokens": 200,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "meals_today", "goal", "food_safety", "user_rules",
         ],
     },
     "end_of_day": {
         "max_tokens": 200,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "workout_today", "week_schedule", "completed_days",
             "next_week", "user_rules",
@@ -81,7 +81,7 @@ AGENTS = {
     },
     "chat_opened": {
         "max_tokens": 300,
-        "temperature": 1.0,
+        "temperature": 0.6,
         "requires": [
             "base", "checkins", "chat_history", "workout_today",
             "meals_today", "completed_days", "coach_memories",

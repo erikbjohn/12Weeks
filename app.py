@@ -780,33 +780,33 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
     steps = []
 
     # 1. General mobility (always)
-    steps.append({"name": "Arm circles", "duration": "30s", "note": "15s forward, 15s backward"})
+    steps.append({"name": "Arm circles", "reps": "15 each direction", "note": "Forward then backward"})
 
     # 2. Target muscle activation based on today's muscle groups
     MUSCLE_WARMUPS = {
         "chest": [
-            {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps, light band"},
-            {"name": "Push-up to downward dog", "duration": "60s", "note": "8 reps, slow"},
+            {"name": "Band pull-aparts", "reps": "20", "note": "Light band"},
+            {"name": "Push-up to downward dog", "reps": "8", "note": "Slow and controlled"},
         ],
         "back": [
-            {"name": "Band pull-aparts", "duration": "30s", "note": "20 reps"},
-            {"name": "Cat-cow stretch", "duration": "30s", "note": "8 reps, breathe"},
+            {"name": "Band pull-aparts", "reps": "20", "note": "Light band"},
+            {"name": "Cat-cow stretch", "reps": "8", "note": "Breathe deep"},
         ],
         "quads": [
-            {"name": "Bodyweight squats", "duration": "45s", "note": "15 reps, full depth"},
-            {"name": "Walking lunges", "duration": "45s", "note": "8 each leg"},
+            {"name": "Bodyweight squats", "reps": "15", "note": "Full depth"},
+            {"name": "Walking lunges", "reps": "8 each leg", "note": ""},
         ],
         "hamstrings": [
-            {"name": "Leg swings (front-back)", "duration": "30s", "note": "10 each leg"},
-            {"name": "Glute bridges", "duration": "30s", "note": "15 reps, squeeze at top"},
+            {"name": "Leg swings (front-back)", "reps": "10 each leg", "note": ""},
+            {"name": "Glute bridges", "reps": "15", "note": "Squeeze at top"},
         ],
         "shoulders": [
-            {"name": "Band dislocates", "duration": "30s", "note": "10 slow reps"},
-            {"name": "Lateral raises (light)", "duration": "30s", "note": "10 reps, very light"},
+            {"name": "Band dislocates", "reps": "10", "note": "Slow"},
+            {"name": "Lateral raises (light)", "reps": "10", "note": "Very light weight"},
         ],
         "glutes": [
-            {"name": "Hip circles", "duration": "30s", "note": "8 each direction"},
-            {"name": "Glute bridges", "duration": "30s", "note": "15 reps"},
+            {"name": "Hip circles", "reps": "8 each direction", "note": ""},
+            {"name": "Glute bridges", "reps": "15", "note": ""},
         ],
     }
 
@@ -817,15 +817,15 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
                 steps.append(step)
                 seen.add(step["name"])
 
-    # 3. Soreness-specific stretches
+    # 3. Soreness-specific stretches (static holds — keep hold time in note)
     if soreness_data:
         sore_area = soreness_data.get("area", "").lower()
         SORENESS_STRETCHES = {
-            "shoulders": {"name": "Shoulder cross-body stretch", "duration": "30s", "note": "Hold 15s each side -- gentle, don't force"},
-            "lower back": {"name": "Child's pose", "duration": "45s", "note": "Breathe deep, relax into it"},
-            "quads": {"name": "Standing quad stretch", "duration": "30s", "note": "15s each leg, hold wall"},
-            "hamstrings": {"name": "Standing hamstring stretch", "duration": "30s", "note": "15s each leg, slight bend"},
-            "chest": {"name": "Doorway chest stretch", "duration": "30s", "note": "15s each side"},
+            "shoulders": {"name": "Shoulder cross-body stretch", "reps": "Hold 15s each side", "note": "Gentle, don't force"},
+            "lower back": {"name": "Child's pose", "reps": "Hold 45s", "note": "Breathe deep, relax into it"},
+            "quads": {"name": "Standing quad stretch", "reps": "Hold 15s each leg", "note": "Hold wall for balance"},
+            "hamstrings": {"name": "Standing hamstring stretch", "reps": "Hold 15s each leg", "note": "Slight bend"},
+            "chest": {"name": "Doorway chest stretch", "reps": "Hold 15s each side", "note": ""},
         }
         if sore_area in SORENESS_STRETCHES:
             s = SORENESS_STRETCHES[sore_area]
@@ -836,7 +836,7 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
     bar_exercises = [e for e in day_exercises if "barbell" in e.get("exercise", "").lower() or "bench" in e.get("exercise", "").lower()]
     if bar_exercises:
         first_bar = bar_exercises[0]["exercise"]
-        steps.append({"name": f"Empty bar {first_bar.split()[-1].lower()}", "duration": "60s", "note": "15 reps, feel the groove"})
+        steps.append({"name": f"Empty bar {first_bar.split()[-1].lower()}", "reps": "15", "note": "Feel the groove"})
 
     return {
         "label": "Dynamic Warm-Up",
@@ -1847,8 +1847,13 @@ def api_state_update():
 @app.route("/api/weights")
 @login_required
 def api_weights():
-    logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
+    # Merge legacy ExerciseLog with the modern SetLog table.
+    # Per-exercise history collapses multi-set days into ONE entry per day
+    # (max weight × max reps_completed for that day) so e1RM downstream is meaningful.
     result = {}
+
+    # 1. Legacy ExerciseLog entries
+    logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
     for log in logs:
         name = log.exercise_name
         if name not in result:
@@ -1856,6 +1861,7 @@ def api_weights():
         entry = {
             "weight": log.weight,
             "reps": log.sets_label,
+            "reps_completed": log.reps_completed,
             "rpe": log.rpe,
             "date": log.logged_date.isoformat() if log.logged_date else None,
             "week": log.week,
@@ -1867,6 +1873,35 @@ def api_weights():
             entry["estimated1RM"] = log.estimated_1rm
         result[name]["history"].append(entry)
         result[name]["current"] = log.weight
+
+    # 2. Modern SetLog entries — collapse per (exercise, week, day) to the max-weight set
+    set_logs = SetLog.query.filter_by(user_id=current_user.id, done=True).order_by(SetLog.logged_date, SetLog.id).all()
+    by_day = {}  # (name, week, day) -> {weight, reps}
+    for s in set_logs:
+        if not s.weight or s.weight <= 0:
+            continue
+        key = (s.exercise_name, s.week, s.day_idx)
+        existing = by_day.get(key)
+        if not existing or s.weight > existing["weight"]:
+            by_day[key] = {
+                "weight": s.weight,
+                "reps_completed": s.reps or 0,
+                "logged_date": s.logged_date,
+            }
+    # Sort the collapsed entries by date and merge into result
+    for (name, wk, day_idx), info in sorted(by_day.items(), key=lambda kv: (kv[1]["logged_date"] or date.min, kv[0][1] or 0)):
+        if name not in result:
+            result[name] = {"current": 0, "history": []}
+        result[name]["history"].append({
+            "weight": info["weight"],
+            "reps": str(info["reps_completed"]),
+            "reps_completed": info["reps_completed"],
+            "date": info["logged_date"].isoformat() if info["logged_date"] else None,
+            "week": wk,
+            "day": day_idx,
+        })
+        result[name]["current"] = info["weight"]
+
     return jsonify(result)
 
 
@@ -1938,7 +1973,11 @@ def api_set_log():
     set_number = data.get("set_number")
     weight = data.get("weight", 0)
     reps = data.get("reps", 0)
-    done = data.get("done", True)
+    # done is OPTIONAL — if not provided, do NOT touch existing.done (race-condition fix).
+    # This lets blur-triggered saveSetField save weight/reps without clobbering the done
+    # state set by a concurrent toggleSet click.
+    done_provided = "done" in data
+    done = bool(data.get("done", False)) if done_provided else False
 
     if not exercise or week is None or day_idx is None or set_number is None:
         return jsonify({"error": "Missing required fields"}), 400
@@ -1952,13 +1991,16 @@ def api_set_log():
     if existing:
         existing.weight = weight
         existing.reps = reps
-        existing.done = done
+        if done_provided:
+            existing.done = done
         existing.logged_date = _user_today()
     else:
         existing = SetLog(
             user_id=current_user.id, exercise_name=exercise,
             week=week, day_idx=day_idx, set_number=set_number,
-            weight=weight, reps=reps, done=done, logged_date=_user_today(),
+            weight=weight, reps=reps,
+            done=done if done_provided else False,
+            logged_date=_user_today(),
         )
         db.session.add(existing)
     # Compute targets and detect modifications
@@ -2495,8 +2537,53 @@ def api_weight_detail(exercise_name):
                 if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                     weekly_e1rm[wk] = e1rm
 
-    # Build timeline sorted by week
-    timeline = [{"week": wk, "est_1rm": e1rm} for wk, e1rm in sorted(weekly_e1rm.items()) if e1rm and e1rm > 0]
+    # Merge in WeeklyPrescription target_weight as "scheduled" e1RM
+    # so users see progression even before they've lifted at the new weight
+    from models import WeeklyPrescription
+    prescriptions = WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise_name
+    ).all()
+    prescribed_e1rm = {}  # week -> e1rm
+    for p in prescriptions:
+        if not p.target_weight or p.target_weight <= 0:
+            continue
+        # Parse target reps — can be "10", "10s" (skip timed), "8-12" (use mid)
+        reps_str = str(p.reps or '10').strip()
+        if reps_str.endswith('s'):
+            continue  # timed exercise, no e1RM
+        if '-' in reps_str:
+            parts = reps_str.split('-')
+            try:
+                reps_val = (int(parts[0]) + int(parts[1])) // 2
+            except (ValueError, IndexError):
+                reps_val = 10
+        else:
+            try:
+                reps_val = int(reps_str)
+            except ValueError:
+                reps_val = 10
+        reps_capped = min(reps_val, 15)
+        e1rm = round(p.target_weight * (1 + reps_capped / 30))
+        if p.week not in prescribed_e1rm or e1rm > prescribed_e1rm[p.week]:
+            prescribed_e1rm[p.week] = e1rm
+
+    # Build timeline — merge logged and prescribed, prescription wins if user hasn't caught up
+    all_weeks = sorted(set(weekly_e1rm.keys()) | set(prescribed_e1rm.keys()))
+    timeline = []
+    for wk in all_weeks:
+        logged = weekly_e1rm.get(wk, 0)
+        scheduled = prescribed_e1rm.get(wk, 0)
+        # Use the higher of the two — prescription wins if user hasn't caught up
+        best = max(logged, scheduled)
+        if best <= 0:
+            continue
+        timeline.append({
+            "week": wk,
+            "est_1rm": best,
+            "logged_1rm": logged or None,
+            "scheduled_1rm": scheduled or None,
+            "source": "logged" if logged >= scheduled else "scheduled",
+        })
 
     # Also check ExerciseLog for baseline data
     logs = ExerciseLog.query.filter_by(
@@ -2834,6 +2921,16 @@ def api_measurements():
 @login_required
 def api_measurements_record():
     data = request.get_json()
+    # Sunday-only gating: weekday 6 == Sunday
+    today_local = _user_today()
+    if today_local.weekday() != 6:
+        days_until_sunday = (6 - today_local.weekday()) % 7
+        if days_until_sunday == 0:
+            days_until_sunday = 7
+        return jsonify({
+            "error": "Measurements are only recorded on Sundays.",
+            "next_sunday_in_days": days_until_sunday,
+        }), 403
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bm:
@@ -3082,9 +3179,18 @@ def api_progress():
         logs = ExerciseLog.query.filter_by(user_id=current_user.id, exercise_name=name).order_by(ExerciseLog.logged_date).all()
         lifts[name] = [{"date": l.logged_date.isoformat(), "weight": l.weight, "week": l.week} for l in logs]
 
-    # Waist measurements
+    # Body measurements (all fields for Stats screen + charts)
     measurements = [{
-        "date": e.log_date.isoformat(), "waist": e.waist_inches,
+        "date": e.log_date.isoformat(),
+        "weight_lbs": e.weight_lbs,
+        "waist": e.waist_inches,
+        "chest": e.chest,
+        "hips": e.hips,
+        "neck": e.neck,
+        "bicep_left": e.bicep_left,
+        "bicep_right": e.bicep_right,
+        "thigh_left": e.thigh_left,
+        "thigh_right": e.thigh_right,
     } for e in BodyMeasurement.query.filter_by(user_id=current_user.id).order_by(BodyMeasurement.log_date).all()]
 
     # Check-ins

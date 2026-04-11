@@ -10,6 +10,7 @@ let _chatHistory = [];
 let _warmupCache = {};
 let _runLogCache = {};
 let _setCache = {};      // Per-set completion: "week_day_ex_set" → { done, reps, weight }
+let _setSaving = {};     // key: ${week}_${day}_${exIdx}_${setIdx}, value: true while toggleSet API call in flight
 let _restTimerInterval = null;
 let _exerciseSwapsLoaded = false;
 let _scheduleOverrides = [];
@@ -40,13 +41,35 @@ let currentDay = null;
 let garminConnected = false; // Garmin disabled
 let garminData = null;
 let readinessData = null;
-let warmupTimerInterval = null;
 let _chatOverlayOpen = false;
 let _chatScrollPos = null;
 let _mealDetailExpanded = false;
 let _milestonesShownThisSession = new Set();
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
+
+const BODYWEIGHT_EXERCISES = new Set([
+  'Push-Ups', 'Push-ups', 'Push Ups', 'Pushups',
+  'Decline Push-Ups', 'Pike Push-Ups', 'Diamond Push-Ups',
+  'Pull-Ups', 'Pull-ups', 'Pull Ups', 'Chin-Ups', 'Chin-ups',
+  'Ring Row', 'Inverted Row', 'TRX Row',
+  'Dips', 'Bench Dips', 'Tricep Dips',
+  'Plank', 'Side Plank',
+  'Hanging Leg Raises', 'Hanging Knee Raises',
+  'Hollow Hold', 'L-Sit', 'L Sit',
+  'Mountain Climbers', 'Burpees',
+  'Bodyweight Squats', 'Bodyweight Lunges', 'Walking Lunges',
+  'Glute Bridges', 'Single-Leg Glute Bridge',
+  'Bird Dog', 'Dead Bug', 'Superman',
+]);
+
+function isBodyweightExercise(name, note) {
+  if (!name) return false;
+  if (BODYWEIGHT_EXERCISES.has(name)) return true;
+  // Also detect via note text
+  if (note && /\bbodyweight\b|\bBW\b/i.test(note)) return true;
+  return false;
+}
 
 // ─── ACCORDION STATE ───
 const _accordionState = JSON.parse(sessionStorage.getItem('accordion_state') || '{}');
@@ -683,6 +706,9 @@ function parseRestSeconds(rest) {
 }
 
 function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
+  const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
+  // If toggleSet is mid-flight, let it own the save — don't double-write
+  if (_setSaving[key]) return;
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
@@ -690,13 +716,15 @@ function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
   const reps = repsTyped || repsTarget;
   if (weight <= 0 && reps <= 0) return;
-  const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
-  const done = !!(_setCache && _setCache[key] && _setCache[key].done);
-  apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done });
+  // Update local cache so the value persists across re-renders even before toggleSet
+  if (!_setCache[key]) _setCache[key] = { done: false, weight, reps };
+  else { _setCache[key].weight = weight; _setCache[key].reps = reps; }
+  // Send WITHOUT the done flag — backend will preserve the existing done state
+  apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps });
 }
 
 function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
-  event.stopPropagation();
+  if (typeof event !== 'undefined' && event && event.stopPropagation) event.stopPropagation();
   const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
@@ -706,14 +734,20 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
   const reps = repsTyped || repsTarget;
 
-  if (_setCache[key]) {
+  if (_setCache[key] && _setCache[key].done) {
     // Un-check
-    delete _setCache[key];
+    _setCache[key] = { done: false, weight, reps };
     btn.classList.remove('done');
     btn.innerHTML = '';
     btn.closest('.set-row').classList.remove('set-done');
-    // Save un-done state to DB
-    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: false });
+    // Save un-done state to DB — mark in-flight so blur-triggered saveSetField doesn't double-write
+    _setSaving[key] = true;
+    const _p1 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: false });
+    if (_p1 && typeof _p1.finally === 'function') {
+      _p1.finally(() => { delete _setSaving[key]; });
+    } else {
+      setTimeout(() => { delete _setSaving[key]; }, 1500);
+    }
   } else {
     // Check — mark set done
     _setCache[key] = { done: true, weight, reps };
@@ -724,7 +758,13 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     // Save set to DB (every set, every rep, every weight)
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
     const isSwapped = !!swaps[`${week}_${dayIdx}_${exIdx}`];
-    apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true, exercise_swapped: isSwapped });
+    _setSaving[key] = true;
+    const _p2 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true, exercise_swapped: isSwapped });
+    if (_p2 && typeof _p2.finally === 'function') {
+      _p2.finally(() => { delete _setSaving[key]; });
+    } else {
+      setTimeout(() => { delete _setSaving[key]; }, 1500);
+    }
     // Also update the exercise-level weight cache
     if (weight > 0) {
       if (!_weightsCache) _weightsCache = {};
@@ -740,7 +780,8 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     const totalSets = setsMatch.length;
     let allDone = true;
     for (let s = 0; s < totalSets; s++) {
-      if (!_setCache[`${week}_${dayIdx}_${exIdx}_${s}`]) { allDone = false; break; }
+      const _sd = _setCache[`${week}_${dayIdx}_${exIdx}_${s}`];
+      if (!_sd || !_sd.done) { allDone = false; break; }
     }
     if (allDone && !isExDone(week, dayIdx, exIdx)) {
       // Auto-mark exercise as complete
@@ -815,7 +856,7 @@ function startInlineTimer(seconds, btn, exName, week, dayIdx, exIdx, setIdx, res
                            el.closest('.set-row')?.querySelector('.set-check');
             // Mark set done via toggleSet
             var cacheKey = week + '_' + dayIdx + '_' + exIdx + '_' + setIdx;
-            if (!_setCache[cacheKey]) {
+            if (!_setCache[cacheKey] || !_setCache[cacheKey].done) {
                 _setCache[cacheKey] = { done: true, weight: 0, reps: seconds };
                 apiPost('/api/sets', { exercise: exName, week: week, day_idx: dayIdx, set_number: setIdx, weight: 0, reps: seconds, done: true });
                 var row = el.closest('.set-row');
@@ -1036,9 +1077,11 @@ async function toggleWeightDetail(exerciseName, rowEl) {
             for (const e of data.timeline) {
                 if (!e.est_1rm) continue; // Skip entries with no data
                 const isCurrent = e === data.timeline[data.timeline.length - 1];
+                const sourceTag = e.source === 'scheduled' ? '<span class="ws-tl-tag" style="background:var(--accent-bg);color:var(--accent)">scheduled</span>' : '';
                 html += `<div class="ws-timeline-entry${isCurrent ? ' ws-baseline-entry' : ''}">
                     <span class="ws-tl-week">Wk ${e.week}</span>
                     <span class="ws-tl-weight">${e.est_1rm} lb e1RM</span>
+                    ${sourceTag}
                     ${isCurrent ? '<span class="ws-tl-tag">current</span>' : ''}
                 </div>`;
             }
@@ -1518,13 +1561,18 @@ async function saveBaselineMeasurementsAndStart() {
       _bodyweightCache = null;
     }
 
-    // Save waist measurement
+    // Save waist measurement (may be gated to Sundays — silently continue on 403 for baseline)
     if (waistVal && waistVal > 0) {
-      await fetch('/api/measurements', {
+      var _blRes = await fetch('/api/measurements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: today, waist: waistVal, notes: notesVal })
       });
+      if (_blRes && _blRes.status === 403) {
+        console.info('Baseline waist not saved — measurements are Sunday-only. User can record on next Sunday.');
+      } else {
+        window._measurementsCache = null;
+      }
     }
 
     // Upload any photos that haven't been uploaded yet (they're uploaded on capture, but just in case)
@@ -4196,7 +4244,18 @@ async function submitSundayMeasurements() {
   };
 
   // Save measurements
-  await apiPost('/api/measurements', data);
+  var _measRes = await apiPost('/api/measurements', data);
+  if (_measRes && _measRes.status === 403) {
+    try {
+      var err = await _measRes.json();
+      alert('Measurements can only be recorded on Sundays. Next Sunday: ' + (err.next_sunday_in_days || '?') + ' days.');
+    } catch (e) {
+      alert('Measurements can only be recorded on Sundays.');
+    }
+    return;
+  }
+  // Clear the cache so the Stats section picks up the new entry
+  window._measurementsCache = null;
   window._sundayMeasurements = data;
 
   // Also save weight to bodyweight tracker
@@ -5329,6 +5388,53 @@ function setDay(d) {
   renderDetail();
 }
 
+// Used by swipe gestures — always navigates (no toggle), clamps at week boundaries
+function navigateDay(direction) {
+  if (currentDay === null) return;
+  const next = currentDay + direction;
+  if (next < 0 || next > 6) return;
+  currentDay = next;
+  renderTodayNav();
+  renderDayGrid();
+  renderDetail();
+}
+
+// Attach swipe handlers to the detail panel — call once after first render
+let _swipeHandlersAttached = false;
+function attachSwipeHandlers() {
+  if (_swipeHandlersAttached) return;
+  const panel = document.getElementById('detail-panel');
+  if (!panel) return;
+  _swipeHandlersAttached = true;
+  let startX = 0, startY = 0, startT = 0, tracking = false;
+  panel.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { tracking = false; return; }
+    // Don't hijack swipes that start on inputs/buttons
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'button' || tag === 'textarea' || tag === 'select') {
+      tracking = false;
+      return;
+    }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startT = Date.now();
+    tracking = true;
+  }, { passive: true });
+  panel.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    const dt = Date.now() - startT;
+    // Require: ≥60px horizontal, horizontal > 1.5×vertical, ≤500ms
+    if (Math.abs(dx) < 60) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dt > 500) return;
+    navigateDay(dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+
 // ─── COMPLETION TRACKING (cache-based) ─────────────────────────────────────
 function isExDone(week, dayIdx, exIdx) {
   if (!_completionsCache || !_completionsCache.exercises) return false;
@@ -5582,18 +5688,15 @@ function renderWarmupInner(dayData) {
     <div class="warmup-body visible" id="warmup-body">
       ${(wu.steps || []).map((step, i) => {
         const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i];
-        const hasDuration = !!step.duration;
+        const repsLabel = step.reps || step.duration || '';
         return `<div class="warmup-step" id="wu-step-${i}">
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
         <div class="wu-step-content">
           <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
+          ${repsLabel ? `<div class="warmup-step-reps">${repsLabel}</div>` : ''}
           ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
         </div>
-        ${hasDuration && !isWuDone ? `<button class="wu-start-btn" onclick="startWuStepTimer(${i},'${step.duration.replace(/'/g, "\\'")}')" id="wu-start-${i}">${step.duration}</button>` : ''}
-        ${hasDuration && isWuDone ? `<span class="warmup-step-duration" style="opacity:0.5">${step.duration}</span>` : ''}
-        ${!hasDuration ? '' : ''}
-        <div class="wu-timer" id="wu-timer-${i}"></div>
       </div>`;
       }).join('')}
     </div>`;
@@ -5611,68 +5714,6 @@ function toggleWarmup(week, dayIdx, stepIdx, btn) {
   btn.classList.toggle('done');
   btn.innerHTML = _warmupCache[key] ? '&#10003;' : '';
   apiPost('/api/warmup-completions', { week, day_idx: dayIdx, step_idx: stepIdx });
-  // Stop timer for this step if running
-  if (_warmupCache[key] && warmupTimerInterval) {
-    clearInterval(warmupTimerInterval);
-    warmupTimerInterval = null;
-    const timerEl = document.getElementById('wu-timer-' + stepIdx);
-    if (timerEl) timerEl.innerHTML = '';
-  }
-  // Hide the start button for completed steps
-  const startBtn = document.getElementById('wu-start-' + stepIdx);
-  if (startBtn && _warmupCache[key]) {
-    startBtn.style.display = 'none';
-  }
-}
-
-function startWuStepTimer(stepIdx, durationStr) {
-  // Stop any existing timer
-  if (warmupTimerInterval) clearInterval(warmupTimerInterval);
-
-  const timerEl = document.getElementById('wu-timer-' + stepIdx);
-  const startBtn = document.getElementById('wu-start-' + stepIdx);
-  if (!timerEl) return;
-
-  // Parse duration
-  let seconds = 30;
-  const m = durationStr.match(/(\d+)/);
-  if (m) {
-    seconds = parseInt(m[1]);
-    if (durationStr.includes('min')) seconds *= 60;
-  }
-
-  // Hide start button, show timer
-  if (startBtn) startBtn.style.display = 'none';
-
-  let remaining = seconds;
-  timerEl.innerHTML = `<span class="wu-countdown">${formatWuTimer(remaining)}</span>`;
-
-  warmupTimerInterval = setInterval(() => {
-    remaining--;
-    if (remaining <= 0) {
-      clearInterval(warmupTimerInterval);
-      warmupTimerInterval = null;
-      timerEl.innerHTML = `<span class="wu-countdown wu-done">DONE</span>`;
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      // Auto-check this step
-      const checkBtn = document.querySelector(`#wu-step-${stepIdx} .wu-check`);
-      if (checkBtn && !checkBtn.classList.contains('done')) {
-        toggleWarmup(currentWeek, currentDay, stepIdx, checkBtn);
-      }
-      setTimeout(() => { timerEl.innerHTML = ''; }, 2000);
-    } else {
-      timerEl.innerHTML = `<span class="wu-countdown">${formatWuTimer(remaining)}</span>`;
-    }
-  }, 1000);
-}
-
-function formatWuTimer(sec) {
-  if (sec >= 60) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-  return `${sec}s`;
 }
 
 function renderPostWorkoutCoach() {
@@ -5919,8 +5960,12 @@ async function sendRunCoachMsg() {
 
 // ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
 function renderCheckinInner(dayData, dayIdx) {
-  // Show on Sunday (index 6) or Saturday (index 5)
-  if (dayIdx < 5) return '';
+  // Sunday-only — gate by ACTUAL today (not the day the user is viewing).
+  // JS getDay(): Sun=0. The entry form should only appear on real Sundays;
+  // history/deltas live in renderMeasurementsSection (always visible).
+  if (new Date().getDay() !== 0) return '';
+  // Also require that the user is viewing Sunday in the grid (Mon=0, Sun=6)
+  if (dayIdx !== 6) return '';
   // Check if measurements already saved today (from Sunday morning flow)
   var saved = window._sundayMeasurements || null;
   var fields = [
@@ -5988,7 +6033,7 @@ function submitCheckin() {
   submitWeeklyMeasurements();
 }
 
-function submitWeeklyMeasurements() {
+async function submitWeeklyMeasurements() {
   var data = {
     date: todayStr(),
     weight: parseFloat(document.getElementById('checkin-weight')?.value) || null,
@@ -6003,7 +6048,17 @@ function submitWeeklyMeasurements() {
     notes: (document.getElementById('checkin-notes')?.value || '').trim(),
   };
 
-  apiPost('/api/measurements', data);
+  var _wmRes = await apiPost('/api/measurements', data);
+  if (_wmRes && _wmRes.status === 403) {
+    try {
+      var err = await _wmRes.json();
+      alert('Measurements can only be recorded on Sundays. Next Sunday: ' + (err.next_sunday_in_days || '?') + ' days.');
+    } catch (e) {
+      alert('Measurements can only be recorded on Sundays.');
+    }
+    return;
+  }
+  window._measurementsCache = null;
 
   if (data.weight) {
     apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
@@ -6965,6 +7020,87 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
     return html;
 }
 
+async function fetchMeasurementsCache() {
+    if (window._measurementsCache) return window._measurementsCache;
+    try {
+        var res = await fetch('/api/measurements');
+        if (!res.ok) return [];
+        var data = await res.json();
+        // Normalize: GET /api/measurements returns `weight`, but renderer expects `weight_lbs`
+        window._measurementsCache = (data || []).map(function(e) {
+            return {
+                date: e.date,
+                weight_lbs: (e.weight_lbs != null ? e.weight_lbs : e.weight),
+                waist: e.waist,
+                chest: e.chest,
+                hips: e.hips,
+                neck: e.neck,
+                bicep_left: e.bicep_left,
+                bicep_right: e.bicep_right,
+                thigh_left: e.thigh_left,
+                thigh_right: e.thigh_right,
+            };
+        });
+        return window._measurementsCache;
+    } catch (e) {
+        return [];
+    }
+}
+
+function renderMeasurementsSection(measurements) {
+    if (!measurements || measurements.length === 0) {
+        return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements</h4><div class="measurements-empty" style="font-size:13px;color:var(--muted);padding:12px 0">No measurements yet — first entry on Sunday.</div></div>';
+    }
+    var latest = measurements[measurements.length - 1];
+    var prev = measurements.length >= 2 ? measurements[measurements.length - 2] : null;
+    var fields = [
+        { key: 'weight_lbs', label: 'Weight', unit: 'lb' },
+        { key: 'waist', label: 'Waist', unit: 'in' },
+        { key: 'chest', label: 'Chest', unit: 'in' },
+        { key: 'hips', label: 'Hips', unit: 'in' },
+        { key: 'neck', label: 'Neck', unit: 'in' },
+        { key: 'bicep_left', label: 'Bicep L', unit: 'in' },
+        { key: 'bicep_right', label: 'Bicep R', unit: 'in' },
+        { key: 'thigh_left', label: 'Thigh L', unit: 'in' },
+        { key: 'thigh_right', label: 'Thigh R', unit: 'in' },
+    ];
+    var rows = '';
+    for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        var cur = latest[f.key];
+        if (cur == null) continue;
+        var deltaHtml = '';
+        if (prev && prev[f.key] != null) {
+            var d = cur - prev[f.key];
+            if (d !== 0) {
+                var sign = d > 0 ? '+' : '';
+                // For weight/waist/hips lower is better; for everything else (biceps/chest/thigh) bigger is "lift"
+                var color = (f.key === 'weight_lbs' || f.key === 'waist' || f.key === 'hips')
+                    ? (d < 0 ? 'var(--lift)' : '#ef4444')
+                    : (d > 0 ? 'var(--lift)' : '#ef4444');
+                deltaHtml = '<span class="m-delta" style="color:' + color + '">' + sign + d.toFixed(1) + '</span>';
+            } else {
+                deltaHtml = '<span class="m-delta" style="color:var(--muted)">0</span>';
+            }
+        } else {
+            deltaHtml = '<span class="m-delta"></span>';
+        }
+        rows += '<div class="m-row">' +
+            '<span class="m-label">' + f.label + '</span>' +
+            '<span class="m-val">' + cur + ' ' + f.unit + '</span>' +
+            deltaHtml +
+        '</div>';
+    }
+    var dateStr = latest.date || '';
+    if (!rows) {
+        return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements <span style="font-size:11px;color:var(--muted);font-weight:400">' + dateStr + '</span></h4><div class="measurements-empty" style="font-size:13px;color:var(--muted);padding:12px 0">Latest entry has no values.</div></div>';
+    }
+    return '<div class="measurements-section" style="margin-top:16px">' +
+        '<h4>Measurements <span style="font-size:11px;color:var(--muted);font-weight:400">' + dateStr + '</span></h4>' +
+        '<div class="m-grid">' + rows + '</div>' +
+    '</div>';
+}
+
 function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, dayIdx) {
     var html = '';
     if (!d.isRest) {
@@ -6975,7 +7111,14 @@ function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, da
     }
     // Garmin stats are always useful (HRV, sleep, etc.)
     html += garminStatsHtml;
+    // Measurements section — populated asynchronously so buildStatsContent stays sync
+    html += '<div id="measurements-section-mount"></div>';
     html += renderCheckinInner(d, dayIdx);
+    // Async fetch + populate measurements
+    fetchMeasurementsCache().then(function(m) {
+        var mount = document.getElementById('measurements-section-mount');
+        if (mount) mount.innerHTML = renderMeasurementsSection(m);
+    });
     return html;
 }
 
@@ -7070,6 +7213,7 @@ let _hiitAudioCtx = null;
 
 function _parseHiitDetail(detail, totalTime) {
     // Parse structured part: "5 min warmup, 8x 30:90, 3 min cooldown"
+    // The structured part is canonical — never silently adjust to fit a label.
     var work = 30, rest = 90, rounds = 8, warmup = 300, cooldown = 180;
 
     // Parse warmup: "5 min warmup" or "5 min warm"
@@ -7093,10 +7237,8 @@ function _parseHiitDetail(detail, totalTime) {
         if (restMatch) rest = parseInt(restMatch[1]);
     }
 
-    // Parse rounds: prefer the one near the ratio format "8x 30:90"
-    // Look for "Nx" pattern closest to the ratio
-    var structuredPart = detail.includes('warmup') ? detail.substring(detail.indexOf('warmup')) : detail;
-    var roundMatch = structuredPart.match(/(\d+)\s*x\s*\d/);
+    // Parse rounds: prefer the "Nx D:D" format adjacent to the ratio
+    var roundMatch = detail.match(/(\d+)\s*x\s*\d+\s*:\s*\d+/);
     if (roundMatch) {
         rounds = parseInt(roundMatch[1]);
     } else {
@@ -7105,22 +7247,8 @@ function _parseHiitDetail(detail, totalTime) {
         if (fallbackRound) rounds = parseInt(fallbackRound[1]);
     }
 
-    // Validate against total time if provided (e.g., "20 min")
-    if (totalTime) {
-        var totalMin = parseInt(totalTime);
-        if (totalMin) {
-            var computed = warmup + rounds * (work + rest) + cooldown;
-            var targetSec = totalMin * 60;
-            // If computed is way off, adjust rounds to fit
-            if (Math.abs(computed - targetSec) > 120) {
-                var intervalSec = work + rest;
-                var availableForIntervals = targetSec - warmup - cooldown;
-                if (availableForIntervals > 0 && intervalSec > 0) {
-                    rounds = Math.max(1, Math.round(availableForIntervals / intervalSec));
-                }
-            }
-        }
-    }
+    // Cooldown always matches warmup
+    cooldown = warmup;
 
     return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: cooldown };
 }
@@ -7293,6 +7421,7 @@ async function renderDetail() {
     panel.classList.remove('visible');
     return;
   }
+  attachSwipeHandlers();
 
   try {
 
@@ -7369,11 +7498,11 @@ async function renderDetail() {
           const dbKey = `${currentWeek}_${currentDay}_${exName}`;
           if (setData[dbKey]) {
             for (const [setNum, setInfo] of Object.entries(setData[dbKey])) {
-              if (setInfo.done) {
-                _setCache[`${currentWeek}_${currentDay}_${i}_${setNum}`] = {
-                  done: true, weight: setInfo.weight, reps: setInfo.reps,
-                };
-              }
+              _setCache[`${currentWeek}_${currentDay}_${i}_${setNum}`] = {
+                done: !!setInfo.done,
+                weight: setInfo.weight,
+                reps: setInfo.reps,
+              };
             }
           }
         }
@@ -7450,12 +7579,17 @@ async function renderDetail() {
     const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
     const setCount = setsMatch ? parseInt(setsMatch[1]) : 1;
     const targetReps = setsMatch ? setsMatch[2] : ex.sets;
+    const targetRepsDisplay = ex.reps || (setsMatch ? setsMatch[2] : ex.sets);
     const restSeconds = parseRestSeconds(ex.rest);
     const escapedName = displayName.replace(/'/g, "\\'");
 
-    // Detect timed exercises (reps like "45s", "60s")
-    const isTimedEx = /^\d+s$/i.test(targetReps);
-    const timedSeconds = isTimedEx ? parseInt(targetReps) : 0;
+    // Detect timed exercises — check ex.reps first (separate field), then parsed sets format
+    const repsField = (ex.reps != null && ex.reps !== '') ? String(ex.reps) : targetReps;
+    const isTimedEx = /^\d+s$/i.test(repsField);
+    const timedSeconds = isTimedEx ? parseInt(repsField) : 0;
+
+    // Detect bodyweight exercises (Ring Row, Plank, Push-Ups, etc.)
+    const isBW = isBodyweightExercise(displayName, ex.note);
 
     // Build per-set rows
     let setRowsHtml = '';
@@ -7475,8 +7609,17 @@ async function renderDetail() {
             ${setDone ? '&#10003;' : ''}
           </button>
           <span class="set-label">Set ${s + 1}</span>
-          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})">${targetReps}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetReps} &#10003;</span>`}
+          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})">${targetRepsDisplay}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay} &#10003;</span>`}
           <div id="inline-timer-${i}-${s}" style="margin-left:8px;font-family:'DM Mono',monospace;font-size:15px;color:var(--accent)"></div>
+        </div>`;
+      } else if (isBW) {
+        // Bodyweight exercise: checkbox + set label + "BW" tag + reps input (no weight input)
+        setRowsHtml += `<div class="set-row bw-row${setDone ? ' set-done' : ''}" data-set="${s}">
+          <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">${setDone ? '&#10003;' : ''}</button>
+          <span class="set-label">Set ${s + 1}</span>
+          <span class="bw-tag">BW</span>
+          <span class="set-x">&times;</span>
+          <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" placeholder="${targetRepsDisplay}" value="${setReps}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')" />
         </div>`;
       } else {
         // Normal exercise: checkbox + set label + weight × reps
@@ -7487,7 +7630,7 @@ async function renderDetail() {
           <span class="set-label">Set ${s + 1}</span>
           <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
           <span class="set-x">&times;</span>
-          <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetReps}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
+          <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetRepsDisplay}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
         </div>`;
       }
     }
@@ -7581,16 +7724,69 @@ async function renderDetail() {
                         trend === 'down' ? '<span class="ws-trend-down">\u2193</span>' :
                         '<span class="ws-trend-same">\u2192</span>';
       const shortName = name.replace('Barbell ', '').replace('Conventional ', '');
-      // Estimate 1RM from last logged weight × reps
+      // Estimate 1RM — take the BEST of: best logged e1RM ever, OR latest prescription's e1RM.
+      // Walk full history to find the max logged e1RM (not just the most recent set,
+      // which might be a warmup or test weight).
       const exData = getExerciseData(name);
       let est1rm = '';
+      let loggedRM = 0;
       if (exData && exData.history && exData.history.length > 0) {
-        const last = exData.history[exData.history.length - 1];
-        const lastWt = last.weight || wt;
-        const lastReps = last.reps_completed || 10;
-        const oneRM = estimate1RM(lastWt, lastReps);
-        if (oneRM > 0) est1rm = oneRM;
+        for (const h of exData.history) {
+          const hw = h.weight || 0;
+          const hr = h.reps_completed || h.reps || 10;
+          if (hw > 0) {
+            const rm = estimate1RM(hw, hr);
+            if (rm > loggedRM) loggedRM = rm;
+          }
+        }
       }
+      // Walk ALL weeks of workoutData (not just currentWeek) to find the LATEST
+      // prescription for this exercise. This way, if the user is viewing week 1
+      // but they're actually on week 3, we show the week 3 training level.
+      let prescribedRM = 0;
+      let latestPrescribedWk = 0;
+      let latestTarget = 0;
+      let latestRepsStr = '10';
+      if (workoutData) {
+        for (const wkKey of Object.keys(workoutData)) {
+          const wkNum = parseInt(wkKey);
+          if (!wkNum || wkNum < 1 || wkNum > 12) continue;
+          const wkData = workoutData[wkKey];
+          const days = (wkData && wkData.days) || [];
+          for (const day of days) {
+            const exList = (day && day.exercises) || [];
+            const found = exList.find(ex => (ex.name || ex.exercise) === name);
+            if (found && found.target_weight && wkNum >= latestPrescribedWk) {
+              latestPrescribedWk = wkNum;
+              latestTarget = found.target_weight;
+              // reps could be in ex.reps OR parsed from "3x12" in ex.sets
+              latestRepsStr = String(found.reps || '');
+              if (!latestRepsStr) {
+                const setsStr = String(found.sets || '');
+                // Match "Nx<reps>" — capture the part AFTER the x
+                const m = setsStr.match(/^\d+x(.+)$/);
+                latestRepsStr = m ? m[1] : '10';
+              }
+            }
+          }
+        }
+      }
+      if (latestTarget > 0) {
+        let r = 10;
+        const rs = latestRepsStr.trim();
+        if (!rs.endsWith('s')) {
+          if (rs.includes('-')) {
+            const parts = rs.split('-').map(x => parseInt(x));
+            if (parts[0] && parts[1]) r = Math.round((parts[0] + parts[1]) / 2);
+          } else {
+            const m = rs.match(/(\d+)/);
+            if (m) r = parseInt(m[1]);
+          }
+        }
+        prescribedRM = estimate1RM(latestTarget, r);
+      }
+      const oneRM = Math.max(loggedRM, prescribedRM);
+      if (oneRM > 0) est1rm = oneRM;
       const displayVal = est1rm || wt;
       wsRows += `<div class="ws-row-wrap">
   <div class="ws-row" onclick="toggleWeightDetail('${name}', this)">
@@ -7797,11 +7993,20 @@ async function saveMeasurements() {
   btn.disabled = true;
 
   try {
-    await fetch('/api/measurements', {
+    const _smRes = await fetch('/api/measurements', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
+    if (_smRes.status === 403) {
+      let _smErr = {};
+      try { _smErr = await _smRes.json(); } catch (e) {}
+      alert('Measurements can only be recorded on Sundays. Next Sunday: ' + (_smErr.next_sunday_in_days || '?') + ' days.');
+      btn.textContent = 'Save Measurements';
+      btn.disabled = false;
+      return;
+    }
+    window._measurementsCache = null;
     btn.textContent = 'Saved!';
     btn.classList.add('saved');
     setTimeout(() => {
@@ -8411,7 +8616,8 @@ function logFocusSet() {
   // Check if all sets done
   let allDone = true;
   for (let s = 0; s < _focusSetCount; s++) {
-    if (!_setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`]) {
+    const _fsd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
+    if (!_fsd || !_fsd.done) {
       allDone = false; break;
     }
   }
@@ -8519,7 +8725,8 @@ function startTimedSet(seconds) {
       // Check if all sets done
       let allDone = true;
       for (let s = 0; s < _focusSetCount; s++) {
-        if (!_setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`]) { allDone = false; break; }
+        const _tsd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
+        if (!_tsd || !_tsd.done) { allDone = false; break; }
       }
 
       if (allDone) {
@@ -8619,7 +8826,7 @@ function showFocusRestTimer(seconds, showRpeAfter) {
     const completedSets = [];
     for (let s = 0; s < _focusSetIdx; s++) {
       const sd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
-      if (sd) {
+      if (sd && sd.done) {
         completedSets.push(`<span style="font-size:11px;color:var(--muted)">S${s+1}: ${sd.weight}×${sd.reps}</span>`);
       }
     }
