@@ -321,12 +321,21 @@ function renderCoachMarkdown(text) {
   // Regex approaches break multi-word names like "Barbell Bench Press".
   // Instead, find exact exercise names in the text and break before them.
   if (window._exerciseNames && window._exerciseNames.length) {
-    // Sort longest first so "Cable Seated Row" matches before "Row"
+    // Sort longest first so "Barbell Bench Press" matches before "Bench Press"
     var sortedNames = window._exerciseNames.slice().sort(function(a, b) { return b.length - a.length; });
+    // Skip names that are substrings of longer names (e.g. "Bench Press" is inside "Barbell Bench Press")
+    var skipNames = {};
+    for (var _si = 0; _si < sortedNames.length; _si++) {
+      for (var _sj = 0; _sj < _si; _sj++) {
+        if (sortedNames[_sj].indexOf(sortedNames[_si]) >= 0) {
+          skipNames[sortedNames[_si]] = true;
+          break;
+        }
+      }
+    }
     for (var _eni = 0; _eni < sortedNames.length; _eni++) {
       var _exName = sortedNames[_eni];
-      if (_exName.length < 3) continue; // skip tiny names
-      // Match: non-newline char + space + ExactExerciseName + ":" (must have colon after = exercise entry)
+      if (_exName.length < 4 || skipNames[_exName]) continue;
       var _exEsc = _exName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       clean = clean.replace(new RegExp('([^\\n])\\s+(' + _exEsc + '\\s*:)', 'g'), '$1\n$2');
     }
@@ -7384,17 +7393,42 @@ async function launchWeeklyPlanning(weekOverride) {
         } catch(e) {}
     }
 
-    // Build the program summary for the coach
+    // Build the program summary WITH last week's actual data for comparison
     var programSummary = '';
+    // Gather last week's actual set data from cache
+    var lastWeekActual = {};
+    if (_weightsCache) {
+        for (var exName in _weightsCache) {
+            var hist = _weightsCache[exName];
+            var entries = hist && hist.history ? hist.history : (Array.isArray(hist) ? hist : []);
+            // Find entries from previous week
+            var prevEntries = entries.filter(function(e) { return e.week === currentWeek; });
+            if (prevEntries.length > 0) {
+                var last = prevEntries[prevEntries.length - 1];
+                lastWeekActual[exName] = {
+                    weight: last.weight,
+                    reps: last.reps_completed || last.reps || '?',
+                };
+            }
+        }
+    }
     if (programData && programData.program) {
         var dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
         var currentDayP = -1;
         for (var pi = 0; pi < programData.program.length; pi++) {
             var p = programData.program[pi];
             if (p.day !== currentDayP) { currentDayP = p.day; programSummary += '\n' + dayNames[p.day] + ':'; }
-            var weightStr = p.target_weight ? ' -> ' + p.target_weight + 'lb' : '';
+            var weightStr = p.target_weight ? ' @ ' + p.target_weight + 'lb' : '';
             var reasonStr = p.reason ? ' (' + p.reason + ')' : '';
-            programSummary += '\n  ' + p.exercise + ': ' + p.sets + 'x' + p.reps + weightStr + reasonStr;
+            // Include what they ACTUALLY lifted last week
+            var prevStr = '';
+            var prev = lastWeekActual[p.exercise];
+            if (prev && prev.weight) {
+                var delta = p.target_weight ? (p.target_weight - prev.weight) : 0;
+                var changeLabel = delta > 0 ? ' [UP ' + delta + 'lb]' : delta < 0 ? ' [DOWN ' + Math.abs(delta) + 'lb]' : ' [HOLD]';
+                prevStr = ' (last week: ' + prev.weight + 'lb x ' + prev.reps + ' reps' + changeLabel + ')';
+            }
+            programSummary += '\n  ' + p.exercise + ': ' + p.sets + 'x' + p.reps + weightStr + reasonStr + prevStr;
         }
     }
     var deficitStr = '';
@@ -7433,17 +7467,20 @@ async function launchWeeklyPlanning(weekOverride) {
         mealStr +
         '\n\nFORMAT — THIS IS A CONVERSATION. Present ONE DAY AT A TIME:' +
         '\n1. First message: 2-3 sentence OVERVIEW of what is changing this week vs last week and why. If calories changed, explain (weight dropped, TDEE recalculated, deficit adjusted). End with "Ready to see Monday?"' +
-        '\n2. When the athlete responds, present MONDAY only:' +
+        '\n2. When the athlete responds, present MONDAY only. Use this EXACT format:' +
         '\n\n**Monday — [Workout Name]**' +
-        '\n- Exercise: SetsxReps @ Weight — why' +
-        '\n- Exercise: SetsxReps @ Weight — why' +
-        '\nRun: Type, Duration' +
-        '\n\nEnd with "Questions on Monday, or move to Tuesday?"' +
-        '\n3. Then Tuesday when they respond. Then Wednesday. One day per message.' +
-        '\n4. Each exercise on its OWN LINE with a bullet.' +
-        '\n5. Explain WHY weights changed.' +
-        '\n6. After all 6 days presented, summarize the week and ask if they want to adjust anything.' +
-        '\n7. Do NOT dump the entire week in one message. This is a dialogue, not a lecture.';
+        '\n- Barbell Bench Press: 4x10 @ 115lb — UP 5lb (was 110lb x 10)' +
+        '\n- Cable Seated Row: 4x10 @ 150lb — UP 5lb (was 145lb x 10)' +
+        '\n- Face Pull: 3x15 @ 55lb — HOLD (was 55lb x 15)' +
+        '\n- Lateral Raise: 3x14 @ 10lb — reps UP (was 3x13)' +
+        '\nRun: Zone 2, 30 min' +
+        '\n\nEnd with "Questions, or Tuesday?"' +
+        '\n3. Then Tuesday when they respond. One day per message.' +
+        '\n4. EACH exercise on its OWN LINE with a dash.' +
+        '\n5. For EVERY exercise, state what changed: weight UP/DOWN/HOLD, reps changed, or sets changed. Include last week actual in parentheses.' +
+        '\n6. The (last week: Xlb x Y reps) data is provided in the program data above — USE IT.' +
+        '\n7. After all 6 days, summarize and ask for adjustments.' +
+        '\n8. Do NOT dump the entire week. One day per message.';
 
     // Now open the inline chat with the planning trigger
     container.innerHTML =
