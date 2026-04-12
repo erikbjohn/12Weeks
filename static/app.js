@@ -6626,20 +6626,18 @@ function _pdStreakGrid(completions, startDate) {
     '</div>';
 }
 
-/* ── LIFT PROGRESSION (mini bar charts) ── */
+/* ── LIFT PROGRESSION (compact rows with inline sparkline + horizontal bar) ── */
 function _pdLiftProgression(lifts) {
   if (!lifts || Object.keys(lifts).length === 0) {
     return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div><div class="pd-empty">No lift data yet</div></div>';
   }
 
-  // Gather top lifts by number of entries, pick top 5
   var liftEntries = [];
   for (var name in lifts) {
     var hist = lifts[name];
     if (!hist) continue;
     var entries = Array.isArray(hist) ? hist : (hist.history || []);
     if (entries.length === 0) continue;
-    // Group by week, take max weight per week
     var weekMap = {};
     for (var ei = 0; ei < entries.length; ei++) {
       var e = entries[ei];
@@ -6657,41 +6655,49 @@ function _pdLiftProgression(lifts) {
     var weeks = Object.keys(weekMap).map(Number).sort(function(a, b) { return a - b; });
     if (weeks.length === 0) continue;
     var weekVals = weeks.map(function(wk) { return { week: wk, e1rm: weekMap[wk] }; });
-    liftEntries.push({ name: name, data: weekVals, maxE1rm: Math.max.apply(null, weekVals.map(function(v) { return v.e1rm; })) });
+    var maxE1rm = Math.max.apply(null, weekVals.map(function(v) { return v.e1rm; }));
+    liftEntries.push({ name: name, data: weekVals, maxE1rm: maxE1rm });
   }
 
-  // Sort by most data points, take top 5
-  liftEntries.sort(function(a, b) { return b.data.length - a.data.length; });
-  liftEntries = liftEntries.slice(0, 5);
+  liftEntries.sort(function(a, b) { return b.maxE1rm - a.maxE1rm; });
+  liftEntries = liftEntries.slice(0, 8);
 
   if (liftEntries.length === 0) {
     return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div><div class="pd-empty">No lift data yet</div></div>';
   }
 
+  // Find global max for bar scaling
+  var globalMax = Math.max.apply(null, liftEntries.map(function(l) { return l.maxE1rm; }));
+
   var html = '';
   for (var li = 0; li < liftEntries.length; li++) {
     var lift = liftEntries[li];
-    var maxVal = Math.max.apply(null, lift.data.map(function(v) { return v.e1rm; }));
     var latestVal = lift.data[lift.data.length - 1].e1rm;
-    var isPR = latestVal >= maxVal;
+    var firstVal = lift.data[0].e1rm;
+    var isPR = latestVal >= lift.maxE1rm;
+    var delta = latestVal - firstVal;
+    var deltaStr = delta > 0 ? '+' + delta : delta === 0 ? '' : '' + delta;
+    var deltaColor = delta > 0 ? '#4ade80' : delta < 0 ? '#ef4444' : 'var(--muted)';
+    var barPct = globalMax > 0 ? Math.round(latestVal / globalMax * 100) : 0;
+    var shortName = lift.name.replace('Barbell ', '').replace('Conventional ', '').replace('Cable ', '');
 
-    html += '<div class="pd-lift-row">';
-    html += '<div class="pd-lift-name">' + lift.name + (isPR ? ' <span class="pd-pr-badge">PR</span>' : '') + '</div>';
-    html += '<div class="pd-lift-bars">';
+    // Build sparkline from weekly e1RM values
+    var sparkVals = lift.data.map(function(d) { return d.e1rm; });
+    var spark = _buildSparkline(sparkVals, false);
 
-    for (var bi = 0; bi < lift.data.length; bi++) {
-      var pct = maxVal > 0 ? (lift.data[bi].e1rm / maxVal * 100) : 0;
-      var barLabel = 'W' + lift.data[bi].week;
-      var isMax = lift.data[bi].e1rm >= maxVal;
-      html += '<div class="pd-lift-bar-wrap">';
-      html += '<div class="pd-lift-bar' + (isMax ? ' pd-lift-bar-max' : '') + '" style="height:' + Math.max(8, pct) + '%"></div>';
-      html += '<div class="pd-lift-bar-label">' + barLabel + '</div>';
-      html += '</div>';
-    }
-
-    html += '</div>';
-    html += '<div class="pd-lift-val">' + latestVal + ' <span class="pd-lift-unit">e1RM</span></div>';
-    html += '</div>';
+    html += '<div class="pd-lift-row">' +
+      '<div class="pd-lift-top">' +
+        '<span class="pd-lift-name">' + shortName + (isPR ? ' <span class="pd-pr-badge">PR</span>' : '') + '</span>' +
+        '<span class="pd-lift-vals">' +
+          '<span class="pd-lift-e1rm">' + latestVal + '</span>' +
+          (deltaStr ? '<span style="color:' + deltaColor + ';font-size:11px;margin-left:4px">' + deltaStr + '</span>' : '') +
+        '</span>' +
+      '</div>' +
+      '<div class="pd-lift-bottom">' +
+        '<div class="pd-lift-bar-bg"><div class="pd-lift-bar-fill" style="width:' + barPct + '%"></div></div>' +
+        '<div class="pd-lift-spark">' + spark + '</div>' +
+      '</div>' +
+    '</div>';
   }
 
   return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div>' + html + '</div>';

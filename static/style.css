@@ -2469,77 +2469,65 @@ footer {
 .pd-lift-row {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 8px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
 }
-
+.pd-lift-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
 .pd-lift-name {
-  font-family: 'Inter', sans-serif;
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 8px;
 }
-
 .pd-pr-badge {
   display: inline-block;
   background: #4ade80;
   color: #0d0f0e;
   font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
   vertical-align: middle;
   margin-left: 4px;
 }
-
-.pd-lift-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  height: 60px;
-  margin-bottom: 4px;
-}
-
-.pd-lift-bar-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  justify-content: flex-end;
-}
-
-.pd-lift-bar {
-  width: 100%;
-  max-width: 28px;
-  background: #4ade80;
-  border-radius: 3px 3px 0 0;
-  min-height: 4px;
-  opacity: 0.6;
-}
-
-.pd-lift-bar-max {
-  opacity: 1;
-  box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
-}
-
-.pd-lift-bar-label {
+.pd-lift-vals {
   font-family: 'DM Mono', monospace;
-  font-size: 9px;
-  color: var(--dim);
-  margin-top: 3px;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
 }
-
-.pd-lift-val {
-  font-family: 'DM Mono', monospace;
-  font-size: 15px;
+.pd-lift-e1rm {
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text);
-  text-align: right;
 }
-
+.pd-lift-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pd-lift-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pd-lift-bar-fill {
+  height: 100%;
+  background: #4ade80;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.pd-lift-spark {
+  flex-shrink: 0;
+}
 .pd-lift-unit {
   font-size: 11px;
   color: var(--muted);
