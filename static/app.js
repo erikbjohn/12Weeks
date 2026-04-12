@@ -3414,8 +3414,8 @@ function showSettingsMenu() {
     <button onclick="showStartDateSetting()">Set Start Date</button>
     <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="recomputeGoal()">Recompute Calories</button>
-    <button onclick="if(confirm('Re-plan this week? Exercises will be regenerated.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
-    <button onclick="if(confirm('Plan next week? This generates the full program.'))launchWeeklyPlanning()">Plan Next Week</button>
+    <button onclick="if(confirm('Re-plan Week ' + currentWeek + '? This will regenerate exercises, weights, and meals for this week.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
+    <button onclick="if(confirm('Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?'))launchWeeklyPlanning()">Plan Next Week</button>
     <button onclick="regenerateProfile()">Regenerate Profile</button>
     <button onclick="restartFromReveal()">Restart from Plan Review</button>
     <button onclick="showGroceryList()">Grocery List</button>
