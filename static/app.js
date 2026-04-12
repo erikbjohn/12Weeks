@@ -155,29 +155,93 @@ function markPopupFired(key) {
   localStorage.setItem('popup_' + key + '_' + todayStr(), '1');
 }
 
-function showPreStartLockout(startDateStr) {
+async function showPreStartLockout(startDateStr) {
   const startDate = new Date(startDateStr + 'T00:00:00');
   const now = new Date();
   const diffMs = startDate - now;
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-
   const dateLabel = startDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
+  // Fetch Week 1 schedule for preview
+  var previewHtml = '';
+  try {
+    const wkRes = await fetch('/api/workouts');
+    if (wkRes.ok) {
+      const wkData = await wkRes.json();
+      const week1 = wkData['1'];
+      if (week1 && week1.days) {
+        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        var schedRows = '';
+        for (var di = 0; di < Math.min(week1.days.length, 7); di++) {
+          var dd = week1.days[di];
+          var liftName = dd.liftName || (dd.isRest ? 'Rest' : 'Workout');
+          var runInfo = dd.run ? dd.run.label + ' ' + dd.run.time : '';
+          var exCount = (dd.exercises || []).length;
+          var mealInfo = dd.mealPlan ? (dd.mealPlan.targetCal || dd.mealPlan.label || '') : '';
+          schedRows += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #2a2e2c">' +
+            '<div><span style="color:#4ade80;font-weight:600;font-size:13px">' + dayNames[di].slice(0,3) + '</span> <span style="color:#e8ede9;font-size:13px">' + liftName + '</span>' +
+            (exCount > 0 ? '<span style="color:#6b7280;font-size:11px;margin-left:6px">' + exCount + ' exercises</span>' : '') + '</div>' +
+            '<span style="color:#6b7280;font-size:12px;font-family:\'DM Mono\',monospace">' + runInfo + '</span>' +
+          '</div>';
+        }
+        previewHtml = '<div style="margin-top:1.5rem;text-align:left">' +
+          '<div style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin-bottom:8px">WEEK 1 PREVIEW</div>' +
+          schedRows +
+          '<button onclick="showGroceryListPreStart()" style="width:100%;margin-top:12px;background:#1a2e24;border:1px solid #3a7a56;color:#4ade80;padding:10px;border-radius:8px;font-size:14px;cursor:pointer;font-family:\'DM Mono\',monospace">View Grocery List</button>' +
+        '</div>';
+      }
+    }
+  } catch(e) {}
+
   document.body.innerHTML = `
-    <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;text-align:center;background:var(--bg,#0d0f0e);color:var(--text,#e8ede9)">
-      <div style="max-width:400px">
+    <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:2rem;text-align:center;background:#0d0f0e;color:#e8ede9">
+      <div style="max-width:420px;width:100%;padding-top:2rem">
         <div style="font-family:'DM Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin-bottom:1rem">COACH ERIK</div>
         <h1 style="font-size:1.8rem;font-weight:700;margin-bottom:0.5rem">YOUR PROGRAM STARTS</h1>
-        <div style="font-size:1.4rem;color:#4ade80;font-weight:600;margin-bottom:2rem">${dateLabel}</div>
+        <div style="font-size:1.4rem;color:#4ade80;font-weight:600;margin-bottom:1.5rem">${dateLabel}</div>
         <div style="font-family:'DM Mono',monospace;font-size:3rem;font-weight:800;color:#4ade80;margin-bottom:0.5rem">${days}d ${hours}h</div>
-        <div style="font-size:13px;color:#6b7280;margin-bottom:2rem">until Day 1</div>
-        <div style="background:#1a2e24;border:2px solid #3a7a56;border-radius:12px;padding:20px;margin-bottom:2rem;text-align:left;font-size:15px;line-height:1.6;color:#e8ede9">
+        <div style="font-size:13px;color:#6b7280;margin-bottom:1.5rem">until Day 1</div>
+        <div style="background:#1a2e24;border:2px solid #3a7a56;border-radius:12px;padding:20px;margin-bottom:1rem;text-align:left;font-size:15px;line-height:1.6;color:#e8ede9">
           Rest up. Eat clean. Hydrate. When that clock hits zero, we go. No warm-up period. No easing in. Day 1 is full speed. Be ready.
         </div>
-        <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'" style="background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
+        ${previewHtml}
+        <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'" style="margin-top:1.5rem;background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
       </div>
     </div>`;
+}
+
+async function showGroceryListPreStart() {
+  try {
+    const res = await fetch('/api/shopping-list');
+    if (!res.ok) return;
+    const data = await res.json();
+    var html = '<div style="position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;overflow-y:auto;padding:2rem">' +
+      '<div style="max-width:420px;margin:0 auto">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+        '<h2 style="color:#4ade80;font-size:1.2rem">Grocery List — Week 1</h2>' +
+        '<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="background:none;border:none;color:#6b7280;font-size:24px;cursor:pointer">&times;</button>' +
+      '</div>';
+    if (data.categories) {
+      for (var cat in data.categories) {
+        html += '<div style="font-family:\'DM Mono\',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin:12px 0 6px">' + cat + '</div>';
+        for (var ii = 0; ii < data.categories[cat].length; ii++) {
+          var item = data.categories[cat][ii];
+          html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2a2e2c;font-size:14px">' +
+            '<span style="color:#e8ede9">' + item.name + '</span>' +
+            '<span style="color:#6b7280;font-family:\'DM Mono\',monospace">' + item.amount + '</span></div>';
+        }
+      }
+    } else if (Array.isArray(data)) {
+      for (var ji = 0; ji < data.length; ji++) {
+        html += '<div style="padding:6px 0;border-bottom:1px solid #2a2e2c;font-size:14px;color:#e8ede9">' + (data[ji].name || data[ji]) + '</div>';
+      }
+    }
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch(e) {
+    alert('Could not load grocery list.');
+  }
 }
 
 function apiPost(url, body) {
