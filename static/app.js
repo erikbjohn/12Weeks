@@ -6318,12 +6318,22 @@ function showProgress() {
   overlay.classList.add('visible');
   overlay.innerHTML = '<div class="progress-loading">Loading progress data...</div>';
 
+  // Timeout: if API doesn't respond in 8 seconds, render from local caches
+  var _rendered = false;
+  var _timeout = setTimeout(function() {
+    if (!_rendered) { _rendered = true; _renderNewDashboard(null); }
+  }, 8000);
+
   fetch('/api/progress/dashboard')
-    .then(function(r) { return r.ok ? r.json() : Promise.reject('api'); })
-    .then(function(data) { _renderNewDashboard(data); })
-    .catch(function() {
-      // Fallback: build dashboard from local caches
-      _renderNewDashboard(null);
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      clearTimeout(_timeout);
+      if (!_rendered) { _rendered = true; try { _renderNewDashboard(data); } catch(e) { console.error('Dashboard render error:', e); _renderNewDashboard(null); } }
+    })
+    .catch(function(e) {
+      console.error('Dashboard fetch error:', e);
+      clearTimeout(_timeout);
+      if (!_rendered) { _rendered = true; _renderNewDashboard(null); }
     });
 }
 
@@ -6337,7 +6347,12 @@ function closeProgress() {
 function _renderNewDashboard(apiData) {
   var overlay = document.getElementById('progress-overlay');
   if (!overlay) return;
-
+  try { _renderNewDashboardInner(apiData, overlay); } catch(e) {
+    console.error('Dashboard render crash:', e);
+    overlay.innerHTML = '<div class="pd-header"><button class="pd-close" onclick="closeProgress()">&times;</button><span class="pd-title">Progress</span></div><div style="padding:2rem;color:#ef4444">Dashboard error: ' + e.message + '</div>';
+  }
+}
+function _renderNewDashboardInner(apiData, overlay) {
   // Gather data from API response with fallbacks to local caches
   var d = apiData || {};
   var bwData = d.bodyweight || {};
@@ -6373,6 +6388,17 @@ function _renderNewDashboard(apiData) {
   html += _pdBodyComp(measurements);
 
   // ── 4. TRAINING STREAK ──
+  var completions = training.weekly_adherence ? {} : (_completionsCache ? _completionsCache.days : {});
+  // Build completions from training.weekly_adherence if available
+  if (training.weekly_adherence) {
+    for (var ai = 0; ai < training.weekly_adherence.length; ai++) {
+      var wa = training.weekly_adherence[ai];
+      // Mark days_done number of days as complete for this week
+      for (var di = 0; di < wa.days_done && di < 6; di++) {
+        completions[wa.week + '_' + di] = true;
+      }
+    }
+  }
   html += _pdStreakGrid(completions, startDate);
 
   // ── 5. LIFT PROGRESSION ──
