@@ -2082,6 +2082,46 @@ def api_set_log():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+
+    # Auto-complete day: if all prescribed exercises have all sets done, mark the day complete.
+    if done_provided and done:
+        try:
+            from workout_data import get_workouts
+            phase_workouts = get_workouts(week)
+            if day_idx < len(phase_workouts):
+                day_exercises = phase_workouts[day_idx].get("exercises", [])
+                # Check user prescriptions (override template)
+                user_rx = WeeklyPrescription.query.filter_by(
+                    user_id=current_user.id, week=week, day_idx=day_idx
+                ).all()
+                if user_rx:
+                    total_sets = sum(rx.sets for rx in user_rx)
+                else:
+                    total_sets = 0
+                    for ex in day_exercises:
+                        s = ex.get("sets", 1)
+                        if isinstance(s, int):
+                            total_sets += s
+                        elif isinstance(s, str):
+                            m = __import__('re').match(r'(\d+)', str(s))
+                            total_sets += int(m.group(1)) if m else 1
+
+                if total_sets > 0:
+                    done_count = SetLog.query.filter_by(
+                        user_id=current_user.id, week=week, day_idx=day_idx, done=True
+                    ).count()
+                    if done_count >= total_sets:
+                        dc = DayCompletion.query.filter_by(
+                            user_id=current_user.id, week=week, day_idx=day_idx
+                        ).first()
+                        if not dc:
+                            db.session.add(DayCompletion(
+                                user_id=current_user.id, week=week, day_idx=day_idx, done=True
+                            ))
+                            db.session.commit()
+        except Exception:
+            pass  # Don't fail the set save if auto-complete errors
+
     return jsonify({"ok": True, "id": existing.id})
 
 
