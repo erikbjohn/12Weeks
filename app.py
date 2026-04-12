@@ -5893,6 +5893,27 @@ def admin_dashboard():
     return render_template("admin.html", users=users, invites=invites, pending=pending)
 
 
+@app.route("/api/admin/reset-password", methods=["POST"])
+@admin_required
+def api_admin_reset_password():
+    """Reset a user's password. Admin-only. Returns a temporary password."""
+    import secrets
+    data = request.get_json()
+    email = (data.get("email") or "").strip().lower()
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+    temp_password = secrets.token_urlsafe(10)
+    user.password_hash = generate_password_hash(temp_password)
+    try:
+        db.session.commit()
+        return jsonify({"ok": True, "email": user.email, "temp_password": temp_password,
+                        "message": f"Password reset for {user.email}. Give them the temp password and have them change it."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/admin/reset-assessment", methods=["POST"])
 @admin_required
 def api_admin_reset_assessment():
