@@ -317,23 +317,29 @@ function renderCoachMarkdown(text) {
       }
   }
 
-  // Break before markdown list items (- Exercise: ...)
-  clean = clean.replace(/([^\n])\s*(?=- [A-Z])/g, '$1\n');
+  // Insert line breaks between exercises using the KNOWN exercise name list.
+  // Regex approaches break multi-word names like "Barbell Bench Press".
+  // Instead, find exact exercise names in the text and break before them.
+  if (window._exerciseNames && window._exerciseNames.length) {
+    // Sort longest first so "Cable Seated Row" matches before "Row"
+    var sortedNames = window._exerciseNames.slice().sort(function(a, b) { return b.length - a.length; });
+    for (var _eni = 0; _eni < sortedNames.length; _eni++) {
+      var _exName = sortedNames[_eni];
+      if (_exName.length < 3) continue; // skip tiny names
+      // Match: non-newline char + space + ExactExerciseName + ":" (must have colon after = exercise entry)
+      var _exEsc = _exName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      clean = clean.replace(new RegExp('([^\\n])\\s+(' + _exEsc + '\\s*:)', 'g'), '$1\n$2');
+    }
+  }
 
-  // Break before exercise entries: "Exercise Name: NxN" pattern (with or without bullets)
-  clean = clean.replace(/([^\n])\s+(?=[A-Z][a-zA-Z\- ]+ (?:Press|Row|Curl|Raise|Pull|Push|Squat|Lunge|Fly|Dip|Thrust|Deadlift|Shrug|Plank|Extension|Kickback|Swing|Hold|Climber|Burpee|Bridge|Step|Bird|Dead|Superman|Walk)[\w\s]*:\s*\d+[x×]\d+)/g, '$1\n');
+  // Break before day headers
+  clean = clean.replace(/([^\n])\s*(?=\*{0,2}(?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b)/gi, '$1\n\n');
 
-  // Break before "Exercise Name: NxN @" — catches anything we missed above
-  clean = clean.replace(/([^\n])\s+(?=[A-Z][\w\s\-]+:\s*\d+[x×]\d+\s*@)/g, '$1\n');
+  // Break before run entries
+  clean = clean.replace(/([^\n])\s+(?=(?:Zone \d|HIIT run|Run:|Min mile|Tempo run|Easy run|Long run))/g, '$1\n');
 
-  // Break before "Zone 2 run" / "HIIT" / "Run:" patterns
-  clean = clean.replace(/([^\n])\s+(?=(?:Zone \d|HIIT|Run:|Min mile|Tempo|Easy|Long))/g, '$1\n');
-
-  // Break before "Any swaps" / "Questions" / "Move to"
-  clean = clean.replace(/([^\n])\s+(?=(?:Any swaps|Questions|Move to|Ready for))/g, '$1\n');
-
-  // Break before day headers: "Monday -" "Tuesday:" etc.
-  clean = clean.replace(/([.:!?])\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, '$1\n\n');
+  // Break before follow-up questions
+  clean = clean.replace(/([^\n])\s+(?=(?:Any swaps|Any questions|Questions on|Move to|Ready for|Want to))/g, '$1\n\n');
 
   // Break before "Anything you want" / "Any injuries" / "Schedule conflicts" questions
   clean = clean.replace(/\.\s+(?=(?:Anything|Any injuries|Schedule conflicts|Any schedule))/g, '.\n\n');
