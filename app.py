@@ -82,8 +82,15 @@ def unauthorized():
 
 def admin_required(f):
     @wraps(f)
-    @login_required
     def decorated(*args, **kwargs):
+        # API key auth — allows CLI/curl access without browser session
+        api_key = request.headers.get('X-Admin-Key') or request.args.get('admin_key')
+        expected_key = os.environ.get('ADMIN_API_KEY')
+        if api_key and expected_key and api_key == expected_key:
+            return f(*args, **kwargs)
+        # Fall back to session auth
+        if not current_user or not current_user.is_authenticated:
+            return jsonify({"error": "Login required"}), 401
         if not current_user.is_admin:
             return jsonify({"error": "Admin required"}), 403
         return f(*args, **kwargs)
