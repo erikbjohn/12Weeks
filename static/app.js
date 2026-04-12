@@ -6467,81 +6467,80 @@ function _pdWeightChart(bw, projection, targetWeight, startDate) {
     return '<div class="pd-section"><div class="pd-section-label">Weight</div><div class="pd-empty">Need 2+ weigh-ins for chart</div></div>';
   }
 
-  var W = 340, H = 200, padL = 48, padR = 12, padT = 16, padB = 28;
-  var vals = bw.map(function(e) { return e.weight; });
-  var dates = bw.map(function(e) { return e.date; });
+  var W = 340, H = 200, padL = 48, padR = 16, padT = 16, padB = 28;
 
-  // Y-axis range: use actual data points only, with padding.
-  // Target and projection are shown as reference lines but don't stretch the axis.
-  var projVals = [];
-  if (projection && projection.length > 0) {
-    projVals = projection.map(function(p) { return p.projected || p.weight || p; });
-  }
-
-  var dataMin = Math.min.apply(null, vals);
-  var dataMax = Math.max.apply(null, vals);
-  // Add ~10% padding above and below the actual data range
-  var dataRange = dataMax - dataMin || 10;
-  var yMin = dataMin - dataRange * 0.15;
-  var yMax = dataMax + dataRange * 0.1;
+  // Fixed axes: Y = goal weight to start weight, X = start date to end date (12 weeks)
+  var startWt = bw[0].weight;
+  var goalWt = targetWeight || startWt - 30;
+  var yMin = goalWt - 2;
+  var yMax = startWt + 2;
   var yRange = yMax - yMin || 1;
 
-  function xPos(i, total) { return padL + (i / Math.max(1, total - 1)) * (W - padL - padR); }
-  function yPos(v) { return padT + (1 - (v - yMin) / yRange) * (H - padT - padB); }
+  // X axis: start_date to start_date + 84 days (12 weeks)
+  var xStart = startDate ? new Date(startDate + 'T00:00:00') : new Date(bw[0].date + 'T00:00:00');
+  var xEnd = new Date(xStart); xEnd.setDate(xEnd.getDate() + 84);
+  var xRangeMs = xEnd - xStart || 1;
+
+  function xPos(dateStr) {
+    var d = new Date(dateStr + 'T00:00:00');
+    var pct = (d - xStart) / xRangeMs;
+    return padL + Math.max(0, Math.min(1, pct)) * (W - padL - padR);
+  }
+  function yPos(v) {
+    return padT + (1 - (v - yMin) / yRange) * (H - padT - padB);
+  }
 
   var svg = '<svg class="pd-weight-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
 
-  // Y-axis labels
-  var yLabels = [yMax, (yMax + yMin) / 2, yMin];
+  // Y-axis labels: start weight, midpoint, goal
+  var yLabels = [startWt, Math.round((startWt + goalWt) / 2), goalWt];
   for (var yi = 0; yi < yLabels.length; yi++) {
     var ly = yPos(yLabels[yi]);
     svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="#9aaa9d" font-size="11" font-family="DM Mono,monospace">' + Math.round(yLabels[yi]) + '</text>';
     svg += '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="#2a2e2c" stroke-width="0.5"/>';
   }
 
-  // Target weight horizontal dashed line
-  if (targetWeight) {
-    var tY = yPos(targetWeight);
-    svg += '<line x1="' + padL + '" y1="' + tY + '" x2="' + (W - padR) + '" y2="' + tY + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>';
-    svg += '<text x="' + (W - padR + 2) + '" y="' + (tY + 4) + '" fill="#4ade80" font-size="10" font-family="DM Mono,monospace" opacity="0.7">goal</text>';
-  }
+  // Goal weight line at bottom
+  var goalY = yPos(goalWt);
+  svg += '<line x1="' + padL + '" y1="' + goalY + '" x2="' + (W - padR) + '" y2="' + goalY + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="6,4" opacity="0.4"/>';
+  svg += '<text x="' + (W - padR - 2) + '" y="' + (goalY - 4) + '" text-anchor="end" fill="#4ade80" font-size="9" font-family="DM Mono,monospace" opacity="0.7">goal ' + Math.round(goalWt) + '</text>';
 
-  // Projection dotted line
-  if (projVals.length > 1) {
+  // Projection line — maps week numbers to dates on the X axis
+  if (projection && projection.length > 1) {
     var projPts = [];
-    for (var pi = 0; pi < projVals.length; pi++) {
-      projPts.push(xPos(pi, projVals.length).toFixed(1) + ',' + yPos(projVals[pi]).toFixed(1));
+    for (var pi = 0; pi < projection.length; pi++) {
+      var pw = projection[pi].projected || projection[pi].weight || projection[pi];
+      var weekNum = projection[pi].week || (pi + 1);
+      // Week N starts at start_date + (N-1)*7 days
+      var projDate = new Date(xStart); projDate.setDate(projDate.getDate() + (weekNum - 1) * 7);
+      var px = padL + Math.max(0, Math.min(1, (projDate - xStart) / xRangeMs)) * (W - padL - padR);
+      var py = yPos(pw);
+      projPts.push(px.toFixed(1) + ',' + py.toFixed(1));
     }
-    svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.5"/>';
+    svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>';
   }
 
-  // Actual weight line
+  // Actual weight line — positioned by date on X axis
   var pts = [];
-  for (var ai = 0; ai < vals.length; ai++) {
-    pts.push(xPos(ai, vals.length).toFixed(1) + ',' + yPos(vals[ai]).toFixed(1));
+  for (var ai = 0; ai < bw.length; ai++) {
+    pts.push(xPos(bw[ai].date).toFixed(1) + ',' + yPos(bw[ai].weight).toFixed(1));
   }
-  svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+  svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
   // Dots on actual data
-  for (var di = 0; di < vals.length; di++) {
-    var dx = xPos(di, vals.length);
-    var dy = yPos(vals[di]);
-    svg += '<circle cx="' + dx.toFixed(1) + '" cy="' + dy.toFixed(1) + '" r="3" fill="#4ade80"/>';
+  for (var di = 0; di < bw.length; di++) {
+    svg += '<circle cx="' + xPos(bw[di].date).toFixed(1) + '" cy="' + yPos(bw[di].weight).toFixed(1) + '" r="3.5" fill="#4ade80"/>';
   }
 
-  // X-axis date labels (first, middle, last)
-  var xLabelIdxs = [0];
-  if (dates.length > 2) xLabelIdxs.push(Math.floor(dates.length / 2));
-  xLabelIdxs.push(dates.length - 1);
-  for (var xi = 0; xi < xLabelIdxs.length; xi++) {
-    var idx = xLabelIdxs[xi];
-    var lx = xPos(idx, dates.length);
-    var dateLabel = dates[idx] ? dates[idx].slice(5) : ''; // MM-DD
-    svg += '<text x="' + lx.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#9aaa9d" font-size="10" font-family="DM Mono,monospace">' + dateLabel + '</text>';
+  // X-axis labels: Week 1, Week 4, Week 8, Week 12
+  var xWeeks = [1, 4, 8, 12];
+  for (var xi = 0; xi < xWeeks.length; xi++) {
+    var wkDate = new Date(xStart); wkDate.setDate(wkDate.getDate() + (xWeeks[xi] - 1) * 7);
+    var lx = padL + ((wkDate - xStart) / xRangeMs) * (W - padL - padR);
+    svg += '<text x="' + lx.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#9aaa9d" font-size="10" font-family="DM Mono,monospace">W' + xWeeks[xi] + '</text>';
   }
 
   svg += '</svg>';
-
   return '<div class="pd-section"><div class="pd-section-label">Weight</div>' + svg + '</div>';
 }
 
