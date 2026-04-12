@@ -6340,17 +6340,20 @@ function _renderNewDashboard(apiData) {
 
   // Gather data from API response with fallbacks to local caches
   var d = apiData || {};
-  var bw = d.bodyweight || _bodyweightCache || [];
+  var bwData = d.bodyweight || {};
+  var bw = bwData.series || _bodyweightCache || [];
   var measurements = d.measurements || window._measurementsCache || [];
-  var completions = d.completions || (_completionsCache ? _completionsCache.days : null) || {};
+  var training = d.training || {};
   var lifts = d.lifts || _weightsCache || {};
-  var startDate = d.start_date || (_stateCache ? _stateCache.start_date : null) || null;
-  var targetWeight = d.target_weight || (d.deficit ? d.deficit.target_weight : null) || (_stateCache ? _stateCache.target_weight : null) || null;
-  var projection = d.weight_projection || [];
-  var psychQuote = d.psych_quote || null;
+  var projections = d.projections || {};
+  var startDate = projections.start_date || (_stateCache ? _stateCache.start_date : null) || null;
+  var targetWeight = bwData.target_weight || null;
+  var projection = projections.weight_projection || [];
+  var psychHighlights = d.psych_highlights || {};
+  var psychQuote = psychHighlights.report ? psychHighlights.report.slice(0, 200) : null;
 
-  var startWeight = bw.length > 0 ? bw[0].weight : null;
-  var currentWeight = bw.length > 0 ? bw[bw.length - 1].weight : null;
+  var startWeight = bwData.start_weight || (bw.length > 0 ? bw[0].weight : null);
+  var currentWeight = bwData.current_weight || (bw.length > 0 ? bw[bw.length - 1].weight : null);
 
   var html = '';
   html += '<div class="pd-header">';
