@@ -7410,18 +7410,19 @@ async function launchWeeklyPlanning(weekOverride) {
         deficitStr + calorieStr +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         mealStr +
-        '\n\nFORMAT INSTRUCTIONS:' +
-        '\n1. Start with a 2-3 sentence OVERVIEW: what is changing this week vs last week and why (calorie change, weight progression, phase focus).' +
-        '\n2. If calories changed, explain WHY (weight dropped, TDEE recalculated, deficit adjusted to maintain pace).' +
-        '\n3. Then present EACH DAY on its own section. Use this exact format:' +
+        '\n\nFORMAT — THIS IS A CONVERSATION. Present ONE DAY AT A TIME:' +
+        '\n1. First message: 2-3 sentence OVERVIEW of what is changing this week vs last week and why. If calories changed, explain (weight dropped, TDEE recalculated, deficit adjusted). End with "Ready to see Monday?"' +
+        '\n2. When the athlete responds, present MONDAY only:' +
         '\n\n**Monday — [Workout Name]**' +
-        '\n- Exercise Name: SetsxReps @ Weight — reason for change' +
-        '\n- Exercise Name: SetsxReps @ Weight — reason' +
+        '\n- Exercise: SetsxReps @ Weight — why' +
+        '\n- Exercise: SetsxReps @ Weight — why' +
         '\nRun: Type, Duration' +
-        '\n\n4. Put EACH exercise on its OWN LINE with a bullet point.' +
-        '\n5. Explain WHY weights changed (hit target reps, RPE too low, progression rule).' +
-        '\n6. Use [PRESCRIPTION: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text] markers for any adjustments.' +
-        '\n7. End by asking if the athlete wants to adjust anything.';
+        '\n\nEnd with "Questions on Monday, or move to Tuesday?"' +
+        '\n3. Then Tuesday when they respond. Then Wednesday. One day per message.' +
+        '\n4. Each exercise on its OWN LINE with a bullet.' +
+        '\n5. Explain WHY weights changed.' +
+        '\n6. After all 6 days presented, summarize the week and ask if they want to adjust anything.' +
+        '\n7. Do NOT dump the entire week in one message. This is a dialogue, not a lecture.';
 
     // Now open the inline chat with the planning trigger
     container.innerHTML =
