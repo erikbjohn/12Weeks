@@ -2367,7 +2367,21 @@ function renderFoodSelection() {
   </div>`;
 }
 
+// Track touch movement to prevent scroll-triggers-click on mobile
+let _foodTouchStartY = null;
+document.addEventListener('touchstart', function(e) { _foodTouchStartY = e.touches[0].clientY; }, { passive: true });
+document.addEventListener('touchend', function(e) {
+  if (_foodTouchStartY !== null && e.changedTouches.length > 0) {
+    const dy = Math.abs(e.changedTouches[0].clientY - _foodTouchStartY);
+    if (dy > 10) window._foodScrolled = true;
+    else window._foodScrolled = false;
+  }
+  _foodTouchStartY = null;
+}, { passive: true });
+
 function toggleFood(category, foodId) {
+  // If the user scrolled, this click is from the scroll ending — ignore it
+  if (window._foodScrolled) { window._foodScrolled = false; return; }
   const sel = _foodSelections[category];
   const idx = sel.indexOf(foodId);
   if (idx >= 0) {
