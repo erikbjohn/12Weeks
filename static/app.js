@@ -320,6 +320,18 @@ function renderCoachMarkdown(text) {
   // Break before markdown list items (- Exercise: ...)
   clean = clean.replace(/([^\n])\s*(?=- [A-Z])/g, '$1\n');
 
+  // Break before exercise entries: "Exercise Name: NxN" pattern (with or without bullets)
+  clean = clean.replace(/([^\n])\s+(?=[A-Z][a-zA-Z\- ]+ (?:Press|Row|Curl|Raise|Pull|Push|Squat|Lunge|Fly|Dip|Thrust|Deadlift|Shrug|Plank|Extension|Kickback|Swing|Hold|Climber|Burpee|Bridge|Step|Bird|Dead|Superman|Walk)[\w\s]*:\s*\d+[x×]\d+)/g, '$1\n');
+
+  // Break before "Exercise Name: NxN @" — catches anything we missed above
+  clean = clean.replace(/([^\n])\s+(?=[A-Z][\w\s\-]+:\s*\d+[x×]\d+\s*@)/g, '$1\n');
+
+  // Break before "Zone 2 run" / "HIIT" / "Run:" patterns
+  clean = clean.replace(/([^\n])\s+(?=(?:Zone \d|HIIT|Run:|Min mile|Tempo|Easy|Long))/g, '$1\n');
+
+  // Break before "Any swaps" / "Questions" / "Move to"
+  clean = clean.replace(/([^\n])\s+(?=(?:Any swaps|Questions|Move to|Ready for))/g, '$1\n');
+
   // Break before day headers: "Monday -" "Tuesday:" etc.
   clean = clean.replace(/([.:!?])\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, '$1\n\n');
 
