@@ -132,9 +132,14 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     last_reps = session_sets[0].reps if session_sets else 0
     last_set_count = len(session_sets)
 
-    # Check if user modified from target
-    user_increased = any(getattr(s, 'modification_direction', None) == 'increased_weight' for s in session_sets)
-    user_decreased = any(getattr(s, 'modification_direction', None) in ('decreased_weight', 'decreased_reps') for s in session_sets)
+    # Check if user ACTUALLY decreased weight vs their PREVIOUS session (not vs computed target).
+    # The old logic compared against the engine's computed target — if the engine suggested 115
+    # but the user was prescribed 110 and lifted 110, it was wrongly flagged as "decreased".
+    # Now we compare against what they actually lifted in the prior session.
+    prev_session_sets = [s for s in last_sets if s.logged_date != last_date]
+    prev_weight = prev_session_sets[0].weight if prev_session_sets else None
+    user_increased = prev_weight is not None and last_weight > prev_weight * 1.02
+    user_decreased = prev_weight is not None and last_weight < prev_weight * 0.95
     sets_skipped = sum(1 for s in session_sets if getattr(s, 'set_skipped', False))
 
     # Avg reps across session

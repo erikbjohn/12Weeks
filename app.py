@@ -2074,18 +2074,30 @@ def api_set_log():
             logged_date=_user_today(),
         )
         db.session.add(existing)
-    # Compute targets and detect modifications
+    # Detect user modifications by comparing against the PRESCRIPTION weight
+    # (what the user was actually shown), NOT the computed target from the engine.
+    # The engine may suggest a higher weight, but the user should only be judged
+    # against what they were told to lift.
     try:
+        rx = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx,
+            exercise_name=exercise
+        ).first()
+        prescribed_weight = rx.target_weight if rx and rx.target_weight else None
+
+        # Also compute progression targets for storage (used by next week's planning)
         targets = compute_next_targets(current_user.id, exercise, week, day_idx)
         if targets.get("target_weight"):
             existing.target_weight = targets["target_weight"]
             existing.target_reps = targets.get("target_reps")
-        # Detect user modification
-        if targets.get("target_weight") and weight and targets["target_weight"] > 0:
-            if weight > targets["target_weight"] * 1.02:
+
+        # Compare against PRESCRIPTION, not computed target
+        compare_weight = prescribed_weight or (targets.get("target_weight") if targets else None)
+        if compare_weight and weight and compare_weight > 0:
+            if weight > compare_weight * 1.02:
                 existing.user_modified = True
                 existing.modification_direction = 'increased_weight'
-            elif weight < targets["target_weight"] * 0.98:
+            elif weight < compare_weight * 0.98:
                 existing.user_modified = True
                 existing.modification_direction = 'decreased_weight'
             else:
