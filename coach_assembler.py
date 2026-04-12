@@ -463,6 +463,10 @@ def _build_fasting():
         pass
     # Today's meal type
     today_meal_type = _get_day_meal_type_local(current_user.id, week, today_idx)
+    # On fast days, override the eating window — there is none
+    if today_meal_type == 'fast_day' and fasting_state:
+        fasting_state["eating_window_opens"] = "NONE — full fast day, no eating window"
+        fasting_state["is_fast_day"] = True
     return {
         "fasting_protocol": fasting_protocol,
         "fasting_state": fasting_state,
@@ -1109,11 +1113,19 @@ def _format_athlete_data(ctx, requires):
     # Fasting
     fasting_state = ctx.get("fasting_state")
     if fasting_state:
-        parts.append(
-            f"CURRENT FASTING STATE: {fasting_state['hours_fasted']} hours fasted "
-            f"(since {fasting_state['last_meal_day']} {fasting_state['last_meal_time']}). "
-            f"Eating window opens at {fasting_state['eating_window_opens']}."
-        )
+        if fasting_state.get("is_fast_day"):
+            parts.append(
+                f"CURRENT FASTING STATE: {fasting_state['hours_fasted']} hours fasted "
+                f"(since {fasting_state['last_meal_day']} {fasting_state['last_meal_time']}). "
+                f"TODAY IS A FULL FAST DAY — NO eating window. Zero calories until tomorrow. "
+                f"Water, black coffee, electrolytes only. Do NOT suggest breaking the fast."
+            )
+        else:
+            parts.append(
+                f"CURRENT FASTING STATE: {fasting_state['hours_fasted']} hours fasted "
+                f"(since {fasting_state['last_meal_day']} {fasting_state['last_meal_time']}). "
+                f"Eating window opens at {fasting_state['eating_window_opens']}."
+            )
     fp = ctx.get("fasting_protocol")
     if fp:
         parts.append(f"FASTING PROTOCOL: {fp}")

@@ -3425,6 +3425,17 @@ function showSettingsMenu() {
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
+  // Close on click outside
+  setTimeout(() => {
+    document.addEventListener('click', function _settingsOutside(e) {
+      const menu = document.getElementById('settings-dropdown');
+      if (!menu) { document.removeEventListener('click', _settingsOutside); return; }
+      if (!menu.contains(e.target) && !e.target.closest('[onclick*="showSettingsMenu"]')) {
+        closeSettingsMenu();
+        document.removeEventListener('click', _settingsOutside);
+      }
+    });
+  }, 10);
 }
 
 async function recomputeGoal() {
