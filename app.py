@@ -5813,22 +5813,24 @@ def api_physical_assessment_save():
         pa.height_inches = data["height"]
     if "bodyweight" in data and data["bodyweight"]:
         pa.bodyweight_lbs = float(data["bodyweight"])
-        # CRITICAL: Also log to BodyWeight table — this is the primary weight source
+        # Also log to BodyWeight table — this is the primary weight source
         d = _user_today()
         bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bw:
             bw.weight_lbs = float(data["bodyweight"])
         else:
-            db.session.add(BodyWeight(log_date=d, weight_lbs=float(data["bodyweight"]), user_id=current_user.id))
-        # Flush immediately to ensure BodyWeight entry is created
-        try:
-            db.session.flush()
-        except Exception:
-            db.session.rollback()
-            # Re-add the physical assessment
-            pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-            if pa:
-                pa.bodyweight_lbs = float(data["bodyweight"])
+            # Check if concurrent /api/bodyweight POST already created one
+            try:
+                db.session.flush()  # flush PA changes first
+                bw_check = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
+                if not bw_check:
+                    db.session.add(BodyWeight(log_date=d, weight_lbs=float(data["bodyweight"]), user_id=current_user.id))
+            except Exception:
+                db.session.rollback()
+                # Re-query PA after rollback
+                pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+                if pa:
+                    pa.bodyweight_lbs = float(data["bodyweight"])
     if "waist" in data:
         pa.waist_inches = data["waist"]
         d = _user_today()

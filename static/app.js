@@ -1163,7 +1163,8 @@ async function resumeOnboarding() {
     // Equipment done, constraints done — check goal
     const gRes = await fetch('/api/goal');
     const gData = await gRes.json();
-    if (!gData.computed) {
+    if (!gData.computed || (gData.computed && !gData.calories)) {
+      // Goal doesn't exist OR exists with null macros — (re)compute
       computeGoal();
       return;
     }
@@ -1938,11 +1939,15 @@ async function paNextFromMeasurements() {
   if (_paData.thigh) payload.thigh = _paData.thigh;
   if (_paData.hips) payload.hips = _paData.hips;
   if (_paData.neck) payload.neck = _paData.neck;
-  apiPost('/api/physical-assessment', payload);
+  // Await BOTH saves so weight is in the DB before goal computation runs
+  await apiPost('/api/physical-assessment', payload);
 
-  // Save body weight to bodyweight tracker — AWAIT to ensure it's stored
   if (_paData.weight) {
-    await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
+    const bwRes = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
+    if (!bwRes.ok) {
+      alert('Failed to save body weight. Please try again.');
+      return;
+    }
     if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
     _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
   }

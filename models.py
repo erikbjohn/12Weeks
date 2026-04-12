@@ -146,6 +146,9 @@ class SetLog(db.Model):
     user_modified = db.Column(db.Boolean, default=False)
     modification_direction = db.Column(db.String(30))
     exercise_swapped = db.Column(db.Boolean, default=False)
+    actual_time = db.Column(db.String(30), nullable=True)
+    target_rpe = db.Column(db.Integer, nullable=True)
+    set_skipped = db.Column(db.Boolean, default=False)
 
 
 class ExerciseSwap(db.Model):
