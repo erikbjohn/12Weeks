@@ -5850,12 +5850,6 @@ def api_physical_assessment_save():
                     pa.bodyweight_lbs = float(data["bodyweight"])
     if "waist" in data:
         pa.waist_inches = data["waist"]
-        d = _user_today()
-        bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
-        if bm:
-            bm.waist_inches = data["waist"]
-        else:
-            db.session.add(BodyMeasurement(log_date=d, waist_inches=data["waist"], user_id=current_user.id))
     if "stomach" in data:
         pa.stomach_inches = data["stomach"]
     if "chest" in data:
@@ -5868,6 +5862,27 @@ def api_physical_assessment_save():
         pa.hips_inches = data["hips"]
     if "neck" in data:
         pa.neck_inches = data["neck"]
+
+    # Bridge ALL intake measurements to BodyMeasurement as baseline.
+    # Previously only waist was bridged — chest, bicep, thigh, hips, neck were lost.
+    _has_any_measurement = any(data.get(k) for k in ["waist", "chest", "bicep", "thigh", "hips", "neck"])
+    if _has_any_measurement:
+        d = _user_today()
+        bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
+        if not bm:
+            bm = BodyMeasurement(log_date=d, user_id=current_user.id)
+            db.session.add(bm)
+        if data.get("waist"): bm.waist_inches = float(data["waist"])
+        if data.get("chest"): bm.chest = float(data["chest"])
+        if data.get("bicep"):
+            bm.bicep_left = float(data["bicep"])
+            bm.bicep_right = float(data["bicep"])
+        if data.get("thigh"):
+            bm.thigh_left = float(data["thigh"])
+            bm.thigh_right = float(data["thigh"])
+        if data.get("hips"): bm.hips = float(data["hips"])
+        if data.get("neck"): bm.neck = float(data["neck"])
+        if data.get("bodyweight"): bm.weight_lbs = float(data["bodyweight"])
     if "pushup_count" in data:
         pa.pushup_count = data["pushup_count"]
     if "pushup_from_knees" in data:
