@@ -15,12 +15,12 @@
             background: #0d0f0e;
             color: #e8ede9;
             min-height: 100vh;
-            padding: 2rem 1.5rem;
+            padding: 1.5rem 1rem;
             line-height: 1.5;
         }
 
         .container {
-            max-width: 1060px;
+            max-width: 1100px;
             margin: 0 auto;
             width: 100%;
         }
@@ -30,7 +30,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             flex-wrap: wrap;
             gap: 1rem;
         }
@@ -57,13 +57,37 @@
             transition: color 0.2s;
         }
         .header-links a:hover { color: #4ade80; }
+        .refresh-note {
+            font-size: 0.75rem;
+            color: #5a6a5d;
+            font-family: 'DM Mono', monospace;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 4rem 1rem;
+            color: #5a6a5d;
+            font-size: 1rem;
+        }
+        .loading .spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 2px solid #2a2e2c;
+            border-top-color: #4ade80;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Summary cards */
         .summary-row {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 2rem;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
         }
         @media (max-width: 640px) {
             .summary-row { grid-template-columns: repeat(2, 1fr); }
@@ -72,7 +96,7 @@
             background: #161918;
             border: 1px solid #2a2e2c;
             border-radius: 12px;
-            padding: 1.25rem;
+            padding: 1.1rem 1rem;
             text-align: center;
         }
         .summary-card .num {
@@ -82,94 +106,297 @@
             color: #4ade80;
         }
         .summary-card .label {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: #9aaa9d;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-top: 0.25rem;
+            margin-top: 0.2rem;
         }
 
-        /* Card */
-        .card {
+        /* Section heading */
+        .section-heading {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e8ede9;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .section-heading .count-badge {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.75rem;
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            padding: 0.15rem 0.5rem;
+            border-radius: 8px;
+        }
+
+        /* User cards */
+        .user-cards {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        @media (min-width: 768px) {
+            .user-cards { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .user-card {
+            background: #161918;
+            border: 2px solid #2a2e2c;
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: border-color 0.2s;
+        }
+        .user-card.status-active { border-color: #4ade80; }
+        .user-card.status-inactive { border-color: #eab308; }
+        .user-card.status-stuck { border-color: #ef4444; }
+
+        .user-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+        }
+        .user-name {
+            font-weight: 600;
+            font-size: 1.05rem;
+            color: #e8ede9;
+        }
+        .user-email {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.8rem;
+            color: #5a6a5d;
+            margin-top: 0.1rem;
+            word-break: break-all;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 0.35rem;
+        }
+        .status-dot.green { background: #4ade80; }
+        .status-dot.yellow { background: #eab308; }
+        .status-dot.red { background: #ef4444; }
+
+        /* Onboarding progress */
+        .onboarding-bar {
+            display: flex;
+            gap: 0.35rem;
+            margin: 0.75rem 0;
+            flex-wrap: wrap;
+        }
+        .ob-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            flex: 1;
+            min-width: 50px;
+        }
+        .ob-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid #3a3e3c;
+            background: transparent;
+        }
+        .ob-dot.done {
+            background: #4ade80;
+            border-color: #4ade80;
+        }
+        .ob-dot.stuck {
+            background: #ef4444;
+            border-color: #ef4444;
+            box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+        }
+        .ob-label {
+            font-size: 0.6rem;
+            color: #5a6a5d;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            text-align: center;
+            line-height: 1.2;
+        }
+        .ob-label.stuck-label {
+            color: #f87171;
+            font-weight: 600;
+        }
+
+        /* Program stats */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            margin: 0.75rem 0;
+        }
+        @media (max-width: 400px) {
+            .stat-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .stat-item {
+            background: #1a1d1c;
+            border-radius: 8px;
+            padding: 0.5rem 0.65rem;
+        }
+        .stat-item .stat-val {
+            font-family: 'DM Mono', monospace;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #e8ede9;
+        }
+        .stat-item .stat-key {
+            font-size: 0.65rem;
+            color: #5a6a5d;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        /* Last activity */
+        .last-activity {
+            font-size: 0.78rem;
+            color: #5a6a5d;
+            margin-top: 0.5rem;
+            font-family: 'DM Mono', monospace;
+        }
+
+        /* Action buttons */
+        .card-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .btn {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 500;
+            border: none;
+            border-radius: 8px;
+            padding: 0.45rem 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #3a3e3c;
+            color: #9aaa9d;
+        }
+        .btn-outline:hover {
+            border-color: #4ade80;
+            color: #4ade80;
+        }
+        .btn-danger {
+            background: transparent;
+            border: 1px solid #3a3e3c;
+            color: #9aaa9d;
+        }
+        .btn-danger:hover {
+            border-color: #ef4444;
+            color: #f87171;
+        }
+
+        /* Detail panel (expanded) */
+        .detail-panel {
+            display: none;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #2a2e2c;
+        }
+        .detail-panel.open { display: block; }
+        .detail-section {
+            margin-bottom: 0.75rem;
+        }
+        .detail-section h4 {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #4ade80;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.35rem;
+        }
+        .detail-table {
+            width: 100%;
+            font-size: 0.78rem;
+            border-collapse: collapse;
+        }
+        .detail-table td {
+            padding: 0.25rem 0.5rem;
+            border-bottom: 1px solid rgba(42, 46, 44, 0.3);
+            vertical-align: top;
+        }
+        .detail-table td:first-child {
+            color: #5a6a5d;
+            font-family: 'DM Mono', monospace;
+            white-space: nowrap;
+            width: 120px;
+        }
+        .detail-table td:last-child {
+            color: #e8ede9;
+            font-family: 'DM Mono', monospace;
+        }
+        .detail-loading {
+            color: #5a6a5d;
+            font-size: 0.8rem;
+            padding: 0.5rem 0;
+        }
+
+        /* Modal for password reset */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open {
+            display: flex;
+        }
+        .modal-box {
             background: #161918;
             border: 1px solid #2a2e2c;
             border-radius: 12px;
             padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            overflow-x: auto;
+            max-width: 420px;
+            width: 90%;
         }
-        .card h3 {
+        .modal-box h3 {
             font-size: 1rem;
             font-weight: 600;
-            color: #e8ede9;
+            margin-bottom: 0.75rem;
+        }
+        .modal-box p {
+            font-size: 0.85rem;
+            color: #9aaa9d;
             margin-bottom: 1rem;
         }
-
-        /* Tables */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-        }
-        thead th {
-            text-align: left;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: #9aaa9d;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 0.6rem 0.75rem;
-            border-bottom: 1px solid #2a2e2c;
-            cursor: pointer;
-            white-space: nowrap;
-            user-select: none;
-        }
-        thead th:hover { color: #4ade80; }
-        thead th .sort-arrow {
-            font-size: 0.65rem;
-            margin-left: 0.25rem;
-            color: #5a6a5d;
-        }
-        thead th.sorted .sort-arrow { color: #4ade80; }
-        tbody td {
-            padding: 0.7rem 0.75rem;
-            border-bottom: 1px solid rgba(42, 46, 44, 0.5);
-            vertical-align: middle;
-        }
-        tbody tr:last-child td { border-bottom: none; }
-        tbody tr:hover { background: rgba(74, 222, 128, 0.03); }
-
-        .user-email {
-            font-size: 0.8rem;
-            color: #5a6a5d;
+        .modal-result {
+            background: #1a1d1c;
+            border-radius: 8px;
+            padding: 0.75rem;
             font-family: 'DM Mono', monospace;
-        }
-        .date-cell {
-            color: #9aaa9d;
             font-size: 0.85rem;
-            white-space: nowrap;
-        }
-        .num-cell {
-            font-family: 'DM Mono', monospace;
-            text-align: center;
-        }
-
-        /* Role badge */
-        .role-badge {
-            display: inline-block;
-            padding: 0.15rem 0.6rem;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            letter-spacing: 0.3px;
-        }
-        .role-badge.admin {
-            background: rgba(74, 222, 128, 0.15);
             color: #4ade80;
+            word-break: break-all;
+            margin-bottom: 1rem;
         }
-        .role-badge.user {
-            background: rgba(154, 170, 157, 0.15);
-            color: #9aaa9d;
+        .modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+        .btn-primary {
+            background: #4ade80;
+            color: #0d0f0e;
+            font-weight: 600;
+        }
+        .btn-primary:hover {
+            background: #22c55e;
         }
 
         /* Empty state */
@@ -179,158 +406,456 @@
             padding: 2rem 1rem;
             font-size: 0.9rem;
         }
+
+        /* Hide sections until loaded */
+        #dashboard-content { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1>12 Weeks <span>— Admin</span></h1>
+            <h1>12 Weeks <span>-- Admin</span></h1>
             <div class="header-links">
+                <span class="refresh-note" id="refresh-note"></span>
                 <a href="/">Home</a>
                 <a href="/logout" onclick="localStorage.clear();sessionStorage.clear();">Log Out</a>
             </div>
         </div>
 
-        <!-- Summary Cards -->
-        <div class="summary-row">
-            <div class="summary-card">
-                <div class="num">{{ totals.users }}</div>
-                <div class="label">Total Users</div>
+        <!-- Loading state -->
+        <div id="loading-state" class="loading">
+            <div class="spinner"></div>
+            <div>Loading dashboard...</div>
+        </div>
+
+        <!-- Error state -->
+        <div id="error-state" class="empty" style="display:none;"></div>
+
+        <!-- Dashboard content -->
+        <div id="dashboard-content">
+            <!-- Summary Cards -->
+            <div class="summary-row" id="summary-row"></div>
+
+            <!-- Stuck Users Section (only shown if any) -->
+            <div id="stuck-section" style="display:none;">
+                <div class="section-heading">
+                    Stuck in Onboarding
+                    <span class="count-badge" id="stuck-count"></span>
+                </div>
+                <div class="user-cards" id="stuck-cards"></div>
             </div>
-            <div class="summary-card">
-                <div class="num">{{ totals.active_this_week }}</div>
-                <div class="label">Active This Week</div>
-            </div>
-            <div class="summary-card">
-                <div class="num">{{ totals.invites_sent }}</div>
-                <div class="label">Invites Sent</div>
-            </div>
-            <div class="summary-card">
-                <div class="num">{{ totals.pending_invites }}</div>
-                <div class="label">Pending Invites</div>
+
+            <!-- Active Users -->
+            <div id="active-section">
+                <div class="section-heading">All Users</div>
+                <div class="user-cards" id="user-cards"></div>
             </div>
         </div>
 
-        <!-- Users Table -->
-        <div class="card">
-            <h3>Users</h3>
-            {% if users %}
-            <table id="usersTable">
-                <thead>
-                    <tr>
-                        <th data-col="0" data-type="text">Name <span class="sort-arrow"></span></th>
-                        <th data-col="1" data-type="text">Email <span class="sort-arrow"></span></th>
-                        <th data-col="2" data-type="text">Role <span class="sort-arrow"></span></th>
-                        <th data-col="3" data-type="date" class="sorted">Joined <span class="sort-arrow">&#9660;</span></th>
-                        <th data-col="4" data-type="date">Last Login <span class="sort-arrow"></span></th>
-                        <th data-col="5" data-type="text">Invites <span class="sort-arrow"></span></th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for user in users %}
-                    <tr data-name="{{ (user.name or user.email)|lower }}"
-                        data-email="{{ user.email|lower }}"
-                        data-role="{{ user.role }}"
-                        data-joined="{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}"
-                        data-login="{{ user.last_login_at.strftime('%Y-%m-%d') if user.last_login_at else '' }}"
-                        data-invites="{{ user.invites_sent }}">
-                        <td>
-                            <div style="font-weight:500;">{{ user.name or user.email.split('@')[0] }}</div>
-                        </td>
-                        <td>
-                            <span class="user-email">{{ user.email }}</span>
-                        </td>
-                        <td>
-                            <span class="role-badge {{ user.role }}">{{ user.role }}</span>
-                        </td>
-                        <td class="date-cell">{{ user.created_at.strftime('%b %d, %Y') if user.created_at else '—' }}</td>
-                        <td class="date-cell">{{ user.last_login_at.strftime('%b %d, %Y') if user.last_login_at else '—' }}</td>
-                        <td class="num-cell">{{ user.invites_sent }} / {{ user.invites_remaining }}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty">No users found.</div>
-            {% endif %}
-        </div>
-
-        <!-- Pending Invites Table -->
-        <div class="card">
-            <h3>Pending Invites</h3>
-            {% if pending %}
-            <table id="pendingTable">
-                <thead>
-                    <tr>
-                        <th>Sent To</th>
-                        <th>Sent By</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for inv in pending %}
-                    <tr>
-                        <td>{{ inv.email_sent_to or 'No email (link only)' }}</td>
-                        <td>
-                            <div style="font-weight:500;">{{ inv.sent_by_name or inv.sent_by_email.split('@')[0] }}</div>
-                            <div class="user-email">{{ inv.sent_by_email }}</div>
-                        </td>
-                        <td class="date-cell">{{ inv.created_at.strftime('%b %d, %Y') if inv.created_at else '—' }}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="empty">No pending invites.</div>
-            {% endif %}
+        <!-- Password Reset Modal -->
+        <div class="modal-overlay" id="pw-modal">
+            <div class="modal-box">
+                <h3>Reset Password</h3>
+                <p id="pw-modal-msg">Resetting password for <strong id="pw-modal-email"></strong>...</p>
+                <div class="modal-result" id="pw-modal-result" style="display:none;"></div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline" onclick="closePwModal()">Close</button>
+                    <button class="btn btn-primary" id="pw-modal-confirm" onclick="confirmResetPassword()">Reset</button>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        /* Simple column sorting for tables */
-        document.querySelectorAll('thead th[data-col]').forEach(function(th) {
-            th.addEventListener('click', function() {
-                var table = th.closest('table');
-                var tbody = table.querySelector('tbody');
-                var rows = Array.from(tbody.querySelectorAll('tr'));
-                var colIdx = parseInt(th.dataset.col);
-                var type = th.dataset.type || 'text';
+        let dashboardData = null;
+        let refreshTimer = null;
+        let detailCache = {};
 
-                // Determine sort direction
-                var isAsc = th.classList.contains('sorted-asc');
-                // Clear all sorted states in this table
-                table.querySelectorAll('thead th').forEach(function(h) {
-                    h.classList.remove('sorted', 'sorted-asc', 'sorted-desc');
-                    var arrow = h.querySelector('.sort-arrow');
-                    if (arrow) arrow.innerHTML = '';
-                });
+        // ---------- FETCH & RENDER ----------
 
-                var dir = isAsc ? -1 : 1;
-                th.classList.add('sorted', dir === 1 ? 'sorted-asc' : 'sorted-desc');
-                var arrow = th.querySelector('.sort-arrow');
-                if (arrow) arrow.innerHTML = dir === 1 ? '&#9650;' : '&#9660;';
+        async function fetchDashboard() {
+            try {
+                const resp = await fetch('/api/admin/dashboard');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                dashboardData = await resp.json();
+                render(dashboardData);
+                document.getElementById('loading-state').style.display = 'none';
+                document.getElementById('error-state').style.display = 'none';
+                document.getElementById('dashboard-content').style.display = 'block';
+                updateRefreshNote();
+            } catch (err) {
+                document.getElementById('loading-state').style.display = 'none';
+                var errEl = document.getElementById('error-state');
+                errEl.textContent = 'Failed to load dashboard: ' + err.message;
+                errEl.style.display = 'block';
+            }
+        }
 
-                rows.sort(function(a, b) {
-                    var aVal = a.children[colIdx] ? a.children[colIdx].textContent.trim().toLowerCase() : '';
-                    var bVal = b.children[colIdx] ? b.children[colIdx].textContent.trim().toLowerCase() : '';
+        function updateRefreshNote() {
+            var el = document.getElementById('refresh-note');
+            var now = new Date();
+            el.textContent = 'updated ' + now.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        }
 
-                    if (type === 'date') {
-                        var aDate = Date.parse(aVal) || 0;
-                        var bDate = Date.parse(bVal) || 0;
-                        return (aDate - bDate) * dir;
-                    }
-                    if (type === 'num') {
-                        var aNum = parseFloat(aVal) || 0;
-                        var bNum = parseFloat(bVal) || 0;
-                        return (aNum - bNum) * dir;
-                    }
-                    return aVal.localeCompare(bVal) * dir;
-                });
+        function render(data) {
+            var users = data.users || [];
+            renderSummary(users);
+            renderUsers(users);
+        }
 
-                rows.forEach(function(row) { tbody.appendChild(row); });
+        // ---------- SUMMARY ----------
+
+        function renderSummary(users) {
+            var total = users.length;
+            var active = 0;
+            var stuck = 0;
+            var activeToday = 0;
+            var today = new Date().toISOString().slice(0, 10);
+
+            users.forEach(function(u) {
+                if (u.onboarding.complete) {
+                    active++;
+                } else {
+                    stuck++;
+                }
+                // Active today: last chat or checkin is today
+                var lastChat = (u.activity.last_chat || '').slice(0, 10);
+                var lastCheckin = u.activity.last_checkin || '';
+                if (lastChat === today || lastCheckin === today) {
+                    activeToday++;
+                }
             });
-        });
+
+            var html = '';
+            html += summaryCard(total, 'Total Users');
+            html += summaryCard(active, 'Active');
+            html += summaryCard(stuck, 'In Onboarding');
+            html += summaryCard(activeToday, 'Active Today');
+            document.getElementById('summary-row').innerHTML = html;
+        }
+
+        function summaryCard(num, label) {
+            return '<div class="summary-card"><div class="num">' + num + '</div><div class="label">' + label + '</div></div>';
+        }
+
+        // ---------- USER CARDS ----------
+
+        var STEP_KEYS = ['intake', 'constraints', 'physical', 'equipment', 'goal', 'food', 'plan_accepted'];
+        var STEP_LABELS = ['Intake', 'Constraints', 'Physical', 'Equip', 'Goal', 'Food', 'Plan'];
+
+        function getUserStatus(u) {
+            if (!u.onboarding.complete) return 'stuck';
+            // Active: has activity in last 3 days
+            var now = Date.now();
+            var threeDays = 3 * 24 * 60 * 60 * 1000;
+            var lastActivity = getLastActivityDate(u);
+            if (lastActivity && (now - lastActivity.getTime()) < threeDays) return 'active';
+            return 'inactive';
+        }
+
+        function getLastActivityDate(u) {
+            var dates = [];
+            if (u.activity.last_chat) dates.push(new Date(u.activity.last_chat));
+            if (u.activity.last_checkin) dates.push(new Date(u.activity.last_checkin));
+            if (u.body.weight_date) dates.push(new Date(u.body.weight_date));
+            if (dates.length === 0) return null;
+            dates.sort(function(a, b) { return b - a; });
+            return dates[0];
+        }
+
+        function getStuckStep(u) {
+            for (var i = 0; i < STEP_KEYS.length; i++) {
+                if (!u.onboarding[STEP_KEYS[i]]) return i;
+            }
+            return -1;
+        }
+
+        function renderUsers(users) {
+            var stuckUsers = [];
+            var allUsers = [];
+
+            users.forEach(function(u) {
+                var status = getUserStatus(u);
+                u._status = status;
+                if (status === 'stuck') stuckUsers.push(u);
+                allUsers.push(u);
+            });
+
+            // Sort: stuck first, then active, then inactive; within each by last activity
+            allUsers.sort(function(a, b) {
+                var order = {stuck: 0, active: 1, inactive: 2};
+                var d = order[a._status] - order[b._status];
+                if (d !== 0) return d;
+                var aDate = getLastActivityDate(a);
+                var bDate = getLastActivityDate(b);
+                return (bDate ? bDate.getTime() : 0) - (aDate ? aDate.getTime() : 0);
+            });
+
+            // Stuck section
+            if (stuckUsers.length > 0) {
+                document.getElementById('stuck-section').style.display = 'block';
+                document.getElementById('stuck-count').textContent = stuckUsers.length;
+                document.getElementById('stuck-cards').innerHTML = stuckUsers.map(renderUserCard).join('');
+            } else {
+                document.getElementById('stuck-section').style.display = 'none';
+            }
+
+            // All users
+            document.getElementById('user-cards').innerHTML = allUsers.map(renderUserCard).join('');
+        }
+
+        function renderUserCard(u) {
+            var status = u._status;
+            var statusDot = status === 'active' ? 'green' : (status === 'stuck' ? 'red' : 'yellow');
+            var cardId = 'card-' + u.id;
+            var detailId = 'detail-' + u.id;
+            var stuckIdx = getStuckStep(u);
+
+            var html = '<div class="user-card status-' + status + '" id="' + cardId + '">';
+
+            // Header
+            html += '<div class="user-card-header">';
+            html += '<div>';
+            html += '<div class="user-name">' + esc(u.name || u.email.split('@')[0]) + '</div>';
+            html += '<div class="user-email">' + esc(u.email) + '</div>';
+            html += '</div>';
+            html += '<div class="status-dot ' + statusDot + '"></div>';
+            html += '</div>';
+
+            // Onboarding progress bar
+            html += '<div class="onboarding-bar">';
+            for (var i = 0; i < STEP_KEYS.length; i++) {
+                var done = u.onboarding[STEP_KEYS[i]];
+                var isStuck = (!done && i === stuckIdx && status === 'stuck');
+                var dotClass = done ? 'done' : (isStuck ? 'stuck' : '');
+                var labelClass = isStuck ? 'stuck-label' : '';
+                html += '<div class="ob-step">';
+                html += '<div class="ob-dot ' + dotClass + '"></div>';
+                html += '<div class="ob-label ' + labelClass + '">' + STEP_LABELS[i] + '</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+
+            // Stats (only if onboarded)
+            if (u.onboarding.complete) {
+                html += '<div class="stat-grid">';
+                if (u.program.week != null) {
+                    html += statItem('Week', u.program.week);
+                }
+                if (u.program.goal_type) {
+                    html += statItem('Goal', u.program.goal_type.toUpperCase());
+                }
+                if (u.program.calories) {
+                    html += statItem('Cal', u.program.calories);
+                }
+                if (u.program.protein) {
+                    html += statItem('Protein', u.program.protein + 'g');
+                }
+                if (u.body.weight != null) {
+                    html += statItem('Weight', u.body.weight + ' lb');
+                }
+                if (u.activity.days_completed != null) {
+                    html += statItem('Days', u.activity.days_completed);
+                }
+                if (u.activity.sets_logged != null) {
+                    html += statItem('Sets', u.activity.sets_logged);
+                }
+                html += '</div>';
+            }
+
+            // Last activity
+            var lastAct = getLastActivityDate(u);
+            if (lastAct) {
+                html += '<div class="last-activity">Last active: ' + formatDate(lastAct) + '</div>';
+            } else if (u.created) {
+                html += '<div class="last-activity">Joined: ' + u.created + '</div>';
+            }
+
+            // Action buttons
+            html += '<div class="card-actions">';
+            html += '<button class="btn btn-outline" onclick="toggleDetail(' + u.id + ', \'' + esc(u.email) + '\')">View Details</button>';
+            html += '<button class="btn btn-danger" onclick="showResetModal(\'' + esc(u.email) + '\')">Reset Password</button>';
+            html += '</div>';
+
+            // Detail panel (hidden)
+            html += '<div class="detail-panel" id="' + detailId + '"></div>';
+
+            html += '</div>';
+            return html;
+        }
+
+        function statItem(key, val) {
+            return '<div class="stat-item"><div class="stat-val">' + val + '</div><div class="stat-key">' + key + '</div></div>';
+        }
+
+        // ---------- DETAIL EXPANSION ----------
+
+        async function toggleDetail(userId, email) {
+            var panel = document.getElementById('detail-' + userId);
+            if (!panel) return;
+
+            if (panel.classList.contains('open')) {
+                panel.classList.remove('open');
+                return;
+            }
+
+            // Show loading
+            panel.innerHTML = '<div class="detail-loading">Loading...</div>';
+            panel.classList.add('open');
+
+            // Fetch or use cache
+            if (detailCache[email]) {
+                renderDetail(panel, detailCache[email]);
+                return;
+            }
+
+            try {
+                var resp = await fetch('/api/admin/debug/user/' + encodeURIComponent(email));
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                var data = await resp.json();
+                detailCache[email] = data;
+                renderDetail(panel, data);
+            } catch (err) {
+                panel.innerHTML = '<div class="detail-loading">Error: ' + err.message + '</div>';
+            }
+        }
+
+        function renderDetail(panel, data) {
+            var html = '';
+
+            // Onboarding details
+            if (data.onboarding) {
+                var ob = data.onboarding;
+                html += '<div class="detail-section"><h4>Onboarding</h4><table class="detail-table">';
+                html += detailRow('State', ob.state ? ('Week ' + (ob.state.current_week || '--') + ', Start: ' + (ob.state.start_date || '--')) : 'No state');
+                html += detailRow('Intake', ob.intake_completed ? 'Done' : 'Pending');
+                html += detailRow('Constraints', ob.constraints_completed ? 'Done' : 'Pending');
+                html += detailRow('Physical', ob.pa_completed ? ('Done (' + (ob.pa_weight || '--') + ' lb, ' + (ob.pa_height || '--') + ' in)') : 'Pending');
+                html += detailRow('Equipment', ob.equipment_completed ? 'Done' : 'Pending');
+                html += detailRow('Food', ob.food_completed ? ('Done (' + (ob.food_count || 0) + ' items)') : 'Pending');
+                html += detailRow('Goal', ob.goal_computed ? (ob.goal_type + ' / ' + (ob.goal_calories || '--') + ' cal / ' + (ob.goal_protein || '--') + 'g protein') : 'Pending');
+                html += detailRow('Plan', ob.plan_accepted ? 'Accepted' : 'Not accepted');
+                html += '</table></div>';
+            }
+
+            // Weights
+            if (data.weights && data.weights.length > 0) {
+                html += '<div class="detail-section"><h4>Recent Weights</h4><table class="detail-table">';
+                data.weights.forEach(function(w) {
+                    html += detailRow(w.date, w.weight + ' lb');
+                });
+                html += '</table></div>';
+            }
+
+            // Measurements
+            if (data.measurements && data.measurements.length > 0) {
+                html += '<div class="detail-section"><h4>Measurements</h4><table class="detail-table">';
+                data.measurements.forEach(function(m) {
+                    var parts = [];
+                    if (m.weight) parts.push(m.weight + ' lb');
+                    if (m.waist) parts.push('waist ' + m.waist + '"');
+                    html += detailRow(m.date, parts.join(', ') || '--');
+                });
+                html += '</table></div>';
+            }
+
+            // Check-ins
+            if (data.checkins && data.checkins.length > 0) {
+                html += '<div class="detail-section"><h4>Check-ins</h4><table class="detail-table">';
+                data.checkins.forEach(function(c) {
+                    html += detailRow(c.date, esc(c.notes || '--'));
+                });
+                html += '</table></div>';
+            }
+
+            // User info
+            if (data.user) {
+                html += '<div class="detail-section"><h4>Account</h4><table class="detail-table">';
+                html += detailRow('ID', data.user.id);
+                html += detailRow('Timezone', data.user.timezone || '--');
+                html += detailRow('Created', data.user.created_at || '--');
+                html += '</table></div>';
+            }
+
+            panel.innerHTML = html || '<div class="detail-loading">No additional data.</div>';
+        }
+
+        function detailRow(key, val) {
+            return '<tr><td>' + key + '</td><td>' + val + '</td></tr>';
+        }
+
+        // ---------- PASSWORD RESET ----------
+
+        var resetEmail = null;
+
+        function showResetModal(email) {
+            resetEmail = email;
+            document.getElementById('pw-modal-email').textContent = email;
+            document.getElementById('pw-modal-msg').innerHTML = 'Reset password for <strong>' + esc(email) + '</strong>?';
+            document.getElementById('pw-modal-result').style.display = 'none';
+            document.getElementById('pw-modal-confirm').style.display = 'inline-block';
+            document.getElementById('pw-modal').classList.add('open');
+        }
+
+        function closePwModal() {
+            document.getElementById('pw-modal').classList.remove('open');
+            resetEmail = null;
+        }
+
+        async function confirmResetPassword() {
+            if (!resetEmail) return;
+            var btn = document.getElementById('pw-modal-confirm');
+            btn.textContent = 'Resetting...';
+            btn.disabled = true;
+
+            try {
+                var resp = await fetch('/api/admin/reset-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({email: resetEmail})
+                });
+                var data = await resp.json();
+                if (data.ok) {
+                    document.getElementById('pw-modal-msg').innerHTML = 'Password reset for <strong>' + esc(resetEmail) + '</strong>:';
+                    document.getElementById('pw-modal-result').textContent = data.temp_password;
+                    document.getElementById('pw-modal-result').style.display = 'block';
+                    btn.style.display = 'none';
+                } else {
+                    document.getElementById('pw-modal-msg').textContent = 'Error: ' + (data.error || 'Unknown');
+                    btn.textContent = 'Reset';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                document.getElementById('pw-modal-msg').textContent = 'Error: ' + err.message;
+                btn.textContent = 'Reset';
+                btn.disabled = false;
+            }
+        }
+
+        // ---------- UTILITIES ----------
+
+        function esc(str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function formatDate(d) {
+            var now = new Date();
+            var diff = now - d;
+            var days = Math.floor(diff / (24 * 60 * 60 * 1000));
+            if (days === 0) return 'Today';
+            if (days === 1) return 'Yesterday';
+            if (days < 7) return days + 'd ago';
+            return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+        }
+
+        // ---------- INIT ----------
+
+        fetchDashboard();
+        refreshTimer = setInterval(fetchDashboard, 60000);
     </script>
 </body>
 </html>

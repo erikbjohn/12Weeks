@@ -5994,10 +5994,7 @@ def api_physical_assessment_reset():
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
-    users = User.query.order_by(User.created_at.desc()).all()
-    invites = Invite.query.order_by(Invite.created_at.desc()).all()
-    pending = Invite.query.filter_by(used_by=None, multi_use=False).all()
-    return render_template("admin.html", users=users, invites=invites, pending=pending)
+    return render_template("admin.html")
 
 
 @app.route("/api/admin/reset-password", methods=["POST"])
