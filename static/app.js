@@ -6505,19 +6505,13 @@ function _pdWeightChart(bw, projection, targetWeight, startDate) {
   svg += '<line x1="' + padL + '" y1="' + goalY + '" x2="' + (W - padR) + '" y2="' + goalY + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="6,4" opacity="0.4"/>';
   svg += '<text x="' + (W - padR - 2) + '" y="' + (goalY - 4) + '" text-anchor="end" fill="#4ade80" font-size="9" font-family="DM Mono,monospace" opacity="0.7">goal ' + Math.round(goalWt) + '</text>';
 
-  // Projection line — maps week numbers to dates on the X axis
-  if (projection && projection.length > 1) {
-    var projPts = [];
-    for (var pi = 0; pi < projection.length; pi++) {
-      var pw = projection[pi].projected || projection[pi].weight || projection[pi];
-      var weekNum = projection[pi].week || (pi + 1);
-      // Week N starts at start_date + (N-1)*7 days
-      var projDate = new Date(xStart); projDate.setDate(projDate.getDate() + (weekNum - 1) * 7);
-      var px = padL + Math.max(0, Math.min(1, (projDate - xStart) / xRangeMs)) * (W - padL - padR);
-      var py = yPos(pw);
-      projPts.push(px.toFixed(1) + ',' + py.toFixed(1));
-    }
-    svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>';
+  // Projection line — straight line from start weight to goal weight over 12 weeks.
+  // The stored projection data has bad Week 1 values (doesn't start at actual weight),
+  // so we draw the simple linear plan: where you NEED to be each week to hit goal.
+  if (goalWt && startWt && goalWt < startWt) {
+    var projStart = padL;
+    var projEnd = padL + (W - padL - padR);
+    svg += '<line x1="' + projStart + '" y1="' + yPos(startWt) + '" x2="' + projEnd + '" y2="' + yPos(goalWt) + '" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.35"/>';
   }
 
   // Actual weight line — positioned by date on X axis
