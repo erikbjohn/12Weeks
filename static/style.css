@@ -897,8 +897,8 @@ footer {
 }
 .m-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 12px;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
   align-items: center;
   padding: 8px 12px;
   background: var(--surface);
@@ -907,6 +907,10 @@ footer {
 }
 .m-label {
   color: var(--muted);
+}
+.m-spark {
+  display: flex;
+  align-items: center;
 }
 .m-val {
   font-family: 'DM Mono', monospace;

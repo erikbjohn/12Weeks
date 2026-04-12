@@ -3533,6 +3533,18 @@ async function toggleInviteDropdown() {
             <div id="invite-result" class="invite-result"></div>
         </div>`;
         el.classList.add('visible');
+        // Close on click outside
+        setTimeout(() => {
+            document.addEventListener('click', function _inviteOutside(e) {
+                var menu = document.getElementById('invite-dropdown');
+                if (!menu || !menu.classList.contains('visible')) { document.removeEventListener('click', _inviteOutside); return; }
+                if (!menu.contains(e.target) && !e.target.closest('#invite-btn')) {
+                    menu.classList.remove('visible');
+                    menu.innerHTML = '';
+                    document.removeEventListener('click', _inviteOutside);
+                }
+            });
+        }, 10);
     } catch(e) {
         console.error('Invite status error:', e);
     }
@@ -7201,57 +7213,80 @@ async function fetchMeasurementsCache() {
     }
 }
 
+function _buildSparkline(values, lowerIsBetter) {
+    if (!values || values.length < 2) return '';
+    var w = 80, h = 28, pad = 2;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var range = max - min || 1;
+    var points = [];
+    for (var i = 0; i < values.length; i++) {
+        var x = pad + (i / (values.length - 1)) * (w - pad * 2);
+        var y = pad + (1 - (values[i] - min) / range) * (h - pad * 2);
+        points.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    var last = values[values.length - 1];
+    var first = values[0];
+    var improved = lowerIsBetter ? last <= first : last >= first;
+    var color = improved ? '%234ade80' : '%23ef4444';
+    return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block">' +
+        '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<circle cx="' + points[points.length - 1].split(',')[0] + '" cy="' + points[points.length - 1].split(',')[1] + '" r="2.5" fill="' + color + '"/>' +
+    '</svg>';
+}
+
 function renderMeasurementsSection(measurements) {
     if (!measurements || measurements.length === 0) {
-        return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements</h4><div class="measurements-empty" style="font-size:13px;color:var(--muted);padding:12px 0">No measurements yet — first entry on Sunday.</div></div>';
+        return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements</h4><div style="font-size:13px;color:var(--muted);padding:12px 0">No measurements yet — first entry on Sunday.</div></div>';
     }
     var latest = measurements[measurements.length - 1];
     var prev = measurements.length >= 2 ? measurements[measurements.length - 2] : null;
     var fields = [
-        { key: 'weight_lbs', label: 'Weight', unit: 'lb' },
-        { key: 'waist', label: 'Waist', unit: 'in' },
-        { key: 'chest', label: 'Chest', unit: 'in' },
-        { key: 'hips', label: 'Hips', unit: 'in' },
-        { key: 'neck', label: 'Neck', unit: 'in' },
-        { key: 'bicep_left', label: 'Bicep L', unit: 'in' },
-        { key: 'bicep_right', label: 'Bicep R', unit: 'in' },
-        { key: 'thigh_left', label: 'Thigh L', unit: 'in' },
-        { key: 'thigh_right', label: 'Thigh R', unit: 'in' },
+        { key: 'weight_lbs', label: 'Weight', unit: 'lb', lower: true },
+        { key: 'waist', label: 'Waist', unit: 'in', lower: true },
+        { key: 'chest', label: 'Chest', unit: 'in', lower: false },
+        { key: 'hips', label: 'Hips', unit: 'in', lower: true },
+        { key: 'neck', label: 'Neck', unit: 'in', lower: false },
+        { key: 'bicep_left', label: 'Bicep L', unit: 'in', lower: false },
+        { key: 'bicep_right', label: 'Bicep R', unit: 'in', lower: false },
+        { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: false },
+        { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: false },
     ];
     var rows = '';
     for (var i = 0; i < fields.length; i++) {
         var f = fields[i];
         var cur = latest[f.key];
         if (cur == null) continue;
+        // Build sparkline from all measurements
+        var vals = [];
+        for (var j = 0; j < measurements.length; j++) {
+            var v = measurements[j][f.key];
+            if (v != null) vals.push(v);
+        }
+        var sparkHtml = _buildSparkline(vals, f.lower);
+        // Delta
         var deltaHtml = '';
         if (prev && prev[f.key] != null) {
             var d = cur - prev[f.key];
             if (d !== 0) {
                 var sign = d > 0 ? '+' : '';
-                // For weight/waist/hips lower is better; for everything else (biceps/chest/thigh) bigger is "lift"
-                var color = (f.key === 'weight_lbs' || f.key === 'waist' || f.key === 'hips')
-                    ? (d < 0 ? 'var(--lift)' : '#ef4444')
-                    : (d > 0 ? 'var(--lift)' : '#ef4444');
+                var color = f.lower ? (d < 0 ? 'var(--lift)' : '#ef4444') : (d > 0 ? 'var(--lift)' : '#ef4444');
                 deltaHtml = '<span class="m-delta" style="color:' + color + '">' + sign + d.toFixed(1) + '</span>';
             } else {
                 deltaHtml = '<span class="m-delta" style="color:var(--muted)">0</span>';
             }
-        } else {
-            deltaHtml = '<span class="m-delta"></span>';
         }
         rows += '<div class="m-row">' +
             '<span class="m-label">' + f.label + '</span>' +
+            '<span class="m-spark">' + sparkHtml + '</span>' +
             '<span class="m-val">' + cur + ' ' + f.unit + '</span>' +
             deltaHtml +
         '</div>';
     }
     var dateStr = latest.date || '';
-    if (!rows) {
-        return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements <span style="font-size:11px;color:var(--muted);font-weight:400">' + dateStr + '</span></h4><div class="measurements-empty" style="font-size:13px;color:var(--muted);padding:12px 0">Latest entry has no values.</div></div>';
-    }
     return '<div class="measurements-section" style="margin-top:16px">' +
         '<h4>Measurements <span style="font-size:11px;color:var(--muted);font-weight:400">' + dateStr + '</span></h4>' +
-        '<div class="m-grid">' + rows + '</div>' +
+        '<div class="m-grid">' + (rows || '<div style="font-size:13px;color:var(--muted);padding:12px 0">No values recorded.</div>') + '</div>' +
     '</div>';
 }
 
@@ -7267,8 +7302,7 @@ function buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, da
     html += garminStatsHtml;
     // Measurements section — populated asynchronously so buildStatsContent stays sync
     html += '<div id="measurements-section-mount"></div>';
-    html += renderCheckinInner(d, dayIdx);
-    // Async fetch + populate measurements
+    // Async fetch + populate measurements with sparklines
     fetchMeasurementsCache().then(function(m) {
         var mount = document.getElementById('measurements-section-mount');
         if (mount) mount.innerHTML = renderMeasurementsSection(m);
