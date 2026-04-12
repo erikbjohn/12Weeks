@@ -3026,6 +3026,32 @@ def api_bodyweight_delete(log_date):
 @app.route("/api/measurements")
 @login_required
 def api_measurements():
+    # Auto-backfill: if PhysicalAssessment has measurements but BodyMeasurement doesn't
+    # have a baseline entry, create one from the intake data.
+    try:
+        pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+        if pa and pa.waist_inches:
+            state = AppState.query.filter_by(user_id=current_user.id).first()
+            baseline_date = state.start_date if state and state.start_date else (pa.created_at.date() if pa.created_at else _user_today())
+            existing = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=baseline_date).first()
+            if not existing:
+                bm = BodyMeasurement(log_date=baseline_date, user_id=current_user.id)
+                if pa.bodyweight_lbs: bm.weight_lbs = pa.bodyweight_lbs
+                if pa.waist_inches: bm.waist_inches = pa.waist_inches
+                if getattr(pa, 'chest_inches', None): bm.chest = pa.chest_inches
+                if getattr(pa, 'hips_inches', None): bm.hips = pa.hips_inches
+                if getattr(pa, 'neck_inches', None): bm.neck = pa.neck_inches
+                if getattr(pa, 'bicep_inches', None):
+                    bm.bicep_left = pa.bicep_inches
+                    bm.bicep_right = pa.bicep_inches
+                if getattr(pa, 'thigh_inches', None):
+                    bm.thigh_left = pa.thigh_inches
+                    bm.thigh_right = pa.thigh_inches
+                db.session.add(bm)
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     d = request.args.get("date")
     query = BodyMeasurement.query.filter_by(user_id=current_user.id)
     if d:

@@ -7228,7 +7228,7 @@ function _buildSparkline(values, lowerIsBetter) {
     var last = values[values.length - 1];
     var first = values[0];
     var improved = lowerIsBetter ? last <= first : last >= first;
-    var color = improved ? '%234ade80' : '%23ef4444';
+    var color = improved ? '#4ade80' : '#ef4444';
     return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block">' +
         '<polyline points="' + points.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
         '<circle cx="' + points[points.length - 1].split(',')[0] + '" cy="' + points[points.length - 1].split(',')[1] + '" r="2.5" fill="' + color + '"/>' +
