@@ -6147,6 +6147,26 @@ def api_admin_save_measurements():
         return jsonify({"error": str(e)[:200]}), 500
 
 
+@app.route("/api/admin/debug/exec", methods=["POST"])
+@admin_required
+def api_admin_debug_exec():
+    """Run a write SQL statement. Admin-only. UPDATE/INSERT/DELETE only."""
+    data = request.get_json()
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "No SQL provided"}), 400
+    upper = sql.upper().lstrip()
+    if not (upper.startswith("UPDATE") or upper.startswith("INSERT") or upper.startswith("DELETE")):
+        return jsonify({"error": "Only UPDATE/INSERT/DELETE allowed"}), 403
+    try:
+        result = db.session.execute(text(sql))
+        db.session.commit()
+        return jsonify({"ok": True, "rowcount": result.rowcount})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:300]}), 500
+
+
 @app.route("/api/admin/debug/fix-indexes", methods=["POST"])
 @admin_required
 def api_admin_fix_indexes():
