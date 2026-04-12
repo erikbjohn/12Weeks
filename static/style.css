@@ -3678,7 +3678,7 @@ footer {
 .plan-note-warn { background: var(--run-tempo-bg); border: 1px solid var(--run-tempo-border); color: var(--run-tempo); }
 
 /* ─── INVITE DROPDOWN ─── */
-.invite-dropdown { position: absolute; top: 52px; right: 1rem; z-index: 100; display: none; }
+.invite-dropdown { position: absolute; top: 52px; right: 1rem; z-index: 110; display: none; }
 .invite-dropdown.visible { display: block; }
 .invite-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: min(300px, calc(100vw - 2rem)); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
 .invite-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; }
@@ -3832,6 +3832,8 @@ footer {
   .chat-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .psych-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .mc-coach-input-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .baseline-overlay { padding-top: env(safe-area-inset-top); }
+  .chat-overlay { padding-top: env(safe-area-inset-top); }
 }
 
 /* ─── SCROLL SNAP FOR DAY NAVIGATION ─── */

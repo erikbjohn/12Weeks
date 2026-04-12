@@ -149,6 +149,7 @@ class SetLog(db.Model):
     actual_time = db.Column(db.String(30), nullable=True)
     target_rpe = db.Column(db.Integer, nullable=True)
     set_skipped = db.Column(db.Boolean, default=False)
+    __table_args__ = (db.UniqueConstraint("user_id", "exercise_name", "week", "day_idx", "set_number"),)
 
 
 class ExerciseSwap(db.Model):
@@ -177,17 +178,18 @@ class ExerciseCompletion(db.Model):
 class WarmupCompletion(db.Model):
     __tablename__ = "warmup_completion"
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     week = db.Column(db.Integer, nullable=False)
     day_idx = db.Column(db.Integer, nullable=False)
     step_idx = db.Column(db.Integer, nullable=False)
     done = db.Column(db.Boolean, default=False)
+    __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx", "step_idx"),)
 
 
 class RunLog(db.Model):
     __tablename__ = "run_log"
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     log_date = db.Column(db.Date, default=date.today)
     week = db.Column(db.Integer)
     day_idx = db.Column(db.Integer)
@@ -196,6 +198,7 @@ class RunLog(db.Model):
     elevation_ft = db.Column(db.Integer)
     duration_min = db.Column(db.Integer)
     notes = db.Column(db.Text)
+    __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
 
 
 class DayCompletion(db.Model):
@@ -223,7 +226,8 @@ class MealLog(db.Model):
     scheduled_time = db.Column(db.Text, nullable=True)  # Per-meal timing JSON
     actual_time = db.Column(db.Text, nullable=True)
     fasting = db.Column(db.Boolean, default=False)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint("user_id", "log_date"),)
 
 
 class AppState(db.Model):
@@ -244,7 +248,7 @@ class BodyWeight(db.Model):
     log_date = db.Column(db.Date, nullable=False, index=True)
     weight_lbs = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
 
 
 class BodyMeasurement(db.Model):
@@ -262,7 +266,7 @@ class BodyMeasurement(db.Model):
     hips = db.Column(db.Float, nullable=True)
     neck = db.Column(db.Float, nullable=True)
     notes = db.Column(db.Text, nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
 
 
 class ProgressPhoto(db.Model):
@@ -289,7 +293,8 @@ class WeeklyCheckIn(db.Model):
     adherence_pct = db.Column(db.Integer)
     notes = db.Column(db.Text, nullable=True)
     check_in_date = db.Column(db.Date, default=date.today)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint("user_id", "week"),)
 
 
 class SupplementLog(db.Model):
@@ -315,8 +320,9 @@ class MorningCheckIn(db.Model):
     motivation = db.Column(db.Integer)          # 1-10
     anxiety = db.Column(db.Integer)             # 1-10
     notes = db.Column(db.Text, nullable=True)   # free text "anything on your mind?"
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (db.UniqueConstraint("user_id", "log_date"),)
 
 
 class PsychIntake(db.Model):
@@ -441,8 +447,9 @@ class WeeklyReport(db.Model):
     checkin_avg = db.Column(db.JSON, nullable=True)
     adherence_pct = db.Column(db.Float, nullable=True)
     narrative = db.Column(db.Text, nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (db.UniqueConstraint("user_id", "week"),)
 
 
 class ChatMessage(db.Model):
@@ -453,7 +460,7 @@ class ChatMessage(db.Model):
     content = db.Column(db.Text, nullable=False)
     message_type = db.Column(db.String(30), default='chat')  # chat, morning_opener, checkin_response, workout_nudge, post_workout, scold
     log_date = db.Column(db.Date, default=date.today, index=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 

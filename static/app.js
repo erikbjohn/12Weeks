@@ -175,7 +175,7 @@ function showPreStartLockout(startDateStr) {
         <div style="background:#1a2e24;border:2px solid #3a7a56;border-radius:12px;padding:20px;margin-bottom:2rem;text-align:left;font-size:15px;line-height:1.6;color:#e8ede9">
           Rest up. Eat clean. Hydrate. When that clock hits zero, we go. No warm-up period. No easing in. Day 1 is full speed. Be ready.
         </div>
-        <button onclick="window.location='/logout'" style="background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
+        <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'" style="background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
       </div>
     </div>`;
 }
@@ -3121,7 +3121,7 @@ async function startPsychConversation() {
     </div>
     <div class="psych-chat-messages" id="psych-chat-messages"></div>
     <div class="psych-input-bar" id="psych-input-bar">
-        <input type="text" id="psych-input" placeholder="Type your response..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendPsychMessage()">
+        <input type="text" id="psych-input" placeholder="Type your response..." enterkeyhint="send" onkeydown="if(event.key==='Enter'){event.preventDefault();sendPsychMessage()}">
         <button onclick="sendPsychMessage()">Send</button>
     </div>
   </div>`;
@@ -3421,7 +3421,7 @@ function showSettingsMenu() {
     <button onclick="showGroceryList()">Grocery List</button>
     <button onclick="exportData()">Export Data</button>
     <button onclick="importData()">Import Data</button>
-    <button onclick="window.location='/logout'">Logout</button>
+    <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
@@ -3756,13 +3756,13 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
     }
 }
 
-function revertExerciseSwap(week, day, exIdx) {
+async function revertExerciseSwap(week, day, exIdx) {
     const key = week + '_' + day + '_' + exIdx;
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
     delete swaps[key];
     sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
-    // Also remove from DB
-    apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: '' });
+    // Also remove from DB — await so it's saved before user can close tab
+    await apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: '' });
     renderDetail();
 }
 
@@ -3823,13 +3823,13 @@ function toggleBodyweightMode(on) {
     renderDetail();
 }
 
-function swapExercise(week, day, exIdx, newName) {
+async function swapExercise(week, day, exIdx, newName) {
     const key = week + '_' + day + '_' + exIdx;
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
     swaps[key] = newName;
     sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
-    // Persist to DB
-    apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: newName });
+    // Persist to DB — await so it's saved before user can close tab
+    await apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: newName });
     renderDetail();
 }
 
@@ -4293,7 +4293,7 @@ async function showMorningCheckinOverlay() {
       </div>
       <div style="flex-shrink:0;padding-top:8px">
         <div class="mc-coach-input-bar">
-          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMcChat()">
+          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter'){event.preventDefault();sendMcChat()}">
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMcChat()">Send</button>
         </div>
@@ -4307,6 +4307,8 @@ async function showMorningCheckinOverlay() {
 }
 
 async function submitSundayMeasurements() {
+  var submitBtn = document.querySelector('.morning-checkin-card .btn-primary');
+  if (submitBtn) submitBtn.disabled = true;
   var data = {
     date: todayStr(),
     weight: parseFloat(document.getElementById('sun-weight')?.value) || null,
@@ -4336,6 +4338,7 @@ async function submitSundayMeasurements() {
       } else if (_measRes.status === 403) {
         // Should not happen (backend gating removed) but handle gracefully
         alert('Measurements save was blocked by the server. Please try again.');
+        if (submitBtn) submitBtn.disabled = false;
         return;
       } else {
         console.error('Measurements save failed (attempt ' + (_attempt+1) + '):', _measRes.status);
@@ -4348,6 +4351,7 @@ async function submitSundayMeasurements() {
   }
   if (!_measSaved) {
     alert('Could not save measurements. Check your connection and try again.');
+    if (submitBtn) submitBtn.disabled = false;
     return;
   }
   // Clear the cache so the Stats section picks up the new entry
@@ -4389,7 +4393,7 @@ function _showSundayReviewChat(measurements) {
       </div>
       <div style="flex-shrink:0;padding-top:8px">
         <div class="mc-coach-input-bar">
-          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMcChat()">
+          <input type="text" id="mc-chat-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter'){event.preventDefault();sendMcChat()}">
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-chat-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMcChat()">Send</button>
         </div>
@@ -4768,7 +4772,7 @@ function submitMorningCheckin() {
       <div id="mc-coach-chat" style="display:none">
         <div id="mc-coach-messages" class="mc-coach-messages"></div>
         <div class="mc-coach-input-bar">
-          <input type="text" id="mc-coach-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendMorningCoachReply()">
+          <input type="text" id="mc-coach-input" placeholder="Reply to Erik..." enterkeyhint="send" onkeydown="if(event.key==='Enter'){event.preventDefault();sendMorningCoachReply()}">
           <button class="chat-mic-btn" onclick="toggleVoiceInput('mc-coach-input')" title="Voice input">&#127908;</button>
           <button onclick="sendMorningCoachReply()">Send</button>
         </div>
@@ -5856,7 +5860,7 @@ function renderPostWorkoutCoach() {
       <div class="coach-top-label">ERIK</div>
       <div class="coach-top-messages" id="post-workout-messages" style="max-height:300px">${bubblesHtml || '<div style="color:var(--muted);font-size:13px;padding:8px 0">Coach feedback will appear here after you log your run.</div>'}</div>
       <div class="coach-top-input-bar">
-        <input type="text" id="post-workout-input" placeholder="Talk to Erik about your workout..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendPostWorkoutMessage()">
+        <input type="text" id="post-workout-input" placeholder="Talk to Erik about your workout..." enterkeyhint="send" onkeydown="if(event.key==='Enter'){event.preventDefault();sendPostWorkoutMessage()}">
         <button onclick="sendPostWorkoutMessage()">Send</button>
       </div>
     </div>
@@ -6150,6 +6154,8 @@ function submitCheckin() {
 }
 
 async function submitWeeklyMeasurements() {
+  var submitBtn = document.querySelector('#checkin-form .btn-primary');
+  if (submitBtn) submitBtn.disabled = true;
   var data = {
     date: todayStr(),
     weight: parseFloat(document.getElementById('checkin-weight')?.value) || null,
@@ -6187,6 +6193,7 @@ async function submitWeeklyMeasurements() {
   }
   if (!_wmSaved) {
     alert('Could not save measurements. Check your connection and try again.');
+    if (submitBtn) submitBtn.disabled = false;
     return;
   }
   window._measurementsCache = null;

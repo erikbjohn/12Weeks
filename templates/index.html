@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="stylesheet" href="/static/style.css?v=242">
+  <link rel="stylesheet" href="/static/style.css?v=243">
 </head>
 <body>
 
@@ -21,6 +21,14 @@
     <div style="color:#6b7280;font-size:13px">Loading your program...</div>
   </div>
 </div>
+<script>
+setTimeout(function() {
+  var loader = document.getElementById('app-loading');
+  if (loader && loader.style.display !== 'none') {
+    loader.innerHTML = '<div style="text-align:center"><div style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;margin-bottom:8px">12 WEEKS</div><div style="color:#ef4444;font-size:13px;margin-bottom:12px">Loading timed out</div><button onclick="location.reload()" style="background:#4ade80;color:#0d0f0e;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:14px">Retry</button></div>';
+  }
+}, 15000);
+</script>
 
 <header>
   <div class="header-row">
@@ -74,6 +82,6 @@ if ('caches' in window) {
   caches.keys().then(names => names.forEach(n => caches.delete(n)));
 }
 </script>
-<script src="/static/app.js?v=242"></script>
+<script src="/static/app.js?v=243"></script>
 </body>
 </html>
