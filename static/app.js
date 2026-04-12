@@ -7324,8 +7324,11 @@ function buildCoachContent(d) {
     var _cDow = new Date().getDay();
     var _cHour = new Date().getHours();
     var _showPlanBtn = (_cDow === 0 && _cHour >= 12) || _cDow === 1;
-    html += '<div id="coach-inline-chat" style="margin-top:12px">' +
-      '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
+    html += '<div id="coach-inline-chat" style="margin-top:12px">';
+    if (_showPlanBtn) {
+      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + (currentWeek + 1) + '</button>';
+    }
+    html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
     return html;
 }
