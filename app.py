@@ -2968,12 +2968,13 @@ def api_measurements_record():
     except Exception:
         db.session.rollback()
 
-    # Also try finding by log_date alone (in case user_id was null on old row)
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if not bm:
-        bm = BodyMeasurement.query.filter_by(log_date=d).first()
-        if bm and bm.user_id is None:
-            bm.user_id = current_user.id  # claim orphan row
+        # Check for orphan row (user_id=NULL) — claim it if found
+        orphan = BodyMeasurement.query.filter_by(user_id=None, log_date=d).first()
+        if orphan:
+            orphan.user_id = current_user.id
+            bm = orphan
     if bm:
         if "weight" in data:
             bm.weight_lbs = data["weight"]
@@ -6106,12 +6107,14 @@ def api_admin_save_measurements():
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bm = BodyMeasurement.query.filter_by(user_id=user.id, log_date=d).first()
     if not bm:
-        bm = BodyMeasurement.query.filter_by(log_date=d).first()
-        if bm and bm.user_id is None:
-            bm.user_id = user.id
-    if not bm:
-        bm = BodyMeasurement(log_date=d, user_id=user.id)
-        db.session.add(bm)
+        # Check for orphan row (user_id=NULL) for this date — claim it
+        orphan = BodyMeasurement.query.filter_by(user_id=None, log_date=d).first()
+        if orphan:
+            orphan.user_id = user.id
+            bm = orphan
+        else:
+            bm = BodyMeasurement(log_date=d, user_id=user.id)
+            db.session.add(bm)
     if data.get("weight"): bm.weight_lbs = float(data["weight"])
     if data.get("waist"): bm.waist_inches = float(data["waist"])
     if data.get("chest"): bm.chest = float(data["chest"])
