@@ -6133,26 +6133,45 @@ async function submitWeeklyMeasurements() {
     notes: (document.getElementById('checkin-notes')?.value || '').trim(),
   };
 
-  var _wmRes = await apiPost('/api/measurements', data);
-  if (_wmRes && _wmRes.status === 403) {
+  var _wmSaved = false;
+  for (var _wma = 0; _wma < 3 && !_wmSaved; _wma++) {
     try {
-      var err = await _wmRes.json();
-      alert('Measurements can only be recorded on Sundays. Next Sunday: ' + (err.next_sunday_in_days || '?') + ' days.');
-    } catch (e) {
-      alert('Measurements can only be recorded on Sundays.');
+      var _wmRes = await fetch('/api/measurements', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+      });
+      if (_wmRes.ok) {
+        _wmSaved = true;
+      } else {
+        var _wmErr = '';
+        try { _wmErr = (await _wmRes.json()).error || ''; } catch(e) {}
+        console.error('Measurements save failed (attempt ' + (_wma+1) + '):', _wmRes.status, _wmErr);
+        if (_wma < 2) await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch(e) {
+      console.error('Measurements save network error (attempt ' + (_wma+1) + '):', e);
+      if (_wma < 2) await new Promise(r => setTimeout(r, 1000));
     }
+  }
+  if (!_wmSaved) {
+    alert('Could not save measurements. Check your connection and try again.');
     return;
   }
   window._measurementsCache = null;
 
   if (data.weight) {
-    apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
+    await fetch('/api/bodyweight', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ date: todayStr(), weight: data.weight }),
+    }).catch(function(){});
   }
 
-  // Visual feedback
+  // Visual feedback — only shown AFTER confirmed save
   var form = document.getElementById('checkin-form');
   if (form) {
-    form.innerHTML = '<div style="text-align:center;color:var(--accent);padding:1rem">Measurements submitted!</div>';
+    form.innerHTML = '<div style="text-align:center;color:var(--accent);padding:1rem">Measurements saved.</div>';
   }
 }
 
