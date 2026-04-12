@@ -5916,6 +5916,69 @@ def api_admin_reset_password():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/admin/set-weight", methods=["POST"])
+@admin_required
+def api_admin_set_weight():
+    """Set a user's bodyweight and recompute their goal. Admin-only."""
+    from goal_engine import compute_tdee, compute_targets, compute_day_calories
+    data = request.get_json()
+    email = (data.get("email") or "").strip().lower()
+    weight = data.get("weight")
+    if not email or not weight:
+        return jsonify({"error": "email and weight required"}), 400
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+
+    # 1. Save to BodyWeight table
+    d = _user_today()
+    bw = BodyWeight.query.filter_by(user_id=user.id, log_date=d).first()
+    if bw:
+        bw.weight_lbs = float(weight)
+    else:
+        db.session.add(BodyWeight(log_date=d, weight_lbs=float(weight), user_id=user.id))
+
+    # 2. Save to PhysicalAssessment
+    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+    if pa:
+        pa.bodyweight_lbs = float(weight)
+
+    db.session.commit()
+
+    # 3. Recompute goal if one exists
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    recomputed = False
+    if goal:
+        try:
+            intake = PsychIntake.query.filter_by(user_id=user.id).first()
+            height = pa.height_inches if pa else 70
+            age = intake.age if intake and hasattr(intake, 'age') and intake.age else 30
+            sex = (intake.sex if intake and hasattr(intake, 'sex') else 'male') or 'male'
+            tdee_info = compute_tdee(float(weight), height or 70, age, sex)
+            targets = compute_targets(tdee_info["tdee"], goal.goal_type or "cut", float(weight),
+                                      target_weight=goal.target_weight, weeks=12)
+            goal.daily_calories = targets["calories"]
+            goal.protein_grams = targets["protein"]
+            goal.carb_grams = targets["carbs"]
+            goal.fat_grams = targets["fat"]
+            db.session.commit()
+            recomputed = True
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"ok": True, "weight_saved": True, "recomputed": False,
+                            "recompute_error": str(e)})
+
+    return jsonify({
+        "ok": True,
+        "email": user.email,
+        "weight_saved": True,
+        "weight_lbs": float(weight),
+        "recomputed": recomputed,
+        "calories": goal.daily_calories if goal else None,
+        "protein": goal.protein_grams if goal else None,
+    })
+
+
 @app.route("/api/admin/reset-assessment", methods=["POST"])
 @admin_required
 def api_admin_reset_assessment():
