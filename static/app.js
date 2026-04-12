@@ -7322,8 +7322,21 @@ function buildCoachContent(d) {
     // No auto-refresh — coach only speaks when you tap "Talk to Erik"
     // Show "Plan Next Week" button on Sunday afternoon or Monday
     html += '<div id="coach-inline-chat" style="margin-top:12px">';
-    // Always show Plan Week button — users need to prep for next week anytime
-    html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + (currentWeek + 1) + '</button>';
+    // Show Plan Week button only on Sunday/Monday AND only if next week isn't planned yet.
+    // Check if next week has meal plans — meals are only generated during planning.
+    var _cDow = new Date().getDay(); // 0=Sun, 1=Mon
+    var _isSunOrMon = _cDow === 0 || _cDow === 1;
+    var _nextWk = currentWeek + 1;
+    var _nextWkData = workoutData && workoutData[String(_nextWk)];
+    var _nextWkPlanned = false;
+    if (_nextWkData && _nextWkData.days) {
+      for (var _ndi = 0; _ndi < _nextWkData.days.length && !_nextWkPlanned; _ndi++) {
+        if (_nextWkData.days[_ndi] && _nextWkData.days[_ndi].mealPlan) _nextWkPlanned = true;
+      }
+    }
+    if (_isSunOrMon && !_nextWkPlanned && _nextWk <= 12) {
+      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + _nextWk + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + _nextWk + '</button>';
+    }
     html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
     return html;
