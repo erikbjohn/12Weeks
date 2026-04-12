@@ -6239,173 +6239,484 @@ async function submitWeeklyMeasurements() {
 
 // ─── PROGRESS DASHBOARD ────────────────────────────────────────────────────
 function showProgress() {
-  const overlay = document.getElementById('progress-overlay');
+  var overlay = document.getElementById('progress-overlay');
   if (!overlay) return;
   overlay.classList.add('visible');
   overlay.innerHTML = '<div class="progress-loading">Loading progress data...</div>';
 
-  fetch('/api/progress')
-    .then(r => r.json())
-    .then(data => renderProgressDashboard(data))
-    .catch(e => {
-      overlay.innerHTML = '<div class="progress-loading">Failed to load progress.</div>';
+  fetch('/api/progress/dashboard')
+    .then(function(r) { return r.ok ? r.json() : Promise.reject('api'); })
+    .then(function(data) { _renderNewDashboard(data); })
+    .catch(function() {
+      // Fallback: build dashboard from local caches
+      _renderNewDashboard(null);
     });
 }
 
 function closeProgress() {
-  const overlay = document.getElementById('progress-overlay');
+  var overlay = document.getElementById('progress-overlay');
   if (overlay) overlay.classList.remove('visible');
 }
 
-function renderProgressDashboard(data) {
-  const overlay = document.getElementById('progress-overlay');
+/* ─── NEW PROGRESS DASHBOARD ─────────────────────────────────────────────── */
+
+function _renderNewDashboard(apiData) {
+  var overlay = document.getElementById('progress-overlay');
   if (!overlay) return;
 
-  overlay.innerHTML = `
-    <div class="progress-header">
-      <h2>Progress Dashboard</h2>
-      <button class="progress-share" onclick="shareWeeklySummary()">Share</button>
-      <button class="progress-close" onclick="closeProgress()">&times;</button>
-    </div>
-    <div class="progress-content">
-      <div class="progress-chart-section">
-        <h3>Body Weight</h3>
-        <canvas id="progress-bw-chart" height="180" style="width:100%"></canvas>
-      </div>
-      <div class="progress-chart-section">
-        <h3>Key Lifts</h3>
-        <canvas id="progress-lifts-chart" height="180" style="width:100%"></canvas>
-      </div>
-      <div class="progress-chart-section">
-        <h3>Waist Measurement</h3>
-        <canvas id="progress-waist-chart" height="120" style="width:100%"></canvas>
-      </div>
-      <div class="progress-chart-section">
-        <h3>Weekly Check-Ins</h3>
-        <div id="progress-checkins"></div>
-      </div>
-    </div>
-  `;
+  // Gather data from API response with fallbacks to local caches
+  var d = apiData || {};
+  var bw = d.bodyweight || _bodyweightCache || [];
+  var measurements = d.measurements || window._measurementsCache || [];
+  var completions = d.completions || (_completionsCache ? _completionsCache.days : null) || {};
+  var lifts = d.lifts || _weightsCache || {};
+  var startDate = d.start_date || (_stateCache ? _stateCache.start_date : null) || null;
+  var targetWeight = d.target_weight || (d.deficit ? d.deficit.target_weight : null) || (_stateCache ? _stateCache.target_weight : null) || null;
+  var projection = d.weight_projection || [];
+  var psychQuote = d.psych_quote || null;
 
-  // Draw body weight chart
-  if (data.bodyweight && data.bodyweight.length > 1) {
-    drawProgressChart('progress-bw-chart', data.bodyweight.map(e => e.weight), data.bodyweight.map(e => e.date), '#4ade80');
-  } else {
-    const bwCanvas = document.getElementById('progress-bw-chart');
-    if (bwCanvas) bwCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
-  }
+  var startWeight = bw.length > 0 ? bw[0].weight : null;
+  var currentWeight = bw.length > 0 ? bw[bw.length - 1].weight : null;
 
-  // Draw lifts chart (multiple lines)
-  if (data.lifts) {
-    drawLiftsChart('progress-lifts-chart', data.lifts);
-  } else {
-    const liftsCanvas = document.getElementById('progress-lifts-chart');
-    if (liftsCanvas) liftsCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
-  }
+  var html = '';
+  html += '<div class="pd-header">';
+  html += '<button class="pd-close" onclick="closeProgress()" aria-label="Close">&times;</button>';
+  html += '<span class="pd-title">Progress</span>';
+  html += '<button class="progress-share" onclick="shareWeeklySummary()">Share</button>';
+  html += '</div>';
+  html += '<div class="pd-scroll">';
 
-  // Draw waist chart
-  if (data.measurements && data.measurements.length > 1) {
-    drawProgressChart('progress-waist-chart', data.measurements.map(e => e.waist), data.measurements.map(e => e.date), '#f59e0b');
-  } else {
-    const waistCanvas = document.getElementById('progress-waist-chart');
-    if (waistCanvas) waistCanvas.parentElement.innerHTML += '<p style="text-align:center;color:#9aaa9d;font-size:0.9rem">Need more data for chart</p>';
-  }
+  // ── 1. HERO CARD ──
+  html += _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projection);
 
-  // Render checkins
-  if (data.checkins && data.checkins.length > 0) {
-    const el = document.getElementById('progress-checkins');
-    el.innerHTML = data.checkins.map(c => `
-      <div class="progress-checkin-row">
-        <span class="pc-week">Wk ${c.week}</span>
-        <span class="pc-score">E:${c.energy} S:${c.sleep} So:${c.soreness} A:${c.adherence}%</span>
-      </div>
-    `).join('');
-  }
+  // ── 2. WEIGHT CHART ──
+  html += _pdWeightChart(bw, projection, targetWeight, startDate);
+
+  // ── 3. BODY COMPOSITION GRID ──
+  html += _pdBodyComp(measurements);
+
+  // ── 4. TRAINING STREAK ──
+  html += _pdStreakGrid(completions, startDate);
+
+  // ── 5. LIFT PROGRESSION ──
+  html += _pdLiftProgression(lifts);
+
+  // ── 6. MOTIVATIONAL FOOTER ──
+  html += _pdMotivationalFooter(startWeight, currentWeight, psychQuote);
+
+  html += '</div>'; // end pd-scroll
+  overlay.innerHTML = html;
 }
 
-function drawProgressChart(canvasId, values, labels, color) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas || values.length < 2) return;
-  canvas.width = canvas.offsetWidth;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
-  const pad = 10;
-  ctx.clearRect(0, 0, W, H);
+/* ── HERO CARD ── */
+function _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projection) {
+  if (startWeight == null || currentWeight == null) {
+    return '<div class="pd-hero"><div class="pd-hero-delta">--</div><div class="pd-hero-sub">No weigh-ins yet</div></div>';
+  }
+  var delta = currentWeight - startWeight;
+  var deltaStr = (delta <= 0 ? '' : '+') + delta.toFixed(1) + ' lb';
+  var deltaClass = delta <= 0 ? 'pd-green' : 'pd-red';
 
-  const min = Math.min(...values) - 1;
-  const max = Math.max(...values) + 1;
-  const range = max - min || 1;
-  const xStep = (W - pad * 2) / (values.length - 1);
-  const yScale = (v) => H - pad - ((v - min) / range) * (H - pad * 2);
+  var pct = 0;
+  if (targetWeight && startWeight !== targetWeight) {
+    pct = Math.max(0, Math.min(100, ((startWeight - currentWeight) / (startWeight - targetWeight)) * 100));
+  }
 
-  // Line
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = pad + i * xStep;
-    const y = yScale(v);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Dots
-  ctx.fillStyle = color;
-  values.forEach((v, i) => {
-    ctx.beginPath();
-    ctx.arc(pad + i * xStep, yScale(v), 3, 0, Math.PI * 2);
-    ctx.fill();
-  });
-}
-
-function drawLiftsChart(canvasId, liftsData) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  canvas.width = canvas.offsetWidth;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width;
-  const H = canvas.height;
-  const pad = 10;
-  ctx.clearRect(0, 0, W, H);
-
-  const colors = ['#4ade80', '#60a5fa', '#f59e0b', '#f87171', '#a78bfa', '#94a3b8'];
-  let colorIdx = 0;
-
-  // Find global min/max across all lifts
-  let allVals = [];
-  for (const name in liftsData) {
-    const hist = liftsData[name];
-    if (Array.isArray(hist)) {
-      hist.forEach(e => allVals.push(e.weight || 0));
+  // Projection text
+  var projText = '';
+  if (targetWeight && startDate) {
+    var endDate = new Date(startDate + 'T00:00:00');
+    endDate.setDate(endDate.getDate() + 12 * 7);
+    var weeksTotalRemain = Math.max(1, Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24 * 7)));
+    if (projection && projection.length > 0) {
+      var finalProj = projection[projection.length - 1];
+      var projWeight = finalProj.weight || finalProj;
+      projText = 'On pace for ' + Math.round(projWeight) + ' by Week 12';
+    } else {
+      // Simple linear projection
+      var startDt = new Date(startDate + 'T00:00:00');
+      var elapsedWeeks = Math.max(1, (new Date() - startDt) / (1000 * 60 * 60 * 24 * 7));
+      var weeklyRate = (startWeight - currentWeight) / elapsedWeeks;
+      var projected = currentWeight - (weeklyRate * weeksTotalRemain);
+      projText = 'On pace for ' + Math.round(projected) + ' by Week 12';
     }
   }
-  if (allVals.length < 2) return;
 
-  const min = Math.min(...allVals) - 5;
-  const max = Math.max(...allVals) + 5;
-  const range = max - min || 1;
-  const yScale = (v) => H - pad - ((v - min) / range) * (H - pad * 2);
-
-  for (const name in liftsData) {
-    const hist = liftsData[name];
-    if (!Array.isArray(hist) || hist.length < 2) continue;
-    const color = colors[colorIdx % colors.length];
-    colorIdx++;
-
-    const xStep = (W - pad * 2) / (hist.length - 1);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    hist.forEach((e, i) => {
-      const x = pad + i * xStep;
-      const y = yScale(e.weight);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
+  var barPct = Math.round(pct);
+  var filledBlocks = Math.round(barPct / 100 * 12);
+  var barStr = '';
+  for (var i = 0; i < 12; i++) {
+    barStr += i < filledBlocks ? '\u2588' : '\u2591';
   }
+
+  var h = '<div class="pd-hero">';
+  h += '<div class="pd-hero-delta ' + deltaClass + '">' + deltaStr + '</div>';
+  h += '<div class="pd-hero-range">' + startWeight + ' &rarr; ' + currentWeight.toFixed(1) + '</div>';
+  h += '<div class="pd-hero-bar"><span class="pd-bar-fill">' + barStr + '</span> <span class="pd-bar-pct">' + barPct + '%</span></div>';
+  if (projText) h += '<div class="pd-hero-proj">' + projText + '</div>';
+  h += '</div>';
+  return h;
+}
+
+/* ── WEIGHT CHART (inline SVG) ── */
+function _pdWeightChart(bw, projection, targetWeight, startDate) {
+  if (!bw || bw.length < 2) {
+    return '<div class="pd-section"><div class="pd-section-label">Weight</div><div class="pd-empty">Need 2+ weigh-ins for chart</div></div>';
+  }
+
+  var W = 340, H = 200, padL = 48, padR = 12, padT = 16, padB = 28;
+  var vals = bw.map(function(e) { return e.weight; });
+  var dates = bw.map(function(e) { return e.date; });
+
+  // Merge projection values for y-axis range
+  var projVals = [];
+  if (projection && projection.length > 0) {
+    projVals = projection.map(function(p) { return p.weight || p; });
+  }
+  var allVals = vals.concat(projVals);
+  if (targetWeight) allVals.push(targetWeight);
+
+  var yMin = Math.min.apply(null, allVals) - 2;
+  var yMax = Math.max.apply(null, allVals) + 2;
+  var yRange = yMax - yMin || 1;
+
+  function xPos(i, total) { return padL + (i / Math.max(1, total - 1)) * (W - padL - padR); }
+  function yPos(v) { return padT + (1 - (v - yMin) / yRange) * (H - padT - padB); }
+
+  var svg = '<svg class="pd-weight-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
+
+  // Y-axis labels
+  var yLabels = [yMax, (yMax + yMin) / 2, yMin];
+  for (var yi = 0; yi < yLabels.length; yi++) {
+    var ly = yPos(yLabels[yi]);
+    svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="#9aaa9d" font-size="11" font-family="DM Mono,monospace">' + Math.round(yLabels[yi]) + '</text>';
+    svg += '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="#2a2e2c" stroke-width="0.5"/>';
+  }
+
+  // Target weight horizontal dashed line
+  if (targetWeight) {
+    var tY = yPos(targetWeight);
+    svg += '<line x1="' + padL + '" y1="' + tY + '" x2="' + (W - padR) + '" y2="' + tY + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>';
+    svg += '<text x="' + (W - padR + 2) + '" y="' + (tY + 4) + '" fill="#4ade80" font-size="10" font-family="DM Mono,monospace" opacity="0.7">goal</text>';
+  }
+
+  // Projection dotted line
+  if (projVals.length > 1) {
+    var projPts = [];
+    for (var pi = 0; pi < projVals.length; pi++) {
+      projPts.push(xPos(pi, projVals.length).toFixed(1) + ',' + yPos(projVals[pi]).toFixed(1));
+    }
+    svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.5"/>';
+  }
+
+  // Actual weight line
+  var pts = [];
+  for (var ai = 0; ai < vals.length; ai++) {
+    pts.push(xPos(ai, vals.length).toFixed(1) + ',' + yPos(vals[ai]).toFixed(1));
+  }
+  svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+
+  // Dots on actual data
+  for (var di = 0; di < vals.length; di++) {
+    var dx = xPos(di, vals.length);
+    var dy = yPos(vals[di]);
+    svg += '<circle cx="' + dx.toFixed(1) + '" cy="' + dy.toFixed(1) + '" r="3" fill="#4ade80"/>';
+  }
+
+  // X-axis date labels (first, middle, last)
+  var xLabelIdxs = [0];
+  if (dates.length > 2) xLabelIdxs.push(Math.floor(dates.length / 2));
+  xLabelIdxs.push(dates.length - 1);
+  for (var xi = 0; xi < xLabelIdxs.length; xi++) {
+    var idx = xLabelIdxs[xi];
+    var lx = xPos(idx, dates.length);
+    var dateLabel = dates[idx] ? dates[idx].slice(5) : ''; // MM-DD
+    svg += '<text x="' + lx.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#9aaa9d" font-size="10" font-family="DM Mono,monospace">' + dateLabel + '</text>';
+  }
+
+  svg += '</svg>';
+
+  return '<div class="pd-section"><div class="pd-section-label">Weight</div>' + svg + '</div>';
+}
+
+/* ── BODY COMPOSITION GRID ── */
+function _pdBodyComp(measurements) {
+  if (!measurements || measurements.length === 0) {
+    return '<div class="pd-section"><div class="pd-section-label">Body Composition</div><div class="pd-empty">No measurements recorded yet</div></div>';
+  }
+
+  var latest = measurements[measurements.length - 1];
+  var baseline = measurements[0];
+
+  var fields = [
+    { key: 'weight_lbs', altKey: 'weight', label: 'Weight', unit: 'lb', lower: true },
+    { key: 'waist', label: 'Waist', unit: 'in', lower: true },
+    { key: 'chest', label: 'Chest', unit: 'in', lower: false },
+    { key: 'hips', label: 'Hips', unit: 'in', lower: true },
+    { key: 'neck', label: 'Neck', unit: 'in', lower: false },
+    { key: 'bicep_avg', label: 'Biceps', unit: 'in', lower: false, computed: true },
+    { key: 'thigh_avg', label: 'Thighs', unit: 'in', lower: false, computed: true }
+  ];
+
+  function getVal(entry, field) {
+    if (field.computed) {
+      if (field.key === 'bicep_avg') {
+        var bl = entry.bicep_left, br = entry.bicep_right;
+        if (bl != null && br != null) return (bl + br) / 2;
+        return bl || br || null;
+      }
+      if (field.key === 'thigh_avg') {
+        var tl = entry.thigh_left, tr = entry.thigh_right;
+        if (tl != null && tr != null) return (tl + tr) / 2;
+        return tl || tr || null;
+      }
+    }
+    var v = entry[field.key];
+    if (v == null && field.altKey) v = entry[field.altKey];
+    return v;
+  }
+
+  var cards = '';
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    var cur = getVal(latest, f);
+    if (cur == null) continue;
+
+    // Sparkline values
+    var sparkVals = [];
+    for (var j = 0; j < measurements.length; j++) {
+      var sv = getVal(measurements[j], f);
+      if (sv != null) sparkVals.push(sv);
+    }
+    var sparkHtml = _buildSparkline(sparkVals, f.lower);
+
+    // Delta vs baseline
+    var deltaHtml = '';
+    var baseVal = getVal(baseline, f);
+    if (baseVal != null && measurements.length > 1) {
+      var dd = cur - baseVal;
+      if (dd !== 0) {
+        var sign = dd > 0 ? '+' : '';
+        var goodDir = f.lower ? (dd < 0) : (dd > 0);
+        var dColor = goodDir ? '#4ade80' : '#ef4444';
+        deltaHtml = '<span class="pd-comp-delta" style="color:' + dColor + '">' + sign + dd.toFixed(1) + '</span>';
+      } else {
+        deltaHtml = '<span class="pd-comp-delta" style="color:#9aaa9d">0</span>';
+      }
+    }
+
+    cards += '<div class="pd-comp-card">';
+    cards += '<div class="pd-comp-label">' + f.label + '</div>';
+    cards += '<div class="pd-comp-val">' + cur.toFixed(1) + ' <span class="pd-comp-unit">' + f.unit + '</span></div>';
+    cards += deltaHtml;
+    cards += '<div class="pd-comp-spark">' + sparkHtml + '</div>';
+    cards += '</div>';
+  }
+
+  return '<div class="pd-section"><div class="pd-section-label">Body Composition</div><div class="pd-comp-grid">' + cards + '</div></div>';
+}
+
+/* ── TRAINING STREAK (GitHub-style grid) ── */
+function _pdStreakGrid(completions, startDate) {
+  if (!startDate) {
+    return '<div class="pd-section"><div class="pd-section-label">Training Streak</div><div class="pd-empty">Set a start date first</div></div>';
+  }
+
+  var startDt = new Date(startDate + 'T00:00:00');
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var totalDays = Math.min(12 * 7, Math.floor((today - startDt) / (1000 * 60 * 60 * 24)) + 1);
+
+  // Build day-level completion set
+  var completedDays = {};
+  if (completions) {
+    for (var key in completions) {
+      if (completions[key]) {
+        // key format: "week_dayIdx" e.g. "1_0"
+        var parts = key.split('_');
+        if (parts.length === 2) {
+          var wk = parseInt(parts[0]);
+          var di = parseInt(parts[1]);
+          var dayDate = new Date(startDt);
+          dayDate.setDate(dayDate.getDate() + (wk - 1) * 7 + di);
+          var ds = dayDate.getFullYear() + '-' + String(dayDate.getMonth() + 1).padStart(2, '0') + '-' + String(dayDate.getDate()).padStart(2, '0');
+          completedDays[ds] = true;
+        }
+      }
+    }
+  }
+
+  // Also check per-exercise completions
+  if (_completionsCache && _completionsCache.exercises) {
+    for (var ekey in _completionsCache.exercises) {
+      if (_completionsCache.exercises[ekey]) {
+        var ep = ekey.split('_');
+        if (ep.length >= 2) {
+          var ew = parseInt(ep[0]);
+          var ed = parseInt(ep[1]);
+          var eDate = new Date(startDt);
+          eDate.setDate(eDate.getDate() + (ew - 1) * 7 + ed);
+          var eds = eDate.getFullYear() + '-' + String(eDate.getMonth() + 1).padStart(2, '0') + '-' + String(eDate.getDate()).padStart(2, '0');
+          completedDays[eds] = true;
+        }
+      }
+    }
+  }
+
+  // Calculate current streak
+  var streak = 0;
+  var checkDate = new Date(today);
+  while (true) {
+    var cs = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
+    if (completedDays[cs]) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+      if (checkDate < startDt) break;
+    } else {
+      // Allow today to be incomplete — check yesterday
+      if (streak === 0) {
+        checkDate.setDate(checkDate.getDate() - 1);
+        var ys = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
+        if (completedDays[ys]) {
+          streak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+          continue;
+        }
+      }
+      break;
+    }
+  }
+
+  // Build grid: 7 columns (Mon-Sun), up to 12 rows
+  var totalWeeks = Math.min(12, Math.ceil(totalDays / 7));
+  var dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  var grid = '<div class="pd-streak-header">';
+  for (var li = 0; li < 7; li++) {
+    grid += '<span class="pd-streak-day-label">' + dayLabels[li] + '</span>';
+  }
+  grid += '</div>';
+
+  grid += '<div class="pd-streak-grid">';
+  for (var wi = 0; wi < totalWeeks; wi++) {
+    for (var dj = 0; dj < 7; dj++) {
+      var cellDate = new Date(startDt);
+      cellDate.setDate(cellDate.getDate() + wi * 7 + dj);
+      var cellStr = cellDate.getFullYear() + '-' + String(cellDate.getMonth() + 1).padStart(2, '0') + '-' + String(cellDate.getDate()).padStart(2, '0');
+
+      var cellClass = 'pd-streak-cell';
+      if (cellDate > today) {
+        cellClass += ' pd-streak-future';
+      } else if (completedDays[cellStr]) {
+        cellClass += ' pd-streak-done';
+      } else {
+        cellClass += ' pd-streak-missed';
+      }
+      grid += '<div class="' + cellClass + '"></div>';
+    }
+  }
+  grid += '</div>';
+
+  var streakText = streak + ' day streak';
+
+  return '<div class="pd-section">' +
+    '<div class="pd-section-label">Training Streak</div>' +
+    '<div class="pd-streak-count">' + streak + ' <span class="pd-streak-unit">day streak</span></div>' +
+    grid +
+    '</div>';
+}
+
+/* ── LIFT PROGRESSION (mini bar charts) ── */
+function _pdLiftProgression(lifts) {
+  if (!lifts || Object.keys(lifts).length === 0) {
+    return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div><div class="pd-empty">No lift data yet</div></div>';
+  }
+
+  // Gather top lifts by number of entries, pick top 5
+  var liftEntries = [];
+  for (var name in lifts) {
+    var hist = lifts[name];
+    if (!hist) continue;
+    var entries = Array.isArray(hist) ? hist : (hist.history || []);
+    if (entries.length === 0) continue;
+    // Group by week, take max weight per week
+    var weekMap = {};
+    for (var ei = 0; ei < entries.length; ei++) {
+      var e = entries[ei];
+      var w = e.week || 1;
+      var wt = e.weight || 0;
+      var reps = 1;
+      if (e.reps_completed) reps = parseInt(e.reps_completed) || 1;
+      else if (e.reps) {
+        var rm = String(e.reps).match(/(\d+)/);
+        reps = rm ? parseInt(rm[1]) : 1;
+      }
+      var e1rm = Math.round(wt * (1 + Math.min(reps, 15) / 30));
+      if (!weekMap[w] || e1rm > weekMap[w]) weekMap[w] = e1rm;
+    }
+    var weeks = Object.keys(weekMap).map(Number).sort(function(a, b) { return a - b; });
+    if (weeks.length === 0) continue;
+    var weekVals = weeks.map(function(wk) { return { week: wk, e1rm: weekMap[wk] }; });
+    liftEntries.push({ name: name, data: weekVals, maxE1rm: Math.max.apply(null, weekVals.map(function(v) { return v.e1rm; })) });
+  }
+
+  // Sort by most data points, take top 5
+  liftEntries.sort(function(a, b) { return b.data.length - a.data.length; });
+  liftEntries = liftEntries.slice(0, 5);
+
+  if (liftEntries.length === 0) {
+    return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div><div class="pd-empty">No lift data yet</div></div>';
+  }
+
+  var html = '';
+  for (var li = 0; li < liftEntries.length; li++) {
+    var lift = liftEntries[li];
+    var maxVal = Math.max.apply(null, lift.data.map(function(v) { return v.e1rm; }));
+    var latestVal = lift.data[lift.data.length - 1].e1rm;
+    var isPR = latestVal >= maxVal;
+
+    html += '<div class="pd-lift-row">';
+    html += '<div class="pd-lift-name">' + lift.name + (isPR ? ' <span class="pd-pr-badge">PR</span>' : '') + '</div>';
+    html += '<div class="pd-lift-bars">';
+
+    for (var bi = 0; bi < lift.data.length; bi++) {
+      var pct = maxVal > 0 ? (lift.data[bi].e1rm / maxVal * 100) : 0;
+      var barLabel = 'W' + lift.data[bi].week;
+      var isMax = lift.data[bi].e1rm >= maxVal;
+      html += '<div class="pd-lift-bar-wrap">';
+      html += '<div class="pd-lift-bar' + (isMax ? ' pd-lift-bar-max' : '') + '" style="height:' + Math.max(8, pct) + '%"></div>';
+      html += '<div class="pd-lift-bar-label">' + barLabel + '</div>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+    html += '<div class="pd-lift-val">' + latestVal + ' <span class="pd-lift-unit">e1RM</span></div>';
+    html += '</div>';
+  }
+
+  return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div>' + html + '</div>';
+}
+
+/* ── MOTIVATIONAL FOOTER ── */
+function _pdMotivationalFooter(startWeight, currentWeight, psychQuote) {
+  if (startWeight == null || currentWeight == null || startWeight <= currentWeight) {
+    return '<div class="pd-footer"><div class="pd-footer-line">Every rep counts. Keep showing up.</div></div>';
+  }
+
+  var lost = startWeight - currentWeight;
+  // 1 gallon of milk = 8.6 lb
+  var gallons = (lost / 8.6).toFixed(1);
+
+  var h = '<div class="pd-footer">';
+  h += '<div class="pd-footer-line">You\'ve earned ' + lost.toFixed(1) + ' lb of progress. That\'s ' + gallons + ' gallons of milk you\'re no longer carrying.</div>';
+
+  if (psychQuote) {
+    h += '<div class="pd-footer-quote">You said: "' + psychQuote + '"</div>';
+  }
+
+  h += '<div class="pd-footer-loss">If you stop now, research shows you\'ll regain it in 8 weeks.</div>';
+  h += '</div>';
+  return h;
 }
 
 // ─── MILESTONE DETECTION ────────────────────────────────────────────────────
@@ -7240,7 +7551,8 @@ function renderMeasurementsSection(measurements) {
         return '<div class="measurements-section" style="margin-top:16px"><h4>Measurements</h4><div style="font-size:13px;color:var(--muted);padding:12px 0">No measurements yet — first entry on Sunday.</div></div>';
     }
     var latest = measurements[measurements.length - 1];
-    var prev = measurements.length >= 2 ? measurements[measurements.length - 2] : null;
+    // Delta vs BASELINE (first entry), not just vs previous week — shows total progress
+    var baseline = measurements[0];
     var fields = [
         { key: 'weight_lbs', label: 'Weight', unit: 'lb', lower: true },
         { key: 'waist', label: 'Waist', unit: 'in', lower: true },
@@ -7264,10 +7576,10 @@ function renderMeasurementsSection(measurements) {
             if (v != null) vals.push(v);
         }
         var sparkHtml = _buildSparkline(vals, f.lower);
-        // Delta
+        // Delta vs baseline (first measurement)
         var deltaHtml = '';
-        if (prev && prev[f.key] != null) {
-            var d = cur - prev[f.key];
+        if (baseline && baseline[f.key] != null && latest !== baseline) {
+            var d = cur - baseline[f.key];
             if (d !== 0) {
                 var sign = d > 0 ? '+' : '';
                 var color = f.lower ? (d < 0 ? 'var(--lift)' : '#ef4444') : (d > 0 ? 'var(--lift)' : '#ef4444');

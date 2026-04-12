@@ -3372,6 +3372,226 @@ def api_progress():
     })
 
 
+# ─── PROGRESS DASHBOARD (comprehensive single-call) ─────────────────────────
+
+@app.route("/api/progress/dashboard")
+@login_required
+def api_progress_dashboard():
+    """Return ALL progress dashboard data in a single call."""
+    uid = current_user.id
+    current_week = _current_week()
+    today = _user_today()
+
+    # ── 1. Body weight series ────────────────────────────────────────────
+    bw_entries = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date).all()
+    bw_series = []
+    for i, e in enumerate(bw_entries):
+        window = bw_entries[max(0, i - 6):i + 1]
+        avg = sum(w.weight_lbs for w in window) / len(window)
+        bw_series.append({
+            "date": e.log_date.isoformat(),
+            "weight": e.weight_lbs,
+            "rolling_avg_7d": round(avg, 1),
+        })
+
+    start_weight = bw_entries[0].weight_lbs if bw_entries else None
+    current_weight = bw_entries[-1].weight_lbs if bw_entries else None
+
+    goal = TrainingGoal.query.filter_by(user_id=uid).first()
+    target_weight = goal.target_weight if goal else None
+
+    # ── 2. Body measurements ─────────────────────────────────────────────
+    measurements = [{
+        "date": e.log_date.isoformat(),
+        "weight_lbs": e.weight_lbs,
+        "waist": e.waist_inches,
+        "chest": e.chest,
+        "hips": e.hips,
+        "neck": e.neck,
+        "bicep_left": e.bicep_left,
+        "bicep_right": e.bicep_right,
+        "thigh_left": e.thigh_left,
+        "thigh_right": e.thigh_right,
+        "notes": e.notes,
+    } for e in BodyMeasurement.query.filter_by(user_id=uid).order_by(BodyMeasurement.log_date).all()]
+
+    # ── 3. Training stats ────────────────────────────────────────────────
+    all_day_completions = DayCompletion.query.filter_by(user_id=uid).all()
+    done_days = [d for d in all_day_completions if d.done]
+    days_completed = len(done_days)
+    days_scheduled = current_week * 6  # 6 workout days per week (Sunday rest)
+
+    # Streak calculations — use (week, day_idx) tuples as sequential day keys
+    done_set = {(d.week, d.day_idx) for d in done_days}
+
+    # Build the full schedule of (week, day_idx) pairs up to today
+    all_possible = []
+    for w in range(1, current_week + 1):
+        max_day = 6 if w < current_week else 5  # day_idx 0-5 = Mon-Sat
+        for d in range(0, max_day + 1):
+            all_possible.append((w, d))
+
+    # Current streak: count backwards from the latest scheduled day
+    current_streak = 0
+    for wd in reversed(all_possible):
+        if wd in done_set:
+            current_streak += 1
+        else:
+            break
+
+    # Best streak: scan forward through all possible days
+    best_streak = 0
+    running = 0
+    for wd in all_possible:
+        if wd in done_set:
+            running += 1
+            if running > best_streak:
+                best_streak = running
+        else:
+            running = 0
+
+    # Total completed sets
+    sets_logged = SetLog.query.filter_by(user_id=uid, done=True).count()
+
+    # Weekly adherence
+    weekly_adherence = []
+    for w in range(1, current_week + 1):
+        w_done = sum(1 for d in done_days if d.week == w)
+        weekly_adherence.append({
+            "week": w,
+            "days_done": w_done,
+            "days_scheduled": 6,
+        })
+
+    # PRs for key lifts (max weight from SetLog where done=True)
+    key_lift_names = [
+        "Barbell Bench Press",
+        "Barbell Back Squat",
+        "Conventional Deadlift",
+        "DB Overhead Press",
+        "Barbell Bent-Over Row",
+    ]
+    prs = {}
+    for lift_name in key_lift_names:
+        best = (SetLog.query
+                .filter_by(user_id=uid, exercise_name=lift_name, done=True)
+                .filter(SetLog.weight > 0)
+                .order_by(SetLog.weight.desc())
+                .first())
+        if best:
+            prs[lift_name] = {
+                "weight": best.weight,
+                "reps": best.reps,
+                "date": best.logged_date.isoformat() if best.logged_date else None,
+                "week": best.week,
+            }
+        else:
+            # Fall back to ExerciseLog if no SetLog entries exist
+            best_el = (ExerciseLog.query
+                       .filter_by(user_id=uid, exercise_name=lift_name)
+                       .filter(ExerciseLog.weight > 0)
+                       .order_by(ExerciseLog.weight.desc())
+                       .first())
+            if best_el:
+                prs[lift_name] = {
+                    "weight": best_el.weight,
+                    "reps": best_el.reps_completed,
+                    "date": best_el.logged_date.isoformat() if best_el.logged_date else None,
+                    "week": best_el.week,
+                }
+
+    # ── 4. Nutrition ─────────────────────────────────────────────────────
+    meals_logged = MealLog.query.filter_by(user_id=uid).count()
+    target_calories = goal.daily_calories if goal else None
+    fasting_protocol = goal.fasting_protocol if goal else None
+
+    # ── 5. Projections ───────────────────────────────────────────────────
+    weight_projection = goal.weight_projection if goal else None
+    weeks_remaining = max(0, 12 - current_week)
+
+    on_pace = None
+    if weight_projection and current_weight is not None:
+        # weight_projection is a list of {week, weight} dicts or similar
+        projected_for_week = None
+        if isinstance(weight_projection, list):
+            for entry in weight_projection:
+                if isinstance(entry, dict) and entry.get("week") == current_week:
+                    projected_for_week = entry.get("weight")
+                    break
+            # If no exact match, try index-based lookup
+            if projected_for_week is None and len(weight_projection) >= current_week:
+                entry = weight_projection[current_week - 1]
+                if isinstance(entry, dict):
+                    projected_for_week = entry.get("weight")
+                elif isinstance(entry, (int, float)):
+                    projected_for_week = entry
+        if projected_for_week is not None:
+            on_pace = current_weight <= projected_for_week
+
+    # ── 6. Psych intake highlights ───────────────────────────────────────
+    psych = PsychIntake.query.filter_by(user_id=uid).first()
+    psych_highlights = None
+    if psych and psych.conversation:
+        athlete_idol = None
+        body_goal = None
+        commitment_text = None
+        conv = psych.conversation if isinstance(psych.conversation, list) else []
+        for msg in conv:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                continue
+            lowered = content.lower()
+            # Look for common psych intake patterns in assistant messages
+            if msg.get("role") == "user":
+                # Scan user responses for idol/body goal mentions
+                if not athlete_idol and any(kw in lowered for kw in ["look like", "physique like", "body like", "idol", "aspire"]):
+                    athlete_idol = content[:200]
+                if not body_goal and any(kw in lowered for kw in ["goal", "target", "want to", "dream", "vision"]):
+                    body_goal = content[:200]
+                if not commitment_text and any(kw in lowered for kw in ["commit", "promise", "swear", "no excuses", "all in", "ready"]):
+                    commitment_text = content[:300]
+        psych_highlights = {
+            "athlete_idol": athlete_idol,
+            "body_goal": body_goal,
+            "commitment_text": commitment_text,
+            "report_summary": psych.report[:500] if psych.report else None,
+        }
+
+    # ── Assemble response ────────────────────────────────────────────────
+    return jsonify({
+        "bodyweight": {
+            "series": bw_series,
+            "start_weight": start_weight,
+            "current_weight": current_weight,
+            "target_weight": target_weight,
+        },
+        "measurements": measurements,
+        "training": {
+            "days_completed": days_completed,
+            "days_scheduled": days_scheduled,
+            "current_streak": current_streak,
+            "best_streak": best_streak,
+            "sets_logged": sets_logged,
+            "weekly_adherence": weekly_adherence,
+            "prs": prs,
+        },
+        "nutrition": {
+            "meals_logged": meals_logged,
+            "target_calories": target_calories,
+            "fasting_protocol": fasting_protocol,
+        },
+        "projections": {
+            "weight_projection": weight_projection,
+            "weeks_remaining": weeks_remaining,
+            "current_week": current_week,
+            "on_pace": on_pace,
+        },
+        "psych_highlights": psych_highlights,
+    })
+
+
 # ─── TRAVEL MODE ────────────────────────────────────────────────────────────
 
 @app.route("/api/travel/workout")
