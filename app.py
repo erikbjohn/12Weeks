@@ -6094,6 +6094,41 @@ def api_admin_debug_sql():
         return jsonify({"error": str(e)[:300]}), 500
 
 
+@app.route("/api/admin/save-measurements", methods=["POST"])
+@admin_required
+def api_admin_save_measurements():
+    """Save measurements for a user by email. Admin-only."""
+    data = request.get_json()
+    email = (data.get("email") or "").strip().lower()
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+    d = date.fromisoformat(data.get("date", _user_today().isoformat()))
+    bm = BodyMeasurement.query.filter_by(user_id=user.id, log_date=d).first()
+    if not bm:
+        bm = BodyMeasurement.query.filter_by(log_date=d).first()
+        if bm and bm.user_id is None:
+            bm.user_id = user.id
+    if not bm:
+        bm = BodyMeasurement(log_date=d, user_id=user.id)
+        db.session.add(bm)
+    if data.get("weight"): bm.weight_lbs = float(data["weight"])
+    if data.get("waist"): bm.waist_inches = float(data["waist"])
+    if data.get("chest"): bm.chest = float(data["chest"])
+    if data.get("hips"): bm.hips = float(data["hips"])
+    if data.get("neck"): bm.neck = float(data["neck"])
+    if data.get("bicep_left"): bm.bicep_left = float(data["bicep_left"])
+    if data.get("bicep_right"): bm.bicep_right = float(data["bicep_right"])
+    if data.get("thigh_left"): bm.thigh_left = float(data["thigh_left"])
+    if data.get("thigh_right"): bm.thigh_right = float(data["thigh_right"])
+    try:
+        db.session.commit()
+        return jsonify({"ok": True, "date": d.isoformat(), "user": email})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:200]}), 500
+
+
 @app.route("/api/admin/debug/fix-indexes", methods=["POST"])
 @admin_required
 def api_admin_fix_indexes():
