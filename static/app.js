@@ -4123,10 +4123,10 @@ async function checkMorningCheckin() {
         }
       } catch(e2) {}
       _morningCheckinDone = false;
-      showMorningCheckinOverlay();
+      await showMorningCheckinOverlay();
     } else {
       _morningCheckinDone = false;
-      showMorningCheckinOverlay();
+      await showMorningCheckinOverlay();
     }
   } catch(e) {
     console.error('Morning checkin check failed', e);
@@ -4166,8 +4166,8 @@ function buildMorningBriefing() {
 
 let _mcExchangeCount = 0;
 
-function startMorningCheckin() {
-  showMorningCheckinOverlay();
+async function startMorningCheckin() {
+  await showMorningCheckinOverlay();
 }
 
 async function showMorningCheckinOverlay() {
