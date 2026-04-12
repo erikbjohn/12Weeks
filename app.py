@@ -127,6 +127,34 @@ with app.app_context():
     except Exception as e:
         logging.error("[STARTUP] db.create_all() failed: %s", e)
 
+    # Fix indexes that db.create_all() may have created as UNIQUE.
+    # These MUST be non-unique — multiple users need rows for the same date/week.
+    # PostgreSQL: plain indexes use DROP INDEX, constraints need ALTER TABLE DROP CONSTRAINT.
+    _broken_indexes = [
+        ("body_measurement", "ix_body_measurement_log_date", "CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)"),
+        ("body_weight", "ix_body_weight_log_date", "CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)"),
+        ("day_completion", "day_completion_week_day_idx_key", "CREATE INDEX IF NOT EXISTS ix_day_completion_user ON day_completion (user_id, week, day_idx)"),
+        ("exercise_completion", "exercise_completion_week_day_idx_exercise_idx_key", "CREATE INDEX IF NOT EXISTS ix_exercise_completion_user ON exercise_completion (user_id, week, day_idx, exercise_idx)"),
+        ("meal_log", "ix_meal_log_log_date", "CREATE INDEX IF NOT EXISTS ix_meal_log_user_date ON meal_log (user_id, log_date)"),
+        ("morning_checkin", "ix_morning_checkin_log_date", "CREATE INDEX IF NOT EXISTS ix_morning_checkin_user_date ON morning_checkin (user_id, log_date)"),
+        ("supplement_log", "supplement_log_log_date_supplement_name_key", "CREATE INDEX IF NOT EXISTS ix_supplement_log_user ON supplement_log (user_id, log_date, supplement_name)"),
+        ("weekly_checkin", "weekly_checkin_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_checkin_user_week ON weekly_checkin (user_id, week)"),
+        ("weekly_report", "weekly_report_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_report_user_week ON weekly_report (user_id, week)"),
+    ]
+    for _tbl, _drop_name, _create_sql in _broken_indexes:
+        for _drop_sql in [f'DROP INDEX IF EXISTS {_drop_name}', f'ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_drop_name}']:
+            try:
+                db.session.execute(text(_drop_sql))
+                db.session.commit()
+                break
+            except Exception:
+                db.session.rollback()
+        try:
+            db.session.execute(text(_create_sql))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
         ("physical_assessment", "stomach_inches", "FLOAT"),
@@ -6173,22 +6201,32 @@ def api_admin_fix_indexes():
     """Drop ALL broken unique indexes that lack user_id and recreate correctly."""
     fixed = []
     errors = []
-    # Every index that's UNIQUE without user_id is a cross-user data leak.
-    # Drop the broken unique, recreate as non-unique (or composite with user_id).
+    # Every UNIQUE index/constraint without user_id is a cross-user data leak.
+    # PostgreSQL: plain indexes use DROP INDEX, but constraints need ALTER TABLE DROP CONSTRAINT.
     fixes = [
-        ("ix_body_measurement_log_date", "CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)"),
-        ("ix_body_weight_log_date", "CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)"),
-        ("day_completion_week_day_idx_key", "CREATE INDEX IF NOT EXISTS ix_day_completion_user ON day_completion (user_id, week, day_idx)"),
-        ("exercise_completion_week_day_idx_exercise_idx_key", "CREATE INDEX IF NOT EXISTS ix_exercise_completion_user ON exercise_completion (user_id, week, day_idx, exercise_idx)"),
-        ("ix_meal_log_log_date", "CREATE INDEX IF NOT EXISTS ix_meal_log_user_date ON meal_log (user_id, log_date)"),
-        ("ix_morning_checkin_log_date", "CREATE INDEX IF NOT EXISTS ix_morning_checkin_user_date ON morning_checkin (user_id, log_date)"),
-        ("supplement_log_log_date_supplement_name_key", "CREATE INDEX IF NOT EXISTS ix_supplement_log_user ON supplement_log (user_id, log_date, supplement_name)"),
-        ("weekly_checkin_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_checkin_user_week ON weekly_checkin (user_id, week)"),
-        ("weekly_report_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_report_user_week ON weekly_report (user_id, week)"),
+        ("body_measurement", "ix_body_measurement_log_date", "CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)"),
+        ("body_weight", "ix_body_weight_log_date", "CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)"),
+        ("day_completion", "day_completion_week_day_idx_key", "CREATE INDEX IF NOT EXISTS ix_day_completion_user ON day_completion (user_id, week, day_idx)"),
+        ("exercise_completion", "exercise_completion_week_day_idx_exercise_idx_key", "CREATE INDEX IF NOT EXISTS ix_exercise_completion_user ON exercise_completion (user_id, week, day_idx, exercise_idx)"),
+        ("meal_log", "ix_meal_log_log_date", "CREATE INDEX IF NOT EXISTS ix_meal_log_user_date ON meal_log (user_id, log_date)"),
+        ("morning_checkin", "ix_morning_checkin_log_date", "CREATE INDEX IF NOT EXISTS ix_morning_checkin_user_date ON morning_checkin (user_id, log_date)"),
+        ("supplement_log", "supplement_log_log_date_supplement_name_key", "CREATE INDEX IF NOT EXISTS ix_supplement_log_user ON supplement_log (user_id, log_date, supplement_name)"),
+        ("weekly_checkin", "weekly_checkin_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_checkin_user_week ON weekly_checkin (user_id, week)"),
+        ("weekly_report", "weekly_report_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_report_user_week ON weekly_report (user_id, week)"),
     ]
-    for drop_name, create_sql in fixes:
+    for tbl, drop_name, create_sql in fixes:
+        # Try DROP INDEX first, then ALTER TABLE DROP CONSTRAINT as fallback
+        for drop_sql in [
+            f'DROP INDEX IF EXISTS {drop_name}',
+            f'ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {drop_name}',
+        ]:
+            try:
+                db.session.execute(text(drop_sql))
+                db.session.commit()
+                break
+            except Exception:
+                db.session.rollback()
         try:
-            db.session.execute(text(f'DROP INDEX IF EXISTS {drop_name}'))
             db.session.execute(text(create_sql))
             db.session.commit()
             fixed.append(drop_name)

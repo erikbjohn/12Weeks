@@ -171,7 +171,7 @@ class ExerciseCompletion(db.Model):
     exercise_idx = db.Column(db.Integer, nullable=False)
     done = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    __table_args__ = (db.UniqueConstraint("week", "day_idx", "exercise_idx"),)
+    __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx", "exercise_idx"),)
 
 
 class WarmupCompletion(db.Model):
@@ -209,7 +209,7 @@ class DayCompletion(db.Model):
     workout_started_at = db.Column(db.Text, nullable=True)
     workout_ended_at = db.Column(db.Text, nullable=True)
     workout_duration_min = db.Column(db.Integer, nullable=True)
-    __table_args__ = (db.UniqueConstraint("week", "day_idx"),)
+    __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
 
 
 class MealLog(db.Model):
@@ -300,7 +300,7 @@ class SupplementLog(db.Model):
     supplement_name = db.Column(db.String(100), nullable=False)
     taken = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    __table_args__ = (db.UniqueConstraint("log_date", "supplement_name"),)
+    __table_args__ = (db.UniqueConstraint("user_id", "log_date", "supplement_name"),)
 
 
 class MorningCheckIn(db.Model):
