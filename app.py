@@ -6170,22 +6170,32 @@ def api_admin_debug_exec():
 @app.route("/api/admin/debug/fix-indexes", methods=["POST"])
 @admin_required
 def api_admin_fix_indexes():
-    """Drop broken unique indexes and recreate as non-unique. Admin-only."""
+    """Drop ALL broken unique indexes that lack user_id and recreate correctly."""
     fixed = []
-    try:
-        # body_measurement: log_date should NOT be unique
-        db.session.execute(text('DROP INDEX IF EXISTS ix_body_measurement_log_date'))
-        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)'))
-        fixed.append("ix_body_measurement_log_date")
-        # body_weight: same check
-        db.session.execute(text('DROP INDEX IF EXISTS ix_body_weight_log_date'))
-        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)'))
-        fixed.append("ix_body_weight_log_date")
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)[:300]}), 500
-    return jsonify({"ok": True, "fixed": fixed})
+    errors = []
+    # Every index that's UNIQUE without user_id is a cross-user data leak.
+    # Drop the broken unique, recreate as non-unique (or composite with user_id).
+    fixes = [
+        ("ix_body_measurement_log_date", "CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)"),
+        ("ix_body_weight_log_date", "CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)"),
+        ("day_completion_week_day_idx_key", "CREATE INDEX IF NOT EXISTS ix_day_completion_user ON day_completion (user_id, week, day_idx)"),
+        ("exercise_completion_week_day_idx_exercise_idx_key", "CREATE INDEX IF NOT EXISTS ix_exercise_completion_user ON exercise_completion (user_id, week, day_idx, exercise_idx)"),
+        ("ix_meal_log_log_date", "CREATE INDEX IF NOT EXISTS ix_meal_log_user_date ON meal_log (user_id, log_date)"),
+        ("ix_morning_checkin_log_date", "CREATE INDEX IF NOT EXISTS ix_morning_checkin_user_date ON morning_checkin (user_id, log_date)"),
+        ("supplement_log_log_date_supplement_name_key", "CREATE INDEX IF NOT EXISTS ix_supplement_log_user ON supplement_log (user_id, log_date, supplement_name)"),
+        ("weekly_checkin_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_checkin_user_week ON weekly_checkin (user_id, week)"),
+        ("weekly_report_week_key", "CREATE INDEX IF NOT EXISTS ix_weekly_report_user_week ON weekly_report (user_id, week)"),
+    ]
+    for drop_name, create_sql in fixes:
+        try:
+            db.session.execute(text(f'DROP INDEX IF EXISTS {drop_name}'))
+            db.session.execute(text(create_sql))
+            db.session.commit()
+            fixed.append(drop_name)
+        except Exception as e:
+            db.session.rollback()
+            errors.append({"index": drop_name, "error": str(e)[:100]})
+    return jsonify({"ok": True, "fixed": fixed, "errors": errors})
 
 
 @app.route("/api/admin/reset-assessment", methods=["POST"])
