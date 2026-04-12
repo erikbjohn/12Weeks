@@ -3966,6 +3966,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const onboardingDone = await checkOnboardingComplete();
       if (!onboardingDone) {
         await resumeOnboarding();
+        return; // STOP — don't load chat, check-ins, or render the main app
       }
     }
 

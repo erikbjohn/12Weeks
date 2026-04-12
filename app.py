@@ -6220,6 +6220,89 @@ def api_admin_save_measurements():
         return jsonify({"error": str(e)[:200]}), 500
 
 
+@app.route("/api/admin/dashboard")
+@admin_required
+def api_admin_dashboard_data():
+    """All-users overview for admin monitoring. Returns onboarding status,
+    activity, and key metrics for every user."""
+    users = User.query.order_by(User.created_at).all()
+    result = []
+    for u in users:
+        if u.role == 'admin' and u.email != 'erik@placemetry.com':
+            continue  # skip test admins
+
+        # Onboarding state
+        state = AppState.query.filter_by(user_id=u.id).first()
+        intake = PsychIntake.query.filter_by(user_id=u.id).first()
+        pa = PhysicalAssessment.query.filter_by(user_id=u.id).first()
+        goal = TrainingGoal.query.filter_by(user_id=u.id).first()
+        from models import UserFoodSelections, UserEquipment, UserConstraints
+        food = UserFoodSelections.query.filter_by(user_id=u.id).first()
+        eq = UserEquipment.query.filter_by(user_id=u.id).first()
+        con = UserConstraints.query.filter_by(user_id=u.id).first()
+
+        # Activity
+        last_chat = ChatMessage.query.filter_by(user_id=u.id, role='user').order_by(ChatMessage.created_at.desc()).first()
+        last_checkin = MorningCheckIn.query.filter_by(user_id=u.id).order_by(MorningCheckIn.log_date.desc()).first()
+        last_weight = BodyWeight.query.filter_by(user_id=u.id).order_by(BodyWeight.log_date.desc()).first()
+
+        # Workout completion
+        days_done = DayCompletion.query.filter_by(user_id=u.id, done=True).count()
+        sets_logged = SetLog.query.filter_by(user_id=u.id, done=True).count()
+
+        # Onboarding progress (0-7 steps)
+        steps_done = sum([
+            bool(intake and intake.completed),
+            bool(con and con.completed),
+            bool(pa and pa.completed),
+            bool(eq and eq.completed),
+            bool(goal),
+            bool(food and food.completed),
+            bool(goal and goal.plan_accepted),
+        ])
+
+        result.append({
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "created": str(u.created_at)[:10] if u.created_at else None,
+            "timezone": u.timezone,
+            "onboarding": {
+                "steps_done": steps_done,
+                "steps_total": 7,
+                "complete": steps_done == 7,
+                "intake": bool(intake and intake.completed),
+                "constraints": bool(con and con.completed),
+                "physical": bool(pa and pa.completed),
+                "equipment": bool(eq and eq.completed),
+                "goal": bool(goal),
+                "food": bool(food and food.completed),
+                "plan_accepted": bool(goal and goal.plan_accepted),
+            },
+            "program": {
+                "week": state.current_week if state else None,
+                "start_date": str(state.start_date) if state and state.start_date else None,
+                "goal_type": goal.goal_type if goal else None,
+                "calories": goal.daily_calories if goal else None,
+                "protein": goal.protein_grams if goal else None,
+            },
+            "body": {
+                "weight": last_weight.weight_lbs if last_weight else None,
+                "weight_date": str(last_weight.log_date) if last_weight else None,
+                "pa_weight": pa.bodyweight_lbs if pa else None,
+                "pa_height": pa.height_inches if pa else None,
+            },
+            "activity": {
+                "last_chat": str(last_chat.created_at)[:16] if last_chat else None,
+                "last_checkin": str(last_checkin.log_date) if last_checkin else None,
+                "days_completed": days_done,
+                "sets_logged": sets_logged,
+            },
+        })
+
+    return jsonify({"users": result, "count": len(result)})
+
+
 @app.route("/api/admin/debug/exec", methods=["POST"])
 @admin_required
 def api_admin_debug_exec():
