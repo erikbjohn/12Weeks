@@ -3546,13 +3546,13 @@ def api_progress_dashboard():
         if isinstance(weight_projection, list):
             for entry in weight_projection:
                 if isinstance(entry, dict) and entry.get("week") == current_week:
-                    projected_for_week = entry.get("weight")
+                    projected_for_week = entry.get("projected") or entry.get("weight")
                     break
             # If no exact match, try index-based lookup
             if projected_for_week is None and len(weight_projection) >= current_week:
                 entry = weight_projection[current_week - 1]
                 if isinstance(entry, dict):
-                    projected_for_week = entry.get("weight")
+                    projected_for_week = entry.get("projected") or entry.get("weight")
                 elif isinstance(entry, (int, float)):
                     projected_for_week = entry
         if projected_for_week is not None:
@@ -5514,7 +5514,8 @@ def api_goal_compute():
         fasting = determine_fasting_protocol(goal_type, targets["calories"])
 
     phase_plan = compute_phase_plan(goal_type, weight, target_weight, est_bf)
-    projection = project_weight_curve(weight, target_weight, tdee_info["tdee"], targets["calories"])
+    projection = project_weight_curve(weight, target_weight, tdee_info["tdee"], targets["calories"],
+                                     weeks=_weeks_remaining, height_in=height, age=age, sex=sex)
 
     # Compute per-day-type calories
     day_types = ["heavy_lift", "long_run", "moderate", "rest", "deload"]
