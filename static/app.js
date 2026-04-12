@@ -7321,13 +7321,9 @@ function buildCoachContent(d) {
     }
     // No auto-refresh — coach only speaks when you tap "Talk to Erik"
     // Show "Plan Next Week" button on Sunday afternoon or Monday
-    var _cDow = new Date().getDay();
-    var _cHour = new Date().getHours();
-    var _showPlanBtn = (_cDow === 0 && _cHour >= 12) || _cDow === 1;
     html += '<div id="coach-inline-chat" style="margin-top:12px">';
-    if (_showPlanBtn) {
-      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + (currentWeek + 1) + '</button>';
-    }
+    // Always show Plan Week button — users need to prep for next week anytime
+    html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + (currentWeek + 1) + '</button>';
     html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
     return html;
@@ -7370,7 +7366,20 @@ async function launchWeeklyPlanning(weekOverride) {
     var deficitStr = '';
     if (programData && programData.deficit) {
         var dd = programData.deficit;
-        deficitStr = '\nDEFICIT: ' + dd.current_weight + 'lb -> ' + dd.target_weight + 'lb, ' + dd.weeks_remaining + ' weeks left, need ' + dd.required_weekly_loss + ' lb/week.';
+        deficitStr = '\n\nWEIGHT STATUS: ' + dd.current_weight + 'lb now. Target: ' + dd.target_weight + 'lb. ' + dd.weeks_remaining + ' weeks remaining. Required rate: ' + dd.required_weekly_loss + ' lb/week.';
+    }
+    var calorieStr = '';
+    if (programData && programData.calorie_change) {
+        var cc = programData.calorie_change;
+        if (cc.previous_calories && cc.new_calories) {
+            var calDelta = cc.new_calories - cc.previous_calories;
+            var calDir = calDelta > 0 ? 'UP' : calDelta < 0 ? 'DOWN' : 'UNCHANGED';
+            calorieStr = '\n\nCALORIE RECALIBRATION: ' + cc.previous_calories + ' -> ' + cc.new_calories + ' cal/day (' + calDir + ' ' + Math.abs(calDelta) + ' cal). ';
+            if (cc.previous_protein && cc.new_protein) {
+                calorieStr += 'Protein: ' + cc.previous_protein + ' -> ' + cc.new_protein + 'g. ';
+            }
+            calorieStr += cc.reason || '';
+        }
     }
     var mealStr = '';
     if (programData && programData.meal_summary) {
@@ -7383,11 +7392,23 @@ async function launchWeeklyPlanning(weekOverride) {
     }
 
     var trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
-        (isReplan ? '\nThis is a RE-PLAN of the CURRENT week (Week ' + nextWeek + '). Do NOT review last week. Do NOT plan a future week. Just present THIS week\'s program day by day with weights.' :
-        '\nThis is the weekly planning session.') +
+        (isReplan ? '\nThis is a RE-PLAN of the CURRENT week (Week ' + nextWeek + '). Do NOT review last week. Just present THIS week\'s program.' :
+        '\nThis is the weekly planning session for Week ' + nextWeek + '.') +
+        deficitStr + calorieStr +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
-        deficitStr + mealStr +
-        '\n\nPresent this program day by day. Explain WHY weights changed. Use [PRESCRIPTION: ..., weight=X] markers for adjustments. Include weight= in EVERY prescription.';
+        mealStr +
+        '\n\nFORMAT INSTRUCTIONS:' +
+        '\n1. Start with a 2-3 sentence OVERVIEW: what is changing this week vs last week and why (calorie change, weight progression, phase focus).' +
+        '\n2. If calories changed, explain WHY (weight dropped, TDEE recalculated, deficit adjusted to maintain pace).' +
+        '\n3. Then present EACH DAY on its own section. Use this exact format:' +
+        '\n\n**Monday — [Workout Name]**' +
+        '\n- Exercise Name: SetsxReps @ Weight — reason for change' +
+        '\n- Exercise Name: SetsxReps @ Weight — reason' +
+        '\nRun: Type, Duration' +
+        '\n\n4. Put EACH exercise on its OWN LINE with a bullet point.' +
+        '\n5. Explain WHY weights changed (hit target reps, RPE too low, progression rule).' +
+        '\n6. Use [PRESCRIPTION: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text] markers for any adjustments.' +
+        '\n7. End by asking if the athlete wants to adjust anything.';
 
     // Now open the inline chat with the planning trigger
     container.innerHTML =

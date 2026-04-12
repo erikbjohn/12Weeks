@@ -2345,6 +2345,7 @@ def api_generate_weekly_program():
                                               current_weight, age=age_rec,
                                               target_weight=target_weight_val, weeks=weeks_remaining)
                 old_cal = goal.daily_calories
+                old_protein = goal.protein_grams
                 goal.daily_calories = new_targets["calories"]
                 goal.protein_grams = new_targets["protein"]
                 goal.carb_grams = new_targets["carbs"]
@@ -2617,12 +2618,31 @@ def api_generate_weekly_program():
     except Exception:
         db.session.rollback()
 
+    # Calorie recalibration info for the coach
+    calorie_change = None
+    try:
+        if goal and hasattr(goal, 'daily_calories') and 'old_cal' in dir():
+            pass  # old_cal set during recalibration above
+    except Exception:
+        pass
+    try:
+        calorie_change = {
+            "previous_calories": old_cal,
+            "new_calories": goal.daily_calories if goal else None,
+            "previous_protein": old_protein,
+            "new_protein": goal.protein_grams if goal else None,
+            "reason": f"Recalibrated from {current_weight}lb with {weeks_remaining} weeks remaining" if deficit else None,
+        }
+    except Exception:
+        calorie_change = None
+
     return jsonify({
         "week": target_week,
         "phase": phase,
         "exercises_generated": len(program_summary),
         "program": program_summary,
         "deficit": deficit,
+        "calorie_change": calorie_change,
         "meal_summary": meal_summary,
         "run_summary": run_summary,
         "schedule_summary": schedule_summary,
