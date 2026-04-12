@@ -4170,7 +4170,7 @@ function startMorningCheckin() {
   showMorningCheckinOverlay();
 }
 
-function showMorningCheckinOverlay() {
+async function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
   _mcExchangeCount = 0;
@@ -4179,11 +4179,32 @@ function showMorningCheckinOverlay() {
   var buttonText = _planningDay ? "Let's Start This Week" : "Start Today's Workout";
 
   if (dayOfWeek === 0) {
-    // Sunday — show measurement form first, then transition to coach review
+    // Sunday — but first check if measurements were already submitted (cross-device).
+    // If so, skip the form entirely and just open the coach review (or dismiss).
+    try {
+      const _mCheck = await fetch('/api/measurements?date=' + todayStr());
+      const _mArr = await _mCheck.json();
+      if (Array.isArray(_mArr) && _mArr.length > 0) {
+        // Already submitted on another device — don't show the form
+        _morningCheckinDone = true;
+        var _dk = 'sunday_measurements_' + todayStr();
+        localStorage.setItem(_dk, '1');
+        // Backfill MorningCheckIn if missing
+        fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ date: todayStr(), sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements auto-backfill]' })
+        }).catch(function(){});
+        el.innerHTML = '';
+        renderAll();
+        return;
+      }
+    } catch(e) {}
+
+    // Show measurement form with dismiss button
     el.innerHTML = `<div class="morning-checkin-overlay">
       <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
         <div class="morning-briefing" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
           <div class="morning-briefing-label">Sunday Measurements</div>
+          <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px" onclick="closeMorningCheckin()">&times;</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:12px 0">
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Take all measurements before your coach review.</div>
