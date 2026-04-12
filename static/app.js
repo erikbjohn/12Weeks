@@ -6433,7 +6433,7 @@ function _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projec
     var weeksTotalRemain = Math.max(1, Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24 * 7)));
     if (projection && projection.length > 0) {
       var finalProj = projection[projection.length - 1];
-      var projWeight = finalProj.weight || finalProj;
+      var projWeight = finalProj.projected || finalProj.weight || finalProj;
       projText = 'On pace for ' + Math.round(projWeight) + ' by Week 12';
     } else {
       // Simple linear projection
