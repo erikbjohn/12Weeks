@@ -2950,16 +2950,8 @@ def api_measurements():
 @login_required
 def api_measurements_record():
     data = request.get_json()
-    # Sunday-only gating: weekday 6 == Sunday
-    today_local = _user_today()
-    if today_local.weekday() != 6:
-        days_until_sunday = (6 - today_local.weekday()) % 7
-        if days_until_sunday == 0:
-            days_until_sunday = 7
-        return jsonify({
-            "error": "Measurements are only recorded on Sundays.",
-            "next_sunday_in_days": days_until_sunday,
-        }), 403
+    # Sunday gating handled by frontend — backend accepts all days to avoid
+    # timezone mismatches silently eating submitted data.
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bm:
@@ -2999,7 +2991,11 @@ def api_measurements_record():
             user_id=current_user.id,
         )
         db.session.add(bm)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 
