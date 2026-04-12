@@ -5988,6 +5988,120 @@ def api_admin_set_weight():
     })
 
 
+@app.route("/api/admin/debug/user/<path:email>")
+@admin_required
+def api_admin_debug_user(email):
+    """Full diagnostic dump of a user's state. Admin-only."""
+    email = email.strip().lower()
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+    uid = user.id
+
+    # Onboarding state
+    state = AppState.query.filter_by(user_id=uid).first()
+    intake = PsychIntake.query.filter_by(user_id=uid).first()
+    pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
+    goal = TrainingGoal.query.filter_by(user_id=uid).first()
+    from models import UserFoodSelections, UserConstraints, UserEquipment
+    food = UserFoodSelections.query.filter_by(user_id=uid).first()
+    constraints = UserConstraints.query.filter_by(user_id=uid).first()
+    equipment = UserEquipment.query.filter_by(user_id=uid).first()
+
+    # Measurements
+    measurements = BodyMeasurement.query.filter_by(user_id=uid).order_by(BodyMeasurement.log_date.desc()).limit(5).all()
+    # Also check orphan measurements (user_id=NULL) for today
+    orphan_measurements = BodyMeasurement.query.filter_by(user_id=None).all()
+
+    # Body weight
+    weights = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date.desc()).limit(5).all()
+
+    # Check-ins
+    checkins = MorningCheckIn.query.filter_by(user_id=uid).order_by(MorningCheckIn.log_date.desc()).limit(5).all()
+
+    # DB index check
+    index_info = []
+    try:
+        rows = db.session.execute(text(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'body_measurement'"
+        )).fetchall()
+        index_info = [{"name": r[0], "definition": r[1]} for r in rows]
+    except Exception as e:
+        index_info = [{"error": str(e)}]
+
+    return jsonify({
+        "user": {"id": uid, "email": user.email, "name": user.name, "timezone": user.timezone,
+                 "created_at": str(user.created_at)},
+        "onboarding": {
+            "state": {"baseline_done": state.baseline_done if state else None,
+                      "start_date": str(state.start_date) if state and state.start_date else None,
+                      "current_week": state.current_week if state else None} if state else None,
+            "intake_completed": bool(intake and intake.completed) if intake else False,
+            "pa_completed": bool(pa and pa.completed) if pa else False,
+            "pa_weight": pa.bodyweight_lbs if pa else None,
+            "pa_height": pa.height_inches if pa else None,
+            "constraints_completed": bool(constraints and constraints.completed) if constraints else False,
+            "equipment_completed": bool(equipment and equipment.completed) if equipment else False,
+            "food_completed": bool(food and food.completed) if food else False,
+            "food_count": len(food.selected_foods) if food and food.selected_foods else 0,
+            "goal_computed": bool(goal) if goal else False,
+            "goal_type": goal.goal_type if goal else None,
+            "goal_calories": goal.daily_calories if goal else None,
+            "goal_protein": goal.protein_grams if goal else None,
+            "plan_accepted": goal.plan_accepted if goal else None,
+        },
+        "measurements": [{"date": str(m.log_date), "weight": m.weight_lbs, "waist": m.waist_inches,
+                          "user_id": m.user_id} for m in measurements],
+        "orphan_measurements": [{"id": m.id, "date": str(m.log_date), "weight": m.weight_lbs,
+                                  "user_id": m.user_id} for m in orphan_measurements],
+        "weights": [{"date": str(w.log_date), "weight": w.weight_lbs} for w in weights],
+        "checkins": [{"date": str(c.log_date), "notes": c.notes} for c in checkins],
+        "db_indexes": index_info,
+    })
+
+
+@app.route("/api/admin/debug/sql", methods=["POST"])
+@admin_required
+def api_admin_debug_sql():
+    """Run a read-only SQL query. Admin-only. SELECT only."""
+    data = request.get_json()
+    sql = (data.get("sql") or "").strip()
+    if not sql:
+        return jsonify({"error": "No SQL provided"}), 400
+    # Safety: only allow SELECT
+    if not sql.upper().startswith("SELECT"):
+        return jsonify({"error": "Only SELECT queries allowed"}), 403
+    try:
+        result = db.session.execute(text(sql))
+        columns = list(result.keys())
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+        return jsonify({"columns": columns, "rows": rows, "count": len(rows)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:300]}), 500
+
+
+@app.route("/api/admin/debug/fix-indexes", methods=["POST"])
+@admin_required
+def api_admin_fix_indexes():
+    """Drop broken unique indexes and recreate as non-unique. Admin-only."""
+    fixed = []
+    try:
+        # body_measurement: log_date should NOT be unique
+        db.session.execute(text('DROP INDEX IF EXISTS ix_body_measurement_log_date'))
+        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)'))
+        fixed.append("ix_body_measurement_log_date")
+        # body_weight: same check
+        db.session.execute(text('DROP INDEX IF EXISTS ix_body_weight_log_date'))
+        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_weight_log_date ON body_weight (log_date)'))
+        fixed.append("ix_body_weight_log_date")
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:300]}), 500
+    return jsonify({"ok": True, "fixed": fixed})
+
+
 @app.route("/api/admin/reset-assessment", methods=["POST"])
 @admin_required
 def api_admin_reset_assessment():
