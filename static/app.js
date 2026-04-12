@@ -4289,15 +4289,34 @@ async function submitSundayMeasurements() {
     thigh_right: parseFloat(document.getElementById('sun-thigh-r')?.value) || null,
   };
 
-  // Save measurements
-  var _measRes = await apiPost('/api/measurements', data);
-  if (_measRes && _measRes.status === 403) {
+  // Save measurements — MUST verify the save succeeded before proceeding.
+  // If this fails silently, the phone shows measurements from memory but the DB
+  // has nothing, and no other device can see them.
+  var _measSaved = false;
+  for (var _attempt = 0; _attempt < 3 && !_measSaved; _attempt++) {
     try {
-      var err = await _measRes.json();
-      alert('Measurements can only be recorded on Sundays. Next Sunday: ' + (err.next_sunday_in_days || '?') + ' days.');
-    } catch (e) {
-      alert('Measurements can only be recorded on Sundays.');
+      var _measRes = await fetch('/api/measurements', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+      });
+      if (_measRes.ok) {
+        _measSaved = true;
+      } else if (_measRes.status === 403) {
+        // Should not happen (backend gating removed) but handle gracefully
+        alert('Measurements save was blocked by the server. Please try again.');
+        return;
+      } else {
+        console.error('Measurements save failed (attempt ' + (_attempt+1) + '):', _measRes.status);
+        if (_attempt < 2) await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch(e) {
+      console.error('Measurements save network error (attempt ' + (_attempt+1) + '):', e);
+      if (_attempt < 2) await new Promise(r => setTimeout(r, 1000));
     }
+  }
+  if (!_measSaved) {
+    alert('Could not save measurements. Check your connection and try again.');
     return;
   }
   // Clear the cache so the Stats section picks up the new entry
