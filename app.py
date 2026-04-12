@@ -5954,35 +5954,41 @@ def api_admin_set_weight():
     else:
         db.session.add(BodyWeight(log_date=d, weight_lbs=float(weight), user_id=user.id))
 
-    # 2. Save to PhysicalAssessment
+    # 2. Save to PhysicalAssessment (weight + optional height)
     pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
     if pa:
         pa.bodyweight_lbs = float(weight)
+        if data.get("height"):
+            pa.height_inches = float(data["height"])
+    height = (pa.height_inches if pa and pa.height_inches else data.get("height")) or 70
 
     db.session.commit()
 
-    # 3. Recompute goal if one exists
+    # 3. Recompute goal (create if needed)
     goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     recomputed = False
-    if goal:
-        try:
-            intake = PsychIntake.query.filter_by(user_id=user.id).first()
-            height = pa.height_inches if pa else 70
-            age = intake.age if intake and hasattr(intake, 'age') and intake.age else 30
-            sex = (intake.sex if intake and hasattr(intake, 'sex') else 'male') or 'male'
-            tdee_info = compute_tdee(float(weight), height or 70, age, sex)
-            targets = compute_targets(tdee_info["tdee"], goal.goal_type or "cut", float(weight),
-                                      target_weight=goal.target_weight, weeks=12)
-            goal.daily_calories = targets["calories"]
-            goal.protein_grams = targets["protein"]
-            goal.carb_grams = targets["carbs"]
-            goal.fat_grams = targets["fat"]
-            db.session.commit()
-            recomputed = True
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"ok": True, "weight_saved": True, "recomputed": False,
-                            "recompute_error": str(e)})
+    goal_type = data.get("goal_type") or (goal.goal_type if goal else "cut")
+    try:
+        intake = PsychIntake.query.filter_by(user_id=user.id).first()
+        age = intake.age if intake and hasattr(intake, 'age') and intake.age else 30
+        sex = (intake.sex if intake and hasattr(intake, 'sex') else 'male') or 'male'
+        tdee_info = compute_tdee(float(weight), height, age, sex)
+        target_weight = (goal.target_weight if goal else None) or float(weight) - 20
+        targets = compute_targets(tdee_info["tdee"], goal_type, float(weight),
+                                  target_weight=target_weight, weeks=12)
+        if not goal:
+            goal = TrainingGoal(user_id=user.id, goal_type=goal_type, target_weight=target_weight)
+            db.session.add(goal)
+        goal.daily_calories = targets["calories"]
+        goal.protein_grams = targets["protein"]
+        goal.carb_grams = targets["carbs"]
+        goal.fat_grams = targets["fat"]
+        db.session.commit()
+        recomputed = True
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": True, "weight_saved": True, "recomputed": False,
+                        "recompute_error": str(e)})
 
     return jsonify({
         "ok": True,
