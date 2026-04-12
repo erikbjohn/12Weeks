@@ -961,7 +961,13 @@ def api_regenerate_meals():
                 continue  # Skip past days — don't overwrite eaten meals
             day_type = day_types[day_idx]
             if day_type == 'fast_day':
-                meal_plan = MEAL_PLANS.get('fast_day', {})
+                # Use user's selected foods with fast-day calorie target
+                cal_day_type = _cal_day_type_map.get(day_type, "rest")
+                day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+                meal_plan = generate_meal_plan(
+                    selected_foods=fs.selected_foods, day_type='fast_day',
+                    targets=day_macros, fasting_protocol=fasting_protocol,
+                )
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
                 day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
@@ -2290,8 +2296,23 @@ def api_generate_weekly_program():
             day_type = day_types[day_idx]
 
             if day_type == 'fast_day':
-                # Use the hardcoded fast_day plan directly
-                meal_plan = MEAL_PLANS.get('fast_day', {})
+                # Use user's selected foods with fast-day calorie target
+                if user_foods:
+                    cal_day_type = _cal_day_type_map.get(day_type, "rest")
+                    day_macros = compute_day_calories(
+                        base_calories,
+                        goal.goal_type if goal else 'cut',
+                        cal_day_type,
+                        current_weight,
+                    )
+                    meal_plan = generate_meal_plan(
+                        selected_foods=user_foods,
+                        day_type='fast_day',
+                        targets=day_macros,
+                        fasting_protocol=fasting_protocol,
+                    )
+                else:
+                    meal_plan = MEAL_PLANS.get('fast_day', {})  # fallback only if no selections
             elif user_foods:
                 # Compute day-specific calorie/macro targets
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
@@ -2547,7 +2568,11 @@ def api_weights_baseline():
             user_id=current_user.id,
         )
         db.session.add(log)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 
@@ -3522,7 +3547,11 @@ def api_psych_intake_message():
 
         # Save user message to DB immediately so it's not lost
         intake.conversation = convo
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
 
         # Check for existing pending job — prevent duplicate threads
         for jid, job in _intake_jobs.items():
@@ -5026,7 +5055,11 @@ def api_constraints_save():
         c.schedule_notes = data["schedule_notes"]
     if "completed" in data:
         c.completed = data["completed"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 
@@ -5249,7 +5282,11 @@ def api_goal_update():
         return jsonify({"error": "No goal computed yet"}), 400
     if "plan_accepted" in data:
         goal.plan_accepted = data["plan_accepted"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 
@@ -5284,7 +5321,11 @@ def api_food_selections_save():
         fs.selected_foods = data["selected_foods"]
     if "completed" in data:
         fs.completed = data["completed"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 @app.route("/api/food-selections/validate", methods=["POST"])
@@ -5377,7 +5418,11 @@ def api_equipment_save():
         eq.available_equipment = data["available_equipment"]
     if "completed" in data:
         eq.completed = data["completed"]
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
 

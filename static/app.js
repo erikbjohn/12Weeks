@@ -1365,7 +1365,7 @@ function baselineBack() {
   renderBaseline();
 }
 
-function saveBaseline() {
+async function saveBaseline() {
   const exercises = [];
   if (!_weightsCache) _weightsCache = {};
   for (const lift of BASELINE_LIFTS) {
@@ -1395,10 +1395,10 @@ function saveBaseline() {
       estimated_1rm: oneRM,
     });
   }
-  apiPost('/api/weights/baseline', { exercises });
-  apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
+  await apiPost('/api/weights/baseline', { exercises });
+  await apiPost('/api/physical-assessment', { gym_baseline_done: true, completed: true });
   _stateCache.baseline_done = true;
-  apiPost('/api/state', { baseline_done: true });
+  await apiPost('/api/state', { baseline_done: true });
   showEquipmentSelection();
 }
 
@@ -1909,10 +1909,10 @@ function paUpdateChoices() {
   if (nextBtn) nextBtn.disabled = (_paData.has_gym === null || _paData.has_tape === null);
 }
 
-function paNextFromQuestions() {
+async function paNextFromQuestions() {
   if (_paData.has_gym === null || _paData.has_tape === null) return;
   // Save questions to backend
-  apiPost('/api/physical-assessment', { has_gym: _paData.has_gym, has_measuring_tape: _paData.has_tape });
+  await apiPost('/api/physical-assessment', { has_gym: _paData.has_gym, has_measuring_tape: _paData.has_tape });
   _paStep = 1;
   renderPhysicalAssessment();
 }
@@ -2053,7 +2053,7 @@ function renderBodyweightBaseline() {
   </div>`;
 }
 
-function bwBaselineNext() {
+async function bwBaselineNext() {
   const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
   const val = parseInt(document.getElementById('bw-input').value) || 0;
   const kneesEl = document.getElementById('bw-knees');
@@ -2064,7 +2064,7 @@ function bwBaselineNext() {
   const payload = {};
   payload[keyMap[ex.key] || ex.key] = val;
   if (ex.hasKneesCheckbox) payload.pushup_from_knees = kneesEl ? kneesEl.checked : false;
-  apiPost('/api/physical-assessment', payload);
+  await apiPost('/api/physical-assessment', payload);
 
   _bwBaselineStep++;
   renderBodyweightBaseline();
@@ -2075,10 +2075,10 @@ function bwBaselineBack() {
   renderBodyweightBaseline();
 }
 
-function saveBwBaseline() {
-  apiPost('/api/physical-assessment', { completed: true });
+async function saveBwBaseline() {
+  await apiPost('/api/physical-assessment', { completed: true });
   _stateCache.baseline_done = true;
-  apiPost('/api/state', { baseline_done: true });
+  await apiPost('/api/state', { baseline_done: true });
   showEquipmentSelection();
 }
 
@@ -2234,11 +2234,15 @@ function toggleEquip(id) {
 }
 
 async function saveEquipmentSelections() {
-    await fetch('/api/equipment', {
+    const res = await fetch('/api/equipment', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ available_equipment: _equipSelections, completed: true }),
     });
+    if (!res.ok) {
+        alert('Could not save equipment. Please try again.');
+        return;
+    }
     computeGoal();
 }
 
@@ -2413,11 +2417,15 @@ function foodCategoryNext() {
 }
 
 async function saveFoodSelections() {
-  await fetch('/api/food-selections', {
+  const res = await fetch('/api/food-selections', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ selected_foods: _foodSelections, completed: true }),
   });
+  if (!res.ok) {
+    alert('Could not save food selections. Please try again.');
+    return;
+  }
   showFinalReveal();
 }
 
@@ -3826,20 +3834,31 @@ function swapExercise(week, day, exIdx, newName) {
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
+async function safeFetch(url, fallback) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return { _status: res.status, data: fallback };
+        return { _status: res.status, data: await res.json() };
+    } catch(e) {
+        console.error('Failed to load:', url, e);
+        return { _status: 0, data: fallback };
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  // Fetch all data in parallel
+  // Fetch all data in parallel — each fetch is independent, failures don't block others
   try {
-    const [stateRes, weightsRes, compRes, suppRes, bwRes, workoutRes, mealsRes] = await Promise.all([
-      fetch('/api/state'),
-      fetch('/api/weights'),
-      fetch('/api/completions'),
-      fetch('/api/supplements?date=' + todayStr()),
-      fetch('/api/bodyweight'),
-      fetch('/api/workouts'),
-      fetch('/api/meals?date=' + todayStr()),
+    const [stateW, weightsW, compW, suppW, bwW, workoutW, mealsW] = await Promise.all([
+      safeFetch('/api/state', { current_week: 1, baseline_done: false }),
+      safeFetch('/api/weights', {}),
+      safeFetch('/api/completions', { exercises: {}, days: {} }),
+      safeFetch('/api/supplements?date=' + todayStr(), { taken: {}, list: [] }),
+      safeFetch('/api/bodyweight', []),
+      safeFetch('/api/workouts', {}),
+      safeFetch('/api/meals?date=' + todayStr(), {}),
     ]);
 
-    if (stateRes.status === 401) {
+    if (stateW._status === 401) {
       window.location.href = '/login';
       return;
     }
@@ -3856,22 +3875,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } catch(e) {}
 
-    // Parse all API responses with error handling
-    var _parseErrs = [];
-    try { _stateCache = await stateRes.json(); } catch(e) { _stateCache = {}; _parseErrs.push('state:' + stateRes.status); }
-    try { _weightsCache = await weightsRes.json(); } catch(e) { _weightsCache = {}; _parseErrs.push('weights:' + weightsRes.status); }
-    try { _completionsCache = await compRes.json(); } catch(e) { _completionsCache = {exercises:{},days:{}}; _parseErrs.push('completions:' + compRes.status); }
-    try { _supplementsCache = await suppRes.json(); } catch(e) { _supplementsCache = []; _parseErrs.push('supplements:' + suppRes.status); }
-    try { _bodyweightCache = await bwRes.json(); } catch(e) { _bodyweightCache = []; _parseErrs.push('bodyweight:' + bwRes.status); }
-    try { workoutData = await workoutRes.json(); } catch(e) { workoutData = {}; _parseErrs.push('workouts:' + workoutRes.status); }
-    if (_parseErrs.length) console.error('API errors:', _parseErrs.join(', '));
+    // Unwrap safeFetch results — already parsed, no .json() needed
+    _stateCache = stateW.data;
+    _weightsCache = weightsW.data;
+    _completionsCache = compW.data;
+    _supplementsCache = suppW.data;
+    _bodyweightCache = bwW.data;
+    workoutData = workoutW.data;
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
 
-    try {
-      const mealsData = await mealsRes.json();
-      _mealsCache[todayStr()] = mealsData;
-    } catch(e) {}
+    if (mealsW.data && Object.keys(mealsW.data).length > 0) {
+      _mealsCache[todayStr()] = mealsW.data;
+    }
 
     // Warm-up completions
     try { const wuRes = await fetch('/api/warmup-completions'); _warmupCache = await wuRes.json(); } catch(e) { _warmupCache = {}; }
@@ -3995,7 +4011,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderAll();
   } catch(e) {
     console.error('Init failed', e);
-    // Fallback: try to render with empty data
+    // safeFetch handles individual endpoint failures; this catches remaining errors
+    // (e.g., rendering bugs, post-fetch logic). Ensure caches have safe defaults.
     _stateCache = _stateCache || { current_week: 1, baseline_done: false };
     _weightsCache = _weightsCache || {};
     _completionsCache = _completionsCache || { exercises: {}, days: {} };
