@@ -341,8 +341,11 @@ function renderCoachMarkdown(text) {
     }
   }
 
+  // Fix orphaned day names: model sometimes puts \n before "Monday?" in "Ready to see\nMonday?"
+  // Merge them back if the day name is followed by ? or . (inline), not — or : (section header)
+  clean = clean.replace(/\n+((?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[?.!])/gi, ' $1');
+
   // Break before day headers ONLY when they start a section (followed by — or - or : or **)
-  // NOT when inline like "Ready to see Monday?"
   clean = clean.replace(/([^\n])\s*(?=\*{0,2}(?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[\-—:\*])/g, '$1\n\n');
 
   // Break before run entries
