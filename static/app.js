@@ -317,8 +317,11 @@ function renderCoachMarkdown(text) {
       }
   }
 
+  // Break before markdown list items (- Exercise: ...)
+  clean = clean.replace(/([^\n])\s*(?=- [A-Z])/g, '$1\n');
+
   // Break before day headers: "Monday -" "Tuesday:" etc.
-  clean = clean.replace(/[.:]\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, function(m) { return m[0] + '\n\n'; });
+  clean = clean.replace(/([.:!?])\s*(?=\*{0,2}(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))/g, '$1\n\n');
 
   // Break before "Anything you want" / "Any injuries" / "Schedule conflicts" questions
   clean = clean.replace(/\.\s+(?=(?:Anything|Any injuries|Schedule conflicts|Any schedule))/g, '.\n\n');
