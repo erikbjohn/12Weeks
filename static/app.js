@@ -6471,16 +6471,19 @@ function _pdWeightChart(bw, projection, targetWeight, startDate) {
   var vals = bw.map(function(e) { return e.weight; });
   var dates = bw.map(function(e) { return e.date; });
 
-  // Merge projection values for y-axis range
+  // Y-axis range: use actual data points only, with padding.
+  // Target and projection are shown as reference lines but don't stretch the axis.
   var projVals = [];
   if (projection && projection.length > 0) {
-    projVals = projection.map(function(p) { return p.weight || p; });
+    projVals = projection.map(function(p) { return p.projected || p.weight || p; });
   }
-  var allVals = vals.concat(projVals);
-  if (targetWeight) allVals.push(targetWeight);
 
-  var yMin = Math.min.apply(null, allVals) - 2;
-  var yMax = Math.max.apply(null, allVals) + 2;
+  var dataMin = Math.min.apply(null, vals);
+  var dataMax = Math.max.apply(null, vals);
+  // Add ~10% padding above and below the actual data range
+  var dataRange = dataMax - dataMin || 10;
+  var yMin = dataMin - dataRange * 0.15;
+  var yMax = dataMax + dataRange * 0.1;
   var yRange = yMax - yMin || 1;
 
   function xPos(i, total) { return padL + (i / Math.max(1, total - 1)) * (W - padL - padR); }
