@@ -512,7 +512,7 @@ NAME_ALIASES = {
     "Back Squat - 1RM test": "Barbell Back Squat",
     "Deadlift - 1RM test": "Conventional Deadlift",
     "Lat Pulldown - max weight": "Lat Pulldown",
-    "Inverted Row": "Ring Row",
+    "Inverted Row (table/ledge)": "Inverted Row",
     "DB Bench Press": "DB Bench Press",  # Keep as-is (different from Barbell Bench)
     "DB Bench": "DB Bench Press",
     "Bench": "Barbell Bench Press",
@@ -806,6 +806,127 @@ EXERCISES = {
         "equipment": ["ab_wheel"],
         "video": "ab wheel rollout form tutorial beginner",
     },
+    # ─── BODYWEIGHT / BAND EXERCISES (for no-gym users) ───────
+    "Diamond Push-Ups": {
+        "muscle_group": "triceps",
+        "category": "compound",
+        "equipment": [],
+        "video": "diamond push ups tricep form tutorial",
+    },
+    "Dips": {
+        "muscle_group": "chest_triceps",
+        "category": "compound",
+        "equipment": ["dip_station"],
+        "video": "bodyweight dips form tutorial chest tricep",
+    },
+    "Inverted Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": [],
+        "video": "inverted row bodyweight back exercise tutorial",
+    },
+    "Band Pull-Apart": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "band pull apart rear delt form tutorial",
+    },
+    "Band Curl": {
+        "muscle_group": "biceps",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band bicep curl form tutorial",
+    },
+    "Bodyweight Squats": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": [],
+        "video": "bodyweight squat proper form tutorial",
+    },
+    "Single-Leg Glute Bridge": {
+        "muscle_group": "glutes",
+        "category": "isolation",
+        "equipment": [],
+        "video": "single leg glute bridge form tutorial",
+    },
+    "Nordic Hamstring Curl": {
+        "muscle_group": "hamstrings",
+        "category": "compound",
+        "equipment": [],
+        "video": "nordic hamstring curl eccentric form tutorial",
+    },
+    "Pike Push-Ups": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": [],
+        "video": "pike push ups shoulder press bodyweight tutorial",
+    },
+    "Decline Push-Ups": {
+        "muscle_group": "chest",
+        "category": "compound",
+        "equipment": ["flat_bench"],
+        "video": "decline push ups chest form tutorial",
+    },
+    "Band Lateral Raise": {
+        "muscle_group": "shoulders",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band lateral raise shoulder tutorial",
+    },
+    "Dead Bug": {
+        "muscle_group": "core",
+        "category": "core",
+        "equipment": [],
+        "video": "dead bug core exercise proper form tutorial",
+    },
+    "Mountain Climbers": {
+        "muscle_group": "core",
+        "category": "core",
+        "equipment": [],
+        "video": "mountain climbers exercise form tutorial",
+    },
+    "Hollow Hold": {
+        "muscle_group": "core",
+        "category": "core",
+        "equipment": [],
+        "video": "hollow hold core exercise proper form tutorial",
+    },
+    "Step-Up": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["flat_bench"],
+        "video": "step up exercise proper form tutorial",
+    },
+    "Hip Thrust": {
+        "muscle_group": "glutes",
+        "category": "compound",
+        "equipment": ["flat_bench"],
+        "video": "bodyweight hip thrust glute form tutorial",
+    },
+    "Band Row": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["resistance_band"],
+        "video": "resistance band row back exercise tutorial",
+    },
+    "Band Face Pull": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band face pull form tutorial",
+    },
+    "Band Tricep Extension": {
+        "muscle_group": "triceps",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band tricep extension form tutorial",
+    },
+    "Burpees": {
+        "muscle_group": "full_body",
+        "category": "compound",
+        "equipment": [],
+        "video": "burpee proper form full body exercise tutorial",
+    },
 }
 
 
@@ -1026,6 +1147,67 @@ PHASE_TEMPLATES = {
         6: [],  # Sunday — Rest
     },
 
+    # ── Deload BW (weeks 4, 8, bodyweight) ─────────────────────────────────
+    "deload_bw": {
+        0: [  # Monday — Deload Upper BW
+            {"exercise": "Push-Ups", "sets": 2, "reps": "12", "rest": "60s", "note": "Slow tempo. Just move."},
+            {"exercise": "Pike Push-Ups", "sets": 2, "reps": "8", "rest": "60s", "note": "Easy shoulder work"},
+            {"exercise": "Inverted Row (table/ledge)", "sets": 2, "reps": "10", "rest": "60s", "note": "Light, controlled"},
+            {"exercise": "Plank Shoulder Taps", "sets": 2, "reps": "16", "rest": "45s", "note": "Slow, no hip rotation"},
+        ],
+        1: [  # Tuesday — Deload Lower BW
+            {"exercise": "Bulgarian Split Squat", "sets": 2, "reps": "8", "rest": "60s", "note": "Bodyweight, easy tempo"},
+            {"exercise": "Single-Leg Romanian Deadlift", "sets": 2, "reps": "8", "rest": "60s", "note": "Balance focus"},
+            {"exercise": "Glute Bridge (single leg)", "sets": 2, "reps": "10", "rest": "45s", "note": "Light, controlled"},
+            {"exercise": "Calf Raises (step)", "sets": 2, "reps": "15", "rest": "45s", "note": "Slow and controlled"},
+        ],
+        2: [  # Wednesday — Deload Full Body BW
+            {"exercise": "Burpees", "sets": 2, "reps": "6", "rest": "60s", "note": "Easy pace, focus on form"},
+            {"exercise": "Push-Ups", "sets": 2, "reps": "10", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Walking Lunges", "sets": 2, "reps": "8", "rest": "60s", "note": "Easy pace"},
+            {"exercise": "Plank", "sets": 2, "reps": "30s", "rest": "60s", "note": "Brace and breathe"},
+        ],
+        3: [],  # Thursday — Rest
+        4: [  # Friday — Deload Upper Light BW
+            {"exercise": "Push-Ups", "sets": 2, "reps": "10", "rest": "60s", "note": "Bodyweight. Just move."},
+            {"exercise": "Inverted Row (table/ledge)", "sets": 2, "reps": "8", "rest": "60s", "note": "Easy, controlled"},
+            {"exercise": "Plank Shoulder Taps", "sets": 2, "reps": "12", "rest": "60s", "note": "Light"},
+        ],
+        5: [],  # Saturday — Rest
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Test Week BW (week 12) ────────────────────────────────────────────
+    "test_bw": {
+        0: [  # Monday — Endurance Test - Lower
+            {"exercise": "Pistol Squat (or assisted)", "sets": 1, "reps": "max each", "rest": "3 min", "note": "How many can you do per leg? Compare to week 1."},
+            {"exercise": "Jump Squats", "sets": 3, "reps": "20", "rest": "60s", "note": "Test power endurance"},
+            {"exercise": "Wall Sit", "sets": 1, "reps": "max hold", "rest": "3 min", "note": "Time yourself. Beat your best."},
+            {"exercise": "Calf Raises (step)", "sets": 3, "reps": "25", "rest": "45s", "note": "Full stretch, slow."},
+        ],
+        1: [  # Tuesday — Endurance Test - Upper
+            {"exercise": "Push-Ups", "sets": 1, "reps": "max", "rest": "3 min", "note": "How many strict push-ups can you do? Compare to week 1."},
+            {"exercise": "Diamond Push-Ups", "sets": 1, "reps": "max", "rest": "3 min", "note": "Test tricep endurance"},
+            {"exercise": "Inverted Row (table/ledge)", "sets": 1, "reps": "max", "rest": "3 min", "note": "Test pulling endurance"},
+            {"exercise": "Plank", "sets": 1, "reps": "max hold", "rest": "3 min", "note": "Time yourself."},
+        ],
+        2: [  # Wednesday — Full Body BW Moderate
+            {"exercise": "Burpees", "sets": 3, "reps": "10", "rest": "60s", "note": "Moderate pace"},
+            {"exercise": "Push-Ups", "sets": 3, "reps": "12", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Walking Lunges", "sets": 3, "reps": "10", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Solid brace"},
+        ],
+        3: [],  # Thursday — Rest
+        4: [  # Friday — Final BW Session
+            {"exercise": "Burpees", "sets": 3, "reps": "10", "rest": "60s", "note": "Feel the power vs week 1"},
+            {"exercise": "Push-Ups", "sets": 3, "reps": "15", "rest": "60s", "note": "Moderate"},
+            {"exercise": "Pistol Squat (or assisted)", "sets": 3, "reps": "5", "rest": "60s", "note": "Each leg. Controlled."},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "60s", "note": "Final hold. You earned this."},
+        ],
+        5: [],  # Saturday — Rest
+        6: [],  # Sunday — Rest
+    },
+
     # ── Test Week (week 12) ───────────────────────────────────────────────
     "test": {
         0: [  # Monday — Strength Test - Lower
@@ -1056,6 +1238,185 @@ PHASE_TEMPLATES = {
         5: [],  # Saturday — Rest
         6: [],  # Sunday — Rest
     },
+}
+
+# ─── BODYWEIGHT PHASE TEMPLATES ───────────────────────────────────────────
+# For users with has_gym=False. Same 6-day split structure as PHASE_TEMPLATES.
+# Equipment assumed: flat bench, dip station, resistance bands, foam roller.
+# NO barbell, NO dumbbells, NO cables, NO machines.
+
+BW_PHASE_TEMPLATES = {
+    # ── Phase 1: Foundation (weeks 1-4) ──────────────────────────────────
+    1: {
+        0: [  # Monday — Upper Push + Pull
+            {"exercise": "Push-Ups", "sets": 3, "reps": "12", "rest": "60s", "note": "Full ROM, chest to floor"},
+            {"exercise": "Dips", "sets": 3, "reps": "10", "rest": "60s", "note": "Use dip station, lean forward for chest"},
+            {"exercise": "Diamond Push-Ups", "sets": 3, "reps": "10", "rest": "60s", "note": "Hands together, tricep focus"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "10", "rest": "60s", "note": "Use table edge or bar, pull chest to bar"},
+            {"exercise": "Band Pull-Apart", "sets": 3, "reps": "15", "rest": "45s", "note": "Light band, squeeze shoulder blades"},
+            {"exercise": "Band Curl", "sets": 3, "reps": "12", "rest": "45s", "note": "Resistance band, controlled"},
+            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard, don't sag"},
+        ],
+        1: [  # Tuesday — Lower Body
+            {"exercise": "Bodyweight Squats", "sets": 4, "reps": "15", "rest": "60s", "note": "Full depth, heels down"},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60s", "note": "Rear foot on bench, each leg"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60s", "note": "Each leg, long stride"},
+            {"exercise": "Single-Leg Glute Bridge", "sets": 3, "reps": "15", "rest": "45s", "note": "Each leg, squeeze at top"},
+            {"exercise": "Nordic Hamstring Curl", "sets": 3, "reps": "5", "rest": "90s", "note": "Eccentric focus, use pad under knees"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "20", "rest": "30s", "note": "On step edge, full ROM"},
+        ],
+        2: [  # Wednesday — Push + Core
+            {"exercise": "Pike Push-Ups", "sets": 3, "reps": "10", "rest": "60s", "note": "Hips high, shoulder press movement"},
+            {"exercise": "Decline Push-Ups", "sets": 3, "reps": "12", "rest": "60s", "note": "Feet on bench, chest focus"},
+            {"exercise": "Dips", "sets": 3, "reps": "10", "rest": "60s", "note": "Upright for triceps"},
+            {"exercise": "Band Lateral Raise", "sets": 3, "reps": "15", "rest": "45s", "note": "Resistance band, slow"},
+            {"exercise": "Dead Bug", "sets": 3, "reps": "12", "rest": "45s", "note": "Each side, keep lower back flat"},
+            {"exercise": "Mountain Climbers", "sets": 3, "reps": "30s", "rest": "45s", "note": "Fast, controlled"},
+            {"exercise": "Hollow Hold", "sets": 3, "reps": "30s", "rest": "45s", "note": "Arms overhead, press lower back down"},
+        ],
+        3: [  # Thursday — Lower + Pull
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "12", "rest": "60s", "note": "Each leg, deeper than Tuesday"},
+            {"exercise": "Step-Up", "sets": 3, "reps": "10", "rest": "60s", "note": "Each leg, use bench"},
+            {"exercise": "Hip Thrust", "sets": 4, "reps": "15", "rest": "60s", "note": "Shoulders on bench, squeeze glutes"},
+            {"exercise": "Band Row", "sets": 4, "reps": "12", "rest": "60s", "note": "Anchor band at chest height, squeeze"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "10", "rest": "60s", "note": "Wider grip than Monday"},
+            {"exercise": "Band Face Pull", "sets": 3, "reps": "15", "rest": "45s", "note": "External rotation at end"},
+        ],
+        4: [  # Friday — Full Upper
+            {"exercise": "Push-Ups", "sets": 4, "reps": "15", "rest": "60s", "note": "Max quality reps"},
+            {"exercise": "Dips", "sets": 3, "reps": "12", "rest": "60s", "note": "Full depth, control the eccentric"},
+            {"exercise": "Inverted Row", "sets": 4, "reps": "10", "rest": "60s", "note": "Underhand grip for bicep emphasis"},
+            {"exercise": "Pike Push-Ups", "sets": 3, "reps": "10", "rest": "60s", "note": "Strict form, shoulders only"},
+            {"exercise": "Band Pull-Apart", "sets": 3, "reps": "20", "rest": "30s", "note": "Rear delt focus"},
+            {"exercise": "Band Tricep Extension", "sets": 3, "reps": "15", "rest": "45s", "note": "Anchor band overhead"},
+            {"exercise": "Band Curl", "sets": 3, "reps": "15", "rest": "45s", "note": "Slow eccentric"},
+        ],
+        5: [  # Saturday — Full Body Circuit
+            {"exercise": "Burpees", "sets": 4, "reps": "10", "rest": "60s", "note": "Full burpee, chest to floor, jump up"},
+            {"exercise": "Bodyweight Squats", "sets": 3, "reps": "20", "rest": "60s", "note": "Full depth"},
+            {"exercise": "Push-Ups", "sets": 3, "reps": "15", "rest": "60s", "note": "Strict form"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "10", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Mountain Climbers", "sets": 3, "reps": "30s", "rest": "30s", "note": "Fast"},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "30s", "note": "Don't break form"},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Phase 2: Strength BW (weeks 5-7) ─────────────────────────────────
+    2: {
+        0: [  # Monday — Lower Strength
+            {"exercise": "Pistol Squat (or assisted)", "sets": 4, "reps": "6", "rest": "90s", "note": "Each leg. Full depth."},
+            {"exercise": "Bulgarian Split Squat", "sets": 4, "reps": "10", "rest": "60s", "note": "Each leg, slow eccentric (3s down)"},
+            {"exercise": "Nordic Hamstring Curl", "sets": 4, "reps": "6", "rest": "90s", "note": "Eccentric focus, resist the fall"},
+            {"exercise": "Hip Thrust", "sets": 4, "reps": "15", "rest": "60s", "note": "Single-leg if bilateral is easy"},
+            {"exercise": "Wall Sit", "sets": 3, "reps": "60s", "rest": "60s", "note": "Thighs parallel. Isometric strength."},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "25", "rest": "30s", "note": "Single-leg for difficulty"},
+        ],
+        1: [  # Tuesday — Upper Strength - Pull Focus
+            {"exercise": "Inverted Row", "sets": 5, "reps": "10", "rest": "60s", "note": "Most horizontal angle you can manage"},
+            {"exercise": "Band Row", "sets": 4, "reps": "12", "rest": "60s", "note": "Heavy band, squeeze at end"},
+            {"exercise": "Band Face Pull", "sets": 3, "reps": "15", "rest": "45s", "note": "External rotation at end"},
+            {"exercise": "Push-Ups", "sets": 4, "reps": "20", "rest": "60s", "note": "Tempo: 3s down, explosive up"},
+            {"exercise": "Band Curl", "sets": 4, "reps": "15", "rest": "45s", "note": "Heavy band, strict form"},
+            {"exercise": "Band Tricep Extension", "sets": 3, "reps": "15", "rest": "45s", "note": "Overhead anchor"},
+        ],
+        2: [  # Wednesday — Full Body Power
+            {"exercise": "Burpees", "sets": 4, "reps": "12", "rest": "60s", "note": "Explosive. Full extension."},
+            {"exercise": "Jump Squats", "sets": 4, "reps": "12", "rest": "60s", "note": "Max height, soft landing"},
+            {"exercise": "Decline Push-Ups", "sets": 4, "reps": "12", "rest": "60s", "note": "Explosive concentric"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "12", "rest": "60s", "note": "Explosive pull"},
+            {"exercise": "Step-Up", "sets": 3, "reps": "12", "rest": "60s", "note": "Each leg, explosive push-off"},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "45s", "note": "Anti-extension, brace hard"},
+        ],
+        3: [  # Thursday — Lower Strength - Hinge Focus
+            {"exercise": "Nordic Hamstring Curl", "sets": 5, "reps": "6", "rest": "90s", "note": "Slow eccentric. Deadlift equivalent."},
+            {"exercise": "Pistol Squat (or assisted)", "sets": 4, "reps": "6", "rest": "90s", "note": "Each leg. Full depth."},
+            {"exercise": "Single-Leg Glute Bridge", "sets": 4, "reps": "15", "rest": "45s", "note": "Each leg, power drive"},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60s", "note": "Each leg. Deep."},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "25", "rest": "30s", "note": "Single-leg if possible"},
+            {"exercise": "Dead Bug", "sets": 3, "reps": "12", "rest": "45s", "note": "Each side, slow and controlled"},
+        ],
+        4: [  # Friday — Upper Strength - Press Focus
+            {"exercise": "Dips", "sets": 5, "reps": "12", "rest": "60s", "note": "Full depth, controlled eccentric"},
+            {"exercise": "Pike Push-Ups", "sets": 5, "reps": "10", "rest": "60s", "note": "Feet elevated for difficulty"},
+            {"exercise": "Decline Push-Ups", "sets": 4, "reps": "15", "rest": "60s", "note": "Feet on bench, chest focus"},
+            {"exercise": "Inverted Row", "sets": 4, "reps": "12", "rest": "60s", "note": "Underhand grip, horizontal body"},
+            {"exercise": "Band Lateral Raise", "sets": 3, "reps": "15", "rest": "45s", "note": "Slow and controlled"},
+            {"exercise": "Band Tricep Extension", "sets": 3, "reps": "15", "rest": "45s", "note": "Full lockout"},
+        ],
+        5: [  # Saturday — Full Body Volume
+            {"exercise": "Burpees", "sets": 3, "reps": "10", "rest": "60s", "note": "Full burpee"},
+            {"exercise": "Push-Ups", "sets": 4, "reps": "15", "rest": "60s", "note": "Controlled, quality reps"},
+            {"exercise": "Pistol Squat (or assisted)", "sets": 3, "reps": "5", "rest": "90s", "note": "Each leg"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "12", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60s", "note": "Each leg"},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "45s", "note": "Solid brace"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "25", "rest": "30s", "note": "Full ROM"},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # ── Phase 3: Power BW (weeks 9-11) ───────────────────────────────────
+    3: {
+        0: [  # Monday — Lower Power
+            {"exercise": "Jump Squats", "sets": 5, "reps": "12", "rest": "60s", "note": "Max height. Explosive."},
+            {"exercise": "Pistol Squat (or assisted)", "sets": 4, "reps": "8", "rest": "90s", "note": "Each leg. Unassisted by now."},
+            {"exercise": "Bulgarian Split Squat", "sets": 4, "reps": "12", "rest": "60s", "note": "Each leg. Explosive up."},
+            {"exercise": "Nordic Hamstring Curl", "sets": 4, "reps": "6", "rest": "90s", "note": "Full eccentric control"},
+            {"exercise": "Single-Leg Glute Bridge", "sets": 3, "reps": "15", "rest": "45s", "note": "Each leg, power drive"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "25", "rest": "30s", "note": "Explosive up, slow down"},
+            {"exercise": "Hollow Hold", "sets": 3, "reps": "45s", "rest": "45s", "note": "Core power"},
+        ],
+        1: [  # Tuesday — Upper Power
+            {"exercise": "Clap Push-Ups", "sets": 4, "reps": "8", "rest": "60s", "note": "Explosive. Hands leave ground."},
+            {"exercise": "Dips", "sets": 5, "reps": "12", "rest": "60s", "note": "Explosive up, slow down"},
+            {"exercise": "Pike Push-Ups", "sets": 4, "reps": "12", "rest": "60s", "note": "Near-handstand difficulty"},
+            {"exercise": "Inverted Row", "sets": 5, "reps": "12", "rest": "60s", "note": "Explosive pull, slow lower"},
+            {"exercise": "Band Pull-Apart", "sets": 3, "reps": "20", "rest": "30s", "note": "Fast, controlled"},
+            {"exercise": "Band Curl", "sets": 3, "reps": "15", "rest": "45s", "note": "Heavy band, strict"},
+        ],
+        2: [  # Wednesday — Full Body Power
+            {"exercise": "Burpees", "sets": 5, "reps": "12", "rest": "60s", "note": "Full power. Every rep explosive."},
+            {"exercise": "Jump Squats", "sets": 4, "reps": "15", "rest": "60s", "note": "Max height"},
+            {"exercise": "Clap Push-Ups", "sets": 4, "reps": "8", "rest": "60s", "note": "Or explosive push-ups"},
+            {"exercise": "Inverted Row", "sets": 4, "reps": "12", "rest": "60s", "note": "Explosive pull"},
+            {"exercise": "Step-Up", "sets": 3, "reps": "12", "rest": "60s", "note": "Explosive push-off each step"},
+            {"exercise": "Mountain Climbers", "sets": 3, "reps": "45s", "rest": "30s", "note": "Sprint pace"},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "45s", "note": "Final brace"},
+        ],
+        3: [  # Thursday — Lower Accessory + Endurance
+            {"exercise": "Bulgarian Split Squat", "sets": 4, "reps": "12", "rest": "60s", "note": "Each leg. Slow tempo."},
+            {"exercise": "Hip Thrust", "sets": 4, "reps": "20", "rest": "45s", "note": "Single-leg for difficulty"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "15", "rest": "60s", "note": "Each leg, controlled"},
+            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "25", "rest": "30s", "note": "Full stretch, slow"},
+            {"exercise": "Wall Sit", "sets": 3, "reps": "75s", "rest": "60s", "note": "Beat your Phase 2 time."},
+            {"exercise": "Dead Bug", "sets": 3, "reps": "15", "rest": "45s", "note": "Each side, slow"},
+        ],
+        4: [  # Friday — Upper Power + Endurance
+            {"exercise": "Clap Push-Ups", "sets": 4, "reps": "8", "rest": "60s", "note": "Peak power"},
+            {"exercise": "Dips", "sets": 5, "reps": "15", "rest": "60s", "note": "Bench press equivalent"},
+            {"exercise": "Pike Push-Ups", "sets": 4, "reps": "12", "rest": "60s", "note": "Shoulder power"},
+            {"exercise": "Inverted Row", "sets": 4, "reps": "12", "rest": "60s", "note": "Explosive, horizontal body"},
+            {"exercise": "Band Pull-Apart", "sets": 3, "reps": "25", "rest": "30s", "note": "Rear delt endurance"},
+            {"exercise": "Band Curl", "sets": 3, "reps": "15", "rest": "45s", "note": "Controlled"},
+            {"exercise": "Band Tricep Extension", "sets": 3, "reps": "15", "rest": "45s", "note": "Full lockout"},
+        ],
+        5: [  # Saturday — Full Body Volume
+            {"exercise": "Burpees", "sets": 4, "reps": "12", "rest": "60s", "note": "Full power"},
+            {"exercise": "Push-Ups", "sets": 4, "reps": "20", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Pistol Squat (or assisted)", "sets": 3, "reps": "8", "rest": "90s", "note": "Each leg"},
+            {"exercise": "Inverted Row", "sets": 3, "reps": "12", "rest": "60s", "note": "Controlled"},
+            {"exercise": "Walking Lunge", "sets": 3, "reps": "15", "rest": "60s", "note": "Each leg"},
+            {"exercise": "Mountain Climbers", "sets": 3, "reps": "45s", "rest": "30s", "note": "Sprint"},
+            {"exercise": "Plank", "sets": 3, "reps": "60s", "rest": "45s", "note": "Final hold"},
+            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "25", "rest": "30s", "note": "Full stretch, slow"},
+        ],
+        6: [],  # Sunday — Rest
+    },
+
+    # BW deload/test reference PHASE_TEMPLATES BW variants
+    "deload": PHASE_TEMPLATES["deload_bw"],
+    "test": PHASE_TEMPLATES["test_bw"],
 }
 
 
@@ -1185,6 +1546,87 @@ def get_workouts(week):
             d["warmup"] = WARMUPS[warmup_type]
         else:
             d["warmup"] = None
+
+    return days
+
+
+def get_workouts_for_user(week, has_gym=True):
+    """Get workouts using BW templates if user has no gym.
+
+    For gym users, delegates to get_workouts(). For no-gym users,
+    builds day dicts from BW_PHASE_TEMPLATES with the same meal plan
+    and warmup injection.
+    """
+    if has_gym:
+        return get_workouts(week)
+
+    is_deload = week in (4, 8)
+    is_test = week == 12
+    phase = get_phase(week)
+
+    if is_test:
+        template = PHASE_TEMPLATES.get("test_bw", BW_PHASE_TEMPLATES.get(1, {}))
+    elif is_deload:
+        template = PHASE_TEMPLATES.get("deload_bw", BW_PHASE_TEMPLATES.get(1, {}))
+    else:
+        template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
+
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    bw_day_labels = {
+        0: "Upper Push + Pull",
+        1: "Lower Body",
+        2: "Push + Core",
+        3: "Lower + Pull",
+        4: "Full Upper",
+        5: "Full Body Circuit",
+        6: "Rest",
+    }
+
+    days = []
+    for day_idx in range(7):
+        exercises = template.get(day_idx, [])
+        day_name = day_names[day_idx]
+        is_rest = len(exercises) == 0
+
+        label = bw_day_labels.get(day_idx, "Bodyweight")
+        if is_deload:
+            label = f"Deload BW - {label}"
+        elif is_test:
+            label = f"Test BW - {label}"
+
+        # Convert template format (exercise/sets/reps) to display format (name/sets)
+        display_exercises = []
+        for e in exercises:
+            de = {"name": e["exercise"], "rest": e.get("rest", "60s"), "note": e.get("note", "")}
+            de["sets"] = f"{e['sets']}x{e['reps']}"
+            display_exercises.append(de)
+
+        d = {
+            "day": day_name,
+            "liftName": label if not is_rest else "Rest - Streak Day Only",
+            "exercises": display_exercises,
+            "run": _run("min") if is_rest else _run("z2_40"),
+            "timing": ["Morning", "Min 1 mile at easy pace", "-", "No lifting"] if is_rest else [],
+            "notes": "Rest day." if is_rest else "",
+        }
+        if is_rest:
+            d["isRest"] = True
+
+        # Inject meal plan and warmup
+        if is_deload:
+            meal_type = "deload"
+        else:
+            meal_type = DAY_MEAL_TYPES.get(day_name, "moderate")
+        d["mealType"] = meal_type
+        d["mealPlan"] = get_meal_plan(meal_type)
+
+        warmup_type = DAY_WARMUP_TYPES.get(day_name)
+        if warmup_type and warmup_type in WARMUPS:
+            d["warmup"] = WARMUPS[warmup_type]
+        else:
+            d["warmup"] = None
+
+        days.append(d)
 
     return days
 

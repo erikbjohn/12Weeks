@@ -1650,10 +1650,19 @@ def api_workouts():
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
     user_food_ids = _get_user_food_ids()
+
+    # Detect bodyweight-only users
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
+
     all_weeks = {}
     for week in range(1, 13):
         phase = get_phase(week)
-        days = get_workouts(week)
+        if has_gym:
+            days = get_workouts(week)
+        else:
+            from workout_data import get_workouts_for_user
+            days = get_workouts_for_user(week, has_gym=False)
 
         # Check for user-specific prescriptions
         prescriptions = WeeklyPrescription.query.filter_by(
@@ -1757,7 +1766,15 @@ def api_week(week):
     user_equipment = eq.available_equipment if eq else []
     user_food_ids = _get_user_food_ids()
     phase = get_phase(week)
-    days = get_workouts(week)
+
+    # Detect bodyweight-only users
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
+    if has_gym:
+        days = get_workouts(week)
+    else:
+        from workout_data import get_workouts_for_user
+        days = get_workouts_for_user(week, has_gym=False)
 
     # Check for user-specific prescriptions
     prescriptions = WeeklyPrescription.query.filter_by(
@@ -2150,15 +2167,21 @@ def api_prescription_seed():
     """Seed WeeklyPrescription rows for a week from the phase template."""
     data = request.get_json()
     week = data.get("week", _current_week())
-    from workout_data import PHASE_TEMPLATES, get_phase
+    from workout_data import PHASE_TEMPLATES, BW_PHASE_TEMPLATES, get_phase
 
     # Don't overwrite existing prescriptions
     existing = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).first()
     if existing:
         return jsonify({"message": "Prescriptions already exist for this week", "count": WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()})
 
+    # Use BW templates for no-gym users
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
     phase = get_phase(week)
-    template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+    if has_gym:
+        template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+    else:
+        template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
     count = 0
     for day_idx in range(7):
         for order, ex in enumerate(template.get(day_idx, [])):
@@ -2193,10 +2216,17 @@ def api_generate_weekly_program():
     if existing:
         return jsonify({"message": "Coach-modified prescriptions exist", "week": target_week})
 
-    # Get the phase template as baseline
-    from workout_data import PHASE_TEMPLATES, get_phase, EXERCISES, resolve_name
-    phase = get_phase(target_week)
-    template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+    # Get the phase template as baseline — use BW templates for no-gym users
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
+    if has_gym:
+        from workout_data import PHASE_TEMPLATES, get_phase, EXERCISES, resolve_name
+        phase = get_phase(target_week)
+        template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
+    else:
+        from workout_data import BW_PHASE_TEMPLATES, PHASE_TEMPLATES, get_phase, EXERCISES, resolve_name
+        phase = get_phase(target_week)
+        template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
 
     # Delete any existing template-sourced prescriptions for this week
     WeeklyPrescription.query.filter_by(
@@ -6486,8 +6516,10 @@ def api_admin_generate_meals():
     if not fs or not fs.selected_foods:
         return jsonify({"error": "No food selections"}), 400
 
-    from workout_data import get_workouts
-    days = get_workouts(week)
+    from workout_data import get_workouts, get_workouts_for_user
+    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+    has_gym = pa.has_gym if pa else True
+    days = get_workouts(week) if has_gym else get_workouts_for_user(week, has_gym=False)
     fasting_protocol = goal.fasting_protocol or '16_8'
     latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
     weight = latest_bw.weight_lbs if latest_bw else 200
