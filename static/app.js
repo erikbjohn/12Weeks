@@ -4105,6 +4105,25 @@ async function checkMorningCheckin() {
       localStorage.setItem(dismissKey, '1');
       _morningCheckinCache = data.checkin || data;
       renderCheckinSummaryBar();
+    } else if (dow === 0) {
+      // Sunday fallback: measurements might have been submitted (via submitSundayMeasurements)
+      // without completing the coach conversation (finishMorningCheckin never ran).
+      // Check BodyMeasurement table as a secondary signal.
+      try {
+        const mRes = await fetch('/api/measurements?date=' + today);
+        const mData = await mRes.json();
+        if (Array.isArray(mData) && mData.length > 0) {
+          _morningCheckinDone = true;
+          localStorage.setItem(dismissKey, '1');
+          // Backfill MorningCheckIn so future checks find it immediately
+          fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ date: today, sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements auto-backfill]' })
+          }).catch(function(){});
+          return;
+        }
+      } catch(e2) {}
+      _morningCheckinDone = false;
+      showMorningCheckinOverlay();
     } else {
       _morningCheckinDone = false;
       showMorningCheckinOverlay();
@@ -4268,6 +4287,16 @@ async function submitSundayMeasurements() {
   if (data.weight) {
     await apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
   }
+
+  // Create MorningCheckIn record NOW — don't wait for coach conversation to finish.
+  // This way even if the user closes the app mid-conversation, the gate is cleared
+  // on all devices.
+  await fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ date: todayStr(), sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements submitted]' })
+  }).catch(function(){});
+  var _sunDk = 'sunday_measurements_' + todayStr();
+  localStorage.setItem(_sunDk, '1');
+  _morningCheckinDone = true;
 
   // Transition to the Sunday review coach conversation
   _showSundayReviewChat(data);
