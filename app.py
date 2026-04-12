@@ -2302,24 +2302,66 @@ def api_generate_weekly_program():
 
     db.session.commit()
 
-    # Also run deficit plan
+    # Also run deficit plan + AUTO-RECALIBRATE calories based on current weight.
+    # As the user loses weight, TDEE drops. Recalibrating weekly keeps the deficit
+    # on target for the remaining weeks. Without this, the same calorie intake
+    # produces a shrinking deficit and the user falls behind pace.
     deficit = None
     try:
-        # Inline deficit calculation (same logic as api_deficit_plan)
         goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
         bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
         if goal and goal.target_weight and bw:
             current_weight = bw.weight_lbs
-            target_weight = goal.target_weight
+            target_weight_val = goal.target_weight
             weeks_remaining = max(1, 12 - target_week + 1)
-            required_weekly = (current_weight - target_weight) / weeks_remaining
+            required_weekly = (current_weight - target_weight_val) / weeks_remaining
             if required_weekly > 0:
                 deficit = {
                     "current_weight": current_weight,
-                    "target_weight": target_weight,
+                    "target_weight": target_weight_val,
                     "weeks_remaining": weeks_remaining,
                     "required_weekly_loss": round(required_weekly, 1),
                 }
+
+            # Weekly calorie recalibration
+            try:
+                from goal_engine import compute_tdee, compute_targets, compute_day_calories
+                pa_rec = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+                height_rec = (pa_rec.height_inches if pa_rec and pa_rec.height_inches else 70)
+                intake_rec = PsychIntake.query.filter_by(user_id=current_user.id).first()
+                convo_rec = intake_rec.conversation if intake_rec and intake_rec.conversation else []
+                age_rec, sex_rec = 30, "male"
+                for msg in (convo_rec if isinstance(convo_rec, list) else []):
+                    if not isinstance(msg, dict) or msg.get("role") != "user":
+                        continue
+                    c = msg.get("content", "").lower().split()
+                    if any(w in c for w in ["female", "f", "woman"]): sex_rec = "female"
+                    import re as _re
+                    am = _re.search(r'\b(\d{1,2})\b', msg.get("content", ""))
+                    if am and 13 <= int(am.group(1)) <= 80: age_rec = int(am.group(1))
+
+                tdee_rec = compute_tdee(current_weight, height_rec, age_rec, sex_rec)
+                new_targets = compute_targets(tdee_rec["tdee"], goal.goal_type or "cut",
+                                              current_weight, age=age_rec,
+                                              target_weight=target_weight_val, weeks=weeks_remaining)
+                old_cal = goal.daily_calories
+                goal.daily_calories = new_targets["calories"]
+                goal.protein_grams = new_targets["protein"]
+                goal.carb_grams = new_targets["carbs"]
+                goal.fat_grams = new_targets["fat"]
+                # Recompute per-day-type calories
+                day_types_cal = ["heavy_lift", "long_run", "moderate", "rest", "deload"]
+                cal_by_day = {}
+                for dt in day_types_cal:
+                    cal_by_day[dt] = compute_day_calories(new_targets["calories"], goal.goal_type or "cut", dt, weight_lbs=current_weight)
+                goal.calorie_by_day_type = cal_by_day
+                db.session.commit()
+                if old_cal != goal.daily_calories:
+                    import logging
+                    logging.info(f"[RECALIBRATE] User {current_user.id} week {target_week}: {old_cal} -> {goal.daily_calories} cal (weight {current_weight}, {weeks_remaining}wk remain)")
+            except Exception as e:
+                import logging
+                logging.warning(f"[RECALIBRATE] Failed for user {current_user.id}: {e}")
     except Exception:
         pass
 
