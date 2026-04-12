@@ -2950,10 +2950,23 @@ def api_measurements():
 @login_required
 def api_measurements_record():
     data = request.get_json()
-    # Sunday gating handled by frontend — backend accepts all days to avoid
-    # timezone mismatches silently eating submitted data.
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
+
+    # Fix broken unique index: log_date was indexed as UNIQUE (should not be — multiple
+    # users need to submit on the same date). Drop the unique constraint if it exists.
+    try:
+        db.session.execute(text('DROP INDEX IF EXISTS ix_body_measurement_log_date'))
+        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Also try finding by log_date alone (in case user_id was null on old row)
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
+    if not bm:
+        bm = BodyMeasurement.query.filter_by(log_date=d).first()
+        if bm and bm.user_id is None:
+            bm.user_id = current_user.id  # claim orphan row
     if bm:
         if "weight" in data:
             bm.weight_lbs = data["weight"]
