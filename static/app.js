@@ -2972,12 +2972,22 @@ async function pickStartDate(dateStr) {
     await apiPost('/api/state', { baseline_done: true, start_date: dateStr });
     _stateCache.baseline_done = true;
     _stateCache.start_date = dateStr;
+
+    // Generate Week 1 program (exercises + meals) so user can preview and prep
+    try {
+        await fetch('/api/weekly-program/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ week: 1 }),
+        });
+    } catch(e) {}
+
     document.getElementById('baseline-overlay').innerHTML = '';
 
-    // Check if start date is in the future → show lockout
+    // Check if start date is in the future → show lockout with preview
     const start = new Date(dateStr + 'T00:00:00');
     if (start > new Date()) {
-        showPreStartLockout(dateStr);
+        await showPreStartLockout(dateStr);
         return;
     }
     renderAll();

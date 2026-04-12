@@ -6466,6 +6466,84 @@ def api_admin_debug_sql():
         return jsonify({"error": str(e)[:300]}), 500
 
 
+@app.route("/api/admin/generate-meals", methods=["POST"])
+@admin_required
+def api_admin_generate_meals():
+    """Generate meal plans for a user. Admin-only."""
+    from meal_generator import generate_meal_plan
+    from goal_engine import compute_day_calories
+    data = request.get_json()
+    email = (data.get("email") or "").strip().lower()
+    week = data.get("week", 1)
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    if not goal or not goal.daily_calories:
+        return jsonify({"error": "No goal computed"}), 400
+    fs = UserFoodSelections.query.filter_by(user_id=user.id).first()
+    if not fs or not fs.selected_foods:
+        return jsonify({"error": "No food selections"}), 400
+
+    from workout_data import get_workouts
+    days = get_workouts(week)
+    fasting_protocol = goal.fasting_protocol or '16_8'
+    latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
+    weight = latest_bw.weight_lbs if latest_bw else 200
+
+    generated = 0
+    for day_idx, day_data in enumerate(days):
+        # Determine day type for calorie computation
+        cal_day_type = 'moderate'
+        if day_data.get('isRest'):
+            cal_day_type = 'rest'
+        elif day_data.get('run', {}).get('type') == 'hiit':
+            cal_day_type = 'heavy_lift'
+        elif day_data.get('run', {}).get('type') in ('long', 'tempo'):
+            cal_day_type = 'long_run'
+
+        try:
+            day_macros = compute_day_calories(goal.daily_calories, goal.goal_type or 'cut', cal_day_type, weight_lbs=weight)
+        except Exception:
+            day_macros = {"calories": goal.daily_calories, "protein": goal.protein_grams or 200, "carbs": goal.carb_grams or 150, "fat": goal.fat_grams or 60}
+
+        # Check for fast day
+        day_meal_type = 'standard'
+        try:
+            override = MealPlanOverride.query.filter_by(user_id=user.id, week=week, day_idx=day_idx).first()
+            if override and override.meal_type:
+                day_meal_type = override.meal_type
+        except Exception:
+            pass
+
+        try:
+            meal_plan = generate_meal_plan(
+                selected_foods=fs.selected_foods,
+                day_type=day_meal_type if day_meal_type != 'standard' else cal_day_type,
+                targets=day_macros,
+                fasting_protocol=fasting_protocol,
+            )
+        except Exception as e:
+            continue
+
+        # Save
+        existing = WeeklyMealPlan.query.filter_by(user_id=user.id, week=week, day_idx=day_idx).first()
+        if existing:
+            existing.meal_data = meal_plan
+        else:
+            db.session.add(WeeklyMealPlan(user_id=user.id, week=week, day_idx=day_idx, meal_data=meal_plan))
+        generated += 1
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:200]}), 500
+
+    return jsonify({"ok": True, "email": email, "week": week, "days_generated": generated})
+
+
 @app.route("/api/admin/save-measurements", methods=["POST"])
 @admin_required
 def api_admin_save_measurements():
