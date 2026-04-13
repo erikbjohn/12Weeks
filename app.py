@@ -2250,14 +2250,22 @@ def api_generate_weekly_program():
 
     program_summary = []
 
+    # Auto-swap exercises the user doesn't have equipment for
+    from equipment_swaps import auto_swap_workout
+    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+    user_equipment = eq.available_equipment if eq else []
+
     for day_idx in range(7):
-        exercises = template.get(day_idx, [])
-        for order, ex_template in enumerate(exercises):
-            exercise_name = resolve_name(ex_template['exercise'])
-            base_sets = ex_template['sets']
-            base_reps = ex_template['reps']
-            base_rest = ex_template.get('rest', '60s')
-            base_note = ex_template.get('note', '')
+        raw_exercises = template.get(day_idx, [])
+        # Convert template format to name-based format for auto_swap
+        named_exercises = [{"name": resolve_name(e["exercise"]), "sets": e.get("sets"), "reps": e.get("reps"), "rest": e.get("rest", "60s"), "note": e.get("note", "")} for e in raw_exercises]
+        swapped_exercises = auto_swap_workout(named_exercises, user_equipment)
+        for order, ex_sw in enumerate(swapped_exercises):
+            exercise_name = ex_sw["name"]
+            base_sets = ex_sw.get('sets') or 3
+            base_reps = ex_sw.get('reps') or '10'
+            base_rest = ex_sw.get('rest', '60s')
+            base_note = ex_sw.get('note', '')
 
             # Run training engine for this exercise
             try:
