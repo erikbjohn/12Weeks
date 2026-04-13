@@ -4396,7 +4396,9 @@ def api_chat_stream():
         except Exception as e:
             import logging
             logging.error("Stream error: %s", e)
-            yield f"data: [ERROR]\n\n"
+            # Send error details to client so we can diagnose
+            err_msg = str(e)[:200].replace('\n', ' ')
+            yield f"data: [ERROR: {err_msg}]\n\n"
         finally:
             # ALWAYS save the response if we got any text — even partial
             if full_text.strip():
