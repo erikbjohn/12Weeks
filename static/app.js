@@ -6601,11 +6601,11 @@ function _pdBodyComp(measurements) {
   var fields = [
     { key: 'weight_lbs', altKey: 'weight', label: 'Weight', unit: 'lb', lower: true },
     { key: 'waist', label: 'Waist', unit: 'in', lower: true },
-    { key: 'chest', label: 'Chest', unit: 'in', lower: false },
+    { key: 'chest', label: 'Chest', unit: 'in', lower: true },
     { key: 'hips', label: 'Hips', unit: 'in', lower: true },
-    { key: 'neck', label: 'Neck', unit: 'in', lower: false },
-    { key: 'bicep_avg', label: 'Biceps', unit: 'in', lower: false, computed: true },
-    { key: 'thigh_avg', label: 'Thighs', unit: 'in', lower: false, computed: true }
+    { key: 'neck', label: 'Neck', unit: 'in', lower: true },
+    { key: 'bicep_avg', label: 'Biceps', unit: 'in', lower: true, computed: true },
+    { key: 'thigh_avg', label: 'Thighs', unit: 'in', lower: true, computed: true }
   ];
 
   function getVal(entry, field) {
@@ -7888,13 +7888,13 @@ function renderMeasurementsSection(measurements) {
     var fields = [
         { key: 'weight_lbs', label: 'Weight', unit: 'lb', lower: true },
         { key: 'waist', label: 'Waist', unit: 'in', lower: true },
-        { key: 'chest', label: 'Chest', unit: 'in', lower: false },
+        { key: 'chest', label: 'Chest', unit: 'in', lower: true },
         { key: 'hips', label: 'Hips', unit: 'in', lower: true },
-        { key: 'neck', label: 'Neck', unit: 'in', lower: false },
-        { key: 'bicep_left', label: 'Bicep L', unit: 'in', lower: false },
-        { key: 'bicep_right', label: 'Bicep R', unit: 'in', lower: false },
-        { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: false },
-        { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: false },
+        { key: 'neck', label: 'Neck', unit: 'in', lower: true },
+        { key: 'bicep_left', label: 'Bicep L', unit: 'in', lower: true },
+        { key: 'bicep_right', label: 'Bicep R', unit: 'in', lower: true },
+        { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: true },
+        { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: true },
     ];
     var rows = '';
     for (var i = 0; i < fields.length; i++) {
