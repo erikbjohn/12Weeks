@@ -7738,8 +7738,15 @@ async function sendInlineCoachMsg() {
     var text = (input.value || '').trim();
     if (!text) return;
     input.value = '';
-    // If we're in a planning session, prepend which day is being discussed (hidden from display)
+    // If in a planning session and user says something affirmative, auto-show next day
     var displayText = text;
+    var _lower = text.toLowerCase().trim();
+    if (window._planDayBlocks && window._planDayIdx < (window._planDayOrder || []).length) {
+        if (/^(yes|yeah|yep|yea|sure|ok|okay|go|next|show|let'?s|ready|do it|send it|go ahead)\b/i.test(_lower)) {
+            showNextPlanDay();
+            return;
+        }
+    }
     if (window._planCurrentDay) {
         text = '[Context: we are currently discussing ' + window._planCurrentDay + "'s workout plan] " + text;
     }
