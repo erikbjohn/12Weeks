@@ -37,12 +37,8 @@ AGENTS = {
         "max_tokens": 1500,
         "temperature": 0.6,
         "requires": [
-            "base", "checkins", "chat_history", "bodyweight", "workout_today",
-            "week_schedule", "exercise_history", "exercise_analysis",
-            "today_sets", "runs", "physical", "meals_today",
-            "coach_memories", "goal", "food_safety", "fasting",
-            "completed_days", "overrides", "next_week",
-            "session_analysis", "equipment", "user_rules",
+            "base", "chat_history", "bodyweight", "coach_memories",
+            "goal", "equipment", "user_rules",
         ],
     },
     "weekly_review": {
