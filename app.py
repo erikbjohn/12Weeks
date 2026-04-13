@@ -961,7 +961,7 @@ def api_regenerate_meals():
 
         _cal_day_type_map = {
             "heavy_lift": "heavy", "long_run": "long_run",
-            "moderate": "training", "fast_day": "rest",
+            "moderate": "training", "fast_day": "fast_day",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
 
@@ -2457,7 +2457,7 @@ def api_generate_weekly_program():
             "heavy_lift": "heavy",
             "long_run": "long_run",
             "moderate": "training",
-            "fast_day": "rest",
+            "fast_day": "fast_day",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"

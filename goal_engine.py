@@ -332,7 +332,10 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
     if goal_type == "cut":
         protein = round(1.2 * weight_lbs)
         fat = round(0.35 * weight_lbs)
-        if day_type == "training":
+        if day_type == "fast_day":
+            # Full fast — zero calories. Water, black coffee, electrolytes only.
+            return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+        elif day_type == "training":
             calories = base_calories
         elif day_type == "rest":
             calories = base_calories - 200
@@ -344,7 +347,9 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
     elif goal_type == "bulk":
         protein = round(1.0 * weight_lbs)
         fat = round(0.4 * weight_lbs)
-        if day_type == "training":
+        if day_type == "fast_day":
+            return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+        elif day_type == "training":
             calories = base_calories + 200
         elif day_type == "rest":
             calories = base_calories
@@ -355,7 +360,9 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
     else:  # recomp
         protein = round(1.2 * weight_lbs)
         fat = round(0.35 * weight_lbs)
-        if day_type == "training":
+        if day_type == "fast_day":
+            return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+        elif day_type == "training":
             calories = base_calories + 50
         elif day_type == "rest":
             calories = base_calories - 150
