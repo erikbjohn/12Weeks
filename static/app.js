@@ -7746,7 +7746,7 @@ async function sendInlineCoachMsg() {
             showNextPlanDay();
             // Ask the coach for a brief follow-up under the plan
             var _dayShown = window._planCurrentDay || 'this day';
-            text = '[The HTML exercise plan for ' + _dayShown + ' was just shown to the athlete. Ask briefly: any swaps or weight adjustments for ' + _dayShown + '? Then ask if ready for the next day. 1-2 sentences only. Do NOT list exercises — they are already displayed.]';
+            text = '[The HTML exercise plan for ' + _dayShown + ' was just shown to the athlete. Ask ONE question only: any swaps or weight adjustments for ' + _dayShown + '? Do NOT mention the next day. Do NOT list exercises. One sentence max.]';
             displayText = null; // don't show a user bubble for this
         }
     }
