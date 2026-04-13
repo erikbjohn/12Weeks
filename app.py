@@ -2314,6 +2314,28 @@ def api_generate_weekly_program():
 
     db.session.commit()
 
+    # Carry forward exercise swaps from the previous week.
+    # If the user swapped Lying Leg Curl → Nordic Hamstring Curl last week,
+    # they probably want the same swap this week.
+    try:
+        prev_week = target_week - 1
+        if prev_week >= 1:
+            prev_swaps = ExerciseSwap.query.filter_by(user_id=current_user.id, week=prev_week).all()
+            for ps in prev_swaps:
+                existing_swap = ExerciseSwap.query.filter_by(
+                    user_id=current_user.id, week=target_week,
+                    day_idx=ps.day_idx, exercise_idx=ps.exercise_idx
+                ).first()
+                if not existing_swap:
+                    db.session.add(ExerciseSwap(
+                        user_id=current_user.id, week=target_week,
+                        day_idx=ps.day_idx, exercise_idx=ps.exercise_idx,
+                        swapped_to=ps.swapped_to,
+                    ))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     # Also run deficit plan + AUTO-RECALIBRATE calories based on current weight.
     # As the user loses weight, TDEE drops. Recalibrating weekly keeps the deficit
     # on target for the remaining weeks. Without this, the same calorie intake
