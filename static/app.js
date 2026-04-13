@@ -7480,35 +7480,74 @@ async function launchWeeklyPlanning(weekOverride) {
         }
     }
 
+    // The coach ONLY provides a brief overview. The exercise list is rendered
+    // programmatically — the LLM never touches exercise formatting.
     var trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
-        '\n\nMANDATORY FORMAT RULE — For EVERY exercise you present, you MUST state:' +
-        '\n1. The exercise name, sets x reps @ weight' +
-        '\n2. Whether weight went UP, DOWN, or HOLD vs last week' +
-        '\n3. Last week\'s actual weight and reps in parentheses' +
-        '\nExample: "- Bench Press: 4x10 @ 115lb — UP 5lb (was 110lb x 10)"' +
-        '\nExample: "- Face Pull: 3x15 @ 55lb — HOLD (was 55lb x 15)"' +
-        '\nExample: "- Lateral Raise: 3x14 @ 10lb — reps UP (was 3x13)"' +
-        '\nThe last week data is in the [UP/DOWN/HOLD] tags in the program data below. USE IT.' +
-        '\n\n' + (isReplan ? 'This is a RE-PLAN of Week ' + nextWeek + '.' :
-        'Weekly planning session for Week ' + nextWeek + '.') +
+        '\n\n' + (isReplan ? 'Re-planning Week ' + nextWeek + '.' :
+        'Weekly planning for Week ' + nextWeek + '.') +
         deficitStr + calorieStr +
-        '\n\nPROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
-        mealStr +
-        '\n\nCONVERSATION FLOW:' +
-        '\n1. First: 2-3 sentence overview of changes + calorie status. End with "Ready to see Monday?"' +
-        '\n2. Present ONE DAY per response. Each exercise on its own line with a dash.' +
-        '\n3. End each day with "Questions, or [next day]?"' +
-        '\n4. After all 6 days, summarize and ask for adjustments.' +
-        '\n5. Do NOT dump the entire week in one message.';
+        '\n\nThe exercise list will be shown separately by the app. Your job is ONLY to give a 2-3 sentence overview:' +
+        '\n- What changed this week vs last (weight progress, calorie adjustments)' +
+        '\n- Key progression highlights (which lifts went up, any holds)' +
+        '\n- One motivational line' +
+        '\nKeep it under 4 sentences. Do NOT list any exercises — the app handles that.';
 
-    // Now open the inline chat with the planning trigger
+    // BUILD the exercise list as HTML directly from programData — never let the LLM format it.
+    // The coach only provides commentary (overview, progression notes).
+    var _dayHtmlBlocks = {};
+    var _dayOrder = [];
+    var _dayLabels = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    if (programData && programData.program) {
+        var _curDay = -1;
+        var _dayHtml = '';
+        for (var _ei = 0; _ei < programData.program.length; _ei++) {
+            var _ex = programData.program[_ei];
+            if (_ex.day !== _curDay) {
+                if (_curDay >= 0) { _dayHtmlBlocks[_curDay] = _dayHtml; }
+                _curDay = _ex.day;
+                _dayOrder.push(_curDay);
+                var _schedInfo = programData.schedule_summary ? programData.schedule_summary[_curDay] : null;
+                var _liftName = _schedInfo ? _schedInfo.lift_name || '' : '';
+                _dayHtml = '<div style="font-weight:700;font-size:15px;color:var(--accent);margin-bottom:6px">' + _dayLabels[_curDay] + (_liftName ? ' — ' + _liftName : '') + '</div>';
+            }
+            var _wt = _ex.target_weight ? _ex.target_weight + 'lb' : 'BW';
+            var _prev = lastWeekActual[_ex.exercise];
+            var _changeHtml = '';
+            if (_prev && _prev.weight && _ex.target_weight) {
+                var _d = _ex.target_weight - _prev.weight;
+                if (_d > 0) _changeHtml = '<span style="color:#4ade80"> — UP ' + _d + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                else if (_d < 0) _changeHtml = '<span style="color:#ef4444"> — DOWN ' + Math.abs(_d) + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                else _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+            } else if (_ex.reason) {
+                _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';
+            }
+            _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _ex.exercise + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + _changeHtml + '</div>';
+        }
+        if (_curDay >= 0) { _dayHtmlBlocks[_curDay] = _dayHtml; }
+    }
+    // Add run info to each day
+    if (programData && programData.run_summary) {
+        for (var _ri = 0; _ri < programData.run_summary.length; _ri++) {
+            var _run = programData.run_summary[_ri];
+            if (_dayHtmlBlocks[_run.day] !== undefined) {
+                _dayHtmlBlocks[_run.day] += '<div style="padding:2px 0;font-size:14px;color:var(--muted)">Run: ' + (_run.label || _run.type || '?') + ', ' + (_run.time || _run.duration || '?') + '</div>';
+            }
+        }
+    }
+    // Store for day-by-day reveal
+    window._planDayBlocks = _dayHtmlBlocks;
+    window._planDayOrder = _dayOrder;
+    window._planDayIdx = 0;
+
+    // Now open the inline chat — show coach overview first, then reveal days one at a time
     container.innerHTML =
-      '<div id="coach-inline-messages" style="max-height:50vh;overflow-y:auto;padding:8px 0">' +
+      '<div id="coach-inline-messages" style="max-height:60vh;overflow-y:auto;padding:8px 0">' +
         '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:8px">' +
-        '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" onkeydown="if(event.key===\'Enter\')sendInlineCoachMsg()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
-        '<button onclick="sendInlineCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
+        '<button id="plan-next-day-btn" onclick="showNextPlanDay()" style="background:var(--accent);color:#0d0f0e;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px;flex-shrink:0">Show ' + _dayLabels[_dayOrder[0] || 0] + '</button>' +
+        '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendInlineCoachMsg()}" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
+        '<button onclick="sendInlineCoachMsg()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
       '</div>';
 
     // Stream the coach's planning response
@@ -7609,6 +7648,37 @@ async function _fetchInlineCoachOpener() {
     }
     var input = document.getElementById('coach-inline-input');
     if (input) setTimeout(function() { input.focus(); }, 100);
+}
+
+function showNextPlanDay() {
+    var blocks = window._planDayBlocks || {};
+    var order = window._planDayOrder || [];
+    var idx = window._planDayIdx || 0;
+    if (idx >= order.length) return;
+
+    var dayNum = order[idx];
+    var html = blocks[dayNum] || '';
+    var messagesEl = document.getElementById('coach-inline-messages');
+    if (messagesEl && html) {
+        var dayBubble = document.createElement('div');
+        dayBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px 14px;margin-bottom:8px';
+        dayBubble.innerHTML = html;
+        messagesEl.appendChild(dayBubble);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    window._planDayIdx = idx + 1;
+    var btn = document.getElementById('plan-next-day-btn');
+    if (btn) {
+        if (window._planDayIdx < order.length) {
+            var nextDayLabel = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][order[window._planDayIdx]] || 'Next';
+            btn.textContent = 'Show ' + nextDayLabel;
+        } else {
+            btn.textContent = 'All Days Shown';
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+        }
+    }
 }
 
 async function sendInlineCoachMsg() {
