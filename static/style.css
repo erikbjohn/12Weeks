@@ -903,9 +903,10 @@ footer {
   background: var(--surface);
   border-radius: 6px;
   font-size: 14px;
+  max-width: 420px;
 }
 .m-label {
-  width: 70px;
+  width: 65px;
   flex-shrink: 0;
   color: var(--muted);
 }
@@ -916,11 +917,11 @@ footer {
   align-items: center;
 }
 .m-val {
-  margin-left: auto;
   white-space: nowrap;
   font-family: 'DM Mono', monospace;
   color: var(--text);
   text-align: right;
+  min-width: 70px;
 }
 .m-delta {
   font-family: 'DM Mono', monospace;
