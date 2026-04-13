@@ -714,16 +714,22 @@ function renderMealInner(dayData) {
 
   const notTodayNote = !isViewingToday ? '<div class="meal-plan-note" style="opacity:0.6;font-style:italic">Meal tracking available on today\'s view only</div>' : '';
 
+  // Calorie + deficit summary
+  const goalData = window._goalData || {};
+  const tdee = goalData.tdee || 0;
+  const deficit = tdee > 0 && target.cal > 0 ? tdee - target.cal : 0;
+  const deficitStr = deficit > 0 ? `<span style="color:var(--accent);font-size:13px;margin-left:6px">\u2212${deficit} cal deficit</span>`
+    : deficit < 0 ? `<span style="color:#4ade80;font-size:13px;margin-left:6px">+${Math.abs(deficit)} cal surplus</span>` : '';
+  const calHeader = target.cal > 0 ? `<span style="font-family:'DM Mono',monospace;font-size:14px;color:var(--text)">${target.cal} cal</span>${deficitStr}` : '';
+
   return `<h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
+    ${calHeader ? '<div style="margin:-4px 0 8px 0">' + calHeader + '</div>' : ''}
     ${isSundayFast ? '<div class="meal-plan-note" style="color:var(--accent)">Fast day. Water, black coffee, electrolytes only.</div>' : ''}
     ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
     ${notTodayNote}
     ${totalsHtml}
     ${isViewingToday ? '<div class="meal-compact-row">' + compactChecks + '</div>' : ''}
-    <button class="meal-detail-toggle" onclick="toggleMealDetails()">
-      ${_mealDetailExpanded ? 'Hide details \u25B2' : 'Show meal details \u25BC'}
-    </button>
-    <div class="meal-detail-body${_mealDetailExpanded ? ' visible' : ''}">
+    <div class="meal-detail-body visible">
       <div class="meal-timeline">
         ${mealsHtml}
       </div>
