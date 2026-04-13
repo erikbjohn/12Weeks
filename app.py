@@ -195,6 +195,7 @@ with app.app_context():
         ("weekly_prescription", "target_weight", "FLOAT"),
         ("weekly_prescription", "progression_indicator", "VARCHAR(20)"),
         ("weekly_prescription", "adjustment_reason", "TEXT"),
+        ("training_goal", "tdee", "INTEGER"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -255,6 +256,21 @@ with app.app_context():
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
+    except Exception:
+        db.session.rollback()
+
+    # Backfill TDEE for existing goals that don't have it
+    try:
+        from goal_engine import compute_tdee
+        goals_without_tdee = TrainingGoal.query.filter(TrainingGoal.tdee.is_(None)).all()
+        for g in goals_without_tdee:
+            pa = PhysicalAssessment.query.filter_by(user_id=g.user_id).first()
+            bw = BodyWeight.query.filter_by(user_id=g.user_id).order_by(BodyWeight.log_date.desc()).first()
+            w = (bw.weight_lbs if bw else None) or (pa.bodyweight_lbs if pa else None) or 180
+            h = (pa.height_inches if pa else None) or 70
+            tdee_info = compute_tdee(w, h, 30, "male")
+            g.tdee = tdee_info["tdee"]
+        db.session.commit()
     except Exception:
         db.session.rollback()
 
@@ -5684,6 +5700,7 @@ def api_goal_compute():
     goal.protein_grams = targets["protein"]
     goal.carb_grams = targets["carbs"]
     goal.fat_grams = targets["fat"]
+    goal.tdee = tdee_info["tdee"]
     goal.phase_plan = phase_plan
     goal.calorie_by_day_type = cal_by_day
     goal.fasting_protocol = fasting["protocol"]
@@ -5722,19 +5739,7 @@ def api_goal():
     if not goal:
         return jsonify({"computed": False})
 
-    # Compute TDEE from current weight so deficit display works
-    tdee = 0
-    try:
-        from goal_engine import compute_tdee
-        pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-        latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-        weight = (latest_bw.weight_lbs if latest_bw else None) or (pa.bodyweight_lbs if pa else 180)
-        height = (pa.height_inches if pa else None) or 70
-        tdee_info = compute_tdee(weight, height, 30, "male")
-        tdee = tdee_info["tdee"]
-    except Exception:
-        pass
-
+    tdee = goal.tdee or 0
     daily_deficit = tdee - goal.daily_calories if tdee and goal.daily_calories else 0
 
     return jsonify({
@@ -6254,9 +6259,14 @@ def api_goal_recalibrate():
         tdee_params
     )
 
-    # Update goal
+    # Update goal — recalc TDEE at new weight
     goal.weight_projection = result["updated_projection"]
     goal.daily_calories = result["new_daily_calories"]
+    try:
+        new_tdee = compute_tdee(actual_weight, pa.height_inches or 70, age, sex)
+        goal.tdee = new_tdee["tdee"]
+    except Exception:
+        pass
     db.session.commit()
 
     return jsonify(result)

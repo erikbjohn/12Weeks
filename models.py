@@ -410,6 +410,7 @@ class TrainingGoal(db.Model):
     protein_grams = db.Column(db.Integer, nullable=True)
     carb_grams = db.Column(db.Integer, nullable=True)
     fat_grams = db.Column(db.Integer, nullable=True)
+    tdee = db.Column(db.Integer, nullable=True)
     phase_plan = db.Column(db.JSON, nullable=True)
     calorie_by_day_type = db.Column(db.JSON, nullable=True)
     fasting_protocol = db.Column(db.String(20), nullable=True)
