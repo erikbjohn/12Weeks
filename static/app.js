@@ -5961,10 +5961,8 @@ function renderWarmupInner(dayData) {
         return `<div class="warmup-step" id="wu-step-${i}">
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
-        <div class="wu-step-content">
-          <span class="warmup-step-name">${step.name} <a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a></span>
-          ${repsLabel ? `<div class="warmup-step-reps">${repsLabel}</div>` : ''}
-          ${step.note ? `<div class="warmup-step-note">${step.note}</div>` : ''}
+        <div class="wu-step-content" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="warmup-step-name">${step.name}</span>${repsLabel ? `<span class="warmup-step-reps">${repsLabel} reps</span>` : ''}${step.note ? `<span class="warmup-step-note">· ${step.note}</span>` : ''}<a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>
         </div>
       </div>`;
       }).join('')}
