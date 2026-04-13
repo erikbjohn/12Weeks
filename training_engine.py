@@ -113,7 +113,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     # Get last session data for this exercise
     last_sets = SetLog.query.filter_by(
         user_id=user_id, exercise_name=exercise_name, done=True
-    ).order_by(SetLog.logged_date.desc(), SetLog.set_number.desc()).limit(20).all()
+    ).order_by(SetLog.logged_date.desc(), SetLog.set_number.asc()).limit(20).all()
 
     if not last_sets:
         # No history — return defaults based on phase
