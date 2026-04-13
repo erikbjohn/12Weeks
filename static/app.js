@@ -7593,7 +7593,6 @@ async function launchWeeklyPlanning(weekOverride) {
         '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:8px">' +
-        '<button id="plan-next-day-btn" onclick="showNextPlanDay()" style="background:var(--accent);color:#0d0f0e;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px;flex-shrink:0">Show ' + _dayLabels[_dayOrder[0] || 0] + '</button>' +
         '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendInlineCoachMsg()}" style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
         '<button onclick="sendInlineCoachMsg()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
       '</div>';
