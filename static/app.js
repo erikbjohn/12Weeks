@@ -7497,12 +7497,17 @@ async function launchWeeklyPlanning(weekOverride) {
     var _dayHtmlBlocks = {};
     var _dayOrder = [];
     var _dayLabels = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    // Load exercise swaps to apply to the plan view
+    var _planSwaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
+
     if (programData && programData.program) {
         var _curDay = -1;
         var _dayHtml = '';
+        var _exIdxInDay = 0;
         for (var _ei = 0; _ei < programData.program.length; _ei++) {
             var _ex = programData.program[_ei];
             if (_ex.day !== _curDay) {
+                _exIdxInDay = 0;
                 if (_curDay >= 0) { _dayHtmlBlocks[_curDay] = _dayHtml; }
                 _curDay = _ex.day;
                 _dayOrder.push(_curDay);
@@ -7532,7 +7537,12 @@ async function launchWeeklyPlanning(weekOverride) {
             } else if (_ex.reason) {
                 _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';
             }
-            _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _ex.exercise + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + _changeHtml + '</div>';
+            // Apply swap overlay — check if this exercise was swapped
+            var _swapKey = nextWeek + '_' + _ex.day + '_' + _exIdxInDay;
+            var _displayExName = _planSwaps[_swapKey] || _ex.exercise;
+            _exIdxInDay++;
+
+            _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _displayExName + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + (_displayExName !== _ex.exercise ? ' <span style="color:var(--muted)">(swapped)</span>' : '') + _changeHtml + '</div>';
         }
         if (_curDay >= 0) { _dayHtmlBlocks[_curDay] = _dayHtml; }
     }
