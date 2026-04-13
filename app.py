@@ -6674,7 +6674,7 @@ def api_admin_generate_meals():
         except Exception:
             day_macros = {"calories": goal.daily_calories, "protein": goal.protein_grams or 200, "carbs": goal.carb_grams or 150, "fat": goal.fat_grams or 60}
 
-        # Check for fast day
+        # Check for fast day — override first, then template mealType
         day_meal_type = 'standard'
         try:
             override = MealPlanOverride.query.filter_by(user_id=user.id, week=week, day_idx=day_idx).first()
@@ -6682,6 +6682,12 @@ def api_admin_generate_meals():
                 day_meal_type = override.meal_type
         except Exception:
             pass
+        if day_meal_type == 'standard':
+            # Check template (Sunday = fast_day)
+            template_meal_type = day_data.get('mealType', '')
+            if template_meal_type == 'fast_day':
+                day_meal_type = 'fast_day'
+                cal_day_type = 'rest'
 
         try:
             meal_plan = generate_meal_plan(
