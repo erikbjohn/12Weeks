@@ -7742,7 +7742,7 @@ async function sendInlineCoachMsg() {
     var displayText = text;
     var _lower = text.toLowerCase().trim();
     if (window._planDayBlocks && window._planDayIdx < (window._planDayOrder || []).length) {
-        if (/^(y|ye|yes|yeah|yep|yea|sure|ok|okay|go|next|show|let'?s|ready|do it|send it|go ahead|absolutely|definitely|let me see)/i.test(_lower)) {
+        if (/^(y|ye|yes|yeah|yep|yea|next|show me|show it|let'?s see|ready)$/i.test(_lower) || /^(next day|show \w+day|tuesday|wednesday|thursday|friday|saturday)$/i.test(_lower)) {
             showNextPlanDay();
             // Ask the coach for a brief follow-up under the plan
             var _dayShown = window._planCurrentDay || 'this day';
