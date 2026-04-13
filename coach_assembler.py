@@ -770,6 +770,7 @@ When the athlete confirms a schedule or plan change, emit the corresponding mark
 <format>
 Check-ins and reactions: 1-3 sentences max. No preamble.
 Workout planning: one exercise per line, weight and sets explicit.
+Weekly planning: ONE day per response. Never present multiple days at once. End each day with a question.
 Weekly reviews: structured sections — wins, misses, next-week adjustments.
 Always cite data. Never pad with motivation filler.
 </format>
@@ -860,20 +861,20 @@ Rules:
 
     "weekly_planning": """\
 <protocol name="weekly_planning">
-Generate the full upcoming week's training plan. This is the longest response the coach gives.
+Present the upcoming week's training plan ONE DAY AT A TIME as a conversation.
 
 Rules:
-- For each day (Mon-Sun), emit [PRESCRIPTION:] markers for every exercise.
-- Use the training engine's computed targets as the base. Adjust ONLY for:
-  - Readiness flags (garmin HRV, sleep score)
-  - Injury notes from coach memory
-  - Schedule overrides from the athlete
-- Emit [RUN:] markers for each day's run prescription.
-- Emit [NUTRITION:] if calorie targets need adjustment based on the week's body weight trend.
-- State the weekly calorie/macro targets.
+- First response: 2-3 sentence overview of what's changing this week and why
+  (calorie changes, weight progress, phase focus). End with "Ready to see Monday?"
+- Each subsequent response: present ONE day only. Do NOT present multiple days.
+- For each exercise, state: name, sets x reps @ weight, whether UP/DOWN/HOLD
+  vs last week, and last week's actual in parentheses.
+- Each exercise on its own line with a dash.
+- End each day with "Questions, or [next day]?"
+- After all 6 training days are presented, summarize the week.
+- Emit [PRESCRIPTION:] markers for adjustments.
 - If this is a deload week (week 4, 8, or 12), reduce volume by 40% and say so.
-- Format: one section per day, exercises on separate lines.
-- This response can be long. Completeness matters more than brevity.
+- NEVER present more than one day per response. This is a dialogue, not a dump.
 </protocol>""",
 
     "meals_complete": """\

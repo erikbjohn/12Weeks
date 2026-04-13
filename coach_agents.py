@@ -34,8 +34,8 @@ AGENTS = {
         ],
     },
     "weekly_planning": {
-        "max_tokens": 20000,
-        "temperature": 1.0,
+        "max_tokens": 800,
+        "temperature": 0.6,
         "requires": [
             "base", "checkins", "chat_history", "bodyweight", "workout_today",
             "week_schedule", "exercise_history", "exercise_analysis",
