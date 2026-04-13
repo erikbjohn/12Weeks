@@ -618,6 +618,26 @@ def _parse_coach_markers(text, user_id, week):
         except Exception:
             db.session.rollback()
 
+    # [SORENESS: area=shoulders, level=moderate]
+    for m in re.finditer(r'\[SORENESS:\s*area=([^,\]]+)(?:,\s*level=([^\]]+))?\]', text):
+        try:
+            area = m.group(1).strip().lower()
+            level = m.group(2).strip() if m.group(2) else 'moderate'
+            # Save to the latest MorningCheckIn notes so warmup generator picks it up
+            latest_ci = MorningCheckIn.query.filter_by(user_id=user_id).order_by(MorningCheckIn.log_date.desc()).first()
+            if latest_ci:
+                soreness_note = f'[SORENESS: {area}]'
+                if latest_ci.notes and soreness_note not in latest_ci.notes:
+                    latest_ci.notes = (latest_ci.notes or '') + ' ' + soreness_note
+                elif not latest_ci.notes:
+                    latest_ci.notes = soreness_note
+                latest_ci.soreness = {'mild': 3, 'moderate': 5, 'severe': 7}.get(level, 5)
+            # Also save as a coach memory for future reference
+            db.session.add(CoachMemory(user_id=user_id, content=f'Athlete reports {level} soreness/tightness in {area}', memory_type='observation', week=week))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     # [RUN: day=X, duration=50 min, type=zone2, reason=...]
     for m in re.finditer(r'\[RUN:\s*day=(\d+),\s*duration=([^,]+),\s*type=([^,]+),\s*reason=([^\]]+)\]', text):
         try:

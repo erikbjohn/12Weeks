@@ -779,6 +779,7 @@ When the athlete confirms a schedule or plan change, emit the corresponding mark
 [BMR_UPDATE: daily_calories=N, protein=N, carbs=N, fat=N, reason=text]
 [LOCKOUT_WARNING: violation_description]
 [SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
+[SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
 </markers>
 
 <format>

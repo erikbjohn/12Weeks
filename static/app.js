@@ -7823,7 +7823,7 @@ async function sendInlineCoachMsg() {
                 var _allDone = (window._planDayIdx || 0) >= (window._planDayOrder || []).length;
                 if (_allDone) {
                     // All days shown — ask for a weekly summary instead of day feedback
-                    var _fbMsg = '[All 6 training days have been shown and confirmed. ' + localTimeContext() + ' Give a brief 2-sentence weekly summary and say the plan is locked. Do NOT list exercises. Do NOT say weigh-in is tomorrow if today is Sunday — Sunday IS weigh-in day.]';
+                    var _fbMsg = '[All 6 training days have been shown and confirmed. ' + localTimeContext() + ' Do two things: 1) Give a brief 1-sentence summary that the plan is locked. 2) Ask about soreness or tightness: "Any areas feeling tight or sore? I can add targeted stretching to next week\'s warmups." Do NOT list exercises. Do NOT say weigh-in is tomorrow if today is Sunday — Sunday IS weigh-in day.]';
                 } else if (_dayName) {
                     var _fbMsg = '[The HTML exercise plan for ' + _dayName + ' was just shown. Ask ONE question: any swaps or weight adjustments for ' + _dayName + '? Do NOT list exercises. Do NOT mention any other day. One sentence.]';
                 }
