@@ -340,8 +340,8 @@ function renderCoachMarkdown(text) {
       var _spos = _lbStart + _bm.index + _bm[0].length - 1;
       if (_spos > _best) _best = _spos;
     }
-    // Closing parens
-    var _pp = /[)]\s/g;
+    // Closing parens and markdown markers (day headers end with )* or )**)
+    var _pp = /[)]\s|[*]+\s/g;
     while ((_bm = _pp.exec(_lookback)) !== null) {
       var _ppos = _lbStart + _bm.index + _bm[0].length - 1;
       if (_ppos > _best) _best = _ppos;
