@@ -7737,21 +7737,12 @@ async function sendInlineCoachMsg() {
     var text = (input.value || '').trim();
     if (!text) return;
     input.value = '';
-    // If in a planning session and user says something affirmative, show the HTML plan
-    // then have the coach ask for feedback underneath
     var displayText = text;
-    var _lower = text.toLowerCase().trim();
-    if (window._planDayBlocks && window._planDayIdx < (window._planDayOrder || []).length) {
-        if (/^(y|ye|yes|yeah|yep|yea|next|show me|show it|let'?s see|ready)$/i.test(_lower) || /^(next day|show \w+day|tuesday|wednesday|thursday|friday|saturday)$/i.test(_lower)) {
-            showNextPlanDay();
-            // Ask the coach for a brief follow-up under the plan
-            var _dayShown = window._planCurrentDay || 'this day';
-            text = '[The HTML exercise plan for ' + _dayShown + ' was just shown to the athlete. Ask ONE question only: any swaps or weight adjustments for ' + _dayShown + '? Do NOT mention the next day. Do NOT list exercises. One sentence max.]';
-            displayText = null; // don't show a user bubble for this
-        }
-    }
+    // If in a planning session, tell the coach which day we're on and that it can advance
     if (window._planCurrentDay) {
-        text = '[Context: we are currently discussing ' + window._planCurrentDay + "'s workout plan] " + text;
+        text = '[Context: discussing ' + window._planCurrentDay + '. The exercise list is shown separately by the app.] ' + text;
+    } else if (window._planDayBlocks && window._planDayIdx === 0) {
+        text = '[Context: weekly planning overview was just shown. Exercise lists are shown by the app when you say SHOW_NEXT_DAY.] ' + text;
     }
 
     var messagesEl = document.getElementById('coach-inline-messages');
@@ -7801,6 +7792,12 @@ async function sendInlineCoachMsg() {
         if (_chatHistory) {
             _chatHistory.push({ role: 'user', content: text, date: todayStr() });
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
+        }
+        // If coach emitted [SHOW_NEXT_DAY], auto-show the next day's plan
+        if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks) {
+            // Strip the marker from display
+            typingBubble.innerHTML = renderCoachMarkdown(fullText.replace(/\[SHOW_NEXT_DAY\]/g, ''));
+            setTimeout(function() { showNextPlanDay(); }, 500);
         }
     } catch(e) {
         typingBubble.textContent = 'Connection issue. Try again.';

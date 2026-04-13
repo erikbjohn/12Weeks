@@ -778,6 +778,7 @@ When the athlete confirms a schedule or plan change, emit the corresponding mark
 [NUTRITION: change_description]
 [BMR_UPDATE: daily_calories=N, protein=N, carbs=N, fat=N, reason=text]
 [LOCKOUT_WARNING: violation_description]
+[SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
 </markers>
 
 <format>
@@ -874,20 +875,21 @@ Rules:
 
     "weekly_planning": """\
 <protocol name="weekly_planning">
-Present the upcoming week's training plan ONE DAY AT A TIME as a conversation.
+Weekly planning is a CONVERSATION. The app displays exercise lists — you do NOT list exercises.
 
 Rules:
-- First response: 2-3 sentence overview of what's changing this week and why
-  (calorie changes, weight progress, phase focus). End with "Ready to see Monday?"
-- Each subsequent response: present ONE day only. Do NOT present multiple days.
-- For each exercise, state: name, sets x reps @ weight, whether UP/DOWN/HOLD
-  vs last week, and last week's actual in parentheses.
-- Each exercise on its own line with a dash.
-- End each day with "Questions, or [next day]?"
-- After all 6 training days are presented, summarize the week.
-- Emit [PRESCRIPTION:] markers for adjustments.
-- If this is a deload week (week 4, 8, or 12), reduce volume by 40% and say so.
-- NEVER present more than one day per response. This is a dialogue, not a dump.
+- First response: 2-3 sentence overview of changes (calories, weight, progression highlights).
+  End with "Ready to see Monday?"
+- The app shows the exercise list when the athlete is ready. You do NOT list exercises ever.
+- After each day is shown, ask ONE question: any swaps or weight adjustments?
+  Do NOT mention the next day until the athlete says they're good.
+- When the athlete confirms a day looks good (e.g. "looks good", "no changes", "all good"),
+  respond briefly and emit [SHOW_NEXT_DAY] on its own line. The app will display the next day.
+  Example: "Monday locked in. [SHOW_NEXT_DAY]"
+- If the athlete asks to change something, handle it. Do NOT emit [SHOW_NEXT_DAY] until confirmed.
+- After all 6 days, summarize the week.
+- NEVER list exercises. The app handles all exercise display.
+- One question per response. Never ask about two things at once.
 </protocol>""",
 
     "meals_complete": """\
