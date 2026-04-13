@@ -7705,6 +7705,7 @@ function showNextPlanDay() {
     if (idx >= order.length) return;
 
     var dayNum = order[idx];
+    var dayLabel = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][dayNum] || 'Day';
     var html = blocks[dayNum] || '';
     var messagesEl = document.getElementById('coach-inline-messages');
     if (messagesEl && html) {
@@ -7714,6 +7715,9 @@ function showNextPlanDay() {
         messagesEl.appendChild(dayBubble);
         messagesEl.scrollTop = messagesEl.scrollHeight;
     }
+
+    // Track which day is currently being discussed so the coach knows context
+    window._planCurrentDay = dayLabel;
 
     window._planDayIdx = idx + 1;
     var btn = document.getElementById('plan-next-day-btn');
@@ -7734,6 +7738,10 @@ async function sendInlineCoachMsg() {
     var text = (input.value || '').trim();
     if (!text) return;
     input.value = '';
+    // If we're in a planning session, prepend which day is being discussed
+    if (window._planCurrentDay) {
+        text = '[Context: we are currently discussing ' + window._planCurrentDay + "'s workout plan] " + text;
+    }
 
     var messagesEl = document.getElementById('coach-inline-messages');
     if (!messagesEl) return;
