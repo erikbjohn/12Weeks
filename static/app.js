@@ -7797,12 +7797,50 @@ async function sendInlineCoachMsg() {
         // (brief confirmation like "Monday locked in.") then auto-show the HTML plan
         if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks) {
             var _beforeMarker = fullText.split('[SHOW_NEXT_DAY]')[0].trim();
-            // Only keep the first sentence or two — strip any exercise listing the coach added
             var _sentences = _beforeMarker.split(/[.!]\s/);
             var _brief = _sentences.slice(0, 2).join('. ').trim();
             if (_brief && !_brief.endsWith('.')) _brief += '.';
             typingBubble.innerHTML = _brief ? renderCoachMarkdown(_brief) : '';
-            setTimeout(function() { showNextPlanDay(); }, 300);
+            // Show the HTML plan, then auto-ask for feedback on the new day
+            setTimeout(function() {
+                showNextPlanDay();
+                var _dayName = window._planCurrentDay;
+                if (_dayName) {
+                    // Auto-send a hidden prompt to get coach feedback on the new day
+                    var _fbMsg = '[The HTML exercise plan for ' + _dayName + ' was just shown. Ask ONE question: any swaps or weight adjustments for ' + _dayName + '? Do NOT list exercises. Do NOT mention any other day. One sentence.]';
+                    fetch('/api/chat/stream', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ message: _fbMsg }),
+                    }).then(function(r) {
+                        var _fbBubble = document.createElement('div');
+                        _fbBubble.className = 'chat-bubble coach';
+                        _fbBubble.style.cssText = 'background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px';
+                        var _mel = document.getElementById('coach-inline-messages');
+                        if (_mel) { _mel.appendChild(_fbBubble); }
+                        var _fbFull = '';
+                        var _fbReader = r.body.getReader();
+                        var _fbDec = new TextDecoder();
+                        (function _readFb() {
+                            _fbReader.read().then(function(res) {
+                                if (res.done) return;
+                                var ch = _fbDec.decode(res.value, { stream: true });
+                                var ls = ch.split('\n');
+                                for (var li = 0; li < ls.length; li++) {
+                                    if (ls[li].startsWith('data: ')) {
+                                        var dd = ls[li].slice(6);
+                                        if (dd === '[DONE]' || dd.startsWith('[ERROR')) return;
+                                        _fbFull += dd.replace(/\\n/g, '\n');
+                                        _fbBubble.innerHTML = renderCoachMarkdown(_fbFull);
+                                        if (_mel) _mel.scrollTop = _mel.scrollHeight;
+                                    }
+                                }
+                                _readFb();
+                            });
+                        })();
+                    }).catch(function(){});
+                }
+            }, 300);
         }
     } catch(e) {
         typingBubble.textContent = 'Connection issue. Try again.';
