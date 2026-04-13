@@ -319,9 +319,15 @@ def _build_today_sets():
     from models import SetLog
     from workout_data import resolve_name
     local_today = _user_today()
+    today_idx = local_today.weekday()  # Mon=0, Sun=6
+    week = _current_week()
+    # Filter by SCHEDULED day (week + day_idx), not logged_date.
+    # User might log Thursday's workout on Sunday — logged_date is Sunday
+    # but day_idx is 3 (Thursday). We only want TODAY's scheduled sets.
     rows = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.logged_date == local_today,
+        SetLog.week == week,
+        SetLog.day_idx == today_idx,
         SetLog.done == True  # noqa: E712
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
