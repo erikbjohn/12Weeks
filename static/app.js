@@ -3539,8 +3539,8 @@ function showSettingsMenu() {
     <button onclick="${_c}showStartDateSetting()">Set Start Date</button>
     <button onclick="${_c}toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
     <button onclick="${_c}recomputeGoal()">Recompute Calories</button>
-    <button onclick="${_c}if(confirm('Re-plan Week ' + currentWeek + '? This will regenerate exercises, weights, and meals for this week.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
-    <button onclick="${_c}if(confirm('Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?'))launchWeeklyPlanning()">Plan Next Week</button>
+    <button onclick="${_c}launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
+    <button onclick="${_c}launchWeeklyPlanning()">Plan Next Week</button>
     <button onclick="${_c}regenerateProfile()">Regenerate Profile</button>
     <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
     <button onclick="${_c}showGroceryList()">Grocery List</button>
@@ -7386,7 +7386,7 @@ function buildCoachContent(d) {
       }
     }
     if (_isSunOrMon && !_nextWkPlanned && _nextWk <= 12) {
-      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="if(confirm(\'Generate Week ' + _nextWk + ' workout plan, progression weights, and meals?\'))launchWeeklyPlanning()">Plan Week ' + _nextWk + '</button>';
+      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="launchWeeklyPlanning()">Plan Week ' + _nextWk + '</button>';
     }
     html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
