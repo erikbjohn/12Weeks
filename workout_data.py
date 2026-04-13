@@ -512,7 +512,10 @@ NAME_ALIASES = {
     "Back Squat - 1RM test": "Barbell Back Squat",
     "Deadlift - 1RM test": "Conventional Deadlift",
     "Lat Pulldown - max weight": "Lat Pulldown",
-    "Inverted Row (table/ledge)": "Inverted Row",
+    "Inverted Row (table edge)": "Inverted Row (table/ledge)",
+    "Inverted Row (table)": "Inverted Row (table/ledge)",
+    "Tricep Dips (chair)": "Tricep Dips (chair/bench)",
+    "Tricep Dips (bench)": "Tricep Dips (chair/bench)",
     "DB Bench Press": "DB Bench Press",  # Keep as-is (different from Barbell Bench)
     "DB Bench": "DB Bench Press",
     "Bench": "Barbell Bench Press",
