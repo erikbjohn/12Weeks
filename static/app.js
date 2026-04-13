@@ -8426,6 +8426,18 @@ async function renderDetail() {
     return;
   }
 
+  // Load exercise swaps BEFORE sets — set lookup needs the swapped names
+  if (!_exerciseSwapsLoaded) {
+    try {
+      const swapRes = await fetch('/api/exercise-swaps');
+      if (swapRes.ok) {
+        const swapData = await swapRes.json();
+        sessionStorage.setItem('exercise_swaps', JSON.stringify(swapData));
+        _exerciseSwapsLoaded = true;
+      }
+    } catch(e) {}
+  }
+
   // Load per-set data from DB for this day (if not already loaded)
   const setDayKey = `${currentWeek}_${currentDay}`;
   if (!_setCache._loadedDay || _setCache._loadedDay !== setDayKey) {
@@ -8460,7 +8472,7 @@ async function renderDetail() {
             }
           }
           if (_matchedKey && setData[_matchedKey]) {
-            for (const [setNum, setInfo] of Object.entries(setData[dbKey])) {
+            for (const [setNum, setInfo] of Object.entries(setData[_matchedKey])) {
               _setCache[`${currentWeek}_${currentDay}_${i}_${setNum}`] = {
                 done: !!setInfo.done,
                 weight: setInfo.weight,
@@ -8507,16 +8519,6 @@ async function renderDetail() {
   </div>`;
 
   // Exercise rows with weight tracking and RPE
-  if (!_exerciseSwapsLoaded) {
-    try {
-      const swapRes = await fetch('/api/exercise-swaps');
-      if (swapRes.ok) {
-        const swapData = await swapRes.json();
-        sessionStorage.setItem('exercise_swaps', JSON.stringify(swapData));
-        _exerciseSwapsLoaded = true;
-      }
-    } catch(e) {}
-  }
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const exRows = displayExercises.map((ex, i) => {
     const swapKey = currentWeek + '_' + currentDay + '_' + i;
