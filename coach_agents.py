@@ -37,8 +37,8 @@ AGENTS = {
         "max_tokens": 1500,
         "temperature": 0.6,
         "requires": [
-            "base", "chat_history", "bodyweight", "coach_memories",
-            "goal", "equipment", "user_rules",
+            "base", "chat_history", "bodyweight",
+            "goal", "user_rules",
         ],
     },
     "weekly_review": {
