@@ -7479,27 +7479,25 @@ async function launchWeeklyPlanning(weekOverride) {
     }
 
     var trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
-        (isReplan ? '\nThis is a RE-PLAN of the CURRENT week (Week ' + nextWeek + '). Do NOT review last week. Just present THIS week\'s program.' :
-        '\nThis is the weekly planning session for Week ' + nextWeek + '.') +
+        '\n\nMANDATORY FORMAT RULE — For EVERY exercise you present, you MUST state:' +
+        '\n1. The exercise name, sets x reps @ weight' +
+        '\n2. Whether weight went UP, DOWN, or HOLD vs last week' +
+        '\n3. Last week\'s actual weight and reps in parentheses' +
+        '\nExample: "- Bench Press: 4x10 @ 115lb — UP 5lb (was 110lb x 10)"' +
+        '\nExample: "- Face Pull: 3x15 @ 55lb — HOLD (was 55lb x 15)"' +
+        '\nExample: "- Lateral Raise: 3x14 @ 10lb — reps UP (was 3x13)"' +
+        '\nThe last week data is in the [UP/DOWN/HOLD] tags in the program data below. USE IT.' +
+        '\n\n' + (isReplan ? 'This is a RE-PLAN of Week ' + nextWeek + '.' :
+        'Weekly planning session for Week ' + nextWeek + '.') +
         deficitStr + calorieStr +
-        '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
+        '\n\nPROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         mealStr +
-        '\n\nFORMAT — THIS IS A CONVERSATION. Present ONE DAY AT A TIME:' +
-        '\n1. First message: 2-3 sentence OVERVIEW of what is changing this week vs last week and why. If calories changed, explain (weight dropped, TDEE recalculated, deficit adjusted). End with "Ready to see Monday?"' +
-        '\n2. When the athlete responds, present MONDAY only. Use this EXACT format:' +
-        '\n\n**Monday — [Workout Name]**' +
-        '\n- Barbell Bench Press: 4x10 @ 115lb — UP 5lb (was 110lb x 10)' +
-        '\n- Cable Seated Row: 4x10 @ 150lb — UP 5lb (was 145lb x 10)' +
-        '\n- Face Pull: 3x15 @ 55lb — HOLD (was 55lb x 15)' +
-        '\n- Lateral Raise: 3x14 @ 10lb — reps UP (was 3x13)' +
-        '\nRun: Zone 2, 30 min' +
-        '\n\nEnd with "Questions, or Tuesday?"' +
-        '\n3. Then Tuesday when they respond. One day per message.' +
-        '\n4. EACH exercise on its OWN LINE with a dash.' +
-        '\n5. For EVERY exercise, state what changed: weight UP/DOWN/HOLD, reps changed, or sets changed. Include last week actual in parentheses.' +
-        '\n6. The (last week: Xlb x Y reps) data is provided in the program data above — USE IT.' +
-        '\n7. After all 6 days, summarize and ask for adjustments.' +
-        '\n8. Do NOT dump the entire week. One day per message.';
+        '\n\nCONVERSATION FLOW:' +
+        '\n1. First: 2-3 sentence overview of changes + calorie status. End with "Ready to see Monday?"' +
+        '\n2. Present ONE DAY per response. Each exercise on its own line with a dash.' +
+        '\n3. End each day with "Questions, or [next day]?"' +
+        '\n4. After all 6 days, summarize and ask for adjustments.' +
+        '\n5. Do NOT dump the entire week in one message.';
 
     // Now open the inline chat with the planning trigger
     container.innerHTML =
