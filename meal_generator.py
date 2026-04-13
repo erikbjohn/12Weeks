@@ -338,7 +338,7 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
              "carbs": ["white_rice", "sweet_potato"],
              "fats": ["avocado", "olive_oil", "almonds"],
              "vegetables": ["mixed_greens", "broccoli", "spinach"]}
-        day_type: one of "heavy_lift", "long_run", "moderate", "rest", "deload"
+        day_type: one of "heavy_lift", "long_run", "moderate", "rest", "deload", "fast_day"
         targets: dict {"calories": int, "protein": int, "carbs": int, "fat": int}
         fasting_protocol: one of "16_8", "18_6", "20_4", "omad", "none"
 
@@ -354,6 +354,47 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             "meals": [{"time", "name", "optional", "foods": [...]}, ...]
         }
     """
+    # Fast day: minimal plan — water, black coffee, protein shake if targets allow
+    if day_type == "fast_day":
+        meals = [{
+            "time": "Anytime",
+            "name": "Fasting",
+            "optional": False,
+            "foods": [
+                dict(_BLACK_COFFEE),
+                dict(_WATER),
+            ],
+        }]
+        target_cal = targets.get("calories", 0)
+        target_protein = targets.get("protein", 0)
+        # If targets have protein (bulk/recomp fast), add a shake
+        if target_protein > 0:
+            shake_id = None
+            for pid in selected_foods.get("proteins", []):
+                if pid in ("whey_protein", "plant_protein"):
+                    shake_id = pid
+                    break
+            if shake_id:
+                shake = _scale_food(shake_id, 1.0)
+                if shake:
+                    meals.append({
+                        "time": "Anytime",
+                        "name": "Protein Shake",
+                        "optional": False,
+                        "foods": [shake],
+                    })
+                    target_cal = shake["cal"] + 5
+                    target_protein = shake["protein"]
+        return {
+            "label": "Fast Day",
+            "targetCal": target_cal,
+            "targetProtein": target_protein,
+            "targetCarbs": targets.get("carbs", 0),
+            "targetFat": targets.get("fat", 0),
+            "note": "Water, black coffee, electrolytes. Rest and recover.",
+            "meals": meals,
+        }
+
     proto = _FASTING_PROTOCOLS.get(fasting_protocol, _FASTING_PROTOCOLS["16_8"])
     modifiers = _DAY_MODIFIERS.get(day_type, _DAY_MODIFIERS["moderate"])
     label, note = _DAY_LABELS.get(day_type, ("Training Day", "Standard meal plan."))

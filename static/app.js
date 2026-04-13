@@ -6790,14 +6790,20 @@ function _pdLiftProgression(lifts) {
     for (var ei = 0; ei < entries.length; ei++) {
       var e = entries[ei];
       var w = e.week || 1;
-      var wt = e.weight || 0;
-      var reps = 1;
-      if (e.reps_completed) reps = parseInt(e.reps_completed) || 1;
-      else if (e.reps) {
-        var rm = String(e.reps).match(/(\d+)/);
-        reps = rm ? parseInt(rm[1]) : 1;
+      var e1rm;
+      if (e.estimated1RM) {
+        // Baseline entries have a properly computed e1RM — use it directly
+        e1rm = Math.round(e.estimated1RM);
+      } else {
+        var wt = e.weight || 0;
+        var reps = 1;
+        if (e.reps_completed) reps = parseInt(e.reps_completed) || 1;
+        else if (e.reps) {
+          var rm = String(e.reps).match(/(\d+)/);
+          reps = rm ? parseInt(rm[1]) : 1;
+        }
+        e1rm = Math.round(wt * (1 + Math.min(reps, 15) / 30));
       }
-      var e1rm = Math.round(wt * (1 + Math.min(reps, 15) / 30));
       if (!weekMap[w] || e1rm > weekMap[w]) weekMap[w] = e1rm;
     }
     var weeks = Object.keys(weekMap).map(Number).sort(function(a, b) { return a - b; });

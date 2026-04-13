@@ -896,23 +896,28 @@ footer {
   gap: 6px;
 }
 .m-row {
-  display: grid;
-  grid-template-columns: 80px 1fr auto 50px;
-  gap: 8px;
+  display: flex;
   align-items: center;
+  gap: 10px;
   padding: 8px 12px;
   background: var(--surface);
   border-radius: 6px;
   font-size: 14px;
 }
 .m-label {
+  width: 70px;
+  flex-shrink: 0;
   color: var(--muted);
 }
 .m-spark {
+  width: 100px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 .m-val {
+  margin-left: auto;
+  white-space: nowrap;
   font-family: 'DM Mono', monospace;
   color: var(--text);
   text-align: right;

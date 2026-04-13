@@ -348,7 +348,8 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
         protein = round(1.0 * weight_lbs)
         fat = round(0.4 * weight_lbs)
         if day_type == "fast_day":
-            return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+            # Bulk fast days: protein shake only (~130 cal, 25g protein)
+            return {"calories": 130, "protein": 25, "carbs": 3, "fat": 2}
         elif day_type == "training":
             calories = base_calories + 200
         elif day_type == "rest":
@@ -361,7 +362,8 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
         protein = round(1.2 * weight_lbs)
         fat = round(0.35 * weight_lbs)
         if day_type == "fast_day":
-            return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+            # Recomp fast days: protein shake only (~130 cal, 25g protein)
+            return {"calories": 130, "protein": 25, "carbs": 3, "fat": 2}
         elif day_type == "training":
             calories = base_calories + 50
         elif day_type == "rest":

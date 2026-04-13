@@ -795,7 +795,11 @@ def _user_now():
         return datetime.now()
 
 def _get_day_meal_type(user_id, week, day_idx):
-    """Get actual meal type for a day — DB first, template fallback."""
+    """Get actual meal type for a day — DB first, template fallback.
+
+    Fast days are goal-dependent: only 'cut' goals get true fast days.
+    Bulk and recomp users get 'rest' on Sunday instead.
+    """
     try:
         override = MealPlanOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
         if override and override.meal_type:
@@ -807,7 +811,19 @@ def _get_day_meal_type(user_id, week, day_idx):
         pass
     from workout_data import DAY_MEAL_TYPES
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    return DAY_MEAL_TYPES.get(day_names[day_idx] if day_idx < 7 else "Mon", "moderate")
+    meal_type = DAY_MEAL_TYPES.get(day_names[day_idx] if day_idx < 7 else "Mon", "moderate")
+
+    # Fast days only make sense for cut goals.
+    # Bulk/recomp users get a rest day instead.
+    if meal_type == "fast_day":
+        try:
+            goal = TrainingGoal.query.filter_by(user_id=user_id).order_by(TrainingGoal.id.desc()).first()
+            if goal and goal.goal_type in ("bulk", "recomp"):
+                return "rest"
+        except Exception:
+            pass
+
+    return meal_type
 
 
 def _generate_run_plan(user_id, week, day_idx, template_run):
