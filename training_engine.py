@@ -81,10 +81,11 @@ def _get_configured_reps(exercise_name, week, day_idx):
 
 
 def _round_weight(weight, exercise_name):
-    """Round to nearest 5 lbs (valid plate/dumbbell increments)."""
+    """Always round UP to the nearest 5 lbs. Never round down — we progress, not regress."""
     if weight <= 0:
         return 0
-    return round(weight / 5) * 5
+    import math
+    return int(math.ceil(weight / 5) * 5)
 
 
 def compute_next_targets(user_id, exercise_name, week, day_idx):

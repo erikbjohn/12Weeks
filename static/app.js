@@ -7514,10 +7514,21 @@ async function launchWeeklyPlanning(weekOverride) {
             var _prev = lastWeekActual[_ex.exercise];
             var _changeHtml = '';
             if (_prev && _prev.weight && _ex.target_weight) {
-                var _d = _ex.target_weight - _prev.weight;
-                if (_d > 0) _changeHtml = '<span style="color:#4ade80"> — UP ' + _d + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
-                else if (_d < 0) _changeHtml = '<span style="color:#ef4444"> — DOWN ' + Math.abs(_d) + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
-                else _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                var _dw = _ex.target_weight - _prev.weight;
+                var _prevReps = parseInt(_prev.reps) || 0;
+                var _newReps = parseInt(_ex.reps) || 0;
+                var _dr = _newReps - _prevReps;
+                if (_dw > 0) {
+                    _changeHtml = '<span style="color:#4ade80"> — weight UP ' + _dw + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                } else if (_dw < 0) {
+                    _changeHtml = '<span style="color:#ef4444"> — weight DOWN ' + Math.abs(_dw) + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                } else if (_dr > 0) {
+                    _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                } else if (_dr < 0) {
+                    _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                } else {
+                    _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                }
             } else if (_ex.reason) {
                 _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';
             }
