@@ -241,7 +241,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
             if coach_alert:
                 result["coach_alert"] = coach_alert
             return result
-        target = min(int(avg_reps) + 1, phase_max_reps)
+        target = min(int(avg_reps) + 2, phase_max_reps)
         result = {
             "target_weight": _round_weight(last_weight, exercise_name),
             "target_reps": target,
