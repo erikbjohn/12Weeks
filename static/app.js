@@ -7738,9 +7738,21 @@ async function sendInlineCoachMsg() {
     if (!text) return;
     input.value = '';
     var displayText = text;
-    // If in a planning session, tell the coach which day we're on and that it can advance
+    // If in a planning session, tell the coach which day we're on
     if (window._planCurrentDay) {
-        text = '[Context: discussing ' + window._planCurrentDay + '. The exercise list is shown separately by the app.] ' + text;
+        // Detect if the user is requesting a change — block auto-advance until confirmed
+        var _isChange = /swap|change|switch|replace|adjust|modify|push|increase|decrease|lower|raise|drop|bump|move|different/i.test(displayText);
+        if (_isChange) {
+            window._planChangesPending = true;
+        }
+        // Detect if user is confirming no more changes after a change was made
+        var _isDone = /^(no|nope|that'?s? (it|all|good)|nothing|all good|good|done|looks good|we'?re? good|nah|i'?m good)/i.test(displayText.toLowerCase().trim());
+        if (_isDone && window._planChangesPending) {
+            window._planChangesPending = false;
+        }
+        text = '[Context: discussing ' + window._planCurrentDay + '. Exercise list shown by app.' +
+            (window._planChangesPending ? ' CHANGES WERE JUST MADE — ask if anything else before advancing. Do NOT emit SHOW_NEXT_DAY yet.' : '') +
+            '] ' + text;
     } else if (window._planDayBlocks && window._planDayIdx === 0) {
         text = '[Context: weekly planning overview was just shown. Exercise lists are shown by the app when you say SHOW_NEXT_DAY.] ' + text;
     }
@@ -7795,7 +7807,7 @@ async function sendInlineCoachMsg() {
         }
         // If coach emitted [SHOW_NEXT_DAY], show ONLY the text before the marker
         // (brief confirmation like "Monday locked in.") then auto-show the HTML plan
-        if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks) {
+        if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks && !window._planChangesPending) {
             var _beforeMarker = fullText.split('[SHOW_NEXT_DAY]')[0].trim();
             var _sentences = _beforeMarker.split(/[.!]\s/);
             var _brief = _sentences.slice(0, 2).join('. ').trim();
