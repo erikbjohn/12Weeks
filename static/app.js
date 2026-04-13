@@ -3531,19 +3531,21 @@ function showSettingsMenu() {
   dd.id = 'settings-dropdown';
   dd.className = 'settings-dropdown visible';
   const travelOn = _stateCache && _stateCache.traveling;
+  // Every button closes the menu first
+  var _c = 'closeSettingsMenu();';
   dd.innerHTML = `
-    <button onclick="if(confirm('This will reset your baseline weights. Continue?'))redoBaseline()">Redo Baseline</button>
-    <button onclick="if(confirm('This will reset your psych intake. Continue?'))redoPsychIntake()">Redo Psych Intake</button>
-    <button onclick="showStartDateSetting()">Set Start Date</button>
-    <button onclick="toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
-    <button onclick="recomputeGoal()">Recompute Calories</button>
-    <button onclick="if(confirm('Re-plan Week ' + currentWeek + '? This will regenerate exercises, weights, and meals for this week.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
-    <button onclick="if(confirm('Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?'))launchWeeklyPlanning()">Plan Next Week</button>
-    <button onclick="regenerateProfile()">Regenerate Profile</button>
-    <button onclick="restartFromReveal()">Restart from Plan Review</button>
-    <button onclick="showGroceryList()">Grocery List</button>
-    <button onclick="exportData()">Export Data</button>
-    <button onclick="importData()">Import Data</button>
+    <button onclick="${_c}if(confirm('This will reset your baseline weights. Continue?'))redoBaseline()">Redo Baseline</button>
+    <button onclick="${_c}if(confirm('This will reset your psych intake. Continue?'))redoPsychIntake()">Redo Psych Intake</button>
+    <button onclick="${_c}showStartDateSetting()">Set Start Date</button>
+    <button onclick="${_c}toggleTravelMode()" id="travel-toggle-btn">${travelOn ? '✈️ Traveling: ON' : '🏠 Traveling: OFF'}</button>
+    <button onclick="${_c}recomputeGoal()">Recompute Calories</button>
+    <button onclick="${_c}if(confirm('Re-plan Week ' + currentWeek + '? This will regenerate exercises, weights, and meals for this week.'))launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
+    <button onclick="${_c}if(confirm('Generate Week ' + (currentWeek+1) + ' workout plan, progression weights, and meals?'))launchWeeklyPlanning()">Plan Next Week</button>
+    <button onclick="${_c}regenerateProfile()">Regenerate Profile</button>
+    <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
+    <button onclick="${_c}showGroceryList()">Grocery List</button>
+    <button onclick="${_c}exportData()">Export Data</button>
+    <button onclick="${_c}importData()">Import Data</button>
     <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
