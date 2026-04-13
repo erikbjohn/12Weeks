@@ -543,7 +543,7 @@ def _build_coach_memories():
     from models import CoachMemory
     rows = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
         CoachMemory.created_at.desc()
-    ).limit(20).all()
+    ).limit(50).all()
     return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week} for m in rows]}
 
 
