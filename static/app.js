@@ -7819,11 +7819,17 @@ async function sendInlineCoachMsg() {
             }
             // Show the HTML plan, then auto-ask for feedback on the new day
             setTimeout(function() {
+                var _beforeIdx = window._planDayIdx || 0;
                 showNextPlanDay();
                 var _dayName = window._planCurrentDay;
-                if (_dayName) {
-                    // Auto-send a hidden prompt to get coach feedback on the new day
+                var _allDone = (window._planDayIdx || 0) >= (window._planDayOrder || []).length;
+                if (_allDone) {
+                    // All days shown — ask for a weekly summary instead of day feedback
+                    var _fbMsg = '[All 6 training days have been shown and confirmed. ' + localTimeContext() + ' Give a brief 2-sentence weekly summary and say the plan is locked. Do NOT list exercises. Do NOT say weigh-in is tomorrow if today is Sunday — Sunday IS weigh-in day.]';
+                } else if (_dayName) {
                     var _fbMsg = '[The HTML exercise plan for ' + _dayName + ' was just shown. Ask ONE question: any swaps or weight adjustments for ' + _dayName + '? Do NOT list exercises. Do NOT mention any other day. One sentence.]';
+                }
+                if (_fbMsg) {
                     fetch('/api/chat/stream', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
