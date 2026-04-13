@@ -5721,6 +5721,22 @@ def api_goal():
     goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     if not goal:
         return jsonify({"computed": False})
+
+    # Compute TDEE from current weight so deficit display works
+    tdee = 0
+    try:
+        from goal_engine import compute_tdee
+        pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+        latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+        weight = (latest_bw.weight_lbs if latest_bw else None) or (pa.bodyweight_lbs if pa else 180)
+        height = (pa.height_inches if pa else None) or 70
+        tdee_info = compute_tdee(weight, height, 30, "male")
+        tdee = tdee_info["tdee"]
+    except Exception:
+        pass
+
+    daily_deficit = tdee - goal.daily_calories if tdee and goal.daily_calories else 0
+
     return jsonify({
         "computed": True,
         "goal_type": goal.goal_type,
@@ -5736,6 +5752,8 @@ def api_goal():
         "weight_projection": goal.weight_projection,
         "calorie_by_day_type": goal.calorie_by_day_type,
         "plan_accepted": goal.plan_accepted or False,
+        "tdee": tdee,
+        "daily_deficit": daily_deficit,
     })
 
 
