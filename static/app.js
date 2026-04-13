@@ -360,6 +360,9 @@ function renderCoachMarkdown(text) {
   // Break before day headers ONLY when they start a section (followed by — or - or : or **)
   clean = clean.replace(/([^\n])\s*(?=\*{0,2}(?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[\-—:\*])/g, '$1\n\n');
 
+  // Clean up orphaned bullets: a lone "-" or "*" on its own line
+  clean = clean.replace(/\n[-*]\s*\n/g, '\n');
+
   // Break before run entries
   clean = clean.replace(/([^\n])\s+(?=(?:Zone \d|HIIT run|Run:|Min mile|Tempo run|Easy run|Long run))/g, '$1\n');
 
