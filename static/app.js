@@ -7793,11 +7793,16 @@ async function sendInlineCoachMsg() {
             _chatHistory.push({ role: 'user', content: text, date: todayStr() });
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
         }
-        // If coach emitted [SHOW_NEXT_DAY], auto-show the next day's plan
+        // If coach emitted [SHOW_NEXT_DAY], show ONLY the text before the marker
+        // (brief confirmation like "Monday locked in.") then auto-show the HTML plan
         if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks) {
-            // Strip the marker from display
-            typingBubble.innerHTML = renderCoachMarkdown(fullText.replace(/\[SHOW_NEXT_DAY\]/g, ''));
-            setTimeout(function() { showNextPlanDay(); }, 500);
+            var _beforeMarker = fullText.split('[SHOW_NEXT_DAY]')[0].trim();
+            // Only keep the first sentence or two — strip any exercise listing the coach added
+            var _sentences = _beforeMarker.split(/[.!]\s/);
+            var _brief = _sentences.slice(0, 2).join('. ').trim();
+            if (_brief && !_brief.endsWith('.')) _brief += '.';
+            typingBubble.innerHTML = _brief ? renderCoachMarkdown(_brief) : '';
+            setTimeout(function() { showNextPlanDay(); }, 300);
         }
     } catch(e) {
         typingBubble.textContent = 'Connection issue. Try again.';
