@@ -7738,7 +7738,8 @@ async function sendInlineCoachMsg() {
     var text = (input.value || '').trim();
     if (!text) return;
     input.value = '';
-    // If we're in a planning session, prepend which day is being discussed
+    // If we're in a planning session, prepend which day is being discussed (hidden from display)
+    var displayText = text;
     if (window._planCurrentDay) {
         text = '[Context: we are currently discussing ' + window._planCurrentDay + "'s workout plan] " + text;
     }
@@ -7746,10 +7747,10 @@ async function sendInlineCoachMsg() {
     var messagesEl = document.getElementById('coach-inline-messages');
     if (!messagesEl) return;
 
-    // User bubble
+    // User bubble — show only what the user typed, not the hidden context
     var userBubble = document.createElement('div');
     userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
-    userBubble.textContent = text;
+    userBubble.textContent = displayText;
     messagesEl.appendChild(userBubble);
 
     // Typing indicator
