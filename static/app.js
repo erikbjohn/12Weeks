@@ -7737,13 +7737,17 @@ async function sendInlineCoachMsg() {
     var text = (input.value || '').trim();
     if (!text) return;
     input.value = '';
-    // If in a planning session and user says something affirmative, auto-show next day
+    // If in a planning session and user says something affirmative, show the HTML plan
+    // then have the coach ask for feedback underneath
     var displayText = text;
     var _lower = text.toLowerCase().trim();
     if (window._planDayBlocks && window._planDayIdx < (window._planDayOrder || []).length) {
-        if (/^(yes|yeah|yep|yea|sure|ok|okay|go|next|show|let'?s|ready|do it|send it|go ahead)\b/i.test(_lower)) {
+        if (/^(y|ye|yes|yeah|yep|yea|sure|ok|okay|go|next|show|let'?s|ready|do it|send it|go ahead|absolutely|definitely|let me see)/i.test(_lower)) {
             showNextPlanDay();
-            return;
+            // Ask the coach for a brief follow-up under the plan
+            var _dayShown = window._planCurrentDay || 'this day';
+            text = '[The HTML exercise plan for ' + _dayShown + ' was just shown to the athlete. Ask briefly: any swaps or weight adjustments for ' + _dayShown + '? Then ask if ready for the next day. 1-2 sentences only. Do NOT list exercises — they are already displayed.]';
+            displayText = null; // don't show a user bubble for this
         }
     }
     if (window._planCurrentDay) {
@@ -7753,11 +7757,13 @@ async function sendInlineCoachMsg() {
     var messagesEl = document.getElementById('coach-inline-messages');
     if (!messagesEl) return;
 
-    // User bubble — show only what the user typed, not the hidden context
-    var userBubble = document.createElement('div');
-    userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
-    userBubble.textContent = displayText;
-    messagesEl.appendChild(userBubble);
+    // User bubble — show only what the user typed (skip if auto-triggered)
+    if (displayText) {
+        var userBubble = document.createElement('div');
+        userBubble.style.cssText = 'background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;line-height:1.5;color:var(--text);margin-bottom:8px;align-self:flex-end;text-align:right';
+        userBubble.textContent = displayText;
+        messagesEl.appendChild(userBubble);
+    }
 
     // Typing indicator
     var typingBubble = document.createElement('div');
