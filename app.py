@@ -2951,6 +2951,13 @@ def api_exercise_swap():
     day_idx = data.get("day_idx")
     exercise_idx = data.get("exercise_idx")
     swapped_to = (data.get("swapped_to") or "").strip()
+    # Resolve to canonical name so "Kettlebell Swing" → "KB Swing"
+    if swapped_to:
+        try:
+            from workout_data import resolve_name
+            swapped_to = resolve_name(swapped_to)
+        except Exception:
+            pass
 
     if week is None or day_idx is None or exercise_idx is None:
         return jsonify({"error": "Missing fields"}), 400

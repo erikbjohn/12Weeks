@@ -8349,7 +8349,24 @@ async function renderDetail() {
           const swapKey = currentWeek + '_' + currentDay + '_' + i;
           const exName = swaps[swapKey] || displayExercises[i].name;
           const dbKey = `${currentWeek}_${currentDay}_${exName}`;
-          if (setData[dbKey]) {
+          // Also try original prescription name — sets might be saved under either name
+          const origName = displayExercises[i].name;
+          const dbKeyOrig = `${currentWeek}_${currentDay}_${origName}`;
+          var _matchedKey = setData[dbKey] ? dbKey : (setData[dbKeyOrig] ? dbKeyOrig : null);
+          // Also search all keys for partial match (handles KB Swing vs Kettlebell Swing)
+          if (!_matchedKey) {
+            for (var _sk in setData) {
+              if (_sk.startsWith(currentWeek + '_' + currentDay + '_') && _sk !== dbKey && _sk !== dbKeyOrig) {
+                // Check if the exercise part matches any known alias
+                var _skEx = _sk.substring((currentWeek + '_' + currentDay + '_').length);
+                if (_skEx.toLowerCase().replace(/[^a-z]/g,'').includes(exName.toLowerCase().replace(/[^a-z]/g,'').substring(0,6))) {
+                  _matchedKey = _sk;
+                  break;
+                }
+              }
+            }
+          }
+          if (_matchedKey && setData[_matchedKey]) {
             for (const [setNum, setInfo] of Object.entries(setData[dbKey])) {
               _setCache[`${currentWeek}_${currentDay}_${i}_${setNum}`] = {
                 done: !!setInfo.done,
