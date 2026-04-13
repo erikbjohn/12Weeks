@@ -7800,7 +7800,11 @@ async function sendInlineCoachMsg() {
             var _sentences = _beforeMarker.split(/[.!]\s/);
             var _brief = _sentences.slice(0, 2).join('. ').trim();
             if (_brief && !_brief.endsWith('.')) _brief += '.';
-            typingBubble.innerHTML = _brief ? renderCoachMarkdown(_brief) : '';
+            if (_brief && _brief.length > 3) {
+                typingBubble.innerHTML = renderCoachMarkdown(_brief);
+            } else {
+                typingBubble.remove();
+            }
             // Show the HTML plan, then auto-ask for feedback on the new day
             setTimeout(function() {
                 showNextPlanDay();
