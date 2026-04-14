@@ -1244,6 +1244,11 @@ async function checkOnboardingComplete() {
 }
 
 async function resumeOnboarding() {
+  // Hide the main app header — user shouldn't see progress/coach/settings during onboarding
+  var _hdr = document.querySelector('header');
+  if (_hdr) _hdr.style.display = 'none';
+  var _appLoading = document.getElementById('app-loading');
+  if (_appLoading) _appLoading.style.display = 'none';
   // Check steps in FORWARD order — first incomplete step gets shown
   try {
     const intakeRes = await fetch('/api/psych-intake/status');
@@ -6368,6 +6373,8 @@ async function submitWeeklyMeasurements() {
 
 // ─── PROGRESS DASHBOARD ────────────────────────────────────────────────────
 function showProgress() {
+  // Don't show progress if onboarding isn't complete
+  if (!_stateCache || !_stateCache.baseline_done) return;
   var overlay = document.getElementById('progress-overlay');
   if (!overlay) return;
   overlay.classList.add('visible');
