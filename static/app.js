@@ -91,6 +91,431 @@ function isBodyweightExercise(name, note) {
   return false;
 }
 
+// ── STATS PANEL: CLIENT-SIDE FORMULAS ──
+
+/**
+ * Compute TDEE using Mifflin-St Jeor equation.
+ * @param {number} weightLbs - Body weight in pounds
+ * @param {number} heightIn - Height in inches
+ * @param {number} age - Age in years
+ * @param {string} sex - "male" or "female"
+ * @param {number} [activityMultiplier=1.55] - Activity factor
+ * @returns {{bmr: number, tdee: number}}
+ */
+function _computeTdee(weightLbs, heightIn, age, sex, activityMultiplier) {
+  if (activityMultiplier === undefined) activityMultiplier = 1.55;
+  var weightKg = weightLbs / 2.205;
+  var heightCm = heightIn * 2.54;
+  var bmr;
+  if (sex === "male") {
+    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 5;
+  } else {
+    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+  }
+  var tdee = bmr * activityMultiplier;
+  return { bmr: Math.round(bmr), tdee: Math.round(tdee) };
+}
+
+/**
+ * Compute daily macro targets based on goal type.
+ * @param {number} tdee - Total daily energy expenditure in calories
+ * @param {string} goalType - "cut", "bulk", or "recomp"
+ * @param {number} weightLbs - Current body weight in pounds
+ * @param {number} targetWeight - Goal weight in lbs
+ * @param {number} [weeks=12] - Weeks remaining in program
+ * @returns {{calories: number, protein: number, carbs: number, fat: number}}
+ */
+function _computeTargets(tdee, goalType, weightLbs, targetWeight, weeks) {
+  if (weeks === undefined) weeks = 12;
+  var protein, fat, calories, proteinCal, fatCal, remainingCal, carbs;
+
+  if (goalType === "cut") {
+    protein = Math.round(1.0 * weightLbs);
+    fat = Math.round(0.3 * weightLbs);
+    if (targetWeight && targetWeight < weightLbs && weeks > 0) {
+      var weightToLose = weightLbs - targetWeight;
+      var requiredWeekly = weightToLose / weeks;
+      var requiredDailyDeficit = (requiredWeekly * 3500) / 7;
+      calories = Math.max(Math.round(tdee - requiredDailyDeficit), 1200);
+    } else {
+      calories = Math.max(Math.round(tdee * 0.65), 1200);
+    }
+    proteinCal = protein * 4;
+    fatCal = fat * 9;
+    remainingCal = Math.max(calories - proteinCal - fatCal, 0);
+    carbs = Math.max(Math.floor(remainingCal / 4), 20);
+  } else if (goalType === "bulk") {
+    calories = Math.round(tdee + 400);
+    protein = Math.round(1.0 * weightLbs);
+    fat = Math.round(0.4 * weightLbs);
+    proteinCal = protein * 4;
+    fatCal = fat * 9;
+    remainingCal = Math.max(calories - proteinCal - fatCal, 0);
+    carbs = Math.floor(remainingCal / 4);
+  } else if (goalType === "recomp") {
+    calories = Math.round(tdee - 100);
+    protein = Math.round(1.2 * weightLbs);
+    fat = Math.round(0.35 * weightLbs);
+    proteinCal = protein * 4;
+    fatCal = fat * 9;
+    remainingCal = Math.max(calories - proteinCal - fatCal, 0);
+    carbs = Math.floor(remainingCal / 4);
+  } else {
+    // Fallback to cut
+    return _computeTargets(tdee, "cut", weightLbs, targetWeight, weeks);
+  }
+
+  return { calories: calories, protein: protein, carbs: carbs, fat: fat };
+}
+
+/**
+ * Project week-by-week weight change with metabolic modeling.
+ * Models water/glycogen effects weeks 1-2, recalculates BMR as weight
+ * changes, and factors in training adaptation.
+ * @param {number} startWeight - Starting weight in lbs
+ * @param {number} targetWeight - Target weight in lbs
+ * @param {number} tdee - Starting TDEE in calories
+ * @param {number} dailyCal - Daily calorie intake target
+ * @param {number} [weeks=12] - Number of weeks to project
+ * @param {number} [heightIn=70] - Height in inches (for BMR recalc)
+ * @param {number} [age=30] - Age in years (for BMR recalc)
+ * @param {string} [sex="male"] - "male" or "female" (for BMR recalc)
+ * @returns {Array<{week: number, projected: number, tdee: number}>}
+ */
+function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, heightIn, age, sex) {
+  if (weeks === undefined) weeks = 12;
+  if (heightIn === undefined) heightIn = 70;
+  if (age === undefined) age = 30;
+  if (sex === undefined) sex = "male";
+
+  var projection = [];
+  var currentWeight = startWeight;
+  var currentTdee = tdee;
+  var gaining = dailyCal > tdee; // bulk mode
+
+  for (var week = 1; week <= weeks; week++) {
+    // Daily deficit/surplus
+    var dailyDeltaCal = dailyCal - currentTdee;
+
+    // Convert to lbs: 3500 cal = 1 lb of fat
+    var weeklyDeltaLbs = (dailyDeltaCal * 7) / 3500;
+
+    // Week 1-2: water/glycogen effect (1.5x rate for cuts, 1.3x for bulk)
+    if (week <= 2) {
+      if (!gaining) {
+        weeklyDeltaLbs *= 1.5;
+      } else {
+        weeklyDeltaLbs *= 1.3;
+      }
+    }
+
+    // Training adaptation: TDEE bump from increased fitness
+    // Ramps up from week 3, peaks at week 6
+    var adaptationBump = 0;
+    if (week >= 3) {
+      adaptationBump = Math.min((week - 2) * 20, 100); // up to +100 cal/day
+    }
+
+    currentWeight += weeklyDeltaLbs;
+    currentWeight = Math.round(currentWeight * 10) / 10;
+
+    // Recalculate TDEE based on new weight
+    var newBmrData = _computeTdee(currentWeight, heightIn, age, sex);
+    currentTdee = newBmrData.tdee + adaptationBump;
+
+    projection.push({
+      week: week,
+      projected: currentWeight,
+      tdee: currentTdee,
+    });
+  }
+
+  return projection;
+}
+
+/**
+ * Estimate body fat percentage using the US Navy circumference method.
+ * @param {number} waist - Waist circumference in inches
+ * @param {number} neck - Neck circumference in inches
+ * @param {number} heightIn - Height in inches
+ * @param {string} sex - "male" or "female"
+ * @param {number} [hips] - Hip circumference in inches (required for female)
+ * @returns {number|null} Estimated body fat percentage, or null if inputs invalid
+ */
+function _estimateBodyFatNavy(waist, neck, heightIn, sex, hips) {
+  if (!waist || !neck || !heightIn) return null;
+  if (waist <= neck) return null;
+
+  try {
+    var bf;
+    if (sex === "female") {
+      if (!hips) return null;
+      bf = 163.205 * Math.log10(waist + hips - neck) - 97.684 * Math.log10(heightIn) - 78.387;
+    } else {
+      bf = 86.010 * Math.log10(waist - neck) - 70.041 * Math.log10(heightIn) + 36.76;
+    }
+    return Math.round(Math.max(3.0, Math.min(50.0, bf)) * 10) / 10;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Strength percentile lookup tables.
+ * General population 1RM / bodyweight ratios by percentile.
+ * Derived from PubMed study of 809,986 powerlifting entries,
+ * adjusted down ~1.5x for general population.
+ */
+var _STRENGTH_PERCENTILES = {
+  male: {
+    "Barbell Bench Press": {
+      percentiles: [[10, 0.40], [25, 0.57], [50, 0.80], [75, 1.03], [90, 1.30], [95, 1.50]],
+    },
+    "Barbell Back Squat": {
+      percentiles: [[10, 0.55], [25, 0.83], [50, 1.17], [75, 1.50], [90, 1.89], [95, 2.20]],
+    },
+    "Conventional Deadlift": {
+      percentiles: [[10, 0.70], [25, 1.00], [50, 1.33], [75, 1.67], [90, 2.17], [95, 2.50]],
+    },
+    "Barbell Bent-Over Row": {
+      percentiles: [[10, 0.35], [25, 0.50], [50, 0.70], [75, 0.90], [90, 1.10], [95, 1.25]],
+    },
+    "DB Overhead Press": {
+      percentiles: [[10, 0.20], [25, 0.30], [50, 0.45], [75, 0.60], [90, 0.75], [95, 0.85]],
+    },
+    "Barbell OHP": {
+      percentiles: [[10, 0.25], [25, 0.40], [50, 0.55], [75, 0.70], [90, 0.85], [95, 1.00]],
+    },
+    "Lat Pulldown": {
+      percentiles: [[10, 0.35], [25, 0.50], [50, 0.65], [75, 0.85], [90, 1.00], [95, 1.15]],
+    },
+    "Barbell Hip Thrust": {
+      percentiles: [[10, 0.50], [25, 0.75], [50, 1.00], [75, 1.35], [90, 1.70], [95, 2.00]],
+    },
+    "EZ-Bar Curl": {
+      percentiles: [[10, 0.15], [25, 0.25], [50, 0.35], [75, 0.45], [90, 0.55], [95, 0.65]],
+    },
+    "Cable Tricep Pushdown": {
+      percentiles: [[10, 0.15], [25, 0.22], [50, 0.30], [75, 0.40], [90, 0.50], [95, 0.55]],
+    },
+  },
+  female: {
+    "Barbell Bench Press": {
+      percentiles: [[10, 0.25], [25, 0.38], [50, 0.55], [75, 0.72], [90, 0.90], [95, 1.05]],
+    },
+    "Barbell Back Squat": {
+      percentiles: [[10, 0.40], [25, 0.60], [50, 0.85], [75, 1.10], [90, 1.40], [95, 1.65]],
+    },
+    "Conventional Deadlift": {
+      percentiles: [[10, 0.50], [25, 0.75], [50, 1.00], [75, 1.30], [90, 1.65], [95, 1.95]],
+    },
+    "Barbell Bent-Over Row": {
+      percentiles: [[10, 0.25], [25, 0.35], [50, 0.50], [75, 0.65], [90, 0.80], [95, 0.95]],
+    },
+    "DB Overhead Press": {
+      percentiles: [[10, 0.12], [25, 0.20], [50, 0.30], [75, 0.42], [90, 0.55], [95, 0.65]],
+    },
+  },
+};
+
+/**
+ * Age adjustment factors (relative to 18-35 peak).
+ */
+var _AGE_FACTORS = [
+  [0, 18, 0.75],
+  [18, 35, 1.00],
+  [35, 45, 0.95],
+  [45, 55, 0.88],
+  [55, 65, 0.80],
+  [65, 100, 0.70],
+];
+
+function _getAgeFactor(age) {
+  for (var i = 0; i < _AGE_FACTORS.length; i++) {
+    var lo = _AGE_FACTORS[i][0];
+    var hi = _AGE_FACTORS[i][1];
+    var factor = _AGE_FACTORS[i][2];
+    if (lo <= age && age < hi) return factor;
+  }
+  return 0.85;
+}
+
+/**
+ * Compute population percentile for a given 1RM.
+ * @param {number} oneRm - Estimated one-rep max in lbs
+ * @param {number} bodyWeight - Body weight in lbs
+ * @param {string} exercise - Exercise name
+ * @param {number} age - Age in years
+ * @param {string} sex - "male" or "female"
+ * @returns {{percentile: number, relativeStrength: number, rating: string}}
+ */
+function _compute1rmPercentile(oneRm, bodyWeight, exercise, age, sex) {
+  if (!oneRm || !bodyWeight || bodyWeight <= 0) {
+    return { percentile: 0, relativeStrength: 0, rating: "Unknown" };
+  }
+
+  var relative = oneRm / bodyWeight;
+  var ageFactor = _getAgeFactor(age);
+  // Adjust relative strength for age -- older lifters get credit
+  var adjustedRelative = relative / ageFactor;
+
+  var sexData = _STRENGTH_PERCENTILES[sex] || _STRENGTH_PERCENTILES["male"];
+  var exData = sexData[exercise] || null;
+  if (!exData) {
+    // Try to find closest match
+    var keys = Object.keys(sexData);
+    for (var k = 0; k < keys.length; k++) {
+      if (keys[k].toLowerCase().indexOf(exercise.toLowerCase()) !== -1 ||
+          exercise.toLowerCase().indexOf(keys[k].toLowerCase()) !== -1) {
+        exData = sexData[keys[k]];
+        break;
+      }
+    }
+  }
+  if (!exData) {
+    return { percentile: 50, relativeStrength: Math.round(relative * 100) / 100, rating: "N/A" };
+  }
+
+  var percentiles = exData.percentiles;
+
+  // Interpolate percentile
+  var pct = 5; // below minimum
+  var matched = false;
+  for (var i = 0; i < percentiles.length; i++) {
+    var p = percentiles[i][0];
+    var ratio = percentiles[i][1];
+    if (adjustedRelative <= ratio) {
+      if (i === 0) {
+        pct = Math.max(1, Math.floor(p * adjustedRelative / ratio));
+      } else {
+        var prevP = percentiles[i - 1][0];
+        var prevR = percentiles[i - 1][1];
+        var frac = (ratio !== prevR) ? (adjustedRelative - prevR) / (ratio - prevR) : 0;
+        pct = Math.floor(prevP + frac * (p - prevP));
+      }
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) {
+    var lastP = percentiles[percentiles.length - 1][0];
+    var lastR = percentiles[percentiles.length - 1][1];
+    pct = Math.min(99, Math.floor(lastP + (adjustedRelative - lastR) * 10));
+  }
+
+  // Rating
+  var rating;
+  if (pct >= 90) {
+    rating = "Elite";
+  } else if (pct >= 75) {
+    rating = "Advanced";
+  } else if (pct >= 50) {
+    rating = "Intermediate";
+  } else if (pct >= 25) {
+    rating = "Novice";
+  } else {
+    rating = "Beginner";
+  }
+
+  return {
+    percentile: Math.max(1, Math.min(99, pct)),
+    relativeStrength: Math.round(relative * 100) / 100,
+    rating: rating,
+  };
+}
+
+/**
+ * Compute the phase split for the 12-week program.
+ * @param {string} goalType - "cut", "bulk", or "recomp"
+ * @param {number} startingWeight - Current weight in lbs
+ * @param {number} targetWeight - Goal weight in lbs
+ * @param {number} [startingBf] - Estimated starting body fat as decimal (e.g. 0.25)
+ * @returns {Array<{weeks: string, type: string, weekly_rate: number, notes: string}>}
+ */
+function _computePhasePlan(goalType, startingWeight, targetWeight, startingBf) {
+  var totalChange = targetWeight - startingWeight; // negative for cut
+  var weeklyRate = Math.abs(totalChange) / 12;
+
+  var phases = [];
+
+  if (goalType === "cut") {
+    if (weeklyRate <= 3.0) {
+      // Manageable deficit -- straight 12-week cut
+      phases.push({
+        weeks: "1-12",
+        type: "cut",
+        weekly_rate: Math.round(weeklyRate * 10) / 10,
+        notes: "Straight cut: " + Math.abs(totalChange).toFixed(0) + " lbs in 12 weeks " +
+               "(" + weeklyRate.toFixed(1) + " lbs/week).",
+      });
+    } else {
+      // Extreme deficit -- break into aggressive phases
+      var p1Rate = weeklyRate * 1.3;
+      var p3Rate = weeklyRate * 1.1;
+      var p2Rate = weeklyRate * 0.7;
+      phases.push({
+        weeks: "1-4",
+        type: "aggressive_cut",
+        weekly_rate: Math.round(p1Rate * 10) / 10,
+        notes: "Aggressive fasting phase. OMAD or 20:4. " +
+               "Electrolyte supplementation required. " +
+               "High protein to preserve muscle.",
+      });
+      phases.push({
+        weeks: "5-8",
+        type: "cut",
+        weekly_rate: Math.round(p2Rate * 10) / 10,
+        notes: "Moderate cut with weekly refeed day. " +
+               "18:6 fasting. Prevents metabolic adaptation.",
+      });
+      phases.push({
+        weeks: "9-12",
+        type: "aggressive_cut",
+        weekly_rate: Math.round(p3Rate * 10) / 10,
+        notes: "Final push. Tighten up for the finish. " +
+               "20:4 fasting. Visual results lock in here.",
+      });
+    }
+  } else if (goalType === "bulk") {
+    if (startingBf !== undefined && startingBf !== null && startingBf > 0.20) {
+      // Too fat to bulk right away -- mini cut first
+      phases.push({
+        weeks: "1-4",
+        type: "cut",
+        weekly_rate: 2.0,
+        notes: "Mini-cut first. Starting BF " + (startingBf * 100).toFixed(0) + "% " +
+               "is too high to bulk cleanly. Drop to ~18% then bulk.",
+      });
+      phases.push({
+        weeks: "5-12",
+        type: "bulk",
+        weekly_rate: totalChange > 0 ? Math.round((Math.abs(totalChange) / 8) * 10) / 10 : 0.5,
+        notes: "Clean bulk phase. Surplus of 300-500 cal. " +
+               "Progressive overload focus.",
+      });
+    } else {
+      phases.push({
+        weeks: "1-12",
+        type: "bulk",
+        weekly_rate: Math.round(weeklyRate * 10) / 10,
+        notes: "Straight bulk: " + totalChange.toFixed(0) + " lbs in 12 weeks. " +
+               "Controlled surplus, progressive overload.",
+      });
+    }
+  } else if (goalType === "recomp") {
+    phases.push({
+      weeks: "1-12",
+      type: "recomp",
+      weekly_rate: Math.round(weeklyRate * 10) / 10,
+      notes: "12-week recomp. Slight deficit on rest days, " +
+             "maintenance on training days. Body composition " +
+             "shifts without dramatic scale change.",
+    });
+  }
+
+  return phases;
+}
+
 // ─── ACCORDION STATE ───
 const _accordionState = JSON.parse(sessionStorage.getItem('accordion_state') || '{}');
 
@@ -6461,24 +6886,30 @@ function _renderNewDashboardInner(apiData, overlay) {
   html += '<span class="pd-title">Progress</span>';
   html += '<button class="progress-share" onclick="shareWeeklySummary()">Share</button>';
   html += '</div>';
-  html += '<div class="pd-scroll">';
 
-  // ── 1. HERO CARD ──
+  // ── TAB BAR ──
+  html += '<div class="sp-tabs">';
+  html += '<button class="sp-tab active" onclick="_spSwitchTab(\'dashboard\',this)">Dashboard</button>';
+  html += '<button class="sp-tab" onclick="_spSwitchTab(\'lab\',this)">Lab</button>';
+  html += '</div>';
+
+  // ── DASHBOARD TAB ──
+  html += '<div class="sp-tab-content active" id="sp-dashboard">';
+
+  // 1. HERO CARD
   html += _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projection);
 
-  // ── 2. WEIGHT CHART ──
+  // 2. WEIGHT CHART
   html += _pdWeightChart(bw, projection, targetWeight, startDate);
 
-  // ── 3. BODY COMPOSITION GRID ──
+  // 3. BODY COMPOSITION GRID
   html += _pdBodyComp(measurements);
 
-  // ── 4. TRAINING STREAK ──
+  // 4. TRAINING STREAK
   var completions = training.weekly_adherence ? {} : (_completionsCache ? _completionsCache.days : {});
-  // Build completions from training.weekly_adherence if available
   if (training.weekly_adherence) {
     for (var ai = 0; ai < training.weekly_adherence.length; ai++) {
       var wa = training.weekly_adherence[ai];
-      // Mark days_done number of days as complete for this week
       for (var di = 0; di < wa.days_done && di < 6; di++) {
         completions[wa.week + '_' + di] = true;
       }
@@ -6486,13 +6917,19 @@ function _renderNewDashboardInner(apiData, overlay) {
   }
   html += _pdStreakGrid(completions, startDate);
 
-  // ── 5. LIFT PROGRESSION ──
+  // 5. LIFT PROGRESSION
   html += _pdLiftProgression(lifts);
 
-  // ── 6. MOTIVATIONAL FOOTER ──
+  // 6. MOTIVATIONAL FOOTER
   html += _pdMotivationalFooter(startWeight, currentWeight, psychQuote);
 
-  html += '</div>'; // end pd-scroll
+  html += '</div>'; // end dashboard tab
+
+  // ── LAB TAB (lazy-loaded on first click) ──
+  html += '<div class="sp-tab-content" id="sp-lab">';
+  html += '<div id="sp-lab-content"><div class="sp-ephemeral">Explore mode — nothing saves. Play with the numbers.</div><div style="text-align:center;padding:2rem;color:var(--muted)">Loading Lab data...</div></div>';
+  html += '</div>';
+
   overlay.innerHTML = html;
 }
 
@@ -6912,6 +7349,453 @@ function _pdMotivationalFooter(startWeight, currentWeight, psychQuote) {
 
   h += '<div class="pd-footer-loss">If you stop now, research shows you\'ll regain it in 8 weeks.</div>';
   h += '</div>';
+  return h;
+}
+
+// ─── STATS PANEL: TAB SWITCHING + LAB ──────────────────────────────────────
+
+var _spLabLoaded = false;
+var _spLabData = {};
+
+function _spSwitchTab(tab, btn) {
+  document.querySelectorAll('.sp-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.sp-tab-content').forEach(function(c) { c.classList.remove('active'); });
+  btn.classList.add('active');
+  var target = document.getElementById('sp-' + tab);
+  if (target) target.classList.add('active');
+
+  // Lazy-load Lab data on first click
+  if (tab === 'lab' && !_spLabLoaded) {
+    _spLabLoaded = true;
+    Promise.all([
+      fetch('/api/stats/projection-inputs').then(function(r) { return r.ok ? r.json() : {}; }),
+      fetch('/api/stats/body-comp').then(function(r) { return r.ok ? r.json() : {}; }),
+    ]).then(function(results) {
+      var projData = results[0];
+      var bcData = results[1];
+      // Merge body-comp measurements into projection data
+      _spLabData = projData;
+      _spLabData.measurements = bcData.measurements || [];
+      if (!_spLabData.height_in && bcData.height_in) _spLabData.height_in = bcData.height_in;
+      if (!_spLabData.sex && bcData.sex) _spLabData.sex = bcData.sex;
+      var mount = document.getElementById('sp-lab-content');
+      if (mount) mount.innerHTML = _spRenderLab(_spLabData);
+    }).catch(function(e) {
+      var mount = document.getElementById('sp-lab-content');
+      if (mount) mount.innerHTML = '<div style="padding:2rem;color:#ef4444">Failed to load Lab data</div>';
+    });
+  }
+}
+
+function _spRenderLab(data) {
+  var html = '<div class="sp-ephemeral">Explore mode — nothing saves. Play with the numbers.</div>';
+
+  // ── WEIGHT PROJECTION SLIDER ──
+  html += _spWeightProjection(data);
+
+  // ── BODY COMPOSITION CALCULATOR ──
+  html += _spBodyCompCalc(data);
+
+  // ── SCENARIO PLANNER ──
+  html += _spScenarioPlanner(data);
+
+  return html;
+}
+
+/* ── WEIGHT PROJECTION SLIDER ── */
+function _spWeightProjection(data) {
+  var cal = data.daily_calories || 1800;
+  var tdee = data.tdee || 2500;
+  var startW = data.start_weight || 220;
+  var targetW = data.target_weight || 195;
+  var curW = data.current_weight || startW;
+  var heightIn = data.height_in || 70;
+  var age = data.age || 30;
+  var sex = data.sex || 'male';
+  var curWeek = data.current_week || 1;
+
+  var h = '<div class="pd-section"><div class="pd-section-label">Weight Projection</div>';
+
+  // Calorie slider
+  h += '<div class="sp-slider-row">';
+  h += '<span class="sp-slider-label">Calories</span>';
+  h += '<input type="range" class="sp-slider" id="sp-cal-slider" min="1000" max="3500" step="25" value="' + cal + '" oninput="_spUpdateProjection()">';
+  h += '<span class="sp-slider-val" id="sp-cal-val">' + cal + '</span>';
+  h += '</div>';
+
+  // Activity slider
+  h += '<div class="sp-slider-row">';
+  h += '<span class="sp-slider-label">Activity</span>';
+  h += '<input type="range" class="sp-slider" id="sp-act-slider" min="0" max="4" step="1" value="2" oninput="_spUpdateProjection()">';
+  h += '<span class="sp-slider-val" id="sp-act-val">Moderate</span>';
+  h += '</div>';
+
+  // Projection chart placeholder
+  h += '<div id="sp-proj-chart" style="margin:16px 0">';
+  // Render initial chart
+  if (typeof _projectWeightCurve === 'function') {
+    var proj = _projectWeightCurve(curW, targetW, tdee, cal, 12 - curWeek + 1, heightIn, age, sex);
+    h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
+  } else {
+    h += '<div style="color:var(--muted);text-align:center;padding:1rem">Projection engine loading...</div>';
+  }
+  h += '</div>';
+
+  // Dynamic insight text
+  h += '<div class="sp-insight" id="sp-proj-insight">';
+  var deficit = tdee - cal;
+  var weeklyLoss = (deficit * 7 / 3500).toFixed(1);
+  h += 'At ' + cal + ' cal/day with TDEE ' + tdee + ', your deficit is ' + deficit + ' cal/day (' + weeklyLoss + ' lb/week).';
+  h += '</div>';
+
+  h += '</div>';
+  return h;
+}
+
+var _SP_ACTIVITY_LABELS = ['Sedentary', 'Light', 'Moderate', 'Active', 'Very Active'];
+var _SP_ACTIVITY_MULTS = [1.2, 1.375, 1.55, 1.725, 1.9];
+
+function _spUpdateProjection() {
+  var calSlider = document.getElementById('sp-cal-slider');
+  var actSlider = document.getElementById('sp-act-slider');
+  if (!calSlider || !actSlider) return;
+
+  var cal = parseInt(calSlider.value);
+  var actIdx = parseInt(actSlider.value);
+  var actMult = _SP_ACTIVITY_MULTS[actIdx] || 1.55;
+  var actLabel = _SP_ACTIVITY_LABELS[actIdx] || 'Moderate';
+
+  document.getElementById('sp-cal-val').textContent = cal;
+  document.getElementById('sp-act-val').textContent = actLabel;
+
+  var d = _spLabData;
+  var heightIn = d.height_in || 70;
+  var age = d.age || 30;
+  var sex = d.sex || 'male';
+  var curW = d.current_weight || 220;
+  var targetW = d.target_weight || 195;
+  var curWeek = d.current_week || 1;
+  var weeksLeft = 12 - curWeek + 1;
+
+  // Recompute TDEE with new activity level
+  var tdeeResult = typeof _computeTdee === 'function' ? _computeTdee(curW, heightIn, age, sex, actMult) : { tdee: d.tdee || 2500 };
+  var tdee = tdeeResult.tdee;
+
+  // Recompute projection
+  if (typeof _projectWeightCurve === 'function') {
+    var proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex);
+    var chartEl = document.getElementById('sp-proj-chart');
+    if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
+  }
+
+  // Update insight
+  var deficit = tdee - cal;
+  var weeklyLoss = (deficit * 7 / 3500).toFixed(1);
+  var insightEl = document.getElementById('sp-proj-insight');
+  if (insightEl) {
+    var endWeight = typeof _projectWeightCurve === 'function' ? proj[proj.length - 1].projected.toFixed(1) : '?';
+    if (deficit > 0) {
+      insightEl.innerHTML = 'At ' + cal + ' cal/day (TDEE ' + tdee + '), deficit is ' + deficit + ' cal/day (' + weeklyLoss + ' lb/week). Projected Week 12: ' + endWeight + ' lb.';
+    } else {
+      insightEl.innerHTML = 'At ' + cal + ' cal/day (TDEE ' + tdee + '), surplus is ' + Math.abs(deficit) + ' cal/day. Projected Week 12: ' + endWeight + ' lb.';
+    }
+  }
+}
+
+function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight, startDate) {
+  // Compact SVG chart — actual data (green) + projection (blue dashed)
+  var W = 340, H = 180, PAD = 40;
+  var maxW = startWeight + 2;
+  var minW = targetWeight ? Math.min(targetWeight, startWeight) - 2 : startWeight - 20;
+  if (minW >= maxW) minW = maxW - 20;
+
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:400px;display:block;margin:0 auto" preserveAspectRatio="xMidYMid meet">';
+
+  // Y-axis labels
+  var yScale = function(w) { return PAD + (maxW - w) / (maxW - minW) * (H - PAD * 2); };
+  svg += '<text x="4" y="' + yScale(maxW) + '" font-size="10" fill="#9aaa9d" font-family="DM Mono">' + Math.round(maxW) + '</text>';
+  svg += '<text x="4" y="' + yScale(minW) + '" font-size="10" fill="#9aaa9d" font-family="DM Mono">' + Math.round(minW) + '</text>';
+
+  // Goal line
+  if (targetWeight) {
+    var gy = yScale(targetWeight);
+    svg += '<line x1="' + PAD + '" y1="' + gy + '" x2="' + (W - 10) + '" y2="' + gy + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>';
+    svg += '<text x="' + (W - 8) + '" y="' + (gy - 4) + '" font-size="9" fill="#4ade80" text-anchor="end" font-family="DM Mono">Goal</text>';
+  }
+
+  // Actual data points (green)
+  if (weightSeries && weightSeries.length > 1) {
+    var xMin = 0, xMax = 84; // 12 weeks in days
+    var xScale = function(dayIdx) { return PAD + dayIdx / xMax * (W - PAD - 10); };
+
+    // Parse dates to day offsets
+    var firstDate = new Date(weightSeries[0].date + 'T00:00:00');
+    var pts = [];
+    for (var i = 0; i < weightSeries.length; i++) {
+      var dt = new Date(weightSeries[i].date + 'T00:00:00');
+      var dayOff = Math.round((dt - firstDate) / (1000 * 60 * 60 * 24));
+      var wt = weightSeries[i].rolling_avg || weightSeries[i].weight;
+      if (wt && dayOff >= 0) pts.push(xScale(dayOff) + ',' + yScale(wt));
+    }
+    if (pts.length > 0) {
+      svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+      // Last point dot
+      var lastPt = pts[pts.length - 1].split(',');
+      svg += '<circle cx="' + lastPt[0] + '" cy="' + lastPt[1] + '" r="4" fill="#4ade80"/>';
+    }
+  }
+
+  // Projection line (blue dashed)
+  if (projection && projection.length > 0) {
+    var curWeek = (_spLabData.current_week || 1);
+    var projPts = [];
+    for (var j = 0; j < projection.length; j++) {
+      var pw = projection[j];
+      var weekNum = pw.week || (curWeek + j);
+      var dayOff2 = (weekNum - 1) * 7;
+      var px = PAD + dayOff2 / 84 * (W - PAD - 10);
+      var py = yScale(pw.projected);
+      projPts.push(px + ',' + py);
+    }
+    svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6,3" stroke-linecap="round"/>';
+    // End point
+    var ep = projPts[projPts.length - 1].split(',');
+    svg += '<circle cx="' + ep[0] + '" cy="' + ep[1] + '" r="4" fill="#60a5fa"/>';
+    svg += '<text x="' + ep[0] + '" y="' + (parseFloat(ep[1]) - 8) + '" font-size="11" fill="#60a5fa" text-anchor="middle" font-family="DM Mono" font-weight="700">' + projection[projection.length - 1].projected.toFixed(0) + '</text>';
+  }
+
+  // X-axis labels
+  svg += '<text x="' + PAD + '" y="' + (H - 4) + '" font-size="9" fill="#4a5549" font-family="DM Mono">W1</text>';
+  svg += '<text x="' + (PAD + (W - PAD - 10) * 0.5) + '" y="' + (H - 4) + '" font-size="9" fill="#4a5549" font-family="DM Mono" text-anchor="middle">W6</text>';
+  svg += '<text x="' + (W - 12) + '" y="' + (H - 4) + '" font-size="9" fill="#4a5549" font-family="DM Mono" text-anchor="end">W12</text>';
+
+  svg += '</svg>';
+  return svg;
+}
+
+/* ── BODY COMPOSITION CALCULATOR ── */
+function _spBodyCompCalc(data) {
+  var curW = data.current_weight || 200;
+  var heightIn = data.height_in || 70;
+  var sex = data.sex || 'male';
+
+  // Get latest measurements if available
+  var measurements = data.measurements || [];
+  var latest = measurements.length > 0 ? measurements[measurements.length - 1] : {};
+  var baseline = measurements.length > 0 ? measurements[0] : {};
+  var waist = latest.waist || 38;
+  var neck = latest.neck || 16;
+  var hips = latest.hips || 40;
+
+  var h = '<div class="pd-section"><div class="pd-section-label">Body Composition</div>';
+
+  // Measurement inputs
+  h += '<div class="sp-input-grid">';
+  h += '<div class="sp-input-group"><label>Waist (in)</label><input type="number" step="0.5" id="sp-bc-waist" value="' + waist + '" oninput="_spUpdateBodyComp()"></div>';
+  h += '<div class="sp-input-group"><label>Neck (in)</label><input type="number" step="0.5" id="sp-bc-neck" value="' + neck + '" oninput="_spUpdateBodyComp()"></div>';
+  h += '<div class="sp-input-group"><label>Hips (in)</label><input type="number" step="0.5" id="sp-bc-hips" value="' + hips + '" oninput="_spUpdateBodyComp()"></div>';
+  h += '<div class="sp-input-group"><label>Weight (lb)</label><input type="number" step="0.1" id="sp-bc-weight" value="' + curW + '" oninput="_spUpdateBodyComp()"></div>';
+  h += '</div>';
+
+  // Results
+  h += '<div id="sp-bc-results">';
+  h += _spBodyCompResults(waist, neck, heightIn, sex, hips, curW, baseline);
+  h += '</div>';
+
+  h += '</div>';
+  return h;
+}
+
+function _spUpdateBodyComp() {
+  var waist = parseFloat(document.getElementById('sp-bc-waist').value) || 0;
+  var neck = parseFloat(document.getElementById('sp-bc-neck').value) || 0;
+  var hips = parseFloat(document.getElementById('sp-bc-hips').value) || 0;
+  var weight = parseFloat(document.getElementById('sp-bc-weight').value) || 0;
+  var d = _spLabData;
+  var heightIn = d.height_in || 70;
+  var sex = d.sex || 'male';
+  var measurements = d.measurements || [];
+  var baseline = measurements.length > 0 ? measurements[0] : {};
+
+  var el = document.getElementById('sp-bc-results');
+  if (el) el.innerHTML = _spBodyCompResults(waist, neck, heightIn, sex, hips, weight, baseline);
+}
+
+function _spBodyCompResults(waist, neck, heightIn, sex, hips, weight, baseline) {
+  var bf = typeof _estimateBodyFatNavy === 'function' ? _estimateBodyFatNavy(waist, neck, heightIn, sex, hips) : null;
+  var h = '';
+
+  if (bf != null && weight > 0) {
+    var fatMass = Math.round(weight * bf / 100 * 10) / 10;
+    var leanMass = Math.round((weight - fatMass) * 10) / 10;
+    var leanPct = Math.round(leanMass / weight * 100);
+    var fatPct = Math.round(fatMass / weight * 100);
+
+    h += '<div class="sp-result-row"><span class="sp-result-label">Body Fat</span><span class="sp-result-val">' + bf.toFixed(1) + '%</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Lean Mass</span><span class="sp-result-val">' + leanMass + ' lb</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Fat Mass</span><span class="sp-result-val">' + fatMass + ' lb</span></div>';
+
+    // Stacked bar
+    h += '<div class="sp-bar-container">';
+    h += '<div class="sp-bar-segment sp-bar-lean" style="width:' + leanPct + '%"></div>';
+    h += '<div class="sp-bar-segment sp-bar-fat" style="width:' + fatPct + '%"></div>';
+    h += '</div>';
+    h += '<div style="display:flex;justify-content:space-between;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--muted)">';
+    h += '<span style="color:var(--lift)">Lean ' + leanPct + '%</span>';
+    h += '<span style="color:#ef4444">Fat ' + fatPct + '%</span>';
+    h += '</div>';
+
+    // Baseline comparison
+    if (baseline && baseline.waist && baseline.neck) {
+      var baseBf = typeof _estimateBodyFatNavy === 'function' ? _estimateBodyFatNavy(baseline.waist, baseline.neck, heightIn, sex, baseline.hips || hips) : null;
+      if (baseBf != null) {
+        var baseWeight = baseline.weight_lbs || baseline.weight || weight;
+        var baseFat = Math.round(baseWeight * baseBf / 100 * 10) / 10;
+        var baseLean = Math.round((baseWeight - baseFat) * 10) / 10;
+        var bfDelta = bf - baseBf;
+        var leanDelta = leanMass - baseLean;
+        var fatDelta = fatMass - baseFat;
+
+        h += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border)">';
+        h += '<div style="font-family:\'DM Mono\',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:6px">vs Baseline</div>';
+        h += '<div class="sp-result-row"><span class="sp-result-label">BF%</span><span class="sp-result-val">' + baseBf.toFixed(1) + '% &rarr; ' + bf.toFixed(1) + '% <span class="sp-result-delta ' + (bfDelta < 0 ? 'positive' : 'negative') + '">' + (bfDelta > 0 ? '+' : '') + bfDelta.toFixed(1) + '</span></span></div>';
+        h += '<div class="sp-result-row"><span class="sp-result-label">Lean</span><span class="sp-result-val">' + baseLean + ' &rarr; ' + leanMass + ' <span class="sp-result-delta ' + (leanDelta > 0 ? 'positive' : 'negative') + '">' + (leanDelta > 0 ? '+' : '') + leanDelta.toFixed(1) + '</span></span></div>';
+        h += '<div class="sp-result-row"><span class="sp-result-label">Fat</span><span class="sp-result-val">' + baseFat + ' &rarr; ' + fatMass + ' <span class="sp-result-delta ' + (fatDelta < 0 ? 'positive' : 'negative') + '">' + (fatDelta > 0 ? '+' : '') + fatDelta.toFixed(1) + '</span></span></div>';
+        h += '</div>';
+      }
+    }
+  } else {
+    h += '<div style="color:var(--muted);font-size:13px;padding:8px 0">Enter measurements to calculate body composition.</div>';
+  }
+  return h;
+}
+
+/* ── SCENARIO PLANNER ── */
+function _spScenarioPlanner(data) {
+  var goalType = data.goal_type || 'cut';
+  var fasting = data.fasting_protocol || '16_8';
+  var cal = data.daily_calories || 1800;
+  var tdee = data.tdee || 2500;
+  var curW = data.current_weight || 220;
+  var targetW = data.target_weight || 195;
+  var heightIn = data.height_in || 70;
+  var age = data.age || 30;
+  var sex = data.sex || 'male';
+
+  var h = '<div class="pd-section"><div class="pd-section-label">Scenario Planner</div>';
+
+  // Goal type toggles
+  h += '<div style="font-family:\'DM Mono\',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:4px">Goal Type</div>';
+  h += '<div class="sp-toggle-row">';
+  ['cut', 'recomp', 'bulk'].forEach(function(g) {
+    h += '<button class="sp-toggle' + (g === goalType ? ' active' : '') + '" onclick="_spSetScenario(\'goal\',\'' + g + '\')">' + g.charAt(0).toUpperCase() + g.slice(1) + '</button>';
+  });
+  h += '</div>';
+
+  // Fasting toggles
+  h += '<div style="font-family:\'DM Mono\',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-top:10px;margin-bottom:4px">Fasting Protocol</div>';
+  h += '<div class="sp-toggle-row">';
+  ['none', '16_8', '18_6', '20_4', 'omad'].forEach(function(f) {
+    var label = f === 'none' ? 'None' : f === 'omad' ? 'OMAD' : f.replace('_', ':');
+    h += '<button class="sp-toggle' + (f === fasting ? ' active' : '') + '" onclick="_spSetScenario(\'fasting\',\'' + f + '\')">' + label + '</button>';
+  });
+  h += '</div>';
+
+  // Target weight slider
+  h += '<div class="sp-slider-row" style="margin-top:12px">';
+  h += '<span class="sp-slider-label">Target</span>';
+  h += '<input type="range" class="sp-slider" id="sp-target-slider" min="' + Math.round(curW * 0.7) + '" max="' + Math.round(curW * 1.15) + '" step="1" value="' + Math.round(targetW) + '" oninput="_spUpdateScenario()">';
+  h += '<span class="sp-slider-val" id="sp-target-val">' + Math.round(targetW) + ' lb</span>';
+  h += '</div>';
+
+  // Scenario results
+  h += '<div id="sp-scenario-results">';
+  h += _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, age, sex, cal);
+  h += '</div>';
+
+  h += '</div>';
+  return h;
+}
+
+var _spScenarioState = { goal: null, fasting: null };
+
+function _spSetScenario(key, val) {
+  _spScenarioState[key] = val;
+  // Update toggle visuals
+  var row = event.target.parentElement;
+  row.querySelectorAll('.sp-toggle').forEach(function(b) { b.classList.remove('active'); });
+  event.target.classList.add('active');
+  _spUpdateScenario();
+}
+
+function _spUpdateScenario() {
+  var d = _spLabData;
+  var goalType = _spScenarioState.goal || d.goal_type || 'cut';
+  var fasting = _spScenarioState.fasting || d.fasting_protocol || '16_8';
+  var curW = d.current_weight || 220;
+  var tdee = d.tdee || 2500;
+  var heightIn = d.height_in || 70;
+  var age = d.age || 30;
+  var sex = d.sex || 'male';
+  var origCal = d.daily_calories || 1800;
+
+  var targetSlider = document.getElementById('sp-target-slider');
+  var targetW = targetSlider ? parseInt(targetSlider.value) : (d.target_weight || 195);
+  var targetValEl = document.getElementById('sp-target-val');
+  if (targetValEl) targetValEl.textContent = targetW + ' lb';
+
+  var el = document.getElementById('sp-scenario-results');
+  if (el) el.innerHTML = _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, age, sex, origCal);
+}
+
+function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, age, sex, origCal) {
+  var h = '';
+
+  // Compute new targets
+  var curWeek = _spLabData.current_week || 1;
+  var weeksLeft = 12 - curWeek + 1;
+
+  if (typeof _computeTargets === 'function') {
+    var targets = _computeTargets(tdee, goalType, curW, targetW, weeksLeft);
+    var proj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex) : [];
+    var endWeight = proj.length > 0 ? proj[proj.length - 1].projected.toFixed(1) : '?';
+    var deficit = tdee - targets.calories;
+
+    // Daily targets
+    h += '<div style="margin:12px 0;padding:12px;background:var(--surface);border-radius:8px">';
+    h += '<div style="font-family:\'DM Mono\',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Scenario Daily Targets</div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Calories</span><span class="sp-result-val">' + targets.calories + '</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Protein</span><span class="sp-result-val">' + targets.protein + 'g</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Carbs</span><span class="sp-result-val">' + targets.carbs + 'g</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">Fat</span><span class="sp-result-val">' + targets.fat + 'g</span></div>';
+    h += '<div class="sp-result-row"><span class="sp-result-label">' + (deficit > 0 ? 'Deficit' : 'Surplus') + '</span><span class="sp-result-val">' + Math.abs(deficit) + ' cal/day</span></div>';
+    h += '</div>';
+
+    // Projected outcome
+    h += '<div class="sp-result-row" style="margin-top:8px"><span class="sp-result-label">Week 12 Weight</span><span class="sp-result-val" style="font-size:22px;color:var(--lift)">' + endWeight + ' lb</span></div>';
+
+    // Compare vs current plan
+    h += '<div class="sp-compare" style="margin-top:12px">';
+    h += '<div class="sp-compare-card"><div class="sp-compare-title">Current Plan</div>';
+    h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--text)">' + origCal + ' cal/day</div>';
+    var origProj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex) : [];
+    var origEnd = origProj.length > 0 ? origProj[origProj.length - 1].projected.toFixed(1) : '?';
+    h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">W12: ' + origEnd + ' lb</div>';
+    h += '</div>';
+
+    h += '<div class="sp-compare-card scenario"><div class="sp-compare-title">This Scenario</div>';
+    h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--lift)">' + targets.calories + ' cal/day</div>';
+    h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--lift)">W12: ' + endWeight + ' lb</div>';
+    var diff = origEnd !== '?' && endWeight !== '?' ? (parseFloat(endWeight) - parseFloat(origEnd)).toFixed(1) : null;
+    if (diff != null) {
+      h += '<div style="font-family:\'DM Mono\',monospace;font-size:11px;color:' + (parseFloat(diff) < 0 ? 'var(--lift)' : '#ef4444') + ';margin-top:4px">' + (parseFloat(diff) > 0 ? '+' : '') + diff + ' lb</div>';
+    }
+    h += '</div>';
+    h += '</div>';
+  } else {
+    h += '<div style="color:var(--muted);padding:1rem">Computation engine loading...</div>';
+  }
+
   return h;
 }
 

@@ -2571,6 +2571,267 @@ footer {
   line-height: 1.5;
 }
 
+/* ─── STATS PANEL: TABS ─── */
+.sp-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  padding: 0 1rem;
+}
+.sp-tab {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.sp-tab.active {
+  color: var(--lift);
+  border-bottom-color: var(--lift);
+}
+.sp-tab-content { display: none; padding: 1rem; }
+.sp-tab-content.active { display: block; }
+
+/* ─── STATS PANEL: SLIDERS ─── */
+.sp-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.sp-slider-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+.sp-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+}
+.sp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--lift);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--lift-border);
+}
+.sp-slider-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 50px;
+  text-align: right;
+}
+
+/* ─── STATS PANEL: TOGGLES ─── */
+.sp-toggle-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.sp-toggle {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sp-toggle.active {
+  background: var(--lift-bg);
+  border-color: var(--lift-border);
+  color: var(--lift);
+}
+
+/* ─── STATS PANEL: INPUTS ─── */
+.sp-input-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+.sp-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sp-input-group label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.sp-input-group input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'DM Mono', monospace;
+  font-size: 16px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ─── STATS PANEL: RESULT CARDS ─── */
+.sp-result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sp-result-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.sp-result-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sp-result-delta {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  margin-left: 6px;
+}
+.sp-result-delta.positive { color: var(--lift); }
+.sp-result-delta.negative { color: #ef4444; }
+
+/* ─── STATS PANEL: STACKED BAR ─── */
+.sp-bar-container {
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  margin: 12px 0;
+  background: var(--surface);
+}
+.sp-bar-segment {
+  height: 100%;
+  transition: width 0.6s ease;
+}
+.sp-bar-lean { background: var(--lift); }
+.sp-bar-fat { background: #ef4444; }
+
+/* ─── STATS PANEL: RADAR CHART ─── */
+.sp-radar-container {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+}
+
+/* ─── STATS PANEL: METRIC TOGGLES (wellness) ─── */
+.sp-metric-btn {
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.sp-metric-btn.off { opacity: 0.35; }
+
+/* ─── STATS PANEL: COMPARE ─── */
+.sp-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0;
+}
+.sp-compare-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.sp-compare-card.scenario {
+  border-color: var(--lift-border);
+  background: var(--lift-bg);
+}
+.sp-compare-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+/* ─── STATS PANEL: COMPLIANCE HEATMAP ─── */
+.sp-heatmap {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.sp-heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--surface);
+  position: relative;
+}
+.sp-heatmap-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: var(--dim);
+  text-align: center;
+}
+
+/* ─── STATS PANEL: EPHEMERAL BANNER ─── */
+.sp-ephemeral {
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+/* ─── STATS PANEL: INSIGHT ─── */
+.sp-insight {
+  background: var(--coach-bg);
+  border: 1px solid var(--coach-border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--coach);
+  line-height: 1.5;
+  margin: 12px 0;
+}
+
 /* ─── SETTINGS DROPDOWN ─── */
 .settings-dropdown {
   position: absolute;

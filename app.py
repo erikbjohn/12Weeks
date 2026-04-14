@@ -3785,6 +3785,301 @@ def api_progress_dashboard():
     })
 
 
+# ─── STATS PANEL ENDPOINTS ──────────────────────────────────────────────────
+
+@app.route("/api/stats/projection-inputs")
+@login_required
+def api_stats_projection_inputs():
+    """Return all inputs needed for the interactive projection calculator."""
+    try:
+        uid = current_user.id
+        current_week = _current_week()
+
+        # Body weight series
+        bw_entries = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date).all()
+        weight_series = []
+        for i, e in enumerate(bw_entries):
+            window = bw_entries[max(0, i - 6):i + 1]
+            avg = sum(w.weight_lbs for w in window) / len(window)
+            weight_series.append({
+                "date": e.log_date.isoformat(),
+                "weight": e.weight_lbs,
+                "rolling_avg": round(avg, 1),
+            })
+
+        current_weight = bw_entries[-1].weight_lbs if bw_entries else None
+        start_weight = bw_entries[0].weight_lbs if bw_entries else None
+
+        # Training goal
+        goal = TrainingGoal.query.filter_by(user_id=uid).order_by(TrainingGoal.created_at.desc()).first()
+
+        # Physical assessment
+        pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
+        height_in = pa.height_inches if pa else None
+
+        # Age/sex from PsychIntake conversation
+        sex = "male"
+        age = 30
+        intake = PsychIntake.query.filter_by(user_id=uid).first()
+        if intake and intake.conversation:
+            convo = intake.conversation if isinstance(intake.conversation, list) else []
+            for msg in convo:
+                content = msg.get("content", "").lower().strip()
+                if msg.get("role") == "user":
+                    # Sex detection
+                    content_words = content.split()
+                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
+                        sex = "male"
+                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
+                        sex = "female"
+                    # Age detection
+                    age_match = re.search(r'\b(\d{1,2})\b', content)
+                    if age_match:
+                        num = int(age_match.group(1))
+                        if 13 <= num <= 80:
+                            age = num
+
+        return jsonify({
+            "current_weight": current_weight,
+            "start_weight": start_weight,
+            "target_weight": goal.target_weight if goal else None,
+            "height_in": height_in,
+            "age": age,
+            "sex": sex,
+            "tdee": goal.tdee if goal else None,
+            "daily_calories": goal.daily_calories if goal else None,
+            "goal_type": goal.goal_type if goal else None,
+            "fasting_protocol": goal.fasting_protocol if goal else None,
+            "activity_multiplier": 1.55,
+            "current_week": current_week,
+            "weeks_total": 12,
+            "weight_series": weight_series,
+            "stored_projection": goal.weight_projection if goal else None,
+            "phase_plan": goal.phase_plan if goal else None,
+        })
+    except Exception as e:
+        logging.exception("stats/projection-inputs failed")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/stats/body-comp")
+@login_required
+def api_stats_body_comp():
+    """Return body composition data — measurements, height, weight, demographics."""
+    try:
+        uid = current_user.id
+
+        # Physical assessment for height
+        pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
+        height_in = pa.height_inches if pa else None
+
+        # Latest body weight
+        latest_bw = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date.desc()).first()
+        current_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else None)
+
+        # Age/sex from PsychIntake
+        sex = "male"
+        age = 30
+        intake = PsychIntake.query.filter_by(user_id=uid).first()
+        if intake and intake.conversation:
+            convo = intake.conversation if isinstance(intake.conversation, list) else []
+            for msg in convo:
+                content = msg.get("content", "").lower().strip()
+                if msg.get("role") == "user":
+                    content_words = content.split()
+                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
+                        sex = "male"
+                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
+                        sex = "female"
+                    age_match = re.search(r'\b(\d{1,2})\b', content)
+                    if age_match:
+                        num = int(age_match.group(1))
+                        if 13 <= num <= 80:
+                            age = num
+
+        # All body measurements
+        measurements = [{
+            "date": e.log_date.isoformat(),
+            "waist": e.waist_inches,
+            "neck": e.neck,
+            "chest": e.chest,
+            "hips": e.hips,
+            "bicep_left": e.bicep_left,
+            "bicep_right": e.bicep_right,
+            "thigh_left": e.thigh_left,
+            "thigh_right": e.thigh_right,
+        } for e in BodyMeasurement.query.filter_by(user_id=uid).order_by(BodyMeasurement.log_date).all()]
+
+        return jsonify({
+            "height_in": height_in,
+            "sex": sex,
+            "age": age,
+            "current_weight": current_weight,
+            "measurements": measurements,
+        })
+    except Exception as e:
+        logging.exception("stats/body-comp failed")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/stats/strength")
+@login_required
+def api_stats_strength():
+    """Return strength data — per-exercise weekly e1RM, percentiles, muscle profiles."""
+    try:
+        from body_stats import compute_1rm_percentile
+        uid = current_user.id
+
+        # Demographics
+        pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
+        latest_bw = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date.desc()).first()
+        current_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else None)
+
+        sex = "male"
+        age = 30
+        intake = PsychIntake.query.filter_by(user_id=uid).first()
+        if intake and intake.conversation:
+            convo = intake.conversation if isinstance(intake.conversation, list) else []
+            for msg in convo:
+                content = msg.get("content", "").lower().strip()
+                if msg.get("role") == "user":
+                    content_words = content.split()
+                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
+                        sex = "male"
+                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
+                        sex = "female"
+                    age_match = re.search(r'\b(\d{1,2})\b', content)
+                    if age_match:
+                        num = int(age_match.group(1))
+                        if 13 <= num <= 80:
+                            age = num
+
+        # All completed sets
+        all_sets = SetLog.query.filter_by(user_id=uid, done=True).filter(
+            SetLog.weight > 0
+        ).order_by(SetLog.week, SetLog.set_number).all()
+
+        # Group by exercise, then by week — compute max e1RM per week
+        exercise_data = {}
+        for s in all_sets:
+            name = s.exercise_name
+            if name not in exercise_data:
+                exercise_data[name] = {}
+            reps = min(s.reps or 10, 15)
+            e1rm = round(s.weight * (1 + reps / 30))
+            wk = s.week or 1
+            if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
+                exercise_data[name][wk] = e1rm
+
+        # Fallback: if an exercise has no SetLog, check ExerciseLog
+        if not exercise_data:
+            ex_logs = ExerciseLog.query.filter_by(user_id=uid).filter(
+                ExerciseLog.weight > 0
+            ).order_by(ExerciseLog.week).all()
+            for log in ex_logs:
+                name = log.exercise_name
+                if name not in exercise_data:
+                    exercise_data[name] = {}
+                reps = min(log.reps_completed or 10, 15)
+                e1rm = round(log.weight * (1 + reps / 30))
+                wk = log.week or 1
+                if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
+                    exercise_data[name][wk] = e1rm
+
+        # Build per-exercise response with percentiles
+        bw = current_weight or 180
+        exercises = {}
+        for ex_name, weekly_map in exercise_data.items():
+            sorted_weeks = sorted(weekly_map.keys())
+            weekly_e1rm = [{"week": wk, "e1rm": weekly_map[wk]} for wk in sorted_weeks]
+            current_1rm = weekly_map[sorted_weeks[-1]] if sorted_weeks else None
+
+            percentile = None
+            rating = None
+            relative_strength = None
+            if current_1rm:
+                try:
+                    pct_data = compute_1rm_percentile(current_1rm, bw, ex_name, age, sex)
+                    if pct_data:
+                        percentile = pct_data.get("percentile")
+                        rating = pct_data.get("rating")
+                except Exception:
+                    pass
+                relative_strength = round(current_1rm / bw, 2) if bw else None
+
+            exercises[ex_name] = {
+                "weekly_e1rm": weekly_e1rm,
+                "current_1rm": current_1rm,
+                "percentile": percentile,
+                "relative_strength": relative_strength,
+                "rating": rating,
+            }
+
+        # Muscle group profiles
+        profiles = MuscleGroupProfile.query.filter_by(user_id=uid).all()
+        muscle_profiles = [{
+            "muscle_group": p.muscle_group,
+            "strength_score": p.strength_score,
+            "relative_strength": p.relative_strength,
+        } for p in profiles]
+
+        return jsonify({
+            "current_weight": current_weight,
+            "age": age,
+            "sex": sex,
+            "exercises": exercises,
+            "muscle_profiles": muscle_profiles,
+        })
+    except Exception as e:
+        logging.exception("stats/strength failed")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/stats/wellness")
+@login_required
+def api_stats_wellness():
+    """Return wellness data — morning check-ins, weekly reports, session compliance."""
+    try:
+        uid = current_user.id
+
+        # Morning check-ins
+        checkins = [{
+            "date": ci.log_date.isoformat(),
+            "sleep_quality": ci.sleep_quality,
+            "stress_level": ci.stress_level,
+            "soreness": ci.soreness,
+            "mood": ci.mood,
+            "motivation": ci.motivation,
+            "anxiety": ci.anxiety,
+        } for ci in MorningCheckIn.query.filter_by(user_id=uid).order_by(MorningCheckIn.log_date).all()]
+
+        # Weekly reports
+        weekly_reports = [{
+            "week": wr.week,
+            "adherence_pct": wr.adherence_pct,
+            "narrative": wr.narrative,
+        } for wr in WeeklyReport.query.filter_by(user_id=uid).order_by(WeeklyReport.week).all()]
+
+        # Session compliance from SessionAnalysis
+        compliance = [{
+            "week": sa.week,
+            "day_idx": sa.day_idx,
+            "overall_compliance": sa.overall_compliance,
+            "muscle_groups_trained": sa.muscle_groups_trained or [],
+        } for sa in SessionAnalysis.query.filter_by(user_id=uid).order_by(
+            SessionAnalysis.week, SessionAnalysis.day_idx
+        ).all()]
+
+        return jsonify({
+            "checkins": checkins,
+            "weekly_reports": weekly_reports,
+            "compliance": compliance,
+        })
+    except Exception as e:
+        logging.exception("stats/wellness failed")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
 # ─── TRAVEL MODE ────────────────────────────────────────────────────────────
 
 @app.route("/api/travel/workout")
