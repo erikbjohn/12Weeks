@@ -48,24 +48,44 @@ let _milestonesShownThisSession = new Set();
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
-const BODYWEIGHT_EXERCISES = new Set([
+const _BW_EXERCISE_NAMES = [
+  // Push variants
   'Push-Ups', 'Push-ups', 'Push Ups', 'Pushups',
-  'Decline Push-Ups', 'Pike Push-Ups', 'Diamond Push-Ups',
+  'Decline Push-Ups', 'Pike Push-Ups', 'Diamond Push-Ups', 'Clap Push-Ups',
+  // Pull variants
   'Pull-Ups', 'Pull-ups', 'Pull Ups', 'Chin-Ups', 'Chin-ups',
-  'Ring Row', 'Inverted Row', 'TRX Row',
-  'Dips', 'Bench Dips', 'Tricep Dips',
-  'Plank', 'Side Plank',
+  'Ring Row', 'Inverted Row', 'Inverted Row (table/ledge)', 'Inverted Row (table edge)', 'TRX Row',
+  // Dips
+  'Dips', 'Bench Dips', 'Tricep Dips', 'Tricep Dips (chair/bench)', 'Tricep Dips (chair)',
+  // Core
+  'Plank', 'Plank Shoulder Taps', 'Side Plank', 'Hollow Hold', 'Dead Bug',
+  'Mountain Climbers', 'Bird Dog', 'Superman', 'L-Sit', 'L Sit',
   'Hanging Leg Raises', 'Hanging Knee Raises',
-  'Hollow Hold', 'L-Sit', 'L Sit',
-  'Mountain Climbers', 'Burpees',
-  'Bodyweight Squats', 'Bodyweight Lunges', 'Walking Lunges',
-  'Glute Bridges', 'Single-Leg Glute Bridge',
-  'Bird Dog', 'Dead Bug', 'Superman',
-]);
+  // Lower body
+  'Bodyweight Squats', 'Jump Squats', 'Pistol Squat (or assisted)',
+  'Bulgarian Split Squat', 'Bulgarian Split Squats',
+  'Walking Lunge', 'Walking Lunges', 'Bodyweight Lunges',
+  'Step-Up', 'Step Up',
+  'Single-Leg Glute Bridge', 'Single Leg Glute Bridge',
+  'Glute Bridges', 'Hip Thrust',
+  'Nordic Hamstring Curl', 'Standing Calf Raise', 'Wall Sit',
+  // Full body
+  'Burpees',
+  // Band exercises (no weight input needed — resistance is the band)
+  'Band Pull-Apart', 'Band Curl', 'Band Row', 'Band Face Pull',
+  'Band Lateral Raise', 'Band Tricep Extension', 'Band Seated Row',
+  'Band Tricep Pushdown',
+];
+// Normalized lookup: lowercase, strip hyphens/parens for fuzzy matching
+const _BW_NORMALIZED = new Set(_BW_EXERCISE_NAMES.map(n => n.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim()));
+const BODYWEIGHT_EXERCISES = new Set(_BW_EXERCISE_NAMES);
 
 function isBodyweightExercise(name, note) {
   if (!name) return false;
   if (BODYWEIGHT_EXERCISES.has(name)) return true;
+  // Normalized fuzzy match (handles hyphens, parens, case differences)
+  var normalized = name.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim();
+  if (_BW_NORMALIZED.has(normalized)) return true;
   // Also detect via note text
   if (note && /\bbodyweight\b|\bBW\b/i.test(note)) return true;
   return false;
@@ -891,12 +911,15 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
       _weightsCache[exName].current = weight;
     }
 
-    // Start rest timer
-    startRestTimer(exIdx, restSec);
-
     // Check if all sets done → mark exercise complete + show RPE
-    const setsMatch = document.querySelectorAll(`[id^="wt-${week}-${dayIdx}-${exIdx}-"]`);
+    // Use reps-* IDs (exist for ALL exercise types including BW — wt-* only exists for weighted)
+    const setsMatch = document.querySelectorAll(`[id^="reps-${week}-${dayIdx}-${exIdx}-"]`);
     const totalSets = setsMatch.length;
+
+    // Start rest timer — but NOT after the last set of an exercise
+    if (setIdx < totalSets - 1) {
+      startRestTimer(exIdx, restSec);
+    }
     let allDone = true;
     for (let s = 0; s < totalSets; s++) {
       const _sd = _setCache[`${week}_${dayIdx}_${exIdx}_${s}`];
@@ -8551,7 +8574,9 @@ async function renderDetail() {
     const setsMatch = (ex.sets || '').match(/^(\d+)x(.+)/);
     const setCount = setsMatch ? parseInt(setsMatch[1]) : 1;
     const targetReps = setsMatch ? setsMatch[2] : ex.sets;
-    const targetRepsDisplay = ex.reps || (setsMatch ? setsMatch[2] : ex.sets);
+    var targetRepsDisplay = ex.reps || (setsMatch ? setsMatch[2] : ex.sets);
+    // "each" is ambiguous — show "per side" so users know it means per leg/arm
+    if (typeof targetRepsDisplay === 'string') targetRepsDisplay = targetRepsDisplay.replace(/\beach\b/gi, 'per side');
     const restSeconds = parseRestSeconds(ex.rest);
     const escapedName = displayName.replace(/'/g, "\\'");
 

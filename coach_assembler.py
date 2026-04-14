@@ -155,12 +155,14 @@ def _build_garmin():
 
 @section_builder("workout_today")
 def _build_workout_today():
-    from workout_data import get_workouts
-    from models import WeeklyPrescription, WeeklyMealPlan, WeeklyRunPlan, WeeklyWarmup
+    from workout_data import get_workouts, get_workouts_for_user
+    from models import WeeklyPrescription, WeeklyMealPlan, WeeklyRunPlan, WeeklyWarmup, PhysicalAssessment
     local_today = _user_today()
     week = _current_week()
     today_idx = local_today.weekday()
-    workouts = get_workouts(week)
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
+    workouts = get_workouts(week) if has_gym else get_workouts_for_user(week, has_gym=False)
     wt = workouts[today_idx] if today_idx < len(workouts) else None
     # Overlay DB prescriptions + apply exercise swaps
     try:

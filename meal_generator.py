@@ -466,8 +466,10 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             shake_name = "Post-Workout Shake"
             if any(f["item"] == "Banana" for f in pw_foods):
                 shake_name += " + Banana"
+            # Place shake at eating window start — not hardcoded 9am which violates fasting
+            shake_time = proto["start"] if proto["fasted_preworkout"] else "9:00am"
             meals.append({
-                "time": "9:00am",
+                "time": shake_time,
                 "name": shake_name,
                 "optional": True,
                 "foods": pw_foods,
