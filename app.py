@@ -6714,17 +6714,17 @@ def api_admin_generate_meals():
 
     generated = 0
     for day_idx, day_data in enumerate(days):
-        # Determine day type for calorie computation
-        cal_day_type = 'moderate'
-        if day_data.get('isRest'):
-            cal_day_type = 'rest'
-        elif day_data.get('run', {}).get('type') == 'hiit':
-            cal_day_type = 'heavy_lift'
-        elif day_data.get('run', {}).get('type') in ('long', 'tempo'):
-            cal_day_type = 'long_run'
+        # Determine day type — use template mealType first, then infer from run/lift
+        template_meal_type = day_data.get('mealType', '')
+        from workout_data import DAY_MEAL_TYPES
+        day_name = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day_idx] if day_idx < 7 else 'Mon'
+        cal_day_type = template_meal_type or DAY_MEAL_TYPES.get(day_name, 'moderate')
+        # Map to calorie computation types
+        _cal_map = {"heavy_lift": "heavy", "long_run": "long_run", "moderate": "training", "fast_day": "fast_day", "rest": "rest", "deload": "rest"}
+        cal_compute_type = _cal_map.get(cal_day_type, "training")
 
         try:
-            day_macros = compute_day_calories(goal.daily_calories, goal.goal_type or 'cut', cal_day_type, weight_lbs=weight)
+            day_macros = compute_day_calories(goal.daily_calories, goal.goal_type or 'cut', cal_compute_type, weight_lbs=weight)
         except Exception:
             day_macros = {"calories": goal.daily_calories, "protein": goal.protein_grams or 200, "carbs": goal.carb_grams or 150, "fat": goal.fat_grams or 60}
 
@@ -6754,9 +6754,13 @@ def api_admin_generate_meals():
             continue
 
         # Save
+        save_day_type = day_meal_type if day_meal_type != 'standard' else cal_day_type
         existing = WeeklyMealPlan.query.filter_by(user_id=user.id, week=week, day_idx=day_idx).first()
         if existing:
             existing.meal_data = meal_plan
+            existing.day_type = save_day_type
+            existing.daily_calories = meal_plan.get('targetCal', 0)
+            existing.daily_protein = meal_plan.get('targetProtein', 0)
         else:
             db.session.add(WeeklyMealPlan(user_id=user.id, week=week, day_idx=day_idx, meal_data=meal_plan))
         generated += 1
