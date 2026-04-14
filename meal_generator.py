@@ -33,22 +33,23 @@ _MEAL_SPLITS = {
     5: [0.25, 0.20, 0.20, 0.20, 0.15],
 }
 
-# Day-type carb/calorie multipliers applied to the user's base targets.
+# Day-type carb multipliers — fat adjusts inversely to keep total calories flat.
+# This implements carb cycling: more carbs on performance days, less on rest days.
 _DAY_MODIFIERS = {
-    "heavy_lift": {"carbs": 1.0, "calories": 1.0},
-    "long_run":   {"carbs": 1.0, "calories": 1.0},
+    "heavy_lift": {"carbs": 1.5, "calories": 1.0},
+    "long_run":   {"carbs": 2.0, "calories": 1.0},
     "moderate":   {"carbs": 1.0, "calories": 1.0},
-    "rest":       {"carbs": 1.0, "calories": 1.0},
-    "deload":     {"carbs": 1.0, "calories": 1.0},
+    "rest":       {"carbs": 0.7, "calories": 1.0},
+    "deload":     {"carbs": 1.2, "calories": 1.0},
 }
 
 # Day-type labels and notes
 _DAY_LABELS = {
-    "heavy_lift": ("Heavy Lift Day", "High protein, moderate carbs. Fuel the recovery from heavy lifting."),
-    "long_run":   ("Long Run Day", "More carbs to fuel the long run and recovery."),
-    "moderate":   ("Moderate Day", "Standard portions, lean protein focus."),
-    "rest":       ("Rest Day", "Lower calories, maintain protein. Recovery focus."),
-    "deload":     ("Deload Day", "Slightly more carbs for recovery and adaptation."),
+    "heavy_lift": ("Heavy Lift Day", "Extra carbs shifted from fat for training fuel. Same total calories."),
+    "long_run":   ("Long Run Day", "Higher carbs for endurance fuel. Fat reduced to keep calories flat."),
+    "moderate":   ("Training Day", "Standard macro split."),
+    "rest":       ("Rest Day", "Lower carbs, higher fat. Recovery focus."),
+    "deload":     ("Deload Day", "Slightly more carbs for recovery."),
 }
 
 # Meal name templates by position
