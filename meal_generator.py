@@ -452,8 +452,9 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             if shake:
                 pw_foods.append(shake)
 
-        # Long run: add banana for quick carbs
-        if day_type == "long_run":
+        # Long run: add banana for quick carbs (only if there's also a shake —
+        # a banana alone doesn't warrant a separate meal, it'll go in meal 1)
+        if day_type == "long_run" and shake_id:
             banana_id = None
             if "banana" in selected_foods.get("carbs", []):
                 banana_id = "banana"
