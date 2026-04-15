@@ -64,6 +64,14 @@ AGENTS = {
             "week_schedule", "next_week", "coach_memories", "user_rules",
         ],
     },
+    "run_complete": {
+        "max_tokens": 400,
+        "temperature": 0.6,
+        "requires": [
+            "base", "chat_history", "workout_today", "runs",
+            "coach_memories", "user_rules",
+        ],
+    },
     "meals_complete": {
         "max_tokens": 200,
         "temperature": 0.6,

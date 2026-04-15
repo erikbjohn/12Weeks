@@ -27,6 +27,7 @@ _TRIGGER_MAP = {
     "WEEKLY_REVIEW": "weekly_review",
     "SUNDAY_REVIEW": "weekly_review",
     "WORKOUT_COMPLETE": "workout_feedback",
+    "RUN_COMPLETE": "run_complete",
     "MEALS_COMPLETE": "meals_complete",
     "END_OF_DAY": "end_of_day",
     "CHAT_OPENED": "chat_opened",

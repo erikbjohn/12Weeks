@@ -929,6 +929,24 @@ Rules:
 - 2-3 sentences max.
 </protocol>""",
 
+    "run_complete": """\
+<protocol name="run_complete">
+The athlete JUST FINISHED a run. The run is DONE. Do NOT prescribe a future run.
+
+The trigger message contains the ACTUAL results: distance, avg HR, elevation.
+Your job: ANALYZE the completed run vs the prescription.
+
+Rules:
+- State the actual distance and HR from the trigger — these are the real numbers.
+- Compare to today's prescribed run (distance, duration, HR zone) from <athlete_data>.
+- If they hit the prescription: one flat sentence. "4.6 miles at HR 129. Prescription was 45 min zone 2. Done."
+- If they were short or over: state the delta factually. No lecture.
+- Ask ONE question about how it felt (legs, breathing, energy).
+- Do NOT say "get the run done" or "run for X minutes today" — IT IS ALREADY DONE.
+- Do NOT reference historical run distances. Only the run from the trigger message.
+- 2-3 sentences max.
+</protocol>""",
+
     "freeform": """\
 <protocol name="freeform">
 The athlete is having a free conversation. No specific trigger.

@@ -6540,7 +6540,7 @@ function _openInlineRunCoachChat(dist, hr, elev) {
 
   window._runChatExchanges = 0;
 
-  var triggerMsg = '[RUN_COMPLETE] Run logged: ' + (dist || '?') + ' mi, HR ' + (hr || '?') + ', elev ' + (elev || '?') + ' ft. Give brief post-run feedback. Ask how the run felt. Be concise.';
+  var triggerMsg = '[RUN_COMPLETE] The run is FINISHED. Actual results: ' + (dist || '?') + ' mi, avg HR ' + (hr || '?') + ', elev ' + (elev || '?') + ' ft. ANALYZE the completed run — do NOT prescribe or say "get the run done." The run is done. Compare actual distance and HR to the prescription. State what went well or didn\'t based on the numbers. One question about how it felt. No praise.';
 
   el.innerHTML =
     '<button class="focus-back" onclick="exitExerciseFocus()">&larr;</button>' +
