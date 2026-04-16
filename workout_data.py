@@ -534,8 +534,10 @@ NAME_ALIASES = {
 }
 
 
-def resolve_name(name):
+def resolve_name(name: str) -> str:
     """Resolve any exercise name variant to the canonical name."""
+    if not name:
+        return ""
     return NAME_ALIASES.get(name, name)
 
 
@@ -1525,15 +1527,15 @@ def get_workouts(week):
     if is_test:
         days = _test_week()
     elif is_deload:
-        days = _deload_week(week)
+        days = _deload_week()
     else:
         phase = get_phase(week)
         if phase == 1:
-            days = _phase1_week(week)
+            days = _phase1_week()
         elif phase == 2:
-            days = _phase2_week(week)
+            days = _phase2_week()
         else:
-            days = _phase3_week(week)
+            days = _phase3_week()
 
     # Inject meal plan and warmup data into each day
     for d in days:
@@ -1638,7 +1640,7 @@ def _run(key):
     return dict(RUNS[key])
 
 
-def _phase1_week(week):
+def _phase1_week():
     return [
         {
             "day": "Mon", "liftName": "Upper A - Chest & Back",
@@ -1692,7 +1694,7 @@ def _phase1_week(week):
     ]
 
 
-def _phase2_week(week):
+def _phase2_week():
     return [
         {
             "day": "Mon", "liftName": "Lower Strength - Squat Focus",
@@ -1746,7 +1748,7 @@ def _phase2_week(week):
     ]
 
 
-def _phase3_week(week):
+def _phase3_week():
     return [
         {
             "day": "Mon", "liftName": "Lower Power - Squat + Jumps",
@@ -1800,7 +1802,7 @@ def _phase3_week(week):
     ]
 
 
-def _deload_week(week):
+def _deload_week():
     return [
         {
             "day": "Mon", "liftName": "Deload - Upper (60% load)",

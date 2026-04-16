@@ -2,7 +2,7 @@
 
 import re
 from datetime import date, datetime, timedelta, timezone
-from models import db, SetLog, MuscleGroupProfile, SessionAnalysis, ExerciseCompletion, AppState
+from models import db, SetLog, MuscleGroupProfile, SessionAnalysis
 
 
 # Exercise → muscle group mapping (pulled from equipment_swaps at runtime)
@@ -50,7 +50,7 @@ def _is_deload(week):
     return week in (4, 8)
 
 
-def _get_progression_increment(exercise_name, muscle_group, is_weak):
+def _get_progression_increment(exercise_name, is_weak):
     """Get the weight increment for progression."""
     if is_weak:
         return 2.5  # Conservative for weak muscle groups
@@ -80,7 +80,7 @@ def _get_configured_reps(exercise_name, week, day_idx):
     return None
 
 
-def _round_weight(weight, exercise_name):
+def _round_weight(weight):
     """Always round UP to the nearest 5 lbs. Never round down — we progress, not regress."""
     if weight <= 0:
         return 0
@@ -148,12 +148,12 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     target_reps_last = getattr(session_sets[0], 'target_reps', None) or avg_reps
     exceeded_reps = avg_reps > target_reps_last + 1 if target_reps_last else False
 
-    inc = _get_progression_increment(exercise_name, muscle_group, is_weak)
+    inc = _get_progression_increment(exercise_name, is_weak)
 
     # ─── SIGNAL 7: DELOAD WEEK ───
     if _is_deload(week):
         return {
-            "target_weight": _round_weight(last_weight * 0.85, exercise_name),
+            "target_weight": _round_weight(last_weight * 0.85),
             "target_reps": last_reps,
             "target_sets": last_set_count,
             "adjustment_reason": "Deload week — 85% weight, recovery focus",
@@ -161,29 +161,36 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         }
 
     # ─── SIGNAL 6: WEAK MUSCLE GROUP ───
-    if is_weak and muscle_group == 'shoulders':
-        # Shoulders: max +2.5/session, 12-15 rep range, need 3 good sessions
+    # Any muscle marked weak (user-flagged or relative_strength weak/very_weak) gets
+    # conservative progression: +2.5 lb only after 3 clean sessions. Shoulders additionally
+    # cap reps at 12-15 because high-rep shoulder work protects the joint.
+    if is_weak:
         good_sessions = _count_consecutive_good_sessions(user_id, exercise_name)
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        if muscle_group == 'shoulders':
+            target_reps = min(max(last_reps, 12), 15)
+        else:
+            target_reps = configured_reps or last_reps or {1: 10, 2: 6, 3: 4}.get(phase, 10)
         if good_sessions >= 3:
-            new_weight = _round_weight(last_weight + 2.5, exercise_name)
+            new_weight = _round_weight(last_weight + 2.5)
             return {
                 "target_weight": new_weight,
-                "target_reps": min(max(last_reps, 12), 15),
+                "target_reps": target_reps,
                 "target_sets": last_set_count,
-                "adjustment_reason": f"3 good sessions — +2.5 lb (shoulder: conservative)",
+                "adjustment_reason": f"3 good sessions — +2.5 lb ({muscle_group}: conservative)",
                 "progression_indicator": "up",
             }
         return {
-            "target_weight": _round_weight(last_weight, exercise_name),
-            "target_reps": min(max(last_reps, 12), 15),
+            "target_weight": _round_weight(last_weight),
+            "target_reps": target_reps,
             "target_sets": last_set_count,
-            "adjustment_reason": f"Shoulder work — holding ({good_sessions}/3 good sessions for increase)",
+            "adjustment_reason": f"{muscle_group.capitalize()} weak — holding ({good_sessions}/3 good sessions for increase)",
             "progression_indicator": "weak",
         }
 
     # ─── SIGNAL 2: USER INCREASED WEIGHT ───
     if user_increased:
-        new_weight = _round_weight(last_weight + inc * 2, exercise_name)
+        new_weight = _round_weight(last_weight + inc * 2)
         return {
             "target_weight": new_weight,
             "target_reps": last_reps,
@@ -195,7 +202,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     # ─── SIGNAL 3: USER DECREASED ───
     if user_decreased:
         return {
-            "target_weight": _round_weight(last_weight, exercise_name),
+            "target_weight": _round_weight(last_weight),
             "target_reps": last_reps,
             "target_sets": last_set_count,
             "adjustment_reason": "Reduced last session — holding weight",
@@ -211,7 +218,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
 
     # ─── SIGNAL 5: EXCEEDED REPS ───
     if exceeded_reps:
-        new_weight = _round_weight(last_weight + inc, exercise_name)
+        new_weight = _round_weight(last_weight + inc)
         result = {
             "target_weight": new_weight,
             "target_reps": {1: 10, 2: 6, 3: 4}.get(phase, 10),
@@ -230,7 +237,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         configured_reps = _get_configured_reps(exercise_name, week, day_idx)
         phase_max_reps = configured_reps if configured_reps else 15
         if avg_reps >= phase_max_reps:
-            new_weight = _round_weight(last_weight + inc, exercise_name)
+            new_weight = _round_weight(last_weight + inc)
             result = {
                 "target_weight": new_weight,
                 "target_reps": configured_reps or 10,
@@ -243,7 +250,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
             return result
         target = min(int(avg_reps) + 2, phase_max_reps)
         result = {
-            "target_weight": _round_weight(last_weight, exercise_name),
+            "target_weight": _round_weight(last_weight),
             "target_reps": target,
             "target_sets": last_set_count,
             "adjustment_reason": f"Building reps: {int(avg_reps)} → {target}",
@@ -255,7 +262,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
 
     elif phase == 2:
         # Strength: increase weight every 1-2 sessions
-        new_weight = _round_weight(last_weight + inc, exercise_name)
+        new_weight = _round_weight(last_weight + inc)
         result = {
             "target_weight": new_weight,
             "target_reps": max(6, last_reps),
@@ -269,7 +276,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
 
     else:  # Phase 3
         # Power: aggressive increases
-        new_weight = _round_weight(last_weight + inc, exercise_name)
+        new_weight = _round_weight(last_weight + inc)
         result = {
             "target_weight": new_weight,
             "target_reps": max(4, last_reps),
@@ -357,9 +364,13 @@ def compute_muscle_strength(user_id):
             profile = MuscleGroupProfile(user_id=user_id, muscle_group=mg)
             db.session.add(profile)
 
-        # Don't override user_flagged_weak
         profile.strength_score = round(avg_score, 2)
         if not profile.user_flagged_weak:
+            profile.relative_strength = rel
+        elif avg_score >= 1.0 and len(scores) >= 6:
+            # Auto-clear the flag once the user is meeting/beating targets with enough data.
+            # 6 scored sets in a 14-day window = at least two solid sessions of sustained performance.
+            profile.user_flagged_weak = False
             profile.relative_strength = rel
         profile.last_updated = datetime.now(timezone.utc)
 

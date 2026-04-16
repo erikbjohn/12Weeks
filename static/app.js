@@ -9450,14 +9450,13 @@ async function renderDetail() {
     if (isSwapped && suggestion.weight == null) {
       var origSuggestion = getWeightForExercise(ex.name, currentWeek);
       if (origSuggestion.weight != null) {
+        // Mirrors equipment_swaps.scale_for_swap() — keep in sync.
         var origLower = ex.name.toLowerCase();
         var swapLower = displayName.toLowerCase();
+        var toDB = swapLower.includes('dumbbell') || swapLower.includes('db ');
         var scale = 1.0;
-        // Cable/machine → dumbbell: ~50% (cable has constant tension, DB is harder)
-        if ((origLower.includes('cable') || origLower.includes('machine')) && (swapLower.includes('dumbbell') || swapLower.includes('db '))) scale = 0.5;
-        // Barbell → dumbbell: ~70% (barbell is bilateral, DB is unilateral)
-        else if (origLower.includes('barbell') && (swapLower.includes('dumbbell') || swapLower.includes('db '))) scale = 0.7;
-        // Cable/machine → barbell: ~80%
+        if ((origLower.includes('cable') || origLower.includes('machine')) && toDB) scale = 0.5;
+        else if (origLower.includes('barbell') && toDB) scale = 0.7;
         else if ((origLower.includes('cable') || origLower.includes('machine')) && origLower !== swapLower) scale = 0.8;
         suggestion = { weight: roundWeight(origSuggestion.weight * scale, displayName), reason: 'estimated from ' + ex.name };
       }

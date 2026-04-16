@@ -1,5 +1,29 @@
 """Equipment catalog and exercise swap map for the 12Weeks program."""
 
+
+def scale_for_swap(from_exercise_name, to_exercise_name):
+    """Scale factor for transferring a weight between equipment types.
+
+    A cable pushdown at 60 lb is not a dumbbell overhead extension at 60 lb — cables
+    give constant tension, barbells distribute load bilaterally, dumbbells force each
+    side to stabilize. Returns 1.0 when the swap is between equivalent equipment or
+    cannot be classified. Mirrored in static/app.js; keep the two in sync.
+    """
+    if not from_exercise_name or not to_exercise_name:
+        return 1.0
+    orig = from_exercise_name.lower()
+    swap = to_exercise_name.lower()
+    if orig == swap:
+        return 1.0
+    to_db = 'dumbbell' in swap or 'db ' in swap
+    if ('cable' in orig or 'machine' in orig) and to_db:
+        return 0.5
+    if 'barbell' in orig and to_db:
+        return 0.7
+    if 'cable' in orig or 'machine' in orig:
+        return 0.8
+    return 1.0
+
 EQUIPMENT_CATALOG = {
     "free_weights": {
         "label": "Free Weights",
