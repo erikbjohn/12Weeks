@@ -48,45 +48,47 @@ let _milestonesShownThisSession = new Set();
 
 const WEEK_TO_PHASE = {1:1,2:1,3:1,4:1,5:2,6:2,7:2,8:2,9:3,10:3,11:3,12:3};
 
-const _BW_EXERCISE_NAMES = [
-  // Push variants
+// ALWAYS bodyweight — no weight input regardless of gym access
+const _BW_ALWAYS = [
   'Push-Ups', 'Push-ups', 'Push Ups', 'Pushups',
   'Decline Push-Ups', 'Pike Push-Ups', 'Diamond Push-Ups', 'Clap Push-Ups',
-  // Pull variants
   'Pull-Ups', 'Pull-ups', 'Pull Ups', 'Chin-Ups', 'Chin-ups',
   'Ring Row', 'Inverted Row', 'Inverted Row (table/ledge)', 'Inverted Row (table edge)', 'TRX Row',
-  // Dips
   'Dips', 'Bench Dips', 'Tricep Dips', 'Tricep Dips (chair/bench)', 'Tricep Dips (chair)',
-  // Core
   'Plank', 'Plank Shoulder Taps', 'Side Plank', 'Hollow Hold', 'Dead Bug',
   'Mountain Climbers', 'Bird Dog', 'Superman', 'L-Sit', 'L Sit',
   'Hanging Leg Raises', 'Hanging Knee Raises',
-  // Lower body
   'Bodyweight Squats', 'Jump Squats', 'Pistol Squat (or assisted)',
-  'Bulgarian Split Squat', 'Bulgarian Split Squats',
-  'Walking Lunge', 'Walking Lunges', 'Bodyweight Lunges',
-  'Step-Up', 'Step Up',
-  'Single-Leg Glute Bridge', 'Single Leg Glute Bridge',
-  'Glute Bridges', 'Hip Thrust',
-  'Nordic Hamstring Curl', 'Standing Calf Raise', 'Wall Sit',
-  // Full body
-  'Burpees',
-  // Band exercises (no weight input needed — resistance is the band)
+  'Bodyweight Lunges', 'Glute Bridges', 'Wall Sit', 'Burpees',
   'Band Pull-Apart', 'Band Curl', 'Band Row', 'Band Face Pull',
   'Band Lateral Raise', 'Band Tricep Extension', 'Band Seated Row',
   'Band Tricep Pushdown',
 ];
-// Normalized lookup: lowercase, strip hyphens/parens for fuzzy matching
-const _BW_NORMALIZED = new Set(_BW_EXERCISE_NAMES.map(n => n.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim()));
-const BODYWEIGHT_EXERCISES = new Set(_BW_EXERCISE_NAMES);
+// BW ONLY when user has no gym — gym users get weight inputs for these
+const _BW_NO_GYM_ONLY = [
+  'Bulgarian Split Squat', 'Bulgarian Split Squats',
+  'Walking Lunge', 'Walking Lunges',
+  'Step-Up', 'Step Up',
+  'Single-Leg Glute Bridge', 'Single Leg Glute Bridge',
+  'Hip Thrust', 'Nordic Hamstring Curl', 'Standing Calf Raise',
+];
+const _BW_ALWAYS_NORM = new Set(_BW_ALWAYS.map(n => n.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim()));
+const _BW_NOGYM_NORM = new Set(_BW_NO_GYM_ONLY.map(n => n.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim()));
+const BODYWEIGHT_EXERCISES = new Set(_BW_ALWAYS); // legacy compat
 
 function isBodyweightExercise(name, note) {
   if (!name) return false;
-  if (BODYWEIGHT_EXERCISES.has(name)) return true;
-  // Normalized fuzzy match (handles hyphens, parens, case differences)
   var normalized = name.toLowerCase().replace(/[-()\/]/g, '').replace(/\s+/g, ' ').trim();
-  if (_BW_NORMALIZED.has(normalized)) return true;
-  // Also detect via note text
+  // Always BW regardless of gym
+  if (_BW_ALWAYS_NORM.has(normalized)) return true;
+  // BW only for no-gym users
+  if (_BW_NOGYM_NORM.has(normalized)) {
+    var bwOnly = sessionStorage.getItem('bw_only_mode') === 'true';
+    var pa = window._paCache || {};
+    var hasGym = pa.has_gym !== false && !bwOnly;
+    if (!hasGym) return true;
+    return false; // gym user — show weight input
+  }
   if (note && /\bbodyweight\b|\bBW\b/i.test(note)) return true;
   return false;
 }
@@ -4455,7 +4457,7 @@ async function safeFetch(url, fallback) {
 document.addEventListener('DOMContentLoaded', async () => {
   // Fetch all data in parallel — each fetch is independent, failures don't block others
   try {
-    const [stateW, weightsW, compW, suppW, bwW, workoutW, mealsW] = await Promise.all([
+    const [stateW, weightsW, compW, suppW, bwW, workoutW, mealsW, paW] = await Promise.all([
       safeFetch('/api/state', { current_week: 1, baseline_done: false }),
       safeFetch('/api/weights', {}),
       safeFetch('/api/completions', { exercises: {}, days: {} }),
@@ -4463,6 +4465,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       safeFetch('/api/bodyweight', []),
       safeFetch('/api/workouts', {}),
       safeFetch('/api/meals?date=' + todayStr(), {}),
+      safeFetch('/api/physical-assessment/status', {}),
     ]);
 
     if (stateW._status === 401) {
@@ -4491,6 +4494,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     workoutData = workoutW.data;
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
+    window._paCache = paW.data || {};
 
     if (mealsW.data && Object.keys(mealsW.data).length > 0) {
       _mealsCache[todayStr()] = mealsW.data;
