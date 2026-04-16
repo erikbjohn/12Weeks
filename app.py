@@ -867,11 +867,22 @@ def _generate_run_plan(user_id, week, day_idx, template_run):
     else:
         new_minutes = base_minutes
 
+    # Generate detail text that matches the actual progressed duration
+    detail = template_run.get('detail', '')
+    if new_minutes != base_minutes and base_type in ('z2', 'long', 'tempo'):
+        if base_type == 'tempo':
+            warmup = 5
+            cooldown = 5
+            tempo_portion = max(new_minutes - warmup - cooldown, 10)
+            detail = f"HR 155-165. {warmup} min easy warmup, {tempo_portion} min at tempo, {cooldown} min cooldown."
+        elif base_type in ('z2', 'long'):
+            detail = f"HR 130-145. Easy conversational pace. {new_minutes} minutes total."
+
     return {
         'type': base_type,
         'label': template_run.get('label', 'Run'),
         'time': f"{new_minutes} min" if base_type != 'min' else base_time,
-        'detail': template_run.get('detail', ''),
+        'detail': detail,
     }
 
 
