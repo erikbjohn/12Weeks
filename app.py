@@ -6234,6 +6234,60 @@ def api_goal_compute():
     return jsonify(result), status
 
 
+@app.route("/api/admin/set-goal-target", methods=["POST"])
+@admin_required
+def api_admin_set_goal_target():
+    """Directly set a user's target_weight / goal_type / target_bf. Admin-only.
+
+    Bypasses the compute pipeline. Recomputes macros using the stored TDEE and
+    the new target_weight; leaves tdee/phase_plan/projection untouched.
+    """
+    from goal_engine import compute_targets
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    if not goal:
+        return jsonify({"error": "User has no training goal to update"}), 400
+
+    bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
+    current_weight = bw.weight_lbs if bw else (goal.target_weight + 10)
+
+    if "target_weight" in data:
+        goal.target_weight = float(data["target_weight"])
+    if "goal_type" in data and data["goal_type"] in ("cut", "bulk", "recomp"):
+        goal.goal_type = data["goal_type"]
+    if "target_bf" in data:
+        goal.target_bf_pct = float(data["target_bf"])
+
+    if goal.tdee and goal.goal_type and current_weight:
+        targets = compute_targets(goal.tdee, goal.goal_type, current_weight,
+                                  target_weight=goal.target_weight,
+                                  weeks=max(1, 12 - _current_week() + 1))
+        goal.daily_calories = targets["calories"]
+        goal.protein_grams = targets["protein"]
+        goal.carb_grams = targets["carbs"]
+        goal.fat_grams = targets["fat"]
+
+    db.session.commit()
+    return jsonify({
+        "ok": True,
+        "email": user.email,
+        "current_weight": current_weight,
+        "target_weight": goal.target_weight,
+        "goal_type": goal.goal_type,
+        "target_bf_pct": goal.target_bf_pct,
+        "calories": goal.daily_calories,
+        "protein": goal.protein_grams,
+        "carbs": goal.carb_grams,
+        "fat": goal.fat_grams,
+    })
+
+
 @app.route("/api/admin/recompute-goal", methods=["POST"])
 @admin_required
 def api_admin_recompute_goal():
