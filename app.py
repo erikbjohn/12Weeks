@@ -6055,7 +6055,7 @@ def api_goal_compute():
 
     # *** SAFETY: Weight-based goal override ***
     # A lightweight person should NEVER be on a cut — they need to build, not lose.
-    # BMI-based thresholds (rough): underweight < 18.5, normal 18.5-25
+    # BMI-based thresholds (rough): underweight < 18.5, normal 18.5-25, overweight >= 25
     bmi = (weight / (height * height)) * 703 if height > 0 else 22
     if sex == "male":
         if weight < 150 and goal_type == "cut":
@@ -6072,13 +6072,35 @@ def api_goal_compute():
             goal_type = "recomp"
             target_bf = 0.19
 
+    # *** SAFETY: Overweight lock — BMI >= 25 forces cut, regardless of actor/intake ***
+    # An overweight person must never be prescribed a bulk or a weight gain,
+    # even if their actor pick maps to bulk or if weight-lookup lean-mass inflates target.
+    # Minors are exempt (growth > composition; handled by is_minor branch below).
+    is_overweight = (bmi >= 25) and not is_minor
+    if is_overweight and goal_type == "bulk":
+        goal_type = "cut"
+        target_bf = 0.08 if sex == "male" else 0.16
+
     tdee_info = compute_tdee(weight, height, age, sex)
 
-    # Compute target weight from body fat
-    if sex == "male":
-        est_bf = 0.12 if weight < 150 else 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
-    else:
-        est_bf = 0.20 if weight < 130 else 0.22 if weight < 150 else 0.28 if weight < 180 else 0.33
+    # Prefer real navy body fat from tape measurements; fall back to weight-bucket estimate
+    est_bf = None
+    if pa and pa.waist_inches and pa.neck_inches:
+        try:
+            from body_stats import estimate_body_fat_navy
+            navy_bf = estimate_body_fat_navy(
+                pa.waist_inches, pa.neck_inches, height, sex,
+                hips=pa.hips_inches,
+            )
+            if navy_bf and 0.05 <= navy_bf <= 0.60:
+                est_bf = navy_bf
+        except Exception:
+            est_bf = None
+    if est_bf is None:
+        if sex == "male":
+            est_bf = 0.12 if weight < 150 else 0.15 if weight < 180 else 0.20 if weight < 220 else 0.25
+        else:
+            est_bf = 0.20 if weight < 130 else 0.22 if weight < 150 else 0.28 if weight < 180 else 0.33
     lean_mass = weight * (1 - est_bf)
     target_weight = lean_mass / (1 - target_bf)
 
@@ -6090,9 +6112,15 @@ def api_goal_compute():
     if is_minor:
         target_weight = max(target_weight, weight + 5)
 
-    # For bulk: target above current
-    if goal_type == "bulk":
+    # For bulk: target above current — BUT only if not overweight
+    if goal_type == "bulk" and not is_overweight:
         target_weight = max(target_weight, weight + 10)
+
+    # *** Overweight ceiling — never prescribe a weight gain to someone with BMI >= 25 ***
+    # Caps target at current weight; lean-mass inflation from underestimated BF can't
+    # push target above current for overweight users.
+    if is_overweight:
+        target_weight = min(target_weight, weight)
 
     _weeks_remaining = max(1, 12 - _current_week() + 1)
     targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age,
