@@ -163,6 +163,7 @@ with app.app_context():
         ("physical_assessment", "thigh_inches", "FLOAT"),
         ("physical_assessment", "hips_inches", "FLOAT"),
         ("physical_assessment", "neck_inches", "FLOAT"),
+        ("physical_assessment", "burpee_count", "INTEGER"),
         ("training_goal", "target_bf_pct", "FLOAT"),
         ("training_goal", "fasting_protocol", "VARCHAR(20)"),
         ("training_goal", "electrolyte_supplementation", "BOOLEAN"),
@@ -1206,7 +1207,7 @@ def verify_email(token):
 _invite_attempts = {}  # IP -> (count, timestamp)
 
 
-@app.route("/invite/<code>")
+@app.route("/invite/<code>", methods=["GET", "POST"])
 def accept_invite(code):
     ip = request.remote_addr
     now = time.time()
@@ -1223,9 +1224,78 @@ def accept_invite(code):
     if invite.used_by and not invite.multi_use:
         flash("This invite has already been used.", "error")
         return redirect(url_for("login"))
-    session["invite_code"] = code
-    flash("You've been invited! Create your account.", "success")
-    return redirect(url_for("login", mode="signup"))
+
+    # Multi-use invites (no email attached) still go through the old signup form
+    recipient_email = (invite.email_sent_to or "").strip().lower()
+    if not recipient_email:
+        session["invite_code"] = code
+        flash("You've been invited! Create your account.", "success")
+        return redirect(url_for("login", mode="signup"))
+
+    existing = User.query.filter_by(email=recipient_email).first()
+
+    # Already has a password → just send to login
+    if request.method == "GET" and existing and existing.password_hash:
+        flash("You already have an account — log in with your password.", "success")
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        if request.form.get("csrf_token") != session.get("_csrf_token"):
+            flash("Invalid request. Please try again.", "error")
+            return redirect(url_for("accept_invite", code=code))
+
+        password = request.form.get("password", "")
+        confirm = request.form.get("password_confirm", "")
+        name = (request.form.get("name", "") or "").strip()
+
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+            return redirect(url_for("accept_invite", code=code))
+        if password != confirm:
+            flash("Passwords do not match.", "error")
+            return redirect(url_for("accept_invite", code=code))
+
+        if existing:
+            # Attach password to pre-existing row (e.g. Google-only account)
+            existing.password_hash = generate_password_hash(password)
+            if name and not existing.name:
+                existing.name = name
+            existing.email_verified = True
+            user = existing
+        else:
+            role = _determine_role(recipient_email)
+            user = User(
+                email=recipient_email,
+                name=name or recipient_email.split("@")[0],
+                password_hash=generate_password_hash(password),
+                role=role,
+                email_verified=True,
+                invites_remaining=3,
+                invited_by=invite.created_by,
+            )
+            db.session.add(user)
+
+        db.session.commit()
+
+        if not invite.multi_use:
+            invite.used_by = user.id
+            invite.used_at = datetime.now(timezone.utc)
+            db.session.commit()
+
+        user.last_login_at = datetime.now(timezone.utc)
+        db.session.commit()
+        login_user(user, remember=True)
+        return redirect("/")
+
+    is_existing_no_password = bool(existing and not existing.password_hash)
+    suggested_name = (existing.name if existing else "") or ""
+    return render_template(
+        "invite.html",
+        invite_code=code,
+        email=recipient_email,
+        suggested_name=suggested_name,
+        is_existing=is_existing_no_password,
+    )
 
 
 @app.route("/api/invite", methods=["POST"])
@@ -6826,6 +6896,8 @@ def api_physical_assessment_save():
         pa.plank_seconds = data["plank_seconds"]
     if "squat_count" in data:
         pa.squat_count = data["squat_count"]
+    if "burpee_count" in data:
+        pa.burpee_count = data["burpee_count"]
     if "lunge_count_per_leg" in data:
         pa.lunge_count_per_leg = data["lunge_count_per_leg"]
     if "pullup_count" in data:

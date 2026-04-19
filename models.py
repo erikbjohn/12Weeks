@@ -362,12 +362,13 @@ class PhysicalAssessment(db.Model):
     hips_inches = db.Column(db.Float, nullable=True)
     neck_inches = db.Column(db.Float, nullable=True)
     # Bodyweight assessment (for no-gym users)
-    pushup_count = db.Column(db.Integer, nullable=True)  # full pushups
+    pushup_count = db.Column(db.Integer, nullable=True)  # 60-second count
     pushup_from_knees = db.Column(db.Boolean, default=False)
-    plank_seconds = db.Column(db.Integer, nullable=True)
-    squat_count = db.Column(db.Integer, nullable=True)  # bodyweight squats
-    lunge_count_per_leg = db.Column(db.Integer, nullable=True)
-    pullup_count = db.Column(db.Integer, nullable=True)  # 0 if can't
+    plank_seconds = db.Column(db.Integer, nullable=True)  # max hold
+    squat_count = db.Column(db.Integer, nullable=True)  # air squats in 60s
+    burpee_count = db.Column(db.Integer, nullable=True)  # 60-second count
+    lunge_count_per_leg = db.Column(db.Integer, nullable=True)  # legacy, no longer collected
+    pullup_count = db.Column(db.Integer, nullable=True)  # legacy, no longer collected
     # Gym baseline (for gym users) stored in ExerciseLog, just flag here
     gym_baseline_done = db.Column(db.Boolean, default=False)
     actual_bmr = db.Column(db.Float)  # Computed from actual weight loss data, overrides Mifflin-St Jeor

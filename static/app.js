@@ -2643,10 +2643,47 @@ function renderPhysicalAssessment() {
   }
 
   if (_paStep === 1) {
-    // Step 2: Measurements
-    const tapeRows = _paData.has_tape ? `
-        <div class="pa-measure-section-label">Tape Measurements</div>
-        <div class="pa-measure-hint">Measure relaxed, standing straight, tape flat against skin. Don't suck in.</div>
+    // Step 2: Weight + height only (tape measurements moved to step 3, after BW tests)
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Body Weight &amp; Height</h2>
+        <div class="baseline-desc" style="margin-bottom:1rem">Starting numbers. Day 1 benchmarks.</div>
+
+        <div class="pa-measure-row">
+          <label>Body Weight (lbs)</label>
+          <input type="number" inputmode="decimal" id="pa-weight" placeholder="e.g. 185" step="0.1" min="50" max="500" value="${_paData.weight || ''}">
+        </div>
+        <div class="pa-measure-row">
+          <label>Height (inches)</label>
+          <input type="number" inputmode="decimal" id="pa-height" placeholder="e.g. 70 (5'10 = 70)" step="0.1" min="48" max="96" value="${_paData.height || ''}">
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromBasics()">Next</button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  if (_paStep === 2) {
+    // Step 3: Bodyweight tests (universal — both gym and no-gym users)
+    _bwBaselineStep = 0;
+    _bwBaselineData = {};
+    renderBodyweightBaseline();
+    return;
+  }
+
+  if (_paStep === 3) {
+    // Step 4: Tape measurements (conditional on has_tape) — the LAST step
+    if (!_paData.has_tape) {
+      // Skip directly to completion if no tape
+      completePhysicalAssessment();
+      return;
+    }
+    el.innerHTML = `<div class="baseline-overlay">
+      <div class="baseline-card">
+        <h2>Tape Measurements</h2>
+        <div class="baseline-desc" style="margin-bottom:0.5rem">Final step. Measure relaxed, standing straight, tape flat against skin. Don't suck in.</div>
+
         <div class="pa-measure-row">
           <label>Waist — narrowest point above hip bones (inches)</label>
           <input type="number" inputmode="decimal" id="pa-waist" placeholder="e.g. 34" step="0.25" min="15" max="80" value="${_paData.waist || ''}">
@@ -2670,38 +2707,12 @@ function renderPhysicalAssessment() {
         <div class="pa-measure-row">
           <label>Neck — around Adam's apple (inches)</label>
           <input type="number" inputmode="decimal" id="pa-neck" placeholder="e.g. 16" step="0.25" min="8" max="30" value="${_paData.neck || ''}">
-        </div>` : '';
-
-    el.innerHTML = `<div class="baseline-overlay">
-      <div class="baseline-card">
-        <h2>Body Measurements</h2>
-        <div class="baseline-desc" style="margin-bottom:1rem">Let's get your starting numbers. These are your Day 1 benchmarks.</div>
-
-        <div class="pa-measure-row">
-          <label>Body Weight (lbs)</label>
-          <input type="number" inputmode="decimal" id="pa-weight" placeholder="e.g. 185" step="0.1" min="50" max="500" value="${_paData.weight || ''}">
         </div>
-        <div class="pa-measure-row">
-          <label>Height (inches)</label>
-          <input type="number" inputmode="decimal" id="pa-height" placeholder="e.g. 70 (5'10 = 70)" step="0.1" min="48" max="96" value="${_paData.height || ''}">
-        </div>
-        ${tapeRows}
 
-        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromMeasurements()">Next</button>
+        <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="paNextFromTape()">Finish</button>
       </div>
     </div>`;
     return;
-  }
-
-  if (_paStep === 2) {
-    // Step 3: Route to gym or bodyweight baseline
-    if (_paData.has_gym) {
-      showBaseline();
-    } else {
-      _bwBaselineStep = 0;
-      _bwBaselineData = {};
-      renderBodyweightBaseline();
-    }
   }
 }
 
@@ -2731,11 +2742,35 @@ async function paNextFromQuestions() {
   renderPhysicalAssessment();
 }
 
-async function paNextFromMeasurements() {
+async function paNextFromBasics() {
   const getVal = (id) => { const el = document.getElementById(id); return el ? parseFloat(el.value) || null : null; };
 
   _paData.weight = getVal('pa-weight');
   _paData.height = getVal('pa-height');
+
+  if (!_paData.weight || !_paData.height) {
+    alert('Please enter both weight and height to continue.');
+    return;
+  }
+
+  const payload = { bodyweight: _paData.weight, height: _paData.height };
+  await apiPost('/api/physical-assessment', payload);
+
+  const bwRes = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
+  if (!bwRes.ok) {
+    alert('Failed to save body weight. Please try again.');
+    return;
+  }
+  if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
+  _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
+
+  _paStep = 2;
+  renderPhysicalAssessment();
+}
+
+async function paNextFromTape() {
+  const getVal = (id) => { const el = document.getElementById(id); return el ? parseFloat(el.value) || null : null; };
+
   _paData.waist = getVal('pa-waist');
   _paData.chest = getVal('pa-chest');
   _paData.bicep = getVal('pa-bicep');
@@ -2743,69 +2778,74 @@ async function paNextFromMeasurements() {
   _paData.hips = getVal('pa-hips');
   _paData.neck = getVal('pa-neck');
 
-  // Save measurements
   const payload = {};
-  if (_paData.weight) payload.bodyweight = _paData.weight;
-  if (_paData.height) payload.height = _paData.height;
   if (_paData.waist) payload.waist = _paData.waist;
   if (_paData.chest) payload.chest = _paData.chest;
   if (_paData.bicep) payload.bicep = _paData.bicep;
   if (_paData.thigh) payload.thigh = _paData.thigh;
   if (_paData.hips) payload.hips = _paData.hips;
   if (_paData.neck) payload.neck = _paData.neck;
-  // Await BOTH saves so weight is in the DB before goal computation runs
-  await apiPost('/api/physical-assessment', payload);
-
-  if (_paData.weight) {
-    const bwRes = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
-    if (!bwRes.ok) {
-      alert('Failed to save body weight. Please try again.');
-      return;
-    }
-    if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
-    _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
+  if (Object.keys(payload).length) {
+    await apiPost('/api/physical-assessment', payload);
   }
 
-  _paStep = 2;
-  renderPhysicalAssessment();
+  await completePhysicalAssessment();
+}
+
+async function completePhysicalAssessment() {
+  await apiPost('/api/physical-assessment', { completed: true });
+  _stateCache.baseline_done = true;
+  await apiPost('/api/state', { baseline_done: true });
+  showEquipmentSelection();
 }
 
 // ─── BODYWEIGHT BASELINE FLOW ──────────────────────────────────────────────
+// Universal timed bodyweight assessment. 60-second rep tests + plank hold.
 const BW_BASELINE_EXERCISES = [
+  {
+    key: 'squats',
+    name: 'Air Squats',
+    hint: 'Full depth, heels on the ground. Count every rep you complete in 60 seconds.',
+    mode: 'timed_reps',
+    duration: 60,
+  },
   {
     key: 'pushups',
     name: 'Pushups',
-    hint: 'Do as many pushups as you can with good form. If you can\'t do a full pushup, do them from your knees.',
-    inputLabel: 'Reps',
+    hint: 'Good form — chest to the floor. Count every rep in 60 seconds. If you can only do them from your knees, check the box.',
+    mode: 'timed_reps',
+    duration: 60,
     hasKneesCheckbox: true,
+  },
+  {
+    key: 'burpees',
+    name: 'Burpees',
+    hint: 'Squat, kick out, pushup, jump back, stand up, jump. Count every full rep in 60 seconds.',
+    mode: 'timed_reps',
+    duration: 60,
   },
   {
     key: 'plank',
     name: 'Plank Hold',
-    hint: 'Hold a plank as long as you can. Time yourself.',
-    inputLabel: 'Seconds',
-  },
-  {
-    key: 'squats',
-    name: 'Bodyweight Squats',
-    hint: 'Do as many bodyweight squats as you can. Full depth, heels on the ground.',
-    inputLabel: 'Reps',
-  },
-  {
-    key: 'lunges',
-    name: 'Lunges',
-    hint: 'Do as many walking lunges as you can per leg.',
-    inputLabel: 'Per leg',
-  },
-  {
-    key: 'pullups',
-    name: 'Pull-ups',
-    hint: 'If you have access to a bar, how many pull-ups can you do? Enter 0 if none or no bar available.',
-    inputLabel: 'Reps',
+    hint: 'Forearms down, body straight, core engaged. Start the timer and stop when you can\'t hold the line.',
+    mode: 'stopwatch',
   },
 ];
 
+let _bwTimerHandle = null;
+let _bwTimerStartMs = 0;
+let _bwTimerPhase = 'idle';  // 'idle' | 'running' | 'finished'
+let _bwTimerElapsed = 0;      // seconds (for plank)
+
+function _bwClearTimer() {
+  if (_bwTimerHandle) { clearInterval(_bwTimerHandle); _bwTimerHandle = null; }
+}
+
 function renderBodyweightBaseline() {
+  _bwClearTimer();
+  _bwTimerPhase = 'idle';
+  _bwTimerElapsed = 0;
+
   const el = document.getElementById('baseline-overlay');
   const total = BW_BASELINE_EXERCISES.length;
 
@@ -2819,10 +2859,14 @@ function renderBodyweightBaseline() {
       dots += '<div class="bp-dot ' + cls + '"></div>';
     }
 
-    const checkboxHtml = ex.hasKneesCheckbox ? `<div class="bw-assess-checkbox">
+    const checkboxHtml = ex.hasKneesCheckbox ? `<div class="bw-assess-checkbox" style="margin-top:12px">
         <input type="checkbox" id="bw-knees" ${existing.from_knees ? 'checked' : ''}>
         <label for="bw-knees">These were from my knees</label>
       </div>` : '';
+
+    const initialTimerText = ex.mode === 'timed_reps' ? `0:${String(ex.duration).padStart(2,'0')}` : '0:00';
+    const startLabel = ex.mode === 'timed_reps' ? `Start ${ex.duration}s Timer` : 'Start';
+    const inputLabel = ex.mode === 'timed_reps' ? `Reps completed (${ex.duration}s)` : 'Seconds held';
 
     el.innerHTML = `<div class="baseline-overlay">
       <div class="baseline-card bw-assess-card">
@@ -2830,19 +2874,25 @@ function renderBodyweightBaseline() {
         <div class="baseline-progress-text">${_bwBaselineStep + 1} / ${total}</div>
         <div class="bw-assess-exercise">${ex.name}</div>
         <div class="bw-assess-hint">${ex.hint}</div>
-        <div class="bw-assess-input">
-          <label>${ex.inputLabel}</label>
-          <input type="number" inputmode="numeric" id="bw-input" value="${existing.value || ''}" placeholder="0" min="0">
+
+        <div id="bw-timer-display" style="font-family:'DM Mono',monospace;font-size:3rem;text-align:center;margin:1rem 0;letter-spacing:0.05em;color:#4ade80">${initialTimerText}</div>
+
+        <div id="bw-timer-controls" style="display:flex;gap:8px;margin-bottom:1rem">
+          <button class="btn btn-primary" style="flex:1" id="bw-timer-start" onclick="bwTimerStart()">${startLabel}</button>
+          ${ex.mode === 'stopwatch' ? '<button class="btn btn-secondary" id="bw-timer-stop" onclick="bwTimerStop()" style="display:none;flex:1">Stop</button>' : ''}
         </div>
-        ${checkboxHtml}
-        <div style="display:flex;gap:8px">
-          ${_bwBaselineStep > 0 ? '<button class="btn btn-secondary" onclick="bwBaselineBack()">Back</button>' : ''}
-          <button class="btn btn-primary" style="flex:1" onclick="bwBaselineNext()">${_bwBaselineStep === total - 1 ? 'See My Results' : 'Next \u2192'}</button>
+
+        <div id="bw-assess-input-wrap" style="${existing.value ? '' : 'display:none'}">
+          <label>${inputLabel}</label>
+          <input type="number" inputmode="numeric" id="bw-input" value="${existing.value || ''}" placeholder="0" min="0">
+          ${checkboxHtml}
+          <div style="display:flex;gap:8px;margin-top:12px">
+            ${_bwBaselineStep > 0 ? '<button class="btn btn-secondary" onclick="bwBaselineBack()">Back</button>' : ''}
+            <button class="btn btn-primary" style="flex:1" onclick="bwBaselineNext()">${_bwBaselineStep === total - 1 ? 'See My Results' : 'Next \u2192'}</button>
+          </div>
         </div>
       </div>
     </div>`;
-
-    setTimeout(() => { const inp = document.getElementById('bw-input'); if (inp) inp.focus(); }, 100);
     return;
   }
 
@@ -2850,7 +2900,9 @@ function renderBodyweightBaseline() {
   let rows = '';
   for (const ex of BW_BASELINE_EXERCISES) {
     const data = _bwBaselineData[ex.key] || {};
-    let valStr = (data.value || 0) + (ex.key === 'plank' ? ' sec' : ' reps');
+    let valStr = ex.mode === 'stopwatch'
+      ? (data.value || 0) + ' sec'
+      : (data.value || 0) + ' reps';
     if (ex.hasKneesCheckbox && data.from_knees) valStr += ' (from knees)';
     rows += `<div class="bw-assess-summary-row">
       <span>${ex.name}</span>
@@ -2860,40 +2912,103 @@ function renderBodyweightBaseline() {
 
   el.innerHTML = `<div class="baseline-overlay">
     <div class="baseline-card bw-assess-card">
-      <h2>Your Bodyweight Baseline</h2>
+      <h2>Bodyweight Baseline</h2>
       <div class="bw-assess-summary">${rows}</div>
-      <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="saveBwBaseline()">Start My 12 Weeks</button>
+      <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="bwBaselineContinueFromSummary()">${_paData.has_tape ? 'Next — Tape Measurements' : 'Finish'}</button>
     </div>
   </div>`;
 }
 
+function _bwFormatTime(totalSec) {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function bwTimerStart() {
+  const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
+  if (!ex) return;
+  _bwClearTimer();
+  _bwTimerPhase = 'running';
+  _bwTimerStartMs = Date.now();
+  const startBtn = document.getElementById('bw-timer-start');
+  const stopBtn = document.getElementById('bw-timer-stop');
+  const disp = document.getElementById('bw-timer-display');
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = '';
+
+  if (ex.mode === 'timed_reps') {
+    const duration = ex.duration;
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - _bwTimerStartMs) / 1000);
+      const remaining = Math.max(0, duration - elapsed);
+      if (disp) disp.textContent = _bwFormatTime(remaining);
+      if (remaining <= 0) {
+        _bwClearTimer();
+        _bwTimerPhase = 'finished';
+        if (disp) { disp.textContent = 'TIME'; disp.style.color = '#ef4444'; }
+        try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch(e) {}
+        const wrap = document.getElementById('bw-assess-input-wrap');
+        if (wrap) wrap.style.display = '';
+        setTimeout(() => { const inp = document.getElementById('bw-input'); if (inp) inp.focus(); }, 100);
+      }
+    };
+    tick();
+    _bwTimerHandle = setInterval(tick, 250);
+  } else {
+    // stopwatch (plank)
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - _bwTimerStartMs) / 1000);
+      _bwTimerElapsed = elapsed;
+      if (disp) disp.textContent = _bwFormatTime(elapsed);
+    };
+    tick();
+    _bwTimerHandle = setInterval(tick, 250);
+  }
+}
+
+function bwTimerStop() {
+  _bwClearTimer();
+  _bwTimerPhase = 'finished';
+  const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
+  if (ex && ex.mode === 'stopwatch') {
+    const inp = document.getElementById('bw-input');
+    if (inp) inp.value = _bwTimerElapsed;
+    const wrap = document.getElementById('bw-assess-input-wrap');
+    if (wrap) wrap.style.display = '';
+    const stopBtn = document.getElementById('bw-timer-stop');
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+}
+
 async function bwBaselineNext() {
   const ex = BW_BASELINE_EXERCISES[_bwBaselineStep];
-  const val = parseInt(document.getElementById('bw-input').value) || 0;
+  const inpEl = document.getElementById('bw-input');
+  const val = inpEl ? (parseInt(inpEl.value) || 0) : 0;
   const kneesEl = document.getElementById('bw-knees');
   _bwBaselineData[ex.key] = { value: val, from_knees: kneesEl ? kneesEl.checked : false };
 
-  // Save immediately — map to backend field names
-  const keyMap = { pushups: 'pushup_count', plank: 'plank_seconds', squats: 'squat_count', lunges: 'lunge_count_per_leg', pullups: 'pullup_count' };
+  const keyMap = { pushups: 'pushup_count', plank: 'plank_seconds', squats: 'squat_count', burpees: 'burpee_count' };
   const payload = {};
   payload[keyMap[ex.key] || ex.key] = val;
   if (ex.hasKneesCheckbox) payload.pushup_from_knees = kneesEl ? kneesEl.checked : false;
   await apiPost('/api/physical-assessment', payload);
 
+  _bwClearTimer();
   _bwBaselineStep++;
   renderBodyweightBaseline();
 }
 
 function bwBaselineBack() {
+  _bwClearTimer();
   _bwBaselineStep--;
   renderBodyweightBaseline();
 }
 
-async function saveBwBaseline() {
-  await apiPost('/api/physical-assessment', { completed: true });
-  _stateCache.baseline_done = true;
-  await apiPost('/api/state', { baseline_done: true });
-  showEquipmentSelection();
+function bwBaselineContinueFromSummary() {
+  _bwClearTimer();
+  _paStep = 3;
+  renderPhysicalAssessment();
 }
 
 // ─── FULL ATHLETE PROFILE ──────────────────────────────────────────────────

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accept Invite · 12 Weeks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0d0f0e;
+            color: #e8ede9;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            line-height: 1.5;
+        }
+        .container { max-width: 440px; width: 100%; }
+        .brand { text-align: center; margin-bottom: 2rem; }
+        .brand h1 { font-size: 2rem; font-weight: 700; color: #4ade80; letter-spacing: -0.5px; }
+        .brand p { color: #9aaa9d; margin-top: 0.5rem; font-size: 1rem; }
+        .flash {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .flash-error, .flash-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        .flash-success, .flash-info, .flash-message {
+            background: rgba(74, 222, 128, 0.15);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            color: #4ade80;
+        }
+        .card {
+            background: #161918;
+            border: 1px solid #2a2e2c;
+            border-radius: 12px;
+            padding: 2rem 1.75rem;
+        }
+        .card h2 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #e8ede9;
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+        .card .sub {
+            color: #9aaa9d;
+            font-size: 0.9rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: #9aaa9d;
+            margin-bottom: 0.4rem;
+            letter-spacing: 0.3px;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 0.7rem 1rem;
+            background: #0d0f0e;
+            border: 1px solid #2a2e2c;
+            border-radius: 8px;
+            color: #e8ede9;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-bottom: 1rem;
+        }
+        input[readonly] {
+            color: #9aaa9d;
+            cursor: not-allowed;
+        }
+        input::placeholder { color: #5a6a5d; }
+        input:focus {
+            border-color: #4ade80;
+            box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1);
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 0.8rem;
+            background: #4ade80;
+            color: #0d0f0e;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #22c55e; }
+        .foot {
+            text-align: center;
+            margin-top: 1.25rem;
+            font-size: 0.85rem;
+            color: #9aaa9d;
+        }
+        .foot a { color: #4ade80; text-decoration: none; }
+        .foot a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="brand">
+            <h1>12 Weeks</h1>
+            <p>Align aspirations with actions.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            {% if is_existing %}
+            <h2>Set your password</h2>
+            <p class="sub">We found your account. Create a password to finish signing in.</p>
+            {% else %}
+            <h2>Create your account</h2>
+            <p class="sub">You've been invited. Set a password to get started.</p>
+            {% endif %}
+
+            <form method="post" action="{{ url_for('accept_invite', code=invite_code) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" value="{{ email }}" readonly>
+
+                {% if not is_existing %}
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" placeholder="Your name" value="{{ suggested_name }}">
+                {% endif %}
+
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="At least 8 characters" required minlength="8" autofocus>
+
+                <label for="password_confirm">Confirm password</label>
+                <input type="password" id="password_confirm" name="password_confirm" placeholder="Re-enter password" required minlength="8">
+
+                <button type="submit" class="btn">
+                    {% if is_existing %}Set password &amp; sign in{% else %}Create account{% endif %}
+                </button>
+            </form>
+
+            <div class="foot">
+                <a href="{{ url_for('login') }}">Back to log in</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
