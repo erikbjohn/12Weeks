@@ -5974,23 +5974,30 @@ def api_constraints_save():
 
 # ─── GOAL COMPUTATION ─────────────────────────────────────────────────────
 
-@app.route("/api/goal/compute", methods=["POST"])
-@login_required
-def api_goal_compute():
-    """Compute training goal from intake + physical data."""
+def _compute_goal_for_user(user, overrides=None):
+    """Compute and persist TrainingGoal for a user. Returns result dict or (error, status).
+
+    overrides (all optional): target_weight (float, user manual cap), target_bf (float
+    fraction, e.g. 0.15), goal_type ("cut"/"bulk"/"recomp"), aggressive_request (str
+    free text — reserved, currently not auto-applied beyond target overrides).
+
+    Safety guardrails always apply on top of overrides: BMI >= 25 forces cut and caps
+    target_weight at current; min_healthy_weight floor always enforced.
+    """
     from goal_engine import (
         detect_goal, compute_tdee, compute_targets,
         compute_phase_plan, compute_day_calories,
         determine_fasting_protocol, project_weight_curve,
     )
+    overrides = overrides or {}
 
-    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    existing_goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    intake = PsychIntake.query.filter_by(user_id=user.id).first()
+    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+    existing_goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     if not intake and not existing_goal:
-        return jsonify({"error": "Intake and physical assessment required"}), 400
+        return {"error": "Intake and physical assessment required"}, 400
     if not pa and not existing_goal:
-        return jsonify({"error": "Physical assessment required"}), 400
+        return {"error": "Physical assessment required"}, 400
 
     # Extract actor answer from conversation
     actor_answer = ""
@@ -6023,29 +6030,36 @@ def api_goal_compute():
                     age = num
 
     # BodyWeight is primary, PhysicalAssessment is fallback — NEVER default to 180
-    latest_bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
+    latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
     if latest_bw:
         weight = latest_bw.weight_lbs
     elif pa and pa.bodyweight_lbs:
         weight = pa.bodyweight_lbs
         # Sync to BodyWeight table so it's there for next time
-        db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=current_user.id))
+        db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=user.id))
         db.session.commit()
     elif existing_goal and existing_goal.target_weight:
         # Use a reasonable estimate from existing goal
         weight = existing_goal.target_weight + 30  # rough fallback
     else:
-        return jsonify({"error": "No weight data found. Complete physical assessment first."}), 400
+        return {"error": "No weight data found. Complete physical assessment first."}, 400
     height = (pa.height_inches if pa else None) or 70
 
-    # Use existing goal type if recomputing, otherwise detect from intake
-    if existing_goal and not actor_answer:
+    # Goal type: override > existing > detect from actor
+    override_goal_type = overrides.get("goal_type")
+    override_target_bf = overrides.get("target_bf")
+    if override_goal_type in ("cut", "bulk", "recomp"):
+        goal_type = override_goal_type
+        target_bf = override_target_bf if override_target_bf else (existing_goal.target_bf_pct if existing_goal else 0.12)
+    elif existing_goal and not actor_answer:
         goal_type = existing_goal.goal_type or "cut"
         target_bf = existing_goal.target_bf_pct or 0.12
     else:
         goal_info = detect_goal(actor_answer)
         goal_type = goal_info["goal_type"]
         target_bf = goal_info["target_bf"]
+    if override_target_bf and 0.05 <= float(override_target_bf) <= 0.40:
+        target_bf = float(override_target_bf)
 
     # *** SAFETY: Minors (under 18) — NO calorie deficit, NO cut, NO fasting ***
     is_minor = age < 18
@@ -6104,6 +6118,15 @@ def api_goal_compute():
     lean_mass = weight * (1 - est_bf)
     target_weight = lean_mass / (1 - target_bf)
 
+    # User-supplied target weight override (e.g., "I want to hit 160") —
+    # honored within safety bounds below.
+    user_target_override = overrides.get("target_weight")
+    if user_target_override:
+        try:
+            target_weight = float(user_target_override)
+        except (TypeError, ValueError):
+            pass
+
     # Never target weight loss below healthy minimum
     min_healthy_weight = lean_mass / 0.92 if sex == "male" else lean_mass / 0.85
     target_weight = max(target_weight, min_healthy_weight)
@@ -6112,8 +6135,9 @@ def api_goal_compute():
     if is_minor:
         target_weight = max(target_weight, weight + 5)
 
-    # For bulk: target above current — BUT only if not overweight
-    if goal_type == "bulk" and not is_overweight:
+    # For bulk: target above current — BUT only if not overweight AND user didn't
+    # specify their own target (respect their choice over the arbitrary +10 floor).
+    if goal_type == "bulk" and not is_overweight and not user_target_override:
         target_weight = max(target_weight, weight + 10)
 
     # *** Overweight ceiling — never prescribe a weight gain to someone with BMI >= 25 ***
@@ -6145,9 +6169,9 @@ def api_goal_compute():
         cal_by_day[dt] = compute_day_calories(targets["calories"], goal_type, dt, weight_lbs=weight)
 
     # Save to DB
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     if not goal:
-        goal = TrainingGoal(goal_type=goal_type, user_id=current_user.id)
+        goal = TrainingGoal(goal_type=goal_type, user_id=user.id)
         db.session.add(goal)
     goal.goal_type = goal_type
     goal.target_weight = round(target_weight, 1)
@@ -6168,7 +6192,7 @@ def api_goal_compute():
     weekly_loss = round(daily_deficit * 7 / 3500, 1) if daily_deficit > 0 else 0
     total_loss = round(weight - target_weight, 1)
 
-    return jsonify({
+    return {
         "goal_type": goal_type,
         "starting_weight": weight,
         "target_weight": round(target_weight, 1),
@@ -6186,7 +6210,43 @@ def api_goal_compute():
         "phase_plan": phase_plan,
         "weight_projection": projection,
         "calorie_by_day_type": cal_by_day,
-    })
+    }, 200
+
+
+@app.route("/api/goal/compute", methods=["POST"])
+@login_required
+def api_goal_compute():
+    """Compute training goal from intake + physical data.
+
+    Accepts optional overrides: target_weight, target_bf, goal_type,
+    aggressive_request. Safety guardrails (BMI >= 25 → cut, overweight
+    ceiling at current weight, min healthy weight floor) always apply.
+    """
+    data = request.get_json() or {}
+    result, status = _compute_goal_for_user(current_user, overrides=data)
+    return jsonify(result), status
+
+
+@app.route("/api/admin/recompute-goal", methods=["POST"])
+@admin_required
+def api_admin_recompute_goal():
+    """Force a full goal recompute for a specific user. Admin-only.
+
+    Useful after a goal-engine bugfix. Accepts email + optional overrides
+    (target_weight, target_bf, goal_type).
+    """
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"User '{email}' not found"}), 404
+    result, status = _compute_goal_for_user(user, overrides=data)
+    if isinstance(result, dict):
+        result = {"email": user.email, **result}
+    return jsonify(result), status
+
 
 @app.route("/api/goal")
 @login_required
