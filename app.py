@@ -6087,27 +6087,30 @@ def _compute_goal_for_user(user, overrides=None):
             target_bf = 0.19
 
     # *** SAFETY: Overweight lock — BMI >= 25 forces cut, regardless of actor/intake ***
-    # An overweight person must never be prescribed a bulk or a weight gain,
-    # even if their actor pick maps to bulk or if weight-lookup lean-mass inflates target.
+    # An overweight person must never be prescribed a bulk, a recomp, or a weight gain.
     # Minors are exempt (growth > composition; handled by is_minor branch below).
     is_overweight = (bmi >= 25) and not is_minor
-    if is_overweight and goal_type == "bulk":
+    if is_overweight and goal_type in ("bulk", "recomp"):
         goal_type = "cut"
-        target_bf = 0.08 if sex == "male" else 0.16
+        # Moderate cut target — not extreme. 22% female / 15% male is realistic for
+        # a 12-week cut from overweight; the full lean target (16/8) would force an
+        # unrealistic deficit.
+        target_bf = 0.22 if sex == "female" else 0.15
 
     tdee_info = compute_tdee(weight, height, age, sex)
 
-    # Prefer real navy body fat from tape measurements; fall back to weight-bucket estimate
+    # Prefer real navy body fat from tape measurements; fall back to weight-bucket estimate.
+    # estimate_body_fat_navy returns PERCENT (e.g., 31.0), not decimal — convert before use.
     est_bf = None
     if pa and pa.waist_inches and pa.neck_inches:
         try:
             from body_stats import estimate_body_fat_navy
-            navy_bf = estimate_body_fat_navy(
+            navy_bf_pct = estimate_body_fat_navy(
                 pa.waist_inches, pa.neck_inches, height, sex,
                 hips=pa.hips_inches,
             )
-            if navy_bf and 0.05 <= navy_bf <= 0.60:
-                est_bf = navy_bf
+            if navy_bf_pct and 5.0 <= navy_bf_pct <= 60.0:
+                est_bf = navy_bf_pct / 100.0
         except Exception:
             est_bf = None
     if est_bf is None:
@@ -6127,8 +6130,12 @@ def _compute_goal_for_user(user, overrides=None):
         except (TypeError, ValueError):
             pass
 
-    # Never target weight loss below healthy minimum
-    min_healthy_weight = lean_mass / 0.92 if sex == "male" else lean_mass / 0.85
+    # Never target weight loss below healthy minimum. Use BMI 18.5 as the
+    # absolute physiological floor — the old lean-mass/0.85 formula could
+    # produce a floor ABOVE current weight when BF was underestimated,
+    # silently blocking user-specified cuts.
+    bmi_18_5_weight = (18.5 * height * height) / 703 if height > 0 else 110
+    min_healthy_weight = bmi_18_5_weight
     target_weight = max(target_weight, min_healthy_weight)
 
     # For minors: target weight should be ABOVE current weight (growth, not loss)
