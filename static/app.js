@@ -1377,12 +1377,12 @@ function startRestTimer(exIdx, seconds) {
   }
   _activeTimerEl = el;
 
-  let remaining = seconds;
-  el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
+  const endTime = Date.now() + seconds * 1000;
+  el.innerHTML = `<div class="rest-countdown">${formatTimer(seconds)}</div>`;
   el.style.display = 'block';
 
   _restTimerInterval = setInterval(() => {
-    remaining--;
+    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
     if (remaining <= 0) {
       clearInterval(_restTimerInterval);
       _restTimerInterval = null;
@@ -1392,7 +1392,7 @@ function startRestTimer(exIdx, seconds) {
     } else {
       el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
     }
-  }, 1000);
+  }, 250);
 }
 
 function formatTimer(sec) {
@@ -1401,7 +1401,202 @@ function formatTimer(sec) {
   return m > 0 ? `${m}:${s.toString().padStart(2, '0')}` : `${s}s`;
 }
 
-// ─── INLINE TIMED SET TIMER (for planks, etc.) ──────────────────────────
+// ─── HIIT INTERVAL TIMER (full-screen work/rest cycle for planks, timed core) ─
+var _hiitState = null;
+var _hiitLastWholeSec = null;
+
+function _hiitBeep(freq, duration) {
+  try {
+    var ctx = _hiitState && _hiitState.audioCtx;
+    if (!ctx) return;
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq || 880;
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + (duration || 0.15));
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + (duration || 0.15));
+  } catch (e) {}
+}
+
+function startExerciseHiit(exName, week, dayIdx, exIdx, workSec, restSec, totalSets, startSet) {
+  if (_hiitState && _hiitState.iv) clearInterval(_hiitState.iv);
+  if (_hiitState && _hiitState.audioCtx) { try { _hiitState.audioCtx.close(); } catch (e) {} }
+
+  var overlay = document.getElementById('hiit-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'hiit-overlay';
+    overlay.className = 'hiit-overlay';
+    document.body.appendChild(overlay);
+  }
+  overlay.classList.add('visible');
+
+  var audioCtx = null;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+
+  _hiitState = {
+    exName: exName, week: week, dayIdx: dayIdx, exIdx: exIdx,
+    workSec: workSec, restSec: restSec, totalSets: totalSets,
+    setIdx: startSet || 0,
+    phase: 'work',
+    remaining: workSec,
+    paused: false,
+    iv: null,
+    audioCtx: audioCtx,
+  };
+  _hiitLastWholeSec = null;
+
+  overlay.innerHTML =
+    '<div class="hiit-card hiit-work" id="hiit-card">' +
+      '<div class="hiit-ex-name">' + String(exName).replace(/</g, '&lt;') + '</div>' +
+      '<div class="hiit-set-meta" id="hiit-set-n"></div>' +
+      '<div class="hiit-phase-label" id="hiit-phase">WORK</div>' +
+      '<div class="hiit-countdown" id="hiit-count">00</div>' +
+      '<div class="hiit-controls">' +
+        '<button class="hiit-btn" onclick="_hiitSkip()">Skip</button>' +
+        '<button class="hiit-btn" id="hiit-pause-btn" onclick="_hiitPause()">Pause</button>' +
+        '<button class="hiit-btn hiit-btn-close" onclick="_hiitClose()">Close</button>' +
+      '</div>' +
+    '</div>';
+
+  _hiitRenderPhase();
+  _hiitBeep(1200, 0.2);
+  if (navigator.vibrate) navigator.vibrate(150);
+
+  _hiitState.iv = setInterval(_hiitTick, 250);
+}
+
+function _hiitRenderPhase() {
+  var s = _hiitState;
+  if (!s) return;
+  var card = document.getElementById('hiit-card');
+  if (card) {
+    card.classList.toggle('hiit-work', s.phase === 'work');
+    card.classList.toggle('hiit-rest', s.phase === 'rest');
+  }
+  var phaseEl = document.getElementById('hiit-phase');
+  var setMeta = document.getElementById('hiit-set-n');
+  if (phaseEl) phaseEl.textContent = s.phase === 'work' ? 'WORK' : 'REST';
+  if (setMeta) setMeta.textContent = 'Set ' + (s.setIdx + 1) + ' of ' + s.totalSets;
+  _hiitRenderCount();
+}
+
+function _hiitRenderCount() {
+  var s = _hiitState;
+  if (!s) return;
+  var el = document.getElementById('hiit-count');
+  if (!el) return;
+  var n = Math.max(0, Math.ceil(s.remaining));
+  el.textContent = n < 10 ? '0' + n : '' + n;
+  el.classList.toggle('hiit-urgent', n <= 3 && n > 0);
+}
+
+function _hiitTick() {
+  var s = _hiitState;
+  if (!s || s.paused) return;
+  s.remaining -= 0.25;
+  var wholeSec = Math.ceil(s.remaining);
+  if (wholeSec !== _hiitLastWholeSec) {
+    _hiitLastWholeSec = wholeSec;
+    if (wholeSec > 0 && wholeSec <= 3) {
+      _hiitBeep(880, 0.1);
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+  }
+  if (s.remaining <= 0) {
+    _hiitAdvance();
+  } else {
+    _hiitRenderCount();
+  }
+}
+
+function _hiitAdvance() {
+  var s = _hiitState;
+  if (!s) return;
+  if (s.phase === 'work') {
+    _hiitMarkSetDone(s.setIdx);
+    _hiitBeep(1200, 0.3);
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    if (s.setIdx >= s.totalSets - 1) {
+      _hiitFinish();
+      return;
+    }
+    s.phase = 'rest';
+    s.remaining = s.restSec || 0;
+    if (s.remaining <= 0) { return _hiitAdvance(); }
+  } else {
+    s.phase = 'work';
+    s.setIdx++;
+    s.remaining = s.workSec;
+    _hiitBeep(1400, 0.2);
+    if (navigator.vibrate) navigator.vibrate(200);
+  }
+  _hiitLastWholeSec = null;
+  _hiitRenderPhase();
+}
+
+function _hiitMarkSetDone(setIdx) {
+  var s = _hiitState;
+  if (!s) return;
+  var key = s.week + '_' + s.dayIdx + '_' + s.exIdx + '_' + setIdx;
+  if (_setCache[key] && _setCache[key].done) return;
+  _setCache[key] = { done: true, weight: 0, reps: s.workSec };
+  apiPost('/api/sets', {
+    exercise: s.exName, week: s.week, day_idx: s.dayIdx,
+    set_number: setIdx, weight: 0, reps: s.workSec, done: true,
+  });
+  // Sync DOM behind the overlay so checkmarks appear when user closes
+  var inline = document.getElementById('inline-timer-' + s.exIdx + '-' + setIdx);
+  if (inline) {
+    var row = inline.closest('.set-row');
+    if (row) {
+      row.classList.add('set-done');
+      var cb = row.querySelector('.set-check');
+      if (cb) { cb.classList.add('done'); cb.innerHTML = '&#10003;'; }
+    }
+  }
+}
+
+function _hiitPause() {
+  var s = _hiitState;
+  if (!s) return;
+  s.paused = !s.paused;
+  var btn = document.getElementById('hiit-pause-btn');
+  if (btn) btn.textContent = s.paused ? 'Resume' : 'Pause';
+}
+
+function _hiitSkip() {
+  if (!_hiitState) return;
+  _hiitState.remaining = 0;
+  _hiitAdvance();
+}
+
+function _hiitFinish() {
+  var s = _hiitState;
+  if (!s) return;
+  if (s.iv) clearInterval(s.iv);
+  if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
+  _completionsCache.exercises = _completionsCache.exercises || {};
+  _completionsCache.exercises[s.week + '_' + s.dayIdx + '_' + s.exIdx] = true;
+  apiPost('/api/completions/exercise', { week: s.week, day_idx: s.dayIdx, exercise_idx: s.exIdx });
+  _hiitClose();
+  if (typeof renderDetail === 'function') try { renderDetail(); } catch (e) {}
+}
+
+function _hiitClose() {
+  if (_hiitState && _hiitState.iv) clearInterval(_hiitState.iv);
+  if (_hiitState && _hiitState.audioCtx) { try { _hiitState.audioCtx.close(); } catch (e) {} }
+  _hiitState = null;
+  _hiitLastWholeSec = null;
+  var overlay = document.getElementById('hiit-overlay');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+// ─── INLINE TIMED SET TIMER (single-set holds, warmups) ────────────────────
 function startInlineTimer(seconds, btn, exName, week, dayIdx, exIdx, setIdx, restSec) {
     var el = document.getElementById('inline-timer-' + exIdx + '-' + setIdx);
     if (!el) return;
@@ -6138,32 +6333,101 @@ function attachSwipeHandlers() {
   const panel = document.getElementById('detail-panel');
   if (!panel) return;
   _swipeHandlersAttached = true;
-  let startX = 0, startY = 0, startT = 0, tracking = false;
+
+  let startX = 0, startY = 0, startT = 0;
+  let tracking = false;   // actively touching, intent undecided
+  let committed = false;  // committed to a horizontal swipe
+  let lastDx = 0;
+
+  function innerEl() { return panel.querySelector('.detail-inner'); }
+
+  function setDrag(px) {
+    const el = innerEl();
+    if (!el) return;
+    // Resistance past 120px so it doesn't slide off forever
+    const clamped = Math.sign(px) * Math.min(Math.abs(px), 120 + Math.abs(px) * 0.15);
+    el.style.transition = 'none';
+    el.style.transform = 'translateX(' + clamped + 'px)';
+    el.style.opacity = String(Math.max(0.55, 1 - Math.abs(px) / 400));
+  }
+
+  function settle(commit) {
+    const el = innerEl();
+    if (!el) return;
+    el.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+    if (commit) {
+      // Slide fully off in the swipe direction, then renderDetail will replace content
+      const dir = lastDx < 0 ? -1 : 1;
+      el.style.transform = 'translateX(' + (dir * window.innerWidth) + 'px)';
+      el.style.opacity = '0';
+      setTimeout(function() {
+        el.style.transition = 'none';
+        el.style.transform = '';
+        el.style.opacity = '';
+      }, 200);
+    } else {
+      el.style.transform = '';
+      el.style.opacity = '';
+    }
+  }
+
   panel.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) { tracking = false; return; }
-    // Don't hijack swipes that start on inputs/buttons
+    if (e.touches.length !== 1) { tracking = false; committed = false; return; }
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'button' || tag === 'textarea' || tag === 'select') {
-      tracking = false;
-      return;
+      tracking = false; committed = false; return;
+    }
+    // Don't intercept if the touch started inside a scrollable horizontal list
+    if (e.target.closest && e.target.closest('.tn-days, .hiit-overlay, [data-no-swipe]')) {
+      tracking = false; committed = false; return;
     }
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     startT = Date.now();
     tracking = true;
+    committed = false;
+    lastDx = 0;
   }, { passive: true });
-  panel.addEventListener('touchend', (e) => {
+
+  panel.addEventListener('touchmove', (e) => {
     if (!tracking) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    lastDx = dx;
+    if (!committed) {
+      // Decide intent once we've moved >10px in either axis
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      if (Math.abs(dy) > Math.abs(dx) * 1.2) {
+        // Vertical intent — let the page scroll, abort swipe tracking
+        tracking = false;
+        return;
+      }
+      committed = true;
+    }
+    setDrag(dx);
+  }, { passive: true });
+
+  panel.addEventListener('touchend', (e) => {
+    if (!tracking) { if (committed) settle(false); committed = false; return; }
     tracking = false;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - startX;
-    const dy = t.clientY - startY;
+    if (!committed) return;
+    committed = false;
     const dt = Date.now() - startT;
-    // Require: ≥60px horizontal, horizontal > 1.5×vertical, ≤500ms
-    if (Math.abs(dx) < 60) return;
-    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    if (dt > 500) return;
-    navigateDay(dx < 0 ? 1 : -1);
+    const dx = lastDx;
+    // Commit if: moved >40px OR fast flick (>25px in <250ms)
+    const distOk = Math.abs(dx) > 40;
+    const flickOk = Math.abs(dx) > 25 && dt < 250;
+    if ((distOk || flickOk) && dt < 700) {
+      settle(true);
+      navigateDay(dx < 0 ? 1 : -1);
+    } else {
+      settle(false);
+    }
+  }, { passive: true });
+
+  panel.addEventListener('touchcancel', () => {
+    if (committed) settle(false);
+    tracking = false; committed = false;
   }, { passive: true });
 }
 
@@ -6867,7 +7131,8 @@ function _renderNewDashboard(apiData) {
   }
 }
 function _renderNewDashboardInner(apiData, overlay) {
-  // Gather data from API response with fallbacks to local caches
+  // Backend is the authoritative source. Local caches are only used when the
+  // endpoint is unreachable (offline / timeout fallback).
   var d = apiData || {};
   var bwData = d.bodyweight || {};
   var bw = bwData.series || _bodyweightCache || [];
@@ -6877,9 +7142,8 @@ function _renderNewDashboardInner(apiData, overlay) {
   var projections = d.projections || {};
   var startDate = projections.start_date || (_stateCache ? _stateCache.start_date : null) || null;
   var targetWeight = bwData.target_weight || null;
-  var projection = projections.weight_projection || [];
   var psychHighlights = d.psych_highlights || {};
-  var psychQuote = psychHighlights.report ? psychHighlights.report.slice(0, 200) : null;
+  var psychQuote = psychHighlights.quote || null;
 
   var startWeight = bwData.start_weight || (bw.length > 0 ? bw[0].weight : null);
   var currentWeight = bwData.current_weight || (bw.length > 0 ? bw[bw.length - 1].weight : null);
@@ -6900,32 +7164,26 @@ function _renderNewDashboardInner(apiData, overlay) {
   // ── DASHBOARD TAB ──
   html += '<div class="sp-tab-content active" id="sp-dashboard">';
 
-  // 1. HERO CARD
-  html += _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projection);
+  // 1. HERO CARD — uses backend on_pace + projected_final_weight
+  html += _pdHeroCard(startWeight, currentWeight, targetWeight, projections);
 
-  // 2. WEIGHT CHART
-  html += _pdWeightChart(bw, projection, targetWeight, startDate);
+  // 2. WEIGHT CHART — plan line from linear_plan, actual trajectory from bw series
+  html += _pdWeightChart(bw, projections, targetWeight, startDate);
 
-  // 3. BODY COMPOSITION GRID
+  // 3. BODY COMPOSITION GRID (weight lives in the hero, not here)
   html += _pdBodyComp(measurements);
 
-  // 4. TRAINING STREAK
-  var completions = training.weekly_adherence ? {} : (_completionsCache ? _completionsCache.days : {});
-  if (training.weekly_adherence) {
-    for (var ai = 0; ai < training.weekly_adherence.length; ai++) {
-      var wa = training.weekly_adherence[ai];
-      for (var di = 0; di < wa.days_done && di < 6; di++) {
-        completions[wa.week + '_' + di] = true;
-      }
-    }
-  }
-  html += _pdStreakGrid(completions, startDate);
+  // 4. TRAINING STREAK — trust training.current_streak / completed_days from API
+  html += _pdStreakGrid(training, startDate);
 
   // 5. LIFT PROGRESSION
   html += _pdLiftProgression(lifts);
 
-  // 6. MOTIVATIONAL FOOTER
-  html += _pdMotivationalFooter(startWeight, currentWeight, psychQuote);
+  // 6. Optional quiet quote pulled from psych intake — no cheerleading.
+  if (psychQuote) {
+    html += '<div class="pd-quote"><div class="pd-section-label">Why you started</div>' +
+            '<div class="pd-quote-text">"' + psychQuote.replace(/</g, '&lt;') + '"</div></div>';
+  }
 
   html += '</div>'; // end dashboard tab
 
@@ -6938,10 +7196,11 @@ function _renderNewDashboardInner(apiData, overlay) {
 }
 
 /* ── HERO CARD ── */
-function _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projection) {
+function _pdHeroCard(startWeight, currentWeight, targetWeight, projections) {
   if (startWeight == null || currentWeight == null) {
     return '<div class="pd-hero"><div class="pd-hero-delta">--</div><div class="pd-hero-sub">No weigh-ins yet</div></div>';
   }
+  projections = projections || {};
   var delta = currentWeight - startWeight;
   var deltaStr = (delta <= 0 ? '' : '+') + delta.toFixed(1) + ' lb';
   var deltaClass = delta <= 0 ? 'pd-green' : 'pd-red';
@@ -6950,67 +7209,61 @@ function _pdHeroCard(startWeight, currentWeight, targetWeight, startDate, projec
   if (targetWeight && startWeight !== targetWeight) {
     pct = Math.max(0, Math.min(100, ((startWeight - currentWeight) / (startWeight - targetWeight)) * 100));
   }
-
-  // Projection text
-  var projText = '';
-  if (targetWeight && startDate) {
-    var endDate = new Date(startDate + 'T00:00:00');
-    endDate.setDate(endDate.getDate() + 12 * 7);
-    var weeksTotalRemain = Math.max(1, Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24 * 7)));
-    if (projection && projection.length > 0) {
-      var finalProj = projection[projection.length - 1];
-      var projWeight = finalProj.projected || finalProj.weight || finalProj;
-      projText = 'On pace for ' + Math.round(projWeight) + ' by Week 12';
-    } else {
-      // Simple linear projection
-      var startDt = new Date(startDate + 'T00:00:00');
-      var elapsedWeeks = Math.max(1, (new Date() - startDt) / (1000 * 60 * 60 * 24 * 7));
-      var weeklyRate = (startWeight - currentWeight) / elapsedWeeks;
-      var projected = currentWeight - (weeklyRate * weeksTotalRemain);
-      projText = 'On pace for ' + Math.round(projected) + ' by Week 12';
-    }
-  }
-
   var barPct = Math.round(pct);
-  var filledBlocks = Math.round(barPct / 100 * 12);
-  var barStr = '';
-  for (var i = 0; i < 12; i++) {
-    barStr += i < filledBlocks ? '\u2588' : '\u2591';
+
+  // Trust backend extrapolation. Fall back to nothing rather than guessing.
+  var projText = '';
+  var projected = projections.projected_final_weight;
+  if (projected != null && targetWeight != null) {
+    var onPace = projections.on_pace;
+    var paceClass = onPace === true ? 'pd-green' : onPace === false ? 'pd-red' : '';
+    var label = onPace === true ? 'On pace' : onPace === false ? 'Off pace' : 'Projected';
+    projText = '<span class="pd-hero-pace ' + paceClass + '">' + label + '</span> — tracking to ' +
+               Math.round(projected) + ' lb by Week 12 (goal ' + Math.round(targetWeight) + ')';
   }
 
   var h = '<div class="pd-hero">';
   h += '<div class="pd-hero-delta ' + deltaClass + '">' + deltaStr + '</div>';
-  h += '<div class="pd-hero-range">' + startWeight + ' &rarr; ' + currentWeight.toFixed(1) + '</div>';
-  h += '<div class="pd-hero-bar"><span class="pd-bar-fill">' + barStr + '</span> <span class="pd-bar-pct">' + barPct + '%</span></div>';
+  h += '<div class="pd-hero-range">' + startWeight + ' &rarr; ' + currentWeight.toFixed(1) + ' lb</div>';
+  h += '<div class="pd-hero-bar-wrap">' +
+         '<div class="pd-hero-bar-track"><div class="pd-hero-bar-fill" style="width:' + barPct + '%"></div></div>' +
+         '<div class="pd-hero-bar-pct">' + barPct + '%</div>' +
+       '</div>';
   if (projText) h += '<div class="pd-hero-proj">' + projText + '</div>';
   h += '</div>';
   return h;
 }
 
 /* ── WEIGHT CHART (inline SVG) ── */
-function _pdWeightChart(bw, projection, targetWeight, startDate) {
+function _pdWeightChart(bw, projections, targetWeight, startDate) {
   if (!bw || bw.length < 2) {
     return '<div class="pd-section"><div class="pd-section-label">Weight</div><div class="pd-empty">Need 2+ weigh-ins for chart</div></div>';
   }
+  projections = projections || {};
+  var linearPlan = projections.linear_plan || [];
 
   var W = 340, H = 200, padL = 48, padR = 16, padT = 16, padB = 28;
 
-  // Fixed axes: Y = goal weight to start weight, X = start date to end date (12 weeks)
+  // Y axis spans from goal-2 to start+2 so both endpoints have breathing room.
   var startWt = bw[0].weight;
   var goalWt = targetWeight || startWt - 30;
-  var yMin = goalWt - 2;
-  var yMax = startWt + 2;
+  var yMin = Math.min(goalWt, startWt) - 2;
+  var yMax = Math.max(goalWt, startWt) + 2;
   var yRange = yMax - yMin || 1;
 
-  // X axis: start_date to start_date + 84 days (12 weeks)
+  // X axis: start_date → start_date + 84 days (12 weeks) so the plan line has a fixed frame.
   var xStart = startDate ? new Date(startDate + 'T00:00:00') : new Date(bw[0].date + 'T00:00:00');
   var xEnd = new Date(xStart); xEnd.setDate(xEnd.getDate() + 84);
   var xRangeMs = xEnd - xStart || 1;
 
-  function xPos(dateStr) {
+  function xPosDate(dateStr) {
     var d = new Date(dateStr + 'T00:00:00');
     var pct = (d - xStart) / xRangeMs;
     return padL + Math.max(0, Math.min(1, pct)) * (W - padL - padR);
+  }
+  function xPosWeek(wk) {
+    var d = new Date(xStart); d.setDate(d.getDate() + (wk - 1) * 7);
+    return padL + Math.max(0, Math.min(1, (d - xStart) / xRangeMs)) * (W - padL - padR);
   }
   function yPos(v) {
     return padT + (1 - (v - yMin) / yRange) * (H - padT - padB);
@@ -7018,46 +7271,57 @@ function _pdWeightChart(bw, projection, targetWeight, startDate) {
 
   var svg = '<svg class="pd-weight-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
 
-  // Y-axis labels: start weight, midpoint, goal
-  var yLabels = [startWt, Math.round((startWt + goalWt) / 2), goalWt];
+  var yLabels = [Math.round(startWt), Math.round((startWt + goalWt) / 2), Math.round(goalWt)];
   for (var yi = 0; yi < yLabels.length; yi++) {
     var ly = yPos(yLabels[yi]);
-    svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="#9aaa9d" font-size="11" font-family="DM Mono,monospace">' + Math.round(yLabels[yi]) + '</text>';
+    svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="#c5d0c7" font-size="12" font-family="DM Mono,monospace">' + yLabels[yi] + '</text>';
     svg += '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="#2a2e2c" stroke-width="0.5"/>';
   }
 
-  // Goal weight line at bottom
+  // Goal weight horizontal reference
   var goalY = yPos(goalWt);
   svg += '<line x1="' + padL + '" y1="' + goalY + '" x2="' + (W - padR) + '" y2="' + goalY + '" stroke="#4ade80" stroke-width="1" stroke-dasharray="6,4" opacity="0.4"/>';
-  svg += '<text x="' + (W - padR - 2) + '" y="' + (goalY - 4) + '" text-anchor="end" fill="#4ade80" font-size="9" font-family="DM Mono,monospace" opacity="0.7">goal ' + Math.round(goalWt) + '</text>';
+  svg += '<text x="' + (W - padR - 2) + '" y="' + (goalY - 4) + '" text-anchor="end" fill="#4ade80" font-size="10" font-family="DM Mono,monospace" opacity="0.8">goal ' + Math.round(goalWt) + '</text>';
 
-  // Projection line — straight line from start weight to goal weight over 12 weeks.
-  // The stored projection data has bad Week 1 values (doesn't start at actual weight),
-  // so we draw the simple linear plan: where you NEED to be each week to hit goal.
-  if (goalWt && startWt && goalWt < startWt) {
-    var projStart = padL;
-    var projEnd = padL + (W - padL - padR);
-    svg += '<line x1="' + projStart + '" y1="' + yPos(startWt) + '" x2="' + projEnd + '" y2="' + yPos(goalWt) + '" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.35"/>';
+  // Plan line: prefer backend linear_plan. Fall back to a simple start→goal line.
+  if (linearPlan.length >= 2) {
+    var planPts = linearPlan.map(function(p) {
+      return xPosWeek(p.week).toFixed(1) + ',' + yPos(p.planned_weight).toFixed(1);
+    });
+    svg += '<polyline points="' + planPts.join(' ') + '" fill="none" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>';
+  } else if (goalWt && startWt && goalWt < startWt) {
+    svg += '<line x1="' + padL + '" y1="' + yPos(startWt) + '" x2="' + (W - padR) + '" y2="' + yPos(goalWt) + '" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.35"/>';
   }
 
-  // Actual weight line — positioned by date on X axis
+  // Smoothed trajectory from rolling_avg_7d when available, else raw weight
   var pts = [];
   for (var ai = 0; ai < bw.length; ai++) {
-    pts.push(xPos(bw[ai].date).toFixed(1) + ',' + yPos(bw[ai].weight).toFixed(1));
+    var smoothed = bw[ai].rolling_avg_7d != null ? bw[ai].rolling_avg_7d : bw[ai].weight;
+    pts.push(xPosDate(bw[ai].date).toFixed(1) + ',' + yPos(smoothed).toFixed(1));
   }
   svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
-  // Dots on actual data
+  // Raw weigh-in dots — not dimmed; users want to see variance
   for (var di = 0; di < bw.length; di++) {
-    svg += '<circle cx="' + xPos(bw[di].date).toFixed(1) + '" cy="' + yPos(bw[di].weight).toFixed(1) + '" r="3.5" fill="#4ade80"/>';
+    svg += '<circle cx="' + xPosDate(bw[di].date).toFixed(1) + '" cy="' + yPos(bw[di].weight).toFixed(1) + '" r="3" fill="#4ade80" opacity="0.65"/>';
   }
 
-  // X-axis labels: Week 1, Week 4, Week 8, Week 12
+  // Current-weight annotation on the rightmost dot
+  if (bw.length > 0) {
+    var last = bw[bw.length - 1];
+    var lx = xPosDate(last.date);
+    var ly = yPos(last.rolling_avg_7d != null ? last.rolling_avg_7d : last.weight);
+    svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="5" fill="#4ade80"/>';
+    var annX = lx - 8;
+    var annAnchor = 'end';
+    if (annX < padL + 40) { annX = lx + 8; annAnchor = 'start'; }
+    svg += '<text x="' + annX.toFixed(1) + '" y="' + (ly - 8).toFixed(1) + '" text-anchor="' + annAnchor + '" fill="#4ade80" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + last.weight.toFixed(1) + '</text>';
+  }
+
   var xWeeks = [1, 4, 8, 12];
   for (var xi = 0; xi < xWeeks.length; xi++) {
-    var wkDate = new Date(xStart); wkDate.setDate(wkDate.getDate() + (xWeeks[xi] - 1) * 7);
-    var lx = padL + ((wkDate - xStart) / xRangeMs) * (W - padL - padR);
-    svg += '<text x="' + lx.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#9aaa9d" font-size="10" font-family="DM Mono,monospace">W' + xWeeks[xi] + '</text>';
+    var xlab = xPosWeek(xWeeks[xi]);
+    svg += '<text x="' + xlab.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#c5d0c7" font-size="11" font-family="DM Mono,monospace">W' + xWeeks[xi] + '</text>';
   }
 
   svg += '</svg>';
@@ -7074,13 +7338,12 @@ function _pdBodyComp(measurements) {
   var baseline = measurements[0];
 
   var fields = [
-    { key: 'weight_lbs', altKey: 'weight', label: 'Weight', unit: 'lb', lower: true },
     { key: 'waist', label: 'Waist', unit: 'in', lower: true },
-    { key: 'chest', label: 'Chest', unit: 'in', lower: true },
+    { key: 'chest', label: 'Chest', unit: 'in', lower: false },
     { key: 'hips', label: 'Hips', unit: 'in', lower: true },
     { key: 'neck', label: 'Neck', unit: 'in', lower: true },
-    { key: 'bicep_avg', label: 'Biceps', unit: 'in', lower: true, computed: true },
-    { key: 'thigh_avg', label: 'Thighs', unit: 'in', lower: true, computed: true }
+    { key: 'bicep_avg', label: 'Biceps', unit: 'in', lower: false, computed: true },
+    { key: 'thigh_avg', label: 'Thighs', unit: 'in', lower: false, computed: true }
   ];
 
   function getVal(entry, field) {
@@ -7142,80 +7405,40 @@ function _pdBodyComp(measurements) {
 }
 
 /* ── TRAINING STREAK (GitHub-style grid) ── */
-function _pdStreakGrid(completions, startDate) {
+function _pdStreakGrid(training, startDate) {
   if (!startDate) {
     return '<div class="pd-section"><div class="pd-section-label">Training Streak</div><div class="pd-empty">Set a start date first</div></div>';
+  }
+  training = training || {};
+
+  // Authority: backend has already computed current_streak and best_streak from
+  // DayCompletion. Frontend only renders — it does NOT recompute.
+  var streak = training.current_streak != null ? training.current_streak : 0;
+  var best = training.best_streak != null ? training.best_streak : 0;
+
+  // Build exact (week, day_idx) completion set from backend.
+  var doneCells = {};
+  if (Array.isArray(training.completed_days)) {
+    for (var ci = 0; ci < training.completed_days.length; ci++) {
+      var cd = training.completed_days[ci];
+      doneCells[cd.week + '_' + cd.day_idx] = true;
+    }
+  } else if (Array.isArray(training.weekly_adherence)) {
+    // Fallback: only have counts, not positions — mark the first N days of each week.
+    for (var ai = 0; ai < training.weekly_adherence.length; ai++) {
+      var wa = training.weekly_adherence[ai];
+      for (var di = 0; di < wa.days_done && di < 6; di++) {
+        doneCells[wa.week + '_' + di] = true;
+      }
+    }
   }
 
   var startDt = new Date(startDate + 'T00:00:00');
   var today = new Date();
   today.setHours(0, 0, 0, 0);
-  var totalDays = Math.min(12 * 7, Math.floor((today - startDt) / (1000 * 60 * 60 * 24)) + 1);
 
-  // Build day-level completion set
-  var completedDays = {};
-  if (completions) {
-    for (var key in completions) {
-      if (completions[key]) {
-        // key format: "week_dayIdx" e.g. "1_0"
-        var parts = key.split('_');
-        if (parts.length === 2) {
-          var wk = parseInt(parts[0]);
-          var di = parseInt(parts[1]);
-          var dayDate = new Date(startDt);
-          dayDate.setDate(dayDate.getDate() + (wk - 1) * 7 + di);
-          var ds = dayDate.getFullYear() + '-' + String(dayDate.getMonth() + 1).padStart(2, '0') + '-' + String(dayDate.getDate()).padStart(2, '0');
-          completedDays[ds] = true;
-        }
-      }
-    }
-  }
-
-  // Also check per-exercise completions
-  if (_completionsCache && _completionsCache.exercises) {
-    for (var ekey in _completionsCache.exercises) {
-      if (_completionsCache.exercises[ekey]) {
-        var ep = ekey.split('_');
-        if (ep.length >= 2) {
-          var ew = parseInt(ep[0]);
-          var ed = parseInt(ep[1]);
-          var eDate = new Date(startDt);
-          eDate.setDate(eDate.getDate() + (ew - 1) * 7 + ed);
-          var eds = eDate.getFullYear() + '-' + String(eDate.getMonth() + 1).padStart(2, '0') + '-' + String(eDate.getDate()).padStart(2, '0');
-          completedDays[eds] = true;
-        }
-      }
-    }
-  }
-
-  // Calculate current streak
-  var streak = 0;
-  var checkDate = new Date(today);
-  while (true) {
-    var cs = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
-    if (completedDays[cs]) {
-      streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-      if (checkDate < startDt) break;
-    } else {
-      // Allow today to be incomplete — check yesterday
-      if (streak === 0) {
-        checkDate.setDate(checkDate.getDate() - 1);
-        var ys = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
-        if (completedDays[ys]) {
-          streak++;
-          checkDate.setDate(checkDate.getDate() - 1);
-          continue;
-        }
-      }
-      break;
-    }
-  }
-
-  // Build grid: 7 columns (Mon-Sun), up to 12 rows
-  var totalWeeks = Math.min(12, Math.ceil(totalDays / 7));
+  // Render a full 12-week frame (6 workout days + rest column).
   var dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
   var grid = '<div class="pd-streak-header">';
   for (var li = 0; li < 7; li++) {
     grid += '<span class="pd-streak-day-label">' + dayLabels[li] + '</span>';
@@ -7223,16 +7446,16 @@ function _pdStreakGrid(completions, startDate) {
   grid += '</div>';
 
   grid += '<div class="pd-streak-grid">';
-  for (var wi = 0; wi < totalWeeks; wi++) {
+  for (var wi = 0; wi < 12; wi++) {
     for (var dj = 0; dj < 7; dj++) {
       var cellDate = new Date(startDt);
       cellDate.setDate(cellDate.getDate() + wi * 7 + dj);
-      var cellStr = cellDate.getFullYear() + '-' + String(cellDate.getMonth() + 1).padStart(2, '0') + '-' + String(cellDate.getDate()).padStart(2, '0');
-
       var cellClass = 'pd-streak-cell';
-      if (cellDate > today) {
+      if (dj === 6) {
+        cellClass += ' pd-streak-rest';
+      } else if (cellDate > today) {
         cellClass += ' pd-streak-future';
-      } else if (completedDays[cellStr]) {
+      } else if (doneCells[(wi + 1) + '_' + dj]) {
         cellClass += ' pd-streak-done';
       } else {
         cellClass += ' pd-streak-missed';
@@ -7242,11 +7465,13 @@ function _pdStreakGrid(completions, startDate) {
   }
   grid += '</div>';
 
-  var streakText = streak + ' day streak';
-
   return '<div class="pd-section">' +
     '<div class="pd-section-label">Training Streak</div>' +
-    '<div class="pd-streak-count">' + streak + ' <span class="pd-streak-unit">day streak</span></div>' +
+    '<div class="pd-streak-count">' +
+      '<span class="pd-streak-num">' + streak + '</span>' +
+      '<span class="pd-streak-unit">day streak</span>' +
+      '<span class="pd-streak-best">best ' + best + '</span>' +
+    '</div>' +
     grid +
     '</div>';
 }
@@ -7320,8 +7545,8 @@ function _pdLiftProgression(lifts) {
       '<div class="pd-lift-top">' +
         '<span class="pd-lift-name">' + shortName + (isPR ? ' <span class="pd-pr-badge">PR</span>' : '') + '</span>' +
         '<span class="pd-lift-vals">' +
-          '<span class="pd-lift-e1rm">' + latestVal + '</span>' +
-          (deltaStr ? '<span style="color:' + deltaColor + ';font-size:11px;margin-left:4px">' + deltaStr + '</span>' : '') +
+          '<span class="pd-lift-e1rm">' + latestVal + ' <span class="pd-lift-unit">lb</span></span>' +
+          (deltaStr ? '<span class="pd-lift-delta" style="color:' + deltaColor + '">' + deltaStr + '</span>' : '') +
         '</span>' +
       '</div>' +
       '<div class="pd-lift-bottom">' +
@@ -7332,28 +7557,6 @@ function _pdLiftProgression(lifts) {
   }
 
   return '<div class="pd-section"><div class="pd-section-label">Lift Progression</div>' + html + '</div>';
-}
-
-/* ── MOTIVATIONAL FOOTER ── */
-function _pdMotivationalFooter(startWeight, currentWeight, psychQuote) {
-  if (startWeight == null || currentWeight == null || startWeight <= currentWeight) {
-    return '<div class="pd-footer"><div class="pd-footer-line">Every rep counts. Keep showing up.</div></div>';
-  }
-
-  var lost = startWeight - currentWeight;
-  // 1 gallon of milk = 8.6 lb
-  var gallons = (lost / 8.6).toFixed(1);
-
-  var h = '<div class="pd-footer">';
-  h += '<div class="pd-footer-line">You\'ve earned ' + lost.toFixed(1) + ' lb of progress. That\'s ' + gallons + ' gallons of milk you\'re no longer carrying.</div>';
-
-  if (psychQuote) {
-    h += '<div class="pd-footer-quote">You said: "' + psychQuote + '"</div>';
-  }
-
-  h += '<div class="pd-footer-loss">If you stop now, research shows you\'ll regain it in 8 weeks.</div>';
-  h += '</div>';
-  return h;
 }
 
 // ─── STATS PANEL: TAB SWITCHING + LAB ──────────────────────────────────────
@@ -9143,9 +9346,7 @@ function startHiitTimer() {
     phases.push({ name: 'WARMUP', duration: cfg.warmup, color: '#3b82f6' });
     for (var r = 0; r < cfg.rounds; r++) {
         phases.push({ name: 'ALL OUT', round: r + 1, total: cfg.rounds, duration: cfg.work, color: '#ef4444' });
-        if (r < cfg.rounds - 1) {
-            phases.push({ name: 'WALK', round: r + 1, total: cfg.rounds, duration: cfg.rest, color: '#22c55e' });
-        }
+        phases.push({ name: 'RECOVERY', round: r + 1, total: cfg.rounds, duration: cfg.rest, color: '#22c55e' });
     }
     phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
 
@@ -9214,7 +9415,7 @@ function startHiitTimer() {
             setTimeout(function() { _playBeep(1200, 300); }, 400);
             setTimeout(function() { _playBeep(1200, 500); }, 800);
             _hiitFlash('#ef4444');
-        } else if (p.name === 'WALK') {
+        } else if (p.name === 'RECOVERY') {
             _playBeep(600, 500);
             _hiitFlash('#22c55e');
         } else if (p.name === 'COOLDOWN') {
@@ -9500,13 +9701,17 @@ async function renderDetail() {
       if (setData && setData.weight) carryWeight = setData.weight;
 
       if (isTimedEx) {
-        // Timed exercise: checkbox + set label + timer button (no weight/reps inputs)
+        // Timed exercise: multi-set → HIIT modal, single-set → inline hold timer.
+        var timerOnclick = setCount > 1
+          ? `startExerciseHiit('${escapedName}',${currentWeek},${currentDay},${i},${timedSeconds},${restSeconds},${setCount},${s})`
+          : `startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})`;
+        var timerLabel = setCount > 1 ? `▶ ${targetRepsDisplay}` : targetRepsDisplay;
         setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
           <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
             ${setDone ? '&#10003;' : ''}
           </button>
           <span class="set-label">Set ${s + 1}</span>
-          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})">${targetRepsDisplay}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay} &#10003;</span>`}
+          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="${timerOnclick}">${timerLabel}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay} &#10003;</span>`}
           <div id="inline-timer-${i}-${s}" style="margin-left:8px;font-family:'DM Mono',monospace;font-size:15px;color:var(--accent)"></div>
         </div>`;
       } else if (isBW) {

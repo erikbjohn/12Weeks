@@ -3710,27 +3710,70 @@ def api_progress_dashboard():
     fasting_protocol = goal.fasting_protocol if goal else None
 
     # ── 5. Projections ───────────────────────────────────────────────────
-    weight_projection = goal.weight_projection if goal else None
+    state = _get_state()
+    start_date = state.start_date if state and state.start_date else None
     weeks_remaining = max(0, 12 - current_week)
 
+    # Linear plan: straight line from start_weight to target_weight across 12 weeks.
+    # This is the "where you need to be" reference line the dashboard draws.
+    linear_plan = []
+    if start_weight is not None and target_weight is not None:
+        for w in range(1, 13):
+            frac = (w - 1) / 11.0 if 11 else 0
+            linear_plan.append({
+                "week": w,
+                "planned_weight": round(start_weight + (target_weight - start_weight) * frac, 1),
+            })
+
+    # Projected final weight: extrapolate current trajectory to week 12.
+    # Use the rolling 7-day average from the most recent entry to dampen noise.
+    projected_final_weight = None
+    if start_weight is not None and current_weight is not None and current_week > 0:
+        recent_avg = bw_series[-1]["rolling_avg_7d"] if bw_series else current_weight
+        weekly_rate = (start_weight - recent_avg) / max(current_week, 1)
+        projected_final_weight = round(recent_avg - weekly_rate * weeks_remaining, 1)
+
+    # On pace: current weight at or below linear-plan target for this week.
     on_pace = None
-    if weight_projection and current_weight is not None:
-        # weight_projection is a list of {week, weight} dicts or similar
-        projected_for_week = None
-        if isinstance(weight_projection, list):
-            for entry in weight_projection:
-                if isinstance(entry, dict) and entry.get("week") == current_week:
-                    projected_for_week = entry.get("projected") or entry.get("weight")
-                    break
-            # If no exact match, try index-based lookup
-            if projected_for_week is None and len(weight_projection) >= current_week:
-                entry = weight_projection[current_week - 1]
-                if isinstance(entry, dict):
-                    projected_for_week = entry.get("projected") or entry.get("weight")
-                elif isinstance(entry, (int, float)):
-                    projected_for_week = entry
-        if projected_for_week is not None:
-            on_pace = current_weight <= projected_for_week
+    if linear_plan and current_weight is not None and 1 <= current_week <= 12:
+        planned_now = linear_plan[current_week - 1]["planned_weight"]
+        on_pace = current_weight <= planned_now
+
+    # Preserve legacy stored projection for any existing consumers.
+    weight_projection = goal.weight_projection if goal else None
+
+    # Completed days: exact (week, day_idx) cells for accurate streak-grid placement.
+    completed_days = [{"week": d.week, "day_idx": d.day_idx} for d in done_days]
+
+    # ── 5b. Per-exercise weekly e1RM history for the Lift Progression card ──
+    # Aggregate SetLog (preferred) else ExerciseLog into {exercise: [{week, weight, reps}, ...]}.
+    lifts_data = {}
+    all_sets = (SetLog.query
+                .filter_by(user_id=uid, done=True)
+                .filter(SetLog.weight > 0)
+                .order_by(SetLog.week, SetLog.set_number)
+                .all())
+    for s in all_sets:
+        name = s.exercise_name
+        lifts_data.setdefault(name, []).append({
+            "week": s.week or 1,
+            "weight": s.weight,
+            "reps_completed": s.reps or 0,
+        })
+    if not lifts_data:
+        ex_logs = (ExerciseLog.query
+                   .filter_by(user_id=uid)
+                   .filter(ExerciseLog.weight > 0)
+                   .order_by(ExerciseLog.week)
+                   .all())
+        for log in ex_logs:
+            name = log.exercise_name
+            lifts_data.setdefault(name, []).append({
+                "week": log.week or 1,
+                "weight": log.weight,
+                "reps_completed": log.reps_completed or 0,
+            })
+    lifts_response = {name: {"history": history} for name, history in lifts_data.items()}
 
     # ── 6. Psych intake highlights ───────────────────────────────────────
     psych = PsychIntake.query.filter_by(user_id=uid).first()
@@ -3756,11 +3799,15 @@ def api_progress_dashboard():
                     body_goal = content[:200]
                 if not commitment_text and any(kw in lowered for kw in ["commit", "promise", "swear", "no excuses", "all in", "ready"]):
                     commitment_text = content[:300]
+        quote = commitment_text or body_goal or athlete_idol
+        if not quote and psych.report:
+            quote = psych.report[:240]
         psych_highlights = {
             "athlete_idol": athlete_idol,
             "body_goal": body_goal,
             "commitment_text": commitment_text,
             "report_summary": psych.report[:500] if psych.report else None,
+            "quote": quote,
         }
 
     # ── Assemble response ────────────────────────────────────────────────
@@ -3779,15 +3826,20 @@ def api_progress_dashboard():
             "best_streak": best_streak,
             "sets_logged": sets_logged,
             "weekly_adherence": weekly_adherence,
+            "completed_days": completed_days,
             "prs": prs,
         },
+        "lifts": lifts_response,
         "nutrition": {
             "meals_logged": meals_logged,
             "target_calories": target_calories,
             "fasting_protocol": fasting_protocol,
         },
         "projections": {
+            "start_date": start_date.isoformat() if start_date else None,
             "weight_projection": weight_projection,
+            "linear_plan": linear_plan,
+            "projected_final_weight": projected_final_weight,
             "weeks_remaining": weeks_remaining,
             "current_week": current_week,
             "on_pace": on_pace,
