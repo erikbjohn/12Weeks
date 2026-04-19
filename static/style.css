@@ -4285,6 +4285,17 @@ footer {
 .briefing-message { font-size: 15px; line-height: 1.6; color: var(--text); margin-bottom: 8px; }
 .briefing-workout { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); }
 
+/* ─── BODYWEIGHT PROGRESSION (weekly report) ─── */
+.bw-prog-list { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.bw-prog-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.bw-prog-row:last-child { border-bottom: none; }
+.bw-prog-label { flex: 1; color: var(--text); }
+.bw-prog-vals { color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px; }
+.bw-prog-delta { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; min-width: 48px; text-align: right; }
+.bw-prog-delta.bw-up { color: #4ade80; }
+.bw-prog-delta.bw-down { color: #ef4444; }
+.bw-prog-delta.bw-flat { color: var(--muted); }
+
 /* ─── TRAINING PLAN DISPLAY ─── */
 .plan-goal-badge { display: inline-block; padding: 4px 16px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; letter-spacing: 0.1em; color: var(--bg); }
 .plan-section { margin-bottom: 1.25rem; }

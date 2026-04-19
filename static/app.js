@@ -2992,7 +2992,13 @@ async function bwBaselineNext() {
   const payload = {};
   payload[keyMap[ex.key] || ex.key] = val;
   if (ex.hasKneesCheckbox) payload.pushup_from_knees = kneesEl ? kneesEl.checked : false;
-  await apiPost('/api/physical-assessment', payload);
+
+  if (_bwRetestWeek) {
+    payload.week_number = _bwRetestWeek;
+    await apiPost('/api/bodyweight-retest', payload);
+  } else {
+    await apiPost('/api/physical-assessment', payload);
+  }
 
   _bwClearTimer();
   _bwBaselineStep++;
@@ -3007,8 +3013,44 @@ function bwBaselineBack() {
 
 function bwBaselineContinueFromSummary() {
   _bwClearTimer();
+  if (_bwRetestWeek) {
+    completeBwRetest();
+    return;
+  }
   _paStep = 3;
   renderPhysicalAssessment();
+}
+
+// ─── BODYWEIGHT RETEST (week 6 / week 12) ──────────────────────────────────
+let _bwRetestWeek = null;
+
+function showBodyweightRetestIntro(week) {
+  _bwRetestWeek = week;
+  const el = document.getElementById('baseline-overlay');
+  el.innerHTML = `<div class="baseline-overlay">
+    <div class="baseline-card" style="text-align:center">
+      <h2>Week ${week} Retest</h2>
+      <div class="baseline-desc" style="margin:1rem 0 1.5rem">
+        Same four tests as your baseline. Same rules. Same 60 seconds.<br><br>
+        <strong>This is the point of the program.</strong> We see what changed.
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="startBodyweightRetest()">Start Retest</button>
+    </div>
+  </div>`;
+}
+
+function startBodyweightRetest() {
+  _bwBaselineStep = 0;
+  _bwBaselineData = {};
+  renderBodyweightBaseline();
+}
+
+async function completeBwRetest() {
+  await apiPost('/api/bodyweight-retest', { week_number: _bwRetestWeek, completed: true });
+  _bwRetestWeek = null;
+  const el = document.getElementById('baseline-overlay');
+  if (el) el.innerHTML = '';
+  renderAll();
 }
 
 // ─── FULL ATHLETE PROFILE ──────────────────────────────────────────────────
@@ -4975,6 +5017,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Morning check-in gate — check if already done today
     await checkMorningCheckin();
 
+    // Bodyweight retest gate — weeks 6 and 12
+    try {
+      const rtRes = await fetch('/api/bodyweight-retest/status');
+      if (rtRes.ok) {
+        const rtData = await rtRes.json();
+        if (rtData && rtData.due_and_pending) {
+          showBodyweightRetestIntro(rtData.due_week);
+          return;
+        }
+      }
+    } catch(e) {}
+
     renderAll();
   } catch(e) {
     console.error('Init failed', e);
@@ -5897,10 +5951,46 @@ async function showSundayFlow() {
           <div class="report-stat"><span class="report-stat-label">Adherence</span><span class="report-stat-val">${m.adherence_pct || 0}%</span></div>
         </div>
         ${narrative ? '<div class="report-narrative">' + narrative + '</div>' : ''}
+        <div id="bw-progression-section"></div>
         <div id="shopping-list-section"></div>
         <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="document.getElementById('morning-checkin-overlay').innerHTML='';triggerWeeklyPlanning()">Continue to Weekly Planning</button>
       </div>
     </div>`;
+    // Load bodyweight progression (baseline vs retests)
+    try {
+      const bwRes = await fetch('/api/bodyweight-retest/deltas');
+      const bwData = await bwRes.json();
+      const bwEl = document.getElementById('bw-progression-section');
+      if (bwEl && bwData.baseline && bwData.retests && bwData.retests.length > 0) {
+        const LABELS = {
+          squat_count: 'Air Squats (60s)',
+          pushup_count: 'Pushups (60s)',
+          burpee_count: 'Burpees (60s)',
+          plank_seconds: 'Plank (sec)',
+        };
+        // Use most recent retest
+        const latest = bwData.retests[bwData.retests.length - 1];
+        let rows = '';
+        for (const field of ['squat_count','pushup_count','burpee_count','plank_seconds']) {
+          const d = latest.deltas[field];
+          if (!d) continue;
+          const sign = d.delta > 0 ? '+' : '';
+          const cls = d.delta > 0 ? 'bw-up' : (d.delta < 0 ? 'bw-down' : 'bw-flat');
+          rows += `<div class="bw-prog-row">
+            <span class="bw-prog-label">${LABELS[field]}</span>
+            <span class="bw-prog-vals">${d.baseline} → ${d.current}</span>
+            <span class="bw-prog-delta ${cls}">${sign}${d.delta}</span>
+          </div>`;
+        }
+        if (rows) {
+          bwEl.innerHTML = `<div class="plan-section" style="margin-top:1rem">
+            <div class="plan-section-label">Bodyweight progression — Week ${latest.week_number} retest</div>
+            <div class="bw-prog-list">${rows}</div>
+          </div>`;
+        }
+      }
+    } catch(e) {}
+
     // Load shopping list
     try {
       const shopRes = await fetch('/api/shopping-list');
@@ -5935,7 +6025,29 @@ async function triggerWeeklyPlanning() {
   // Send the weekly planning trigger to Coach
   const weekNum = currentWeek;
   const nextWeek = Math.min(weekNum + 1, 12);
-  const msg = `[WEEKLY_PLANNING] It's Sunday. Week ${weekNum} is done, week ${nextWeek} starts tomorrow. Review my week, then let's plan. Ask me about any travel, races, schedule changes, or injuries for the coming week. Adjust the plan based on what I tell you.`;
+
+  // Include bodyweight progression deltas if a retest landed this week
+  let bwLine = '';
+  try {
+    const bwRes = await fetch('/api/bodyweight-retest/deltas');
+    const bwData = await bwRes.json();
+    if (bwData.retests && bwData.retests.length > 0) {
+      const latest = bwData.retests[bwData.retests.length - 1];
+      const parts = [];
+      const LBL = { squat_count: 'squats', pushup_count: 'pushups', burpee_count: 'burpees', plank_seconds: 'plank(s)' };
+      for (const f of ['squat_count','pushup_count','burpee_count','plank_seconds']) {
+        const d = latest.deltas[f];
+        if (!d) continue;
+        const sign = d.delta > 0 ? '+' : '';
+        parts.push(`${LBL[f]} ${d.baseline}→${d.current} (${sign}${d.delta})`);
+      }
+      if (parts.length) {
+        bwLine = ` Week ${latest.week_number} bodyweight retest: ${parts.join(', ')}.`;
+      }
+    }
+  } catch(e) {}
+
+  const msg = `[WEEKLY_PLANNING] It's Sunday. Week ${weekNum} is done, week ${nextWeek} starts tomorrow.${bwLine} Review my week, then let's plan. Ask me about any travel, races, schedule changes, or injuries for the coming week. Adjust the plan based on what I tell you.`;
 
   // Send via API, then show result in Coach accordion
   try {

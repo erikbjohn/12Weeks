@@ -34,7 +34,7 @@ from models import (
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
     ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
-    UserEquipment, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
+    UserEquipment, BodyweightRetest, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
     ComplianceState, MuscleGroupProfile, SessionAnalysis,
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
@@ -6917,6 +6917,86 @@ def api_physical_assessment_reset():
     PhysicalAssessment.query.filter_by(user_id=current_user.id).delete()
     db.session.commit()
     return jsonify({"ok": True})
+
+
+# ─── BODYWEIGHT RETEST (week 6 and week 12) ────────────────────────────────
+RETEST_WEEKS = (6, 12)
+
+
+@app.route("/api/bodyweight-retest/status")
+@login_required
+def api_bodyweight_retest_status():
+    """Tell the client if a retest is due this week and whether it's done."""
+    week = _current_week()
+    due_week = week if week in RETEST_WEEKS else None
+    retests = {r.week_number: r for r in BodyweightRetest.query.filter_by(user_id=current_user.id).all()}
+    completed = {w: retests[w].completed for w in retests}
+    due_and_pending = bool(due_week and not (retests.get(due_week) and retests[due_week].completed))
+    return jsonify({
+        "current_week": week,
+        "due_week": due_week,
+        "due_and_pending": due_and_pending,
+        "completed": completed,
+    })
+
+
+@app.route("/api/bodyweight-retest", methods=["POST"])
+@login_required
+def api_bodyweight_retest_save():
+    data = request.get_json() or {}
+    week = data.get("week_number") or _current_week()
+    if week not in RETEST_WEEKS:
+        return jsonify({"error": f"Retest only accepted for weeks {RETEST_WEEKS}, not week {week}"}), 400
+
+    rt = BodyweightRetest.query.filter_by(user_id=current_user.id, week_number=week).first()
+    if not rt:
+        rt = BodyweightRetest(user_id=current_user.id, week_number=week)
+        db.session.add(rt)
+
+    for field in ("squat_count", "pushup_count", "burpee_count", "plank_seconds"):
+        if field in data and data[field] is not None:
+            setattr(rt, field, int(data[field]))
+    if "pushup_from_knees" in data:
+        rt.pushup_from_knees = bool(data["pushup_from_knees"])
+    if data.get("completed"):
+        rt.completed = True
+        rt.completed_at = datetime.now(timezone.utc)
+
+    db.session.commit()
+    return jsonify({"ok": True, "week_number": week, "completed": rt.completed})
+
+
+@app.route("/api/bodyweight-retest/deltas")
+@login_required
+def api_bodyweight_retest_deltas():
+    """Return baseline-vs-retest deltas for the athlete dashboard / weekly report."""
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    if not pa:
+        return jsonify({"baseline": None, "retests": []})
+
+    baseline = {
+        "squat_count": pa.squat_count,
+        "pushup_count": pa.pushup_count,
+        "pushup_from_knees": pa.pushup_from_knees,
+        "burpee_count": pa.burpee_count,
+        "plank_seconds": pa.plank_seconds,
+    }
+    results = []
+    for rt in BodyweightRetest.query.filter_by(user_id=current_user.id).order_by(BodyweightRetest.week_number.asc()).all():
+        deltas = {}
+        for field in ("squat_count", "pushup_count", "burpee_count", "plank_seconds"):
+            b = baseline.get(field)
+            v = getattr(rt, field)
+            if b is not None and v is not None:
+                deltas[field] = {"baseline": b, "current": v, "delta": v - b}
+        results.append({
+            "week_number": rt.week_number,
+            "completed": rt.completed,
+            "completed_at": rt.completed_at.isoformat() if rt.completed_at else None,
+            "pushup_from_knees": rt.pushup_from_knees,
+            "deltas": deltas,
+        })
+    return jsonify({"baseline": baseline, "retests": results})
 
 
 ## User data reset endpoint removed — no data wipes allowed

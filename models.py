@@ -377,6 +377,24 @@ class PhysicalAssessment(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class BodyweightRetest(db.Model):
+    """Periodic bodyweight assessment retests (week 6, week 12) — compared against PhysicalAssessment baseline."""
+    __tablename__ = "bodyweight_retest"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week_number = db.Column(db.Integer, nullable=False)  # 6 or 12
+    squat_count = db.Column(db.Integer, nullable=True)  # air squats in 60s
+    pushup_count = db.Column(db.Integer, nullable=True)  # 60-second count
+    pushup_from_knees = db.Column(db.Boolean, default=False)
+    burpee_count = db.Column(db.Integer, nullable=True)  # 60-second count
+    plank_seconds = db.Column(db.Integer, nullable=True)  # max hold
+    completed = db.Column(db.Boolean, default=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (db.Index("ix_bwretest_user_week", "user_id", "week_number", unique=True),)
+
+
 class UserEquipment(db.Model):
     """User's available gym equipment."""
     __tablename__ = "user_equipment"
