@@ -7042,6 +7042,73 @@ def api_admin_debug_sql():
         return jsonify({"error": str(e)[:300]}), 500
 
 
+@app.route("/api/admin/debug/patch-set", methods=["POST"])
+@admin_required
+def api_admin_debug_patch_set():
+    """Patch a single set_log row by id. Admin-only. For typo fixes."""
+    from models import SetLog
+    data = request.get_json() or {}
+    set_id = data.get("id")
+    if not set_id:
+        return jsonify({"error": "id required"}), 400
+    s = SetLog.query.get(set_id)
+    if not s:
+        return jsonify({"error": f"set_log id={set_id} not found"}), 404
+    before = {"reps": s.reps, "weight": s.weight}
+    if "reps" in data:
+        s.reps = int(data["reps"])
+    if "weight" in data:
+        s.weight = float(data["weight"])
+    db.session.commit()
+    return jsonify({"ok": True, "id": s.id, "before": before,
+                    "after": {"reps": s.reps, "weight": s.weight}})
+
+
+@app.route("/api/admin/debug/regenerate-projection", methods=["POST"])
+@admin_required
+def api_admin_debug_regenerate_projection():
+    """Re-anchor training_goal.weight_projection using a specified starting weight.
+
+    Admin-only. Used when the original projection was anchored on an intermediate
+    weigh-in (e.g., post-water-weight) instead of the true Mar 30 baseline.
+    """
+    from goal_engine import project_weight_curve
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    starting_weight = data.get("starting_weight")
+    if not email or starting_weight is None:
+        return jsonify({"error": "email and starting_weight required"}), 400
+    user = User.query.filter(User.email.ilike(email)).first()
+    if not user:
+        return jsonify({"error": f"user '{email}' not found"}), 404
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    if not goal:
+        return jsonify({"error": "no training_goal for user"}), 404
+    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+    height = pa.height_inches if pa and pa.height_inches else 70
+    age = pa.age if pa and getattr(pa, "age", None) else 40
+    sex = pa.sex if pa and getattr(pa, "sex", None) else "male"
+    before = goal.weight_projection
+    projection = project_weight_curve(
+        starting_weight=float(starting_weight),
+        target_weight=goal.target_weight,
+        tdee=goal.tdee or 2500,
+        daily_calories=goal.daily_calories or 2000,
+        weeks=12,
+        height_in=height, age=age, sex=sex,
+    )
+    goal.weight_projection = projection
+    db.session.commit()
+    return jsonify({
+        "ok": True,
+        "user_id": user.id,
+        "starting_weight": starting_weight,
+        "target_weight": goal.target_weight,
+        "before": before,
+        "after": projection,
+    })
+
+
 @app.route("/api/admin/generate-meals", methods=["POST"])
 @admin_required
 def api_admin_generate_meals():

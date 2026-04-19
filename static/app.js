@@ -1271,6 +1271,31 @@ function parseRestSeconds(rest) {
   return m ? parseInt(m[1]) : 60;
 }
 
+// Confirm suspicious set entries. Returns true to proceed, false to bail.
+// Caller passes repsTyped (what the user actually typed; 0 if not) so we don't
+// nag when the target placeholder is filled in by default.
+function _confirmSetIfSuspicious(exName, weight, reps, repsTyped) {
+  var warnings = [];
+  // Reps typo: most weighted exercises top out well below 50. Timed holds
+  // (planks) and bodyweight high-rep work (weight=0) are excluded.
+  if (repsTyped > 50 && weight > 0) {
+    warnings.push('You logged ' + repsTyped + ' reps of ' + exName + ' at ' + weight + ' lb. Typo?');
+  }
+  // Weight typo: absolute guardrail.
+  if (weight > 500) {
+    warnings.push('You logged ' + weight + ' lb on ' + exName + '. Typo?');
+  }
+  // Weight typo: relative to this exercise's history.
+  if (window._weightsCache && _weightsCache[exName] && _weightsCache[exName].current > 0) {
+    var prev = _weightsCache[exName].current;
+    if (weight >= prev * 2.5 && weight - prev >= 30) {
+      warnings.push('Last recorded weight for ' + exName + ' was ' + prev + ' lb. You entered ' + weight + ' lb. Typo?');
+    }
+  }
+  if (!warnings.length) return true;
+  return confirm(warnings.join('\n\n') + '\n\nOK to save anyway, Cancel to fix.');
+}
+
 function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
   // If toggleSet is mid-flight, let it own the save — don't double-write
@@ -1282,6 +1307,7 @@ function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
   const reps = repsTyped || repsTarget;
   if (weight <= 0 && reps <= 0) return;
+  if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped)) return;
   // Update local cache so the value persists across re-renders even before toggleSet
   if (!_setCache[key]) _setCache[key] = { done: false, weight, reps };
   else { _setCache[key].weight = weight; _setCache[key].reps = reps; }
@@ -1315,7 +1341,8 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
       setTimeout(() => { delete _setSaving[key]; }, 1500);
     }
   } else {
-    // Check — mark set done
+    // Check — mark set done. Flag obvious typos before persisting.
+    if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped)) return;
     _setCache[key] = { done: true, weight, reps };
     btn.classList.add('done');
     btn.innerHTML = '&#10003;';
