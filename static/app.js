@@ -841,13 +841,49 @@ function localTimeContext() {
 }
 
 // ─── MEAL TRACKING ─────────────────────────────────────────────────────────
+// Calendar date for the currently-viewed week/day. Falls back to today if
+// start_date isn't set yet. Keeps per-day meal state separate in _mealsCache.
+function getViewDateStr() {
+  try {
+    const sd = _stateCache && _stateCache.start_date;
+    if (!sd || currentWeek == null || currentDay == null) return todayStr();
+    const d = new Date(sd + 'T00:00:00');
+    d.setDate(d.getDate() + (currentWeek - 1) * 7 + currentDay);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  } catch(e) { return todayStr(); }
+}
+
 function getMealDateKey() {
-  return todayStr();
+  return getViewDateStr();
+}
+
+// Lazy-fetch past-day meal state on demand. Idempotent — only fetches once
+// per date. Re-renders the detail panel when the data arrives.
+const _mealsFetchInFlight = {};
+function ensureMealDataLoaded(dateKey) {
+  if (!dateKey) return;
+  if (_mealsCache[dateKey]) return;
+  if (_mealsFetchInFlight[dateKey]) return;
+  _mealsFetchInFlight[dateKey] = true;
+  fetch('/api/meals?date=' + encodeURIComponent(dateKey))
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && typeof data === 'object') _mealsCache[dateKey] = data;
+    })
+    .catch(() => {})
+    .finally(() => {
+      delete _mealsFetchInFlight[dateKey];
+      // Re-render if the viewed day is still the one we fetched for
+      if (getMealDateKey() === dateKey) {
+        try { renderDetail(); } catch(e) {}
+      }
+    });
 }
 
 function loadMealData() {
   const key = getMealDateKey();
   if (_mealsCache[key]) return _mealsCache[key];
+  ensureMealDataLoaded(key);
   return {};
 }
 
@@ -1070,8 +1106,8 @@ function renderMealInner(dayData) {
 
   const meals = activePlan.meals || [];
   meals.forEach((meal, idx) => {
-    // Only check eaten state when viewing today — prevents cross-day data leaking
-    const eaten = isViewingToday ? isMealEaten(idx) : false;
+    // Show saved state on every day. Editing is gated to today separately.
+    const eaten = isMealEaten(idx);
     const multiplier = getMealMultiplier(idx);
     const macros = calcMealMacros(meal.foods, multiplier);
 
@@ -1084,56 +1120,36 @@ function renderMealInner(dayData) {
 
     const foodRows = meal.foods.map((f, fIdx) => {
       const adjCal = Math.round((f.cal || 0) * multiplier);
-      if (isViewingToday) {
-        const foodKey = idx + '_' + fIdx;
-        const foodEaten = _isFoodItemEaten(foodKey);
-        return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
-          <button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length},this)">${foodEaten ? '&#10003;' : ''}</button>
-          <span class="meal-food-name">${f.item}</span>
-          <span class="meal-food-portion">${f.portion}</span>
-          <span class="meal-food-portion">${adjCal}cal</span>
-        </div>`;
-      } else {
-        return `<div class="meal-food-row">
-          <span class="meal-food-name">${f.item}</span>
-          <span class="meal-food-portion">${f.portion}</span>
-          <span class="meal-food-portion">${adjCal}cal</span>
-        </div>`;
-      }
+      const foodKey = idx + '_' + fIdx;
+      const foodEaten = _isFoodItemEaten(foodKey);
+      const checkBtn = isViewingToday
+        ? `<button class="food-check${foodEaten ? ' checked' : ''}" onclick="toggleFoodItem('${foodKey}',${idx},${meal.foods.length},this)">${foodEaten ? '&#10003;' : ''}</button>`
+        : `<span class="food-check${foodEaten ? ' checked' : ''}" style="pointer-events:none;opacity:${foodEaten ? '1' : '0.3'}">${foodEaten ? '&#10003;' : ''}</span>`;
+      return `<div class="meal-food-row${foodEaten ? ' food-eaten' : ''}">
+        ${checkBtn}
+        <span class="meal-food-name">${f.item}</span>
+        <span class="meal-food-portion">${f.portion}</span>
+        <span class="meal-food-portion">${adjCal}cal</span>
+      </div>`;
     }).join('');
 
-    if (isViewingToday) {
-      mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
-        <button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">
-          ${eaten ? '&#10003;' : ''}
-        </button>
-        <div class="meal-time">${meal.time}</div>
-        <div class="meal-content">
-          <div class="meal-name">${meal.name}</div>
-          <div class="meal-foods">${foodRows}</div>
-          <div class="meal-macros">
-            <span class="mm-cal">${macros.cal} cal</span>
-            <span class="mm-p">${macros.protein}P</span>
-            <span class="mm-c">${macros.carbs}C</span>
-            <span class="mm-f">${macros.fat}F</span>
-          </div>
+    const mealCheck = isViewingToday
+      ? `<button class="meal-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">${eaten ? '&#10003;' : ''}</button>`
+      : `<span class="meal-check${eaten ? ' eaten' : ''}" style="pointer-events:none;opacity:${eaten ? '1' : '0.3'}">${eaten ? '&#10003;' : ''}</span>`;
+    mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
+      ${mealCheck}
+      <div class="meal-time">${meal.time}</div>
+      <div class="meal-content">
+        <div class="meal-name">${meal.name}</div>
+        <div class="meal-foods">${foodRows}</div>
+        <div class="meal-macros">
+          <span class="mm-cal">${macros.cal} cal</span>
+          <span class="mm-p">${macros.protein}P</span>
+          <span class="mm-c">${macros.carbs}C</span>
+          <span class="mm-f">${macros.fat}F</span>
         </div>
-      </div>`;
-    } else {
-      mealsHtml += `<div class="meal-item${meal.optional ? ' optional' : ''}">
-        <div class="meal-time">${meal.time}</div>
-        <div class="meal-content">
-          <div class="meal-name">${meal.name}</div>
-          <div class="meal-foods">${foodRows}</div>
-          <div class="meal-macros">
-            <span class="mm-cal">${macros.cal} cal</span>
-            <span class="mm-p">${macros.protein}P</span>
-            <span class="mm-c">${macros.carbs}C</span>
-            <span class="mm-f">${macros.fat}F</span>
-          </div>
-        </div>
-      </div>`;
-    }
+      </div>
+    </div>`;
   });
 
   const target = {
@@ -1150,16 +1166,18 @@ function renderMealInner(dayData) {
 
   const totalsHtml = ''; // Daily totals removed — eat the plan, check it off
 
-  // Compact row: meal name checkboxes (today only)
+  // Compact row: meal name checkboxes. Today = clickable, past = read-only badges.
   let compactChecks = '';
-  if (isViewingToday) {
-    meals.forEach((meal, idx) => {
-      const eaten = isMealEaten(idx);
+  meals.forEach((meal, idx) => {
+    const eaten = isMealEaten(idx);
+    if (isViewingToday) {
       compactChecks += `<button class="meal-compact-check${eaten ? ' eaten' : ''}" onclick="toggleMealEaten(${idx},this)">${eaten ? '&#10003; ' : ''}${meal.name}</button>`;
-    });
-  }
+    } else {
+      compactChecks += `<span class="meal-compact-check${eaten ? ' eaten' : ''}" style="pointer-events:none;opacity:${eaten ? '1' : '0.5'}">${eaten ? '&#10003; ' : ''}${meal.name}</span>`;
+    }
+  });
 
-  const notTodayNote = !isViewingToday ? '<div class="meal-plan-note" style="opacity:0.6;font-style:italic">Meal tracking available on today\'s view only</div>' : '';
+  const notTodayNote = '';
 
   // Calorie + deficit summary
   const goalData = window._goalData || {};
@@ -1175,7 +1193,7 @@ function renderMealInner(dayData) {
     ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
     ${notTodayNote}
     ${totalsHtml}
-    ${isViewingToday ? '<div class="meal-compact-row">' + compactChecks + '</div>' : ''}
+    <div class="meal-compact-row">${compactChecks}</div>
     <div class="meal-detail-body visible">
       <div class="meal-timeline">
         ${mealsHtml}
