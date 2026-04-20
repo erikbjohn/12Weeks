@@ -209,6 +209,24 @@ def _build_workout_today():
                          "time": rp.duration, "detail": rp.detail or ""}
     except Exception:
         pass
+    # Merge RunOverride on top — UI does the same in buildRunSubsection,
+    # without this the coach prescribes the base plan while the user sees the override.
+    try:
+        from models import RunOverride
+        ov = RunOverride.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=today_idx
+        ).first()
+        if ov and wt:
+            base = wt.get("run") or {}
+            wt["run"] = {
+                "type": ov.run_type or base.get("type"),
+                "label": ov.run_type or base.get("label") or "Run",
+                "time": ov.duration or base.get("time"),
+                "detail": base.get("detail") or "",
+                "override_reason": ov.reason or "",
+            }
+    except Exception:
+        pass
     try:
         wu = WeeklyWarmup.query.filter_by(
             user_id=current_user.id, week=week, day_idx=today_idx

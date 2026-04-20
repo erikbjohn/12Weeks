@@ -8918,7 +8918,19 @@ async function launchWeeklyPlanning(weekOverride) {
                 var _liftName = _schedInfo ? _schedInfo.lift_name || '' : '';
                 _dayHtml = '<div style="font-weight:700;font-size:15px;color:var(--accent);margin-bottom:6px">' + _dayLabels[_curDay] + (_liftName ? ' — ' + _liftName : '') + '</div>';
             }
-            var _wt = _ex.target_weight ? _ex.target_weight + 'lb' : 'BW';
+            var _swapKeyPre = nextWeek + '_' + _ex.day + '_' + _exIdxInDay;
+            var _displayNameForWt = _planSwaps[_swapKeyPre] || _ex.exercise;
+            var _prevForWt = lastWeekActual[_displayNameForWt] || lastWeekActual[_ex.exercise];
+            var _wt;
+            if (_ex.target_weight) {
+                _wt = _ex.target_weight + 'lb';
+            } else if (isBodyweightExercise(_displayNameForWt, _ex.note)) {
+                _wt = 'BW';
+            } else if (_prevForWt && _prevForWt.weight) {
+                _wt = _prevForWt.weight + 'lb';
+            } else {
+                _wt = '—';
+            }
             var _prev = lastWeekActual[_ex.exercise];
             var _changeHtml = '';
             if (_prev && _prev.weight && _ex.target_weight) {
