@@ -7543,7 +7543,12 @@ function _pdWeightChart(bw, projections, targetWeight, startDate) {
 
   var svg = '<svg class="pd-weight-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
 
-  var yLabels = [Math.round(startWt), Math.round((startWt + goalWt) / 2), Math.round(goalWt)];
+  // Y-axis: round ticks at 5- or 10-lb steps so gridlines land on recognizable numbers.
+  var tickStep = yRange > 30 ? 10 : 5;
+  var tickLo = Math.ceil(yMin / tickStep) * tickStep;
+  var tickHi = Math.floor(yMax / tickStep) * tickStep;
+  var yLabels = [];
+  for (var tv = tickLo; tv <= tickHi; tv += tickStep) yLabels.push(tv);
   for (var yi = 0; yi < yLabels.length; yi++) {
     var ly = yPos(yLabels[yi]);
     svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="#c5d0c7" font-size="12" font-family="DM Mono,monospace">' + yLabels[yi] + '</text>';
@@ -7565,29 +7570,31 @@ function _pdWeightChart(bw, projections, targetWeight, startDate) {
     svg += '<line x1="' + padL + '" y1="' + yPos(startWt) + '" x2="' + (W - padR) + '" y2="' + yPos(goalWt) + '" stroke="#9aaa9d" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.35"/>';
   }
 
-  // Smoothed trajectory from rolling_avg_7d when available, else raw weight
+  // Trajectory: connect actual weigh-ins. Line + dots share the same y so nothing looks orphaned.
   var pts = [];
   for (var ai = 0; ai < bw.length; ai++) {
-    var smoothed = bw[ai].rolling_avg_7d != null ? bw[ai].rolling_avg_7d : bw[ai].weight;
-    pts.push(xPosDate(bw[ai].date).toFixed(1) + ',' + yPos(smoothed).toFixed(1));
+    pts.push(xPosDate(bw[ai].date).toFixed(1) + ',' + yPos(bw[ai].weight).toFixed(1));
   }
   svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
-  // Raw weigh-in dots — not dimmed; users want to see variance
-  for (var di = 0; di < bw.length; di++) {
-    svg += '<circle cx="' + xPosDate(bw[di].date).toFixed(1) + '" cy="' + yPos(bw[di].weight).toFixed(1) + '" r="3" fill="#4ade80" opacity="0.65"/>';
+  for (var di = 0; di < bw.length - 1; di++) {
+    svg += '<circle cx="' + xPosDate(bw[di].date).toFixed(1) + '" cy="' + yPos(bw[di].weight).toFixed(1) + '" r="3" fill="#4ade80" opacity="0.7"/>';
   }
 
   // Current-weight annotation on the rightmost dot
   if (bw.length > 0) {
     var last = bw[bw.length - 1];
     var lx = xPosDate(last.date);
-    var ly = yPos(last.rolling_avg_7d != null ? last.rolling_avg_7d : last.weight);
+    var ly = yPos(last.weight);
     svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="5" fill="#4ade80"/>';
-    var annX = lx - 8;
-    var annAnchor = 'end';
-    if (annX < padL + 40) { annX = lx + 8; annAnchor = 'start'; }
-    svg += '<text x="' + annX.toFixed(1) + '" y="' + (ly - 8).toFixed(1) + '" text-anchor="' + annAnchor + '" fill="#4ade80" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + last.weight.toFixed(1) + '</text>';
+    // Prefer right-of-dot placement when there's horizontal room — avoids crashing into the y-axis labels on the left.
+    var plotRight = W - padR;
+    var annX, annAnchor;
+    if (lx + 40 < plotRight) { annX = lx + 8; annAnchor = 'start'; }
+    else                     { annX = lx - 8; annAnchor = 'end'; }
+    var annY = ly - 10;
+    if (annY < padT + 12) annY = ly + 18; // flip below the dot if it would collide with the top tick
+    svg += '<text x="' + annX.toFixed(1) + '" y="' + annY.toFixed(1) + '" text-anchor="' + annAnchor + '" fill="#4ade80" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + last.weight.toFixed(1) + '</text>';
   }
 
   var xWeeks = [1, 4, 8, 12];
