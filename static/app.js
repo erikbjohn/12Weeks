@@ -8080,20 +8080,36 @@ function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight,
     }
   }
 
-  // Projection line (blue dashed)
+  // Projection line (blue dashed) — starts at the end of the green actual-data
+  // line (today) so the two visually connect, then extends forward through W12.
   if (projection && projection.length > 0) {
     var curWeek = (_spLabData.current_week || 1);
     var projPts = [];
+
+    // Anchor point: last actual weigh-in (end of green line).
+    if (weightSeries && weightSeries.length > 0) {
+      var firstDt = new Date(weightSeries[0].date + 'T00:00:00');
+      var lastEntry = weightSeries[weightSeries.length - 1];
+      var lastDt = new Date(lastEntry.date + 'T00:00:00');
+      var lastDayOff = Math.round((lastDt - firstDt) / (1000 * 60 * 60 * 24));
+      var lastWt = lastEntry.rolling_avg || lastEntry.weight;
+      if (lastWt != null && lastDayOff >= 0) {
+        projPts.push((PAD + lastDayOff / 84 * (W - PAD - 10)) + ',' + yScale(lastWt));
+      }
+    }
+
+    // Forward projection: pw.week is 1..N local-from-today. Map to absolute
+    // program week so the tail lands on W12 (not W1..N near the start).
     for (var j = 0; j < projection.length; j++) {
       var pw = projection[j];
-      var weekNum = pw.week || (curWeek + j);
-      var dayOff2 = (weekNum - 1) * 7;
+      var localWk = pw.week || (j + 1);
+      var absWeek = curWeek + localWk - 1;
+      var dayOff2 = (absWeek - 1) * 7;
       var px = PAD + dayOff2 / 84 * (W - PAD - 10);
       var py = yScale(pw.projected);
       projPts.push(px + ',' + py);
     }
     svg += '<polyline points="' + projPts.join(' ') + '" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6,3" stroke-linecap="round"/>';
-    // End point
     var ep = projPts[projPts.length - 1].split(',');
     svg += '<circle cx="' + ep[0] + '" cy="' + ep[1] + '" r="4" fill="#60a5fa"/>';
     svg += '<text x="' + ep[0] + '" y="' + (parseFloat(ep[1]) - 8) + '" font-size="11" fill="#60a5fa" text-anchor="middle" font-family="DM Mono" font-weight="700">' + projection[projection.length - 1].projected.toFixed(0) + '</text>';
