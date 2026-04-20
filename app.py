@@ -6057,7 +6057,14 @@ def _compute_goal_for_user(user, overrides=None):
     else:
         goal_info = detect_goal(actor_answer)
         goal_type = goal_info["goal_type"]
-        target_bf = goal_info["target_bf"]
+        # If the user already has this goal type stored with a custom target_bf,
+        # preserve it. Otherwise detect_goal's table defaults (e.g. 0.08 male cut)
+        # would silently overwrite a user-picked target on every recompute.
+        if (existing_goal and existing_goal.goal_type == goal_type
+                and existing_goal.target_bf_pct):
+            target_bf = existing_goal.target_bf_pct
+        else:
+            target_bf = goal_info["target_bf"]
     if override_target_bf and 0.05 <= float(override_target_bf) <= 0.40:
         target_bf = float(override_target_bf)
 
@@ -6100,7 +6107,13 @@ def _compute_goal_for_user(user, overrides=None):
         # Moderate cut target — not extreme. 22% female / 15% male is realistic for
         # a 12-week cut from overweight; the full lean target (16/8) would force an
         # unrealistic deficit.
-        target_bf = 0.22 if sex == "female" else 0.15
+        lock_bf = 0.22 if sex == "female" else 0.15
+        # Don't weaken an already-lean target the user chose. If they were aiming
+        # at 10% BF, flipping from recomp→cut shouldn't push them back to 15%.
+        if existing_goal and existing_goal.target_bf_pct and 0.05 <= existing_goal.target_bf_pct < lock_bf:
+            target_bf = existing_goal.target_bf_pct
+        else:
+            target_bf = lock_bf
 
     tdee_info = compute_tdee(weight, height, age, sex)
 
