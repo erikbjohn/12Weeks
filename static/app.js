@@ -205,22 +205,18 @@ function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, h
     // Convert to lbs: 3500 cal = 1 lb of fat
     var weeklyDeltaLbs = (dailyDeltaCal * 7) / 3500;
 
-    // Water/glycogen effect only applies in absolute program weeks 1-2.
-    // If the user is already past week 2, no water boost — that's gone.
-    if (absoluteWeek <= 2) {
-      if (!gaining) {
-        weeklyDeltaLbs *= 1.5;
-      } else {
-        weeklyDeltaLbs *= 1.3;
-      }
+    // Water/glycogen boost: continuous decay rather than a hard week-2 cliff.
+    // weight = 1 + 0.5*exp(-(absWeek-1)/1.5) for cuts, so absWeek=1 → 1.5x,
+    // absWeek=2 → ~1.26x, absWeek=4 → ~1.07x, absWeek=8+ → ~1.0x. No kink.
+    if (!gaining) {
+      weeklyDeltaLbs *= 1 + 0.5 * Math.exp(-(absoluteWeek - 1) / 1.5);
+    } else {
+      weeklyDeltaLbs *= 1 + 0.3 * Math.exp(-(absoluteWeek - 1) / 1.5);
     }
 
-    // Training adaptation: TDEE bump from increased fitness
-    // Ramps up from absolute program week 3, peaks at week 6
-    var adaptationBump = 0;
-    if (absoluteWeek >= 3) {
-      adaptationBump = Math.min((absoluteWeek - 2) * 20, 100); // up to +100 cal/day
-    }
+    // Training adaptation: smooth logistic ramp to +100 cal/day, centered at
+    // absolute week 5. No step function, no piecewise cap.
+    var adaptationBump = 100 / (1 + Math.exp(-(absoluteWeek - 5) / 1.2));
 
     currentWeight += weeklyDeltaLbs;
     currentWeight = Math.round(currentWeight * 10) / 10;
@@ -8042,13 +8038,14 @@ function _spUpdateProjection() {
 }
 
 function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight, startDate) {
-  // Compact SVG chart — actual data (green) + projection (blue dashed)
-  var W = 340, H = 180, PAD = 40;
+  // Taller aspect ratio so weekly weight changes read as meaningful vertical
+  // distance. At 340x300 viewBox, a 1-lb move ≈ 5 px of plot height instead of ~2.
+  var W = 340, H = 300, PAD = 40;
   var maxW = startWeight + 2;
   var minW = targetWeight ? Math.min(targetWeight, startWeight) - 2 : startWeight - 20;
   if (minW >= maxW) minW = maxW - 20;
 
-  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:400px;display:block;margin:0 auto" preserveAspectRatio="xMidYMid meet">';
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:420px;display:block;margin:0 auto" preserveAspectRatio="xMidYMid meet">';
 
   // Y-axis labels
   var yScale = function(w) { return PAD + (maxW - w) / (maxW - minW) * (H - PAD * 2); };
