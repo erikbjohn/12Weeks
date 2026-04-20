@@ -3705,13 +3705,21 @@ def api_progress_dashboard():
         for d in range(0, max_day + 1):
             all_possible.append((w, d))
 
-    # Current streak: count backwards from the latest scheduled day
+    # Current streak: anchor at the latest DONE day (not the latest scheduled day,
+    # which may be today/tomorrow and not yet logged — that would always zero the streak).
+    # Then count backwards through consecutive done days.
     current_streak = 0
-    for wd in reversed(all_possible):
-        if wd in done_set:
-            current_streak += 1
-        else:
+    latest_done_idx = -1
+    for i in range(len(all_possible) - 1, -1, -1):
+        if all_possible[i] in done_set:
+            latest_done_idx = i
             break
+    if latest_done_idx >= 0:
+        for i in range(latest_done_idx, -1, -1):
+            if all_possible[i] in done_set:
+                current_streak += 1
+            else:
+                break
 
     # Best streak: scan forward through all possible days
     best_streak = 0
