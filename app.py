@@ -3795,13 +3795,28 @@ def api_progress_dashboard():
                 "planned_weight": round(start_weight + (target_weight - start_weight) * frac, 1),
             })
 
-    # Projected final weight: extrapolate current trajectory to week 12.
-    # Use the rolling 7-day average from the most recent entry to dampen noise.
+    # Projected final weight: extrapolate recent trajectory to week 12.
+    # Use the most recent ~2 weeks of weigh-ins to estimate current rate —
+    # averaging across the whole program is biased by the W1 water-weight drop
+    # (glycogen depletion makes the first week always much larger than the
+    # sustained rate). Start weight pulls the rate upward, the initial rolling
+    # average pulls current weight upward too, so the old formula consistently
+    # under-projected loss.
     projected_final_weight = None
-    if start_weight is not None and current_weight is not None and current_week > 0:
-        recent_avg = bw_series[-1]["rolling_avg_7d"] if bw_series else current_weight
-        weekly_rate = (start_weight - recent_avg) / max(current_week, 1)
-        projected_final_weight = round(recent_avg - weekly_rate * weeks_remaining, 1)
+    if current_weight is not None and bw_entries and weeks_remaining > 0:
+        from datetime import timedelta
+        latest_date = bw_entries[-1].log_date
+        cutoff = latest_date - timedelta(days=14)
+        recent = [e for e in bw_entries if e.log_date >= cutoff]
+        if len(recent) >= 2:
+            span_days = (recent[-1].log_date - recent[0].log_date).days or 1
+            recent_rate_per_day = (recent[0].weight_lbs - recent[-1].weight_lbs) / span_days
+            weekly_rate = recent_rate_per_day * 7
+            projected_final_weight = round(current_weight - weekly_rate * weeks_remaining, 1)
+        elif start_weight is not None and current_week > 0:
+            # Fallback for users with too few recent entries: old formula
+            weekly_rate = (start_weight - current_weight) / max(current_week, 1)
+            projected_final_weight = round(current_weight - weekly_rate * weeks_remaining, 1)
 
     # On pace: does the projected end state hit the target? This matches the
     # copy shown to the user ("tracking to X by Week 12") — judging pace off the
@@ -6296,10 +6311,22 @@ def api_admin_set_goal_target():
     if "target_bf" in data:
         goal.target_bf_pct = float(data["target_bf"])
 
+    # Weeks remaining must come from the TARGET user's program, not the admin's
+    # session. _current_week() reads current_user's app_state, which in admin
+    # context has no start_date and falls back to 1 — making the deficit plan
+    # assume a full 12 weeks even when the user is already mid-program.
+    user_state = AppState.query.filter_by(user_id=user.id).first()
+    if user_state and user_state.start_date:
+        from datetime import date as _date
+        user_cw = min(12, max(1, (_date.today() - user_state.start_date).days // 7 + 1))
+    else:
+        user_cw = user_state.current_week if user_state and user_state.current_week else 1
+    weeks_remaining = max(1, 12 - user_cw + 1)
+
     if goal.tdee and goal.goal_type and current_weight:
         targets = compute_targets(goal.tdee, goal.goal_type, current_weight,
                                   target_weight=goal.target_weight,
-                                  weeks=max(1, 12 - _current_week() + 1))
+                                  weeks=weeks_remaining)
         goal.daily_calories = targets["calories"]
         goal.protein_grams = targets["protein"]
         goal.carb_grams = targets["carbs"]
