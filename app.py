@@ -3891,8 +3891,10 @@ def api_progress_dashboard():
                 if not commitment_text and any(kw in lowered for kw in ["commit", "promise", "swear", "no excuses", "all in", "ready"]):
                     commitment_text = content[:300]
         quote = commitment_text or body_goal or athlete_idol
-        if not quote and psych.report:
-            quote = psych.report[:240]
+        # Intentionally do NOT fall back to psych.report. The report is an
+        # AI-written profile summary (markdown with ##/# headers) — truncating
+        # its first 240 chars produced ugly header-laden text in the "Why you
+        # started" quote block. Better to hide the section than show that.
         psych_highlights = {
             "athlete_idol": athlete_idol,
             "body_goal": body_goal,
