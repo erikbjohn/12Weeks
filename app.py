@@ -6061,16 +6061,21 @@ def _compute_goal_for_user(user, overrides=None):
     if override_target_bf and 0.05 <= float(override_target_bf) <= 0.40:
         target_bf = float(override_target_bf)
 
-    # *** SAFETY: Minors (under 18) — NO calorie deficit, NO cut, NO fasting ***
+    # *** SAFETY: Minors (under 18) — NO fasting. Healthy-weight minors: no deficit,
+    # no cut (recomp at TDEE). Overweight minors: mild deficit only, target 5-lb loss. ***
     is_minor = age < 18
+    bmi = (weight / (height * height)) * 703 if height > 0 else 22
     if is_minor:
-        goal_type = "recomp"
-        target_bf = 0.12 if sex == "male" else 0.20
+        if bmi >= 25:
+            goal_type = "cut"
+            target_bf = 0.22 if sex == "female" else 0.15
+        else:
+            goal_type = "recomp"
+            target_bf = 0.12 if sex == "male" else 0.20
 
     # *** SAFETY: Weight-based goal override ***
     # A lightweight person should NEVER be on a cut — they need to build, not lose.
     # BMI-based thresholds (rough): underweight < 18.5, normal 18.5-25, overweight >= 25
-    bmi = (weight / (height * height)) * 703 if height > 0 else 22
     if sex == "male":
         if weight < 150 and goal_type == "cut":
             goal_type = "bulk"  # Too light to cut — build muscle
@@ -6138,8 +6143,9 @@ def _compute_goal_for_user(user, overrides=None):
     min_healthy_weight = bmi_18_5_weight
     target_weight = max(target_weight, min_healthy_weight)
 
-    # For minors: target weight should be ABOVE current weight (growth, not loss)
-    if is_minor:
+    # For healthy-weight minors: target weight should be ABOVE current weight
+    # (growth, not loss). Overweight minors are handled by the BMI>=25 floor below.
+    if is_minor and bmi < 25:
         target_weight = max(target_weight, weight + 5)
 
     # For bulk: target above current — BUT only if not overweight AND user didn't
@@ -6147,19 +6153,26 @@ def _compute_goal_for_user(user, overrides=None):
     if goal_type == "bulk" and not is_overweight and not user_target_override:
         target_weight = max(target_weight, weight + 10)
 
-    # *** Overweight ceiling — never prescribe a weight gain to someone with BMI >= 25 ***
-    # Caps target at current weight; lean-mass inflation from underestimated BF can't
-    # push target above current for overweight users.
-    if is_overweight:
-        target_weight = min(target_weight, weight)
+    # *** Overweight floor: minimum 5-lb loss target, any age. ***
+    # Applies to adults and overweight minors. Prevents the lean-mass formula (or
+    # the minor growth floor) from producing a target at or above current weight
+    # for someone with BMI >= 25.
+    if bmi >= 25:
+        target_weight = min(target_weight, weight - 5)
 
     _weeks_remaining = max(1, 12 - _current_week() + 1)
     targets = compute_targets(tdee_info["tdee"], goal_type, weight, age=age,
                               target_weight=target_weight, weeks=_weeks_remaining)
 
     if is_minor:
-        # Override: NO deficit for minors — eat at TDEE or above
-        targets["calories"] = max(targets["calories"], tdee_info["tdee"])
+        if bmi >= 25:
+            # Overweight minor: cap deficit at ~250 cal/day (enough for ~5-lb loss
+            # over 12 weeks). Prevents aggressive restriction during growth.
+            min_cals = tdee_info["tdee"] - 250
+            targets["calories"] = max(targets["calories"], min_cals)
+        else:
+            # Healthy-weight minor: NO deficit — eat at TDEE or above.
+            targets["calories"] = max(targets["calories"], tdee_info["tdee"])
         # No fasting for minors
         fasting = {"protocol": "none", "eating_window_hours": 24, "electrolytes": False, "notes": "No fasting for athletes under 18. Eat regular meals throughout the day."}
     else:
