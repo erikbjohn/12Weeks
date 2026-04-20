@@ -184,11 +184,12 @@ function _computeTargets(tdee, goalType, weightLbs, targetWeight, weeks) {
  * @param {string} [sex="male"] - "male" or "female" (for BMR recalc)
  * @returns {Array<{week: number, projected: number, tdee: number}>}
  */
-function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, heightIn, age, sex) {
+function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, heightIn, age, sex, programWeekOffset) {
   if (weeks === undefined) weeks = 12;
   if (heightIn === undefined) heightIn = 70;
   if (age === undefined) age = 30;
   if (sex === undefined) sex = "male";
+  if (programWeekOffset === undefined) programWeekOffset = 0;
 
   var projection = [];
   var currentWeight = startWeight;
@@ -196,14 +197,17 @@ function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, h
   var gaining = dailyCal > tdee; // bulk mode
 
   for (var week = 1; week <= weeks; week++) {
+    var absoluteWeek = week + programWeekOffset;
+
     // Daily deficit/surplus
     var dailyDeltaCal = dailyCal - currentTdee;
 
     // Convert to lbs: 3500 cal = 1 lb of fat
     var weeklyDeltaLbs = (dailyDeltaCal * 7) / 3500;
 
-    // Week 1-2: water/glycogen effect (1.5x rate for cuts, 1.3x for bulk)
-    if (week <= 2) {
+    // Water/glycogen effect only applies in absolute program weeks 1-2.
+    // If the user is already past week 2, no water boost — that's gone.
+    if (absoluteWeek <= 2) {
       if (!gaining) {
         weeklyDeltaLbs *= 1.5;
       } else {
@@ -212,10 +216,10 @@ function _projectWeightCurve(startWeight, targetWeight, tdee, dailyCal, weeks, h
     }
 
     // Training adaptation: TDEE bump from increased fitness
-    // Ramps up from week 3, peaks at week 6
+    // Ramps up from absolute program week 3, peaks at week 6
     var adaptationBump = 0;
-    if (week >= 3) {
-      adaptationBump = Math.min((week - 2) * 20, 100); // up to +100 cal/day
+    if (absoluteWeek >= 3) {
+      adaptationBump = Math.min((absoluteWeek - 2) * 20, 100); // up to +100 cal/day
     }
 
     currentWeight += weeklyDeltaLbs;
@@ -7931,7 +7935,7 @@ function _spWeightProjection(data) {
   h += '<div id="sp-proj-chart" style="margin:16px 0">';
   // Render initial chart
   if (typeof _projectWeightCurve === 'function') {
-    var proj = _projectWeightCurve(curW, targetW, tdee, cal, 12 - curWeek + 1, heightIn, age, sex);
+    var proj = _projectWeightCurve(curW, targetW, tdee, cal, 12 - curWeek + 1, heightIn, age, sex, curWeek - 1);
     h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
   } else {
     h += '<div style="color:var(--muted);text-align:center;padding:1rem">Projection engine loading...</div>';
@@ -7984,7 +7988,7 @@ function _spUpdateProjection() {
   // Recompute weight projection with new TDEE.
   var proj = null;
   if (typeof _projectWeightCurve === 'function') {
-    proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex);
+    proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex, curWeek - 1);
     var chartEl = document.getElementById('sp-proj-chart');
     if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
   }
@@ -8081,30 +8085,32 @@ function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight,
   }
 
   // Projection line (blue dashed) — starts at the end of the green actual-data
-  // line (today) so the two visually connect, then extends forward through W12.
+  // line (today) so the two visually connect, then steps forward 7 days per
+  // projection entry through W12.
   if (projection && projection.length > 0) {
-    var curWeek = (_spLabData.current_week || 1);
     var projPts = [];
+    var anchorDayOff = null;
 
     // Anchor point: last actual weigh-in (end of green line).
     if (weightSeries && weightSeries.length > 0) {
       var firstDt = new Date(weightSeries[0].date + 'T00:00:00');
       var lastEntry = weightSeries[weightSeries.length - 1];
       var lastDt = new Date(lastEntry.date + 'T00:00:00');
-      var lastDayOff = Math.round((lastDt - firstDt) / (1000 * 60 * 60 * 24));
+      anchorDayOff = Math.round((lastDt - firstDt) / (1000 * 60 * 60 * 24));
       var lastWt = lastEntry.rolling_avg || lastEntry.weight;
-      if (lastWt != null && lastDayOff >= 0) {
-        projPts.push((PAD + lastDayOff / 84 * (W - PAD - 10)) + ',' + yScale(lastWt));
+      if (lastWt != null && anchorDayOff >= 0) {
+        projPts.push((PAD + anchorDayOff / 84 * (W - PAD - 10)) + ',' + yScale(lastWt));
       }
     }
+    if (anchorDayOff == null) anchorDayOff = 0;
 
-    // Forward projection: pw.week is 1..N local-from-today. Map to absolute
-    // program week so the tail lands on W12 (not W1..N near the start).
+    // Each projection entry is +7 days forward from the anchor. Clamp the
+    // final point to W12 (day 84) so it lands at the chart's right edge.
     for (var j = 0; j < projection.length; j++) {
       var pw = projection[j];
       var localWk = pw.week || (j + 1);
-      var absWeek = curWeek + localWk - 1;
-      var dayOff2 = (absWeek - 1) * 7;
+      var dayOff2 = anchorDayOff + localWk * 7;
+      if (dayOff2 > 84) dayOff2 = 84;
       var px = PAD + dayOff2 / 84 * (W - PAD - 10);
       var py = yScale(pw.projected);
       projPts.push(px + ',' + py);
@@ -8308,7 +8314,7 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
 
   if (typeof _computeTargets === 'function') {
     var targets = _computeTargets(tdee, goalType, curW, targetW, weeksLeft);
-    var proj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex) : [];
+    var proj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
     var endWeight = proj.length > 0 ? proj[proj.length - 1].projected.toFixed(1) : '?';
     var deficit = tdee - targets.calories;
 
@@ -8329,7 +8335,7 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
     h += '<div class="sp-compare" style="margin-top:12px">';
     h += '<div class="sp-compare-card"><div class="sp-compare-title">Current Plan</div>';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--text)">' + origCal + ' cal/day</div>';
-    var origProj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex) : [];
+    var origProj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
     var origEnd = origProj.length > 0 ? origProj[origProj.length - 1].projected.toFixed(1) : '?';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">W12: ' + origEnd + ' lb</div>';
     h += '</div>';
