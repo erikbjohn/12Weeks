@@ -7909,11 +7909,22 @@ function _spWeightProjection(data) {
   h += '<span class="sp-slider-val" id="sp-cal-val">' + cal + '</span>';
   h += '</div>';
 
-  // Activity slider
+  // Running slider — miles per week. Running burn ~100 cal/mile so this
+  // directly drives the aerobic half of TDEE.
+  var defRun = data.weekly_miles || 20;
   h += '<div class="sp-slider-row">';
-  h += '<span class="sp-slider-label">Activity</span>';
-  h += '<input type="range" class="sp-slider" id="sp-act-slider" min="0" max="4" step="1" value="2" oninput="_spUpdateProjection()">';
-  h += '<span class="sp-slider-val" id="sp-act-val">Moderate</span>';
+  h += '<span class="sp-slider-label">Running</span>';
+  h += '<input type="range" class="sp-slider" id="sp-run-slider" min="0" max="80" step="5" value="' + defRun + '" oninput="_spUpdateProjection()">';
+  h += '<span class="sp-slider-val" id="sp-run-val">' + defRun + ' mi/wk</span>';
+  h += '</div>';
+
+  // Lifting slider — sessions per week. Lifting burns less (~350 cal/session)
+  // but protects lean mass, which shifts the body-comp projection.
+  var defLift = data.lifts_per_week || 3;
+  h += '<div class="sp-slider-row">';
+  h += '<span class="sp-slider-label">Lifting</span>';
+  h += '<input type="range" class="sp-slider" id="sp-lift-slider" min="0" max="6" step="1" value="' + defLift + '" oninput="_spUpdateProjection()">';
+  h += '<span class="sp-slider-val" id="sp-lift-val">' + defLift + ' sess/wk</span>';
   h += '</div>';
 
   // Projection chart placeholder
@@ -7938,21 +7949,19 @@ function _spWeightProjection(data) {
   return h;
 }
 
-var _SP_ACTIVITY_LABELS = ['Sedentary', 'Light', 'Moderate', 'Active', 'Very Active'];
-var _SP_ACTIVITY_MULTS = [1.2, 1.375, 1.55, 1.725, 1.9];
-
 function _spUpdateProjection() {
   var calSlider = document.getElementById('sp-cal-slider');
-  var actSlider = document.getElementById('sp-act-slider');
-  if (!calSlider || !actSlider) return;
+  var runSlider = document.getElementById('sp-run-slider');
+  var liftSlider = document.getElementById('sp-lift-slider');
+  if (!calSlider || !runSlider || !liftSlider) return;
 
   var cal = parseInt(calSlider.value);
-  var actIdx = parseInt(actSlider.value);
-  var actMult = _SP_ACTIVITY_MULTS[actIdx] || 1.55;
-  var actLabel = _SP_ACTIVITY_LABELS[actIdx] || 'Moderate';
+  var miles = parseInt(runSlider.value);
+  var lifts = parseInt(liftSlider.value);
 
   document.getElementById('sp-cal-val').textContent = cal;
-  document.getElementById('sp-act-val').textContent = actLabel;
+  document.getElementById('sp-run-val').textContent = miles + ' mi/wk';
+  document.getElementById('sp-lift-val').textContent = lifts + ' sess/wk';
 
   var d = _spLabData;
   var heightIn = d.height_in || 70;
@@ -7963,27 +7972,67 @@ function _spUpdateProjection() {
   var curWeek = d.current_week || 1;
   var weeksLeft = 12 - curWeek + 1;
 
-  // Recompute TDEE with new activity level
-  var tdeeResult = typeof _computeTdee === 'function' ? _computeTdee(curW, heightIn, age, sex, actMult) : { tdee: d.tdee || 2500 };
-  var tdee = tdeeResult.tdee;
+  // TDEE = sedentary-ish BMR baseline (1.3) + calories burned from running +
+  // from lifting. Treats the two modalities separately because they have
+  // very different effects on both burn and body-comp outcomes.
+  var bmr = typeof _computeTdee === 'function' ? _computeTdee(curW, heightIn, age, sex, 1.0).bmr : 1700;
+  var baseTdee = Math.round(bmr * 1.3);
+  var runBurn = Math.round(miles * 100 / 7);     // ~100 cal/mile
+  var liftBurn = Math.round(lifts * 350 / 7);    // ~350 cal per 1h session
+  var tdee = baseTdee + runBurn + liftBurn;
 
-  // Recompute projection
+  // Recompute weight projection with new TDEE.
+  var proj = null;
   if (typeof _projectWeightCurve === 'function') {
-    var proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex);
+    proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex);
     var chartEl = document.getElementById('sp-proj-chart');
     if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
   }
 
-  // Update insight
+  // Project body-comp forward: push the projected end weight into the BC
+  // calculator, and estimate tape deltas. More lifting → more of the loss
+  // comes from fat vs lean, so tape shrinks more per pound lost.
+  if (proj && proj.length > 0) {
+    var endWt = proj[proj.length - 1].projected;
+    var totalLoss = Math.max(0, curW - endWt);
+    var fatRatio = lifts >= 3 ? 0.85 : (lifts >= 1 ? 0.75 : 0.65);
+    var fatLost = totalLoss * fatRatio;
+
+    // Rough inches-per-pound-of-fat ratios. Males carry more abdominal fat,
+    // females more gluteofemoral — flipped ratios for waist vs hips.
+    var waistPerLb = sex === 'male' ? 0.4 : 0.3;
+    var neckPerLb = 0.1;
+    var hipsPerLb = sex === 'male' ? 0.3 : 0.4;
+
+    var bcWaist = document.getElementById('sp-bc-waist');
+    var bcNeck = document.getElementById('sp-bc-neck');
+    var bcHips = document.getElementById('sp-bc-hips');
+    var bcWeight = document.getElementById('sp-bc-weight');
+
+    var measurements = d.measurements || [];
+    var latest = measurements.length > 0 ? measurements[measurements.length - 1] : {};
+    var curWaist = parseFloat(latest.waist) || parseFloat(bcWaist && bcWaist.getAttribute('data-base')) || 38;
+    var curNeck = parseFloat(latest.neck) || parseFloat(bcNeck && bcNeck.getAttribute('data-base')) || 16;
+    var curHips = parseFloat(latest.hips) || parseFloat(bcHips && bcHips.getAttribute('data-base')) || 40;
+
+    if (bcWeight) bcWeight.value = endWt.toFixed(1);
+    if (bcWaist) bcWaist.value = Math.max(24, curWaist - fatLost * waistPerLb).toFixed(1);
+    if (bcNeck) bcNeck.value = Math.max(12, curNeck - fatLost * neckPerLb).toFixed(1);
+    if (bcHips) bcHips.value = Math.max(26, curHips - fatLost * hipsPerLb).toFixed(1);
+    if (typeof _spUpdateBodyComp === 'function') _spUpdateBodyComp();
+  }
+
+  // Insight line with the TDEE breakdown so the user can see where the burn comes from.
   var deficit = tdee - cal;
   var weeklyLoss = (deficit * 7 / 3500).toFixed(1);
   var insightEl = document.getElementById('sp-proj-insight');
   if (insightEl) {
-    var endWeight = typeof _projectWeightCurve === 'function' ? proj[proj.length - 1].projected.toFixed(1) : '?';
+    var endWeight = proj ? proj[proj.length - 1].projected.toFixed(1) : '?';
+    var header = 'TDEE ' + tdee + ' = base ' + baseTdee + ' + run ' + runBurn + ' + lift ' + liftBurn + '. ';
     if (deficit > 0) {
-      insightEl.innerHTML = 'At ' + cal + ' cal/day (TDEE ' + tdee + '), deficit is ' + deficit + ' cal/day (' + weeklyLoss + ' lb/week). Projected Week 12: ' + endWeight + ' lb.';
+      insightEl.innerHTML = header + 'Deficit ' + deficit + ' cal/day (' + weeklyLoss + ' lb/week). Projected Week 12: ' + endWeight + ' lb.';
     } else {
-      insightEl.innerHTML = 'At ' + cal + ' cal/day (TDEE ' + tdee + '), surplus is ' + Math.abs(deficit) + ' cal/day. Projected Week 12: ' + endWeight + ' lb.';
+      insightEl.innerHTML = header + 'Surplus ' + Math.abs(deficit) + ' cal/day. Projected Week 12: ' + endWeight + ' lb.';
     }
   }
 }
