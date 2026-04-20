@@ -3803,11 +3803,17 @@ def api_progress_dashboard():
         weekly_rate = (start_weight - recent_avg) / max(current_week, 1)
         projected_final_weight = round(recent_avg - weekly_rate * weeks_remaining, 1)
 
-    # On pace: current weight at or below linear-plan target for this week.
+    # On pace: does the projected end state hit the target? This matches the
+    # copy shown to the user ("tracking to X by Week 12") — judging pace off the
+    # current-week linear-plan milestone disagreed with the projection, so the
+    # badge could say ON PACE while the projection landed well above goal.
     on_pace = None
-    if linear_plan and current_weight is not None and 1 <= current_week <= 12:
-        planned_now = linear_plan[current_week - 1]["planned_weight"]
-        on_pace = current_weight <= planned_now
+    if projected_final_weight is not None and target_weight is not None:
+        tol = 1.5  # lb tolerance so tiny rounding differences don't flip the badge
+        if start_weight is not None and target_weight < start_weight:
+            on_pace = projected_final_weight <= target_weight + tol  # cut
+        else:
+            on_pace = projected_final_weight >= target_weight - tol  # bulk
 
     # Preserve legacy stored projection for any existing consumers.
     weight_projection = goal.weight_projection if goal else None
