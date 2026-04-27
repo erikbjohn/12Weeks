@@ -133,6 +133,16 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
             "progression_indicator": "hold",
         }
 
+    # Exclude deload-week sessions when establishing the progression baseline
+    # for THIS (non-deload) week. Deload prescriptions are engine-mandated 85%
+    # reductions; counting them as "the user's last session" makes the engine
+    # misread its own deload as voluntary regression and peg the next week at
+    # the deload weight.
+    if not _is_deload(week):
+        non_deload_sets = [s for s in last_sets if not _is_deload(s.week)]
+        if non_deload_sets:
+            last_sets = non_deload_sets
+
     # Get the most recent session's data
     last_date = last_sets[0].logged_date
     session_sets = [s for s in last_sets if s.logged_date == last_date]
