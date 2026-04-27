@@ -451,6 +451,12 @@ PHASES = {
         "lifting": "4x10-12, RPE 7-8",
         "deficit": "400-500 kcal below TDEE",
         "protein": "1g/lb bodyweight",
+        "lift_days_per_week": 6,
+        "weekly_structure": (
+            "Mon Upper A (chest/back), Tue Lower A (squat focus) + long run, "
+            "Wed Push/Pull, Thu Lower B (hinge focus), Fri Upper B (shoulders/arms) + HIIT, "
+            "Sat Full-Body Compound + Z2, Sun streak mile only."
+        ),
     },
     2: {
         "label": "Phase 2 - Wks 5-8",
@@ -458,6 +464,13 @@ PHASES = {
         "lifting": "5x5 main lifts, 3x12 accessories",
         "deficit": "400-500 kcal below TDEE",
         "protein": "1g/lb bodyweight",
+        "lift_days_per_week": 6,
+        "weekly_structure": (
+            "Mon Lower Strength (5x5 squat), Tue Upper Pull + long run, "
+            "Wed Full-Body Power + HIIT, Thu Lower Hinge (5x5 deadlift), "
+            "Fri Upper Press, Sat Full-Body Volume + Z2, Sun streak mile only. "
+            "Same 6-day frequency as Phase 1; the shift is heavier loads and 5x5 work, NOT fewer days."
+        ),
     },
     3: {
         "label": "Phase 3 - Wks 9-12",
@@ -465,6 +478,12 @@ PHASES = {
         "lifting": "3-4x3-5 heavy, 3x15 pump",
         "deficit": "300-400 kcal (tighten up)",
         "protein": "1g/lb bodyweight",
+        "lift_days_per_week": 6,
+        "weekly_structure": (
+            "Mon Lower Power (box jumps + 4x3 squat), Tue Upper Power (cleans + heavy press/pull), "
+            "Wed Full-Body Peak, Thu Lower Heavy, Fri Upper Heavy, Sat Full-Body Power, "
+            "Sun streak mile only. Same 6-day frequency as Phase 1/2; the shift is explosive work and peaking loads."
+        ),
     },
 }
 

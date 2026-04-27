@@ -484,8 +484,29 @@ def _build_messages(user_message, chat_history, user_timezone=None):
             continue
         filtered.append(msg)
 
+    last_40 = filtered[-40:]
+
+    # Dedup: only suppress if the last entry is the just-committed user message
+    # from THIS active turn. We require:
+    #   1. role=user with identical raw content (compared before timestamping below)
+    #   2. timestamp within the last 60 seconds — anything older is a real
+    #      historical message and must not be silently swallowed
+    last_is_new_user_msg = False
+    if last_40 and last_40[-1].get("role") == "user" and last_40[-1].get("content") == user_message:
+        last_time_iso = last_40[-1].get("time")
+        if last_time_iso:
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                t = _dt.fromisoformat(last_time_iso.replace('Z', '+00:00'))
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=_tz.utc)
+                age_seconds = (_dt.now(_tz.utc) - t).total_seconds()
+                last_is_new_user_msg = 0 <= age_seconds <= 60
+            except Exception:
+                last_is_new_user_msg = False
+
     # Include last 40 messages with timestamps so coach knows WHEN things happened
-    for msg in filtered[-40:]:
+    for msg in last_40:
         content = msg["content"]
         # Prepend timestamp if available so coach understands time ordering
         msg_time = msg.get("time")
@@ -509,14 +530,8 @@ def _build_messages(user_message, chat_history, user_timezone=None):
             "content": content,
         })
 
-    # Deduplicate: chat_history (from DB) may already contain the just-committed
-    # user message. Only append if it's not already the last entry.
-    already_present = (
-        messages
-        and messages[-1]["role"] == "user"
-        and messages[-1]["content"] == user_message
-    )
-    if not already_present:
+    # Only append the new user message if it isn't already the last history entry.
+    if not last_is_new_user_msg:
         messages.append({
             "role": "user",
             "content": user_message,

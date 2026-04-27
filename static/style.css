@@ -2880,7 +2880,7 @@ footer {
   border: 1px solid var(--border2);
   border-radius: 10px;
   padding: 4px;
-  z-index: 50;
+  z-index: 130;
   display: none;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }

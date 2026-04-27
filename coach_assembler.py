@@ -1065,6 +1065,15 @@ def _format_athlete_data(ctx, requires):
     phase = ctx.get("phase", {})
     week = ctx.get("week", 1)
     parts.append(f"Week {week}/12 — Phase: {phase.get('label', '?')} — Focus: {phase.get('focus', '?')}")
+    # Ground phase explanations in the actual program structure so the coach
+    # doesn't hallucinate (e.g. "Phase 2 drops to 3-4 days" — false; all phases run 6 lift days).
+    if phase.get("lift_days_per_week") or phase.get("weekly_structure"):
+        parts.append(
+            f"This phase: {phase.get('lift_days_per_week', 6)} lift days/week, "
+            f"lifting style {phase.get('lifting', '?')}. "
+            f"Structure: {phase.get('weekly_structure', '?')} "
+            "Do not invent phase details beyond this — describe the phase only as written here."
+        )
 
     # Workout summary
     w = ctx.get("workout_today")
