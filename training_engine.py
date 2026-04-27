@@ -276,13 +276,24 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return result
 
     elif phase == 2:
-        # Strength: increase weight every 1-2 sessions
-        new_weight = _round_weight(last_weight + inc)
+        # Strength: increase weight every 1-2 sessions.
+        # If the rep scheme just dropped (e.g. Phase 1 4x10-12 → Phase 2 5x5),
+        # a flat +inc is far too conservative — fewer reps demand more weight.
+        # Bump ~10% when this week's configured reps are <70% of last session's.
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        rep_drop_factor = 1.0
+        if configured_reps and last_reps and configured_reps < last_reps * 0.7:
+            rep_drop_factor = 1.10
+        base_weight = last_weight * rep_drop_factor if rep_drop_factor > 1.0 else last_weight
+        new_weight = _round_weight(base_weight + inc)
+        reason = f"Strength phase — +{inc} lb"
+        if rep_drop_factor > 1.0:
+            reason = f"Rep drop {last_reps}→{configured_reps} — +10% weight then +{inc} lb"
         result = {
             "target_weight": new_weight,
-            "target_reps": max(6, last_reps),
+            "target_reps": configured_reps or max(5, last_reps),
             "target_sets": last_set_count,
-            "adjustment_reason": f"Strength phase — +{inc} lb",
+            "adjustment_reason": reason,
             "progression_indicator": "up",
         }
         if coach_alert:
@@ -290,13 +301,22 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return result
 
     else:  # Phase 3
-        # Power: aggressive increases
-        new_weight = _round_weight(last_weight + inc)
+        # Power: aggressive increases. Same rep-drop compensation as Phase 2,
+        # plus an additional bump for the typical Phase 2 5x5 → Phase 3 4x3-5 jump.
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        rep_drop_factor = 1.0
+        if configured_reps and last_reps and configured_reps < last_reps * 0.7:
+            rep_drop_factor = 1.05
+        base_weight = last_weight * rep_drop_factor if rep_drop_factor > 1.0 else last_weight
+        new_weight = _round_weight(base_weight + inc)
+        reason = f"Power phase — +{inc} lb, peak performance"
+        if rep_drop_factor > 1.0:
+            reason = f"Rep drop {last_reps}→{configured_reps} — +5% weight then +{inc} lb"
         result = {
             "target_weight": new_weight,
-            "target_reps": max(4, last_reps),
+            "target_reps": configured_reps or max(3, last_reps),
             "target_sets": last_set_count,
-            "adjustment_reason": f"Power phase — +{inc} lb, peak performance",
+            "adjustment_reason": reason,
             "progression_indicator": "up",
         }
         if coach_alert:
