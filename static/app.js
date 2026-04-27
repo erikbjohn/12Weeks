@@ -1284,9 +1284,12 @@ function saveWeightInput(week, dayIdx, exIdx, exName) {
 
 function parseRestSeconds(rest) {
   if (!rest) return 0;
-  // Handle "60-90s" → use the lower bound
+  // Handle "60-90s" or "2-3 min" → use the lower bound, then apply unit
   const m = rest.match(/(\d+)/);
-  return m ? parseInt(m[1]) : 60;
+  if (!m) return 60;
+  const n = parseInt(m[1]);
+  // "min" / "minute(s)" → multiply by 60. Default unit is seconds.
+  return /\bmin(?:ute)?s?\b/i.test(rest) ? n * 60 : n;
 }
 
 // Confirm suspicious set entries. Returns true to proceed, false to bail.

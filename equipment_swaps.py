@@ -45,6 +45,7 @@ EQUIPMENT_CATALOG = {
             {"id": "chest_press_machine", "name": "Chest Press Machine"},
             {"id": "seated_row_machine", "name": "Seated Row Machine"},
             {"id": "smith_machine", "name": "Smith Machine"},
+            {"id": "ab_machine", "name": "Ab Crunch Machine"},
         ],
     },
     "bars_racks": {
@@ -251,7 +252,7 @@ EXERCISE_SWAPS = {
             {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Lighter, easier to control"},
             {"name": "Nordic Hamstring Curl", "requires": [], "note": "Bodyweight, brutal eccentric — pad knees"},
             {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Unilateral balance work"},
-            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Machine isolation"},
+            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Hamstring isolation machine (lying or seated leg curl)"},
         ],
     },
     "Walking Lunge": {
@@ -353,7 +354,7 @@ EXERCISE_SWAPS = {
         "muscle_group": "hamstrings",
         "requires": [],
         "alternatives": [
-            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Machine isolation"},
+            {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Hamstring isolation machine (lying or seated leg curl)"},
             {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Hip hinge hamstring work"},
         ],
     },
@@ -412,6 +413,7 @@ EXERCISE_SWAPS = {
         "muscle_group": "core",
         "requires": ["ab_wheel"],
         "alternatives": [
+            {"name": "Ab Crunch Machine", "requires": ["ab_machine"], "note": "Weighted seated/lying crunch, scalable load"},
             {"name": "Plank", "requires": [], "note": "Isometric core, scale by duration"},
             {"name": "Dead Bug", "requires": [], "note": "Supine anti-extension, lower back safe"},
             {"name": "Cable Crunch", "requires": ["cable_machine"], "note": "Weighted flexion, kneel at cable"},

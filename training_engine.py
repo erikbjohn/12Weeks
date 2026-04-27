@@ -58,6 +58,13 @@ def _get_progression_increment(exercise_name, is_weak):
     # Small isolation movements
     if any(k in nl for k in ['curl', 'raise', 'fly', 'extension', 'pushdown', 'face pull']):
         return 2.5
+    # Heavy compound lower body — can absorb bigger jumps and the program demands
+    # them (5x5 phase, "hit target reps = weight goes up, train near failure").
+    if any(k in nl for k in ['squat', 'deadlift', 'hip thrust', 'leg press']):
+        # Exclude split-stance and unilateral variants — those are dumbbell-loaded
+        # accessory work and can't take 10 lb jumps cleanly.
+        if not any(uni in nl for uni in ['split squat', 'bulgarian', 'split sq', 'lunge', 'pistol', 'single']):
+            return 10.0
     return 5.0
 
 
@@ -190,7 +197,15 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
 
     # ─── SIGNAL 2: USER INCREASED WEIGHT ───
     if user_increased:
-        new_weight = _round_weight(last_weight + inc * 2)
+        # Unilateral/split-stance lifts and small accessories can't take the
+        # doubled jump cleanly — cap the bump at the base increment for those.
+        nl_for_cap = exercise_name.lower()
+        is_unilateral = any(k in nl_for_cap for k in [
+            'split squat', 'bulgarian', 'split sq', 'lunge', 'pistol',
+            'single', 'step-up', 'step up',
+        ])
+        bump = inc if is_unilateral else inc * 2
+        new_weight = _round_weight(last_weight + bump)
         return {
             "target_weight": new_weight,
             "target_reps": last_reps,
