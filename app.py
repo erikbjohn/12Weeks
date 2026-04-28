@@ -567,7 +567,7 @@ def _authoritative_template_for_slot(exercise_name, day_idx):
     """
     import re as _re
     from workout_data import resolve_name, get_workouts
-    name = resolve_name(exercise_name).lower()
+    canon = resolve_name(exercise_name).lower()
     candidates = set()
     for w in range(1, 13):
         try:
@@ -577,7 +577,7 @@ def _authoritative_template_for_slot(exercise_name, day_idx):
         if day_idx < 0 or day_idx >= len(days):
             continue
         for ex in days[day_idx].get("exercises", []) or []:
-            if ex.get("name", "").lower() == name:
+            if resolve_name(ex.get("name", "")).lower() == canon:
                 m = _re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
                 if m:
                     candidates.add((int(m.group(1)), int(m.group(2))))
@@ -639,7 +639,10 @@ def _heal_prescription_volume_floor(user_id, week, current_week=None, today_idx=
                 and rx.day_idx <= today_idx):
             continue
         try:
-            configured = _get_configured_sets_reps(rx.exercise_name, week, rx.day_idx)
+            configured = _get_configured_sets_reps(
+                rx.exercise_name, week, rx.day_idx,
+                exercise_order=rx.exercise_order,
+            )
         except Exception:
             configured = None
         # Cross-phase fallback only when this week's template is SILENT on the

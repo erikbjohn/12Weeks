@@ -80,17 +80,36 @@ def _get_configured_sets(exercise_name, week, day_idx):
     return sets_reps[0] if sets_reps else None
 
 
-def _get_configured_sets_reps(exercise_name, week, day_idx):
-    """Return (sets, reps) from the program template, or None if unknown."""
+def _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order=None):
+    """Return (sets, reps) from the program template, or None if unknown.
+
+    When exercise_order is provided, look up by position first and verify the
+    name matches. This disambiguates exercises that appear twice in the same
+    day (e.g. Phase 2 Tuesday has the heavy Lat Pulldown 5x5 at order 0 AND a
+    pump Lat Pulldown 3x12 at order 2 — by name alone we'd return whichever
+    comes first). Falls back to first-name-match when order is unspecified or
+    doesn't line up.
+
+    Both sides of the name comparison go through resolve_name so an alias-
+    bearing template entry ("Heavy Lat Pulldown") matches a stored canonical
+    row ("Lat Pulldown") and vice versa.
+    """
     from workout_data import resolve_name
-    exercise_name = resolve_name(exercise_name)
+    canon = resolve_name(exercise_name).lower()
     try:
         from workout_data import get_workouts
         days = get_workouts(week)
         if day_idx < len(days):
             day = days[day_idx]
-            for ex in day.get("exercises", []):
-                if ex.get("name", "").lower() == exercise_name.lower():
+            exercises = day.get("exercises", []) or []
+            if (exercise_order is not None and 0 <= exercise_order < len(exercises)):
+                ex = exercises[exercise_order]
+                if resolve_name(ex.get("name", "")).lower() == canon:
+                    m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
+                    if m:
+                        return int(m.group(1)), int(m.group(2))
+            for ex in exercises:
+                if resolve_name(ex.get("name", "")).lower() == canon:
                     m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
                     if m:
                         return int(m.group(1)), int(m.group(2))

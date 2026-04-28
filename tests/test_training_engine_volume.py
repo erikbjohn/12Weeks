@@ -263,6 +263,51 @@ class TestHealPrescriptionVolumeFloor:
             row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
         assert row.reps == "10", "today's row must not be rewritten"
 
+    def test_disambiguates_repeated_exercise_by_order(self, app_ctx):
+        # Phase 2 Tuesday has Lat Pulldown TWICE: heavy 5x5 at order=0 and
+        # pump 3x12 at order=2 (the heavy template uses the alias "Heavy Lat
+        # Pulldown" but resolve_name folds it to "Lat Pulldown"). Without
+        # order-aware lookup, the pump row would resolve against the heavy
+        # template's 5x5 floor and erroneously get widened to 5x12. With
+        # order-aware lookup the pump row uses its own 3x12 contract — and
+        # since 4 sets is above the 3-set floor, the heal correctly leaves
+        # it alone.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=0,
+                exercise_name="Lat Pulldown", sets=4, reps="12",
+                source="engine",
+            ))
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=2,
+                exercise_name="Lat Pulldown", sets=4, reps="12",
+                source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(
+                u.id, week=5, current_week=5, today_idx=0
+            )
+            rows = sorted(
+                WeeklyPrescription.query.filter_by(user_id=u.id, week=5).all(),
+                key=lambda r: r.exercise_order,
+            )
+        # Heavy row (order=0): 4 sets is below the 5-set floor → heal to 5x5.
+        assert (rows[0].sets, rows[0].reps) == (5, "5"), (
+            f"heavy row should heal to 5x5, got {rows[0].sets}x{rows[0].reps}"
+        )
+        # Pump row (order=2): 4 sets is above the 3-set floor of its own
+        # template, AND reps already match. Heal skips. Critically, this
+        # only works because the order-aware lookup found template[2] not
+        # template[0] — without disambiguation we'd be comparing against 5x5.
+        assert (rows[1].sets, rows[1].reps) == (4, "12"), (
+            f"pump row should not heal (above its template floor), got "
+            f"{rows[1].sets}x{rows[1].reps}"
+        )
+
     def test_skips_entire_past_week(self, app_ctx):
         app, db = app_ctx
         from app import _heal_prescription_volume_floor
