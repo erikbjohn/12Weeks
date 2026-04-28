@@ -197,6 +197,7 @@ with app.app_context():
         ("weekly_prescription", "progression_indicator", "VARCHAR(20)"),
         ("weekly_prescription", "adjustment_reason", "TEXT"),
         ("training_goal", "tdee", "INTEGER"),
+        ("exercise_swap", "original_name", "VARCHAR(120)"),
     ]
     try:
         inspector = sa_inspect(db.engine)
@@ -547,9 +548,64 @@ try:
 except Exception:
     pass
 
+
+def _exercise_at_slot(user_id, week, day_idx, exercise_idx, _cache=None):
+    """Resolve the original exercise name at (week, day_idx, exercise_idx) for a user.
+
+    Mirrors api_workouts: WeeklyPrescription overrides take the whole day if any rows
+    exist, otherwise the canonical program template (gym vs. bodyweight, phase/deload)
+    runs through auto_swap_workout for equipment substitutions. The result is the same
+    name the UI shows as the "original" on the swap card. Pass an empty dict as _cache
+    to amortise the day lookup across repeated calls for the same (user, week, day).
+    Returns None when the slot is out of range or the day is empty.
+    """
+    from equipment_swaps import auto_swap_workout
+    from workout_data import get_workouts, get_workouts_for_user
+
+    cache_key = (user_id, week, day_idx)
+    if _cache is not None and cache_key in _cache:
+        exercises = _cache[cache_key]
+    else:
+        rx = (WeeklyPrescription.query
+              .filter_by(user_id=user_id, week=week, day_idx=day_idx)
+              .order_by(WeeklyPrescription.exercise_order)
+              .all())
+        if rx:
+            exercises = [{"name": r.exercise_name, "note": r.note or ""} for r in rx]
+        else:
+            pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+            has_gym = pa.has_gym if pa else True
+            try:
+                days = get_workouts(week) if has_gym else get_workouts_for_user(week, has_gym=False)
+            except Exception:
+                days = []
+            if day_idx < 0 or day_idx >= len(days):
+                exercises = []
+            else:
+                exercises = days[day_idx].get("exercises", []) or []
+
+        if exercises:
+            eq = UserEquipment.query.filter_by(user_id=user_id).first()
+            user_equipment = eq.available_equipment if eq else []
+            try:
+                exercises = auto_swap_workout(exercises, user_equipment)
+            except Exception:
+                pass
+
+        if _cache is not None:
+            _cache[cache_key] = exercises
+
+    if not exercises or exercise_idx < 0 or exercise_idx >= len(exercises):
+        return None
+    return exercises[exercise_idx].get("name")
+
+
 def _parse_coach_markers(text, user_id, week):
     """Parse structured markers from coach response and apply them."""
     import re
+    import logging
+    from equipment_swaps import is_valid_swap
+    from workout_data import resolve_name
     # [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
     # (CORE_PROMPT format — see coach_assembler.py CORE_PROMPT <markers>)
     for m in re.finditer(
@@ -559,16 +615,34 @@ def _parse_coach_markers(text, user_id, week):
         try:
             day_idx = int(m.group(1))
             exercise_idx = int(m.group(2))
-            new_name = m.group(4).strip()
+            new_name = resolve_name(m.group(4).strip())
+            # Resolve the original from the actual plan, not the marker's `old=` —
+            # if the LLM hallucinates a stale `old`, we still validate against truth.
+            original_name = _exercise_at_slot(user_id, week, day_idx, exercise_idx)
+            if original_name is None:
+                logging.warning(
+                    f"Coach SWAP rejected: no exercise at slot week={week} "
+                    f"day={day_idx} idx={exercise_idx} (user {user_id})"
+                )
+                continue
+            if not is_valid_swap(original_name, new_name):
+                logging.warning(
+                    f"Coach SWAP rejected: '{new_name}' is not a valid alternative "
+                    f"for '{original_name}' at week={week} day={day_idx} "
+                    f"idx={exercise_idx} (user {user_id})"
+                )
+                continue
             existing = ExerciseSwap.query.filter_by(
                 user_id=user_id, week=week, day_idx=day_idx, exercise_idx=exercise_idx
             ).first()
             if existing:
                 existing.swapped_to = new_name
+                existing.original_name = original_name
             else:
                 db.session.add(ExerciseSwap(
                     user_id=user_id, week=week, day_idx=day_idx,
                     exercise_idx=exercise_idx, swapped_to=new_name,
+                    original_name=original_name,
                 ))
             db.session.commit()
         except Exception:
@@ -2455,24 +2529,44 @@ def api_generate_weekly_program():
 
     db.session.commit()
 
-    # Carry forward exercise swaps from the previous week.
-    # If the user swapped Lying Leg Curl → Nordic Hamstring Curl last week,
-    # they probably want the same swap this week.
+    # Carry forward exercise swaps from the previous week — but only when the slot
+    # still holds the same original exercise. Phase boundaries (1→2→3, deload weeks)
+    # reshuffle the day's exercise list, so a (day_idx, exercise_idx) that was Lying
+    # Leg Curl in week 4 might be Hammer Curl in week 5; carrying the swap blindly
+    # produces nonsense pairs.
     try:
+        from equipment_swaps import is_valid_swap
         prev_week = target_week - 1
         if prev_week >= 1:
             prev_swaps = ExerciseSwap.query.filter_by(user_id=current_user.id, week=prev_week).all()
+            slot_cache = {}
             for ps in prev_swaps:
                 existing_swap = ExerciseSwap.query.filter_by(
                     user_id=current_user.id, week=target_week,
                     day_idx=ps.day_idx, exercise_idx=ps.exercise_idx
                 ).first()
-                if not existing_swap:
-                    db.session.add(ExerciseSwap(
-                        user_id=current_user.id, week=target_week,
-                        day_idx=ps.day_idx, exercise_idx=ps.exercise_idx,
-                        swapped_to=ps.swapped_to,
-                    ))
+                if existing_swap:
+                    continue
+                # Original from prev row, falling back to recomputing from prev plan.
+                prev_original = ps.original_name or _exercise_at_slot(
+                    current_user.id, prev_week, ps.day_idx, ps.exercise_idx, _cache=slot_cache
+                )
+                new_original = _exercise_at_slot(
+                    current_user.id, target_week, ps.day_idx, ps.exercise_idx, _cache=slot_cache
+                )
+                if not new_original:
+                    continue
+                # Only carry the swap when the slot's original hasn't changed AND the
+                # swap target is still in that exercise's alternatives list.
+                if prev_original and prev_original != new_original:
+                    continue
+                if not is_valid_swap(new_original, ps.swapped_to):
+                    continue
+                db.session.add(ExerciseSwap(
+                    user_id=current_user.id, week=target_week,
+                    day_idx=ps.day_idx, exercise_idx=ps.exercise_idx,
+                    swapped_to=ps.swapped_to, original_name=new_original,
+                ))
             db.session.commit()
     except Exception:
         db.session.rollback()
@@ -3074,12 +3168,39 @@ def api_toggle_exercise():
 @app.route("/api/exercise-swaps")
 @login_required
 def api_exercise_swaps():
-    """Get all exercise swaps for current user."""
+    """Get all exercise swaps for current user, dropping any that no longer match
+    the underlying program. Stale rows are deleted to self-heal existing bad data
+    written before write-time validation existed."""
+    from equipment_swaps import is_valid_swap
     swaps = ExerciseSwap.query.filter_by(user_id=current_user.id).all()
     result = {}
+    slot_cache = {}
+    stale_rows = []
     for s in swaps:
-        key = f"{s.week}_{s.day_idx}_{s.exercise_idx}"
-        result[key] = s.swapped_to
+        current_original = _exercise_at_slot(
+            current_user.id, s.week, s.day_idx, s.exercise_idx, _cache=slot_cache
+        )
+        # Keep when:
+        #   - we can't compute the current original (don't lose a swap on transient errors)
+        #   - the slot still holds the same original we recorded (or stored is unknown)
+        #   - the swap target is still a valid alternative for the current original
+        if current_original is None:
+            result[f"{s.week}_{s.day_idx}_{s.exercise_idx}"] = s.swapped_to
+            continue
+        if s.original_name and s.original_name != current_original:
+            stale_rows.append(s)
+            continue
+        if not is_valid_swap(current_original, s.swapped_to):
+            stale_rows.append(s)
+            continue
+        result[f"{s.week}_{s.day_idx}_{s.exercise_idx}"] = s.swapped_to
+    if stale_rows:
+        try:
+            for r in stale_rows:
+                db.session.delete(r)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify(result)
 
 
@@ -3118,12 +3239,26 @@ def api_exercise_swap():
                 return jsonify({"error": str(e)}), 500
         return jsonify({"ok": True, "reverted": True})
 
+    # Validate that the swap target is in the original exercise's alternatives.
+    # Catches LLM markers, stale UI state, or anything that bypasses the swap menu.
+    from equipment_swaps import is_valid_swap
+    original_name = _exercise_at_slot(current_user.id, week, day_idx, exercise_idx)
+    if original_name is None:
+        return jsonify({"error": f"No exercise at week {week} day {day_idx} idx {exercise_idx}"}), 400
+    if not is_valid_swap(original_name, swapped_to):
+        return jsonify({
+            "error": f"'{swapped_to}' is not a valid swap for '{original_name}'",
+            "original": original_name,
+        }), 400
+
     if existing:
         existing.swapped_to = swapped_to
+        existing.original_name = original_name
     else:
         existing = ExerciseSwap(
             user_id=current_user.id, week=week, day_idx=day_idx,
             exercise_idx=exercise_idx, swapped_to=swapped_to,
+            original_name=original_name,
         )
         db.session.add(existing)
 

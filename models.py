@@ -161,6 +161,11 @@ class ExerciseSwap(db.Model):
     day_idx = db.Column(db.Integer, nullable=False)
     exercise_idx = db.Column(db.Integer, nullable=False)
     swapped_to = db.Column(db.String(100), nullable=False)
+    # Snapshot of the original exercise the user was looking at when they made the swap.
+    # Without this, swaps survive phase boundaries by index alone — e.g. a Lying Leg Curl
+    # swap from week 4 carries to week 5 where index 6 now points at Hammer Curl.
+    # Nullable so legacy rows persist; validation falls back to recomputing from the plan.
+    original_name = db.Column(db.String(120), nullable=True)
 
 
 class ExerciseCompletion(db.Model):

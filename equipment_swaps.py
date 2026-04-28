@@ -132,6 +132,7 @@ EXERCISE_SWAPS = {
         "requires": ["dumbbells"],
         "alternatives": [
             {"name": "Barbell OHP", "requires": ["barbell"], "note": "Standing, heavier loading"},
+            {"name": "Arnold Press", "requires": ["dumbbells"], "note": "Rotation adds front delt work"},
             {"name": "Pike Push-Ups", "requires": [], "note": "Bodyweight, hips high"},
             {"name": "Band Overhead Press", "requires": ["resistance_bands"], "note": "Stand on band, press up"},
             {"name": "Landmine Press", "requires": ["barbell"], "note": "Angled press, shoulder-friendly"},
@@ -250,6 +251,7 @@ EXERCISE_SWAPS = {
         "requires": ["barbell"],
         "alternatives": [
             {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Lighter, easier to control"},
+            {"name": "Kettlebell Deadlift", "requires": ["kettlebells"], "note": "Hip hinge pattern, lighter load"},
             {"name": "Nordic Hamstring Curl", "requires": [], "note": "Bodyweight, brutal eccentric — pad knees"},
             {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Unilateral balance work"},
             {"name": "Lying Leg Curl", "requires": ["leg_curl_ext"], "note": "Hamstring isolation machine (lying or seated leg curl)"},
@@ -503,27 +505,9 @@ EXERCISE_SWAPS = {
         ],
     },
 
-    # ─── VARIANT ALIASES (19) ────────────────────────────────
-    # Short names used in workout_data.py that map to the same
-    # muscle groups and alternatives as their full-name entries.
-    "Bench Press": {
-        "muscle_group": "chest",
-        "requires": ["barbell", "flat_bench"],
-        "alternatives": [
-            {"name": "Dumbbell Bench Press", "requires": ["dumbbells", "flat_bench"], "note": "More ROM, stabilizer work"},
-            {"name": "Push-Ups", "requires": [], "note": "Bodyweight, add weight plate on back for load"},
-            {"name": "Floor Press (Dumbbells)", "requires": ["dumbbells"], "note": "No bench needed, limited ROM"},
-        ],
-    },
-    "Bench": {
-        "muscle_group": "chest",
-        "requires": ["barbell", "flat_bench"],
-        "alternatives": [
-            {"name": "Dumbbell Bench Press", "requires": ["dumbbells", "flat_bench"], "note": "More ROM, stabilizer work"},
-            {"name": "Push-Ups", "requires": [], "note": "Bodyweight, add weight plate on back for load"},
-            {"name": "Floor Press (Dumbbells)", "requires": ["dumbbells"], "note": "No bench needed, limited ROM"},
-        ],
-    },
+    # ─── VARIANT NEEDING DEDICATED ENTRY ─────────────────────
+    # DB Bench Press is a distinct exercise (dumbbells, not barbell), so it
+    # gets its own catalog entry rather than aliasing to Barbell Bench Press.
     "DB Bench Press": {
         "muscle_group": "chest",
         "requires": ["dumbbells", "flat_bench"],
@@ -533,114 +517,6 @@ EXERCISE_SWAPS = {
             {"name": "Floor Press (Dumbbells)", "requires": ["dumbbells"], "note": "No bench needed, limited ROM"},
         ],
     },
-    "DB Bench": {
-        "muscle_group": "chest",
-        "requires": ["dumbbells", "flat_bench"],
-        "alternatives": [
-            {"name": "Barbell Bench Press", "requires": ["barbell", "flat_bench"], "note": "Heavier loading"},
-            {"name": "Push-Ups", "requires": [], "note": "Bodyweight pressing"},
-            {"name": "Floor Press (Dumbbells)", "requires": ["dumbbells"], "note": "No bench needed, limited ROM"},
-        ],
-    },
-    "Back Squat": {
-        "muscle_group": "quads",
-        "requires": ["barbell"],
-        "alternatives": [
-            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Hold dumbbell at chest, great depth"},
-            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Unilateral, crushes quads"},
-            {"name": "Bodyweight Squats", "requires": [], "note": "High reps, add jump for intensity"},
-        ],
-    },
-    "Squat": {
-        "muscle_group": "quads",
-        "requires": ["barbell"],
-        "alternatives": [
-            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Hold dumbbell at chest, great depth"},
-            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Unilateral, crushes quads"},
-            {"name": "Bodyweight Squats", "requires": [], "note": "High reps, add jump for intensity"},
-        ],
-    },
-    "Deadlift": {
-        "muscle_group": "posterior_chain",
-        "requires": ["barbell"],
-        "alternatives": [
-            {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Hip hinge, hamstring focus"},
-            {"name": "Kettlebell Deadlift", "requires": ["kettlebells"], "note": "Lighter, good form practice"},
-            {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Balance + posterior chain"},
-        ],
-    },
-    "Bent-Over Row": {
-        "muscle_group": "back",
-        "requires": ["barbell"],
-        "alternatives": [
-            {"name": "Dumbbell Row (single arm)", "requires": ["dumbbells", "flat_bench"], "note": "Unilateral, easier on lower back"},
-            {"name": "Cable Seated Row", "requires": ["cable_machine"], "note": "Seated, no lower back load"},
-            {"name": "Inverted Row", "requires": ["pull_up_bar"], "note": "Bodyweight horizontal pull"},
-        ],
-    },
-    "Heavy Lat Pulldown": {
-        "muscle_group": "back",
-        "requires": ["lat_pulldown"],
-        "alternatives": [
-            {"name": "Pull-Ups", "requires": ["pull_up_bar"], "note": "Harder, use band for assistance if needed"},
-            {"name": "Dumbbell Pullover", "requires": ["dumbbells", "flat_bench"], "note": "Different angle, same lats"},
-            {"name": "Barbell Bent-Over Row (underhand)", "requires": ["barbell"], "note": "Targets lats with supinated grip"},
-        ],
-    },
-    "DB Walking Lunge": {
-        "muscle_group": "quads",
-        "requires": ["dumbbells"],
-        "alternatives": [
-            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Stationary, rear foot elevated"},
-            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Hold at chest, full depth"},
-            {"name": "Step-Up", "requires": ["dumbbells"], "note": "Use a bench or box"},
-        ],
-    },
-    "DB Row": {
-        "muscle_group": "back",
-        "requires": ["dumbbells", "flat_bench"],
-        "alternatives": [
-            {"name": "Cable Seated Row", "requires": ["cable_machine"], "note": "Bilateral, constant tension"},
-            {"name": "Barbell Bent-Over Row", "requires": ["barbell"], "note": "Heavier bilateral pull"},
-            {"name": "Inverted Row", "requires": ["pull_up_bar"], "note": "Bodyweight horizontal pull"},
-        ],
-    },
-    "Cable Row": {
-        "muscle_group": "back",
-        "requires": ["cable_machine"],
-        "alternatives": [
-            {"name": "Barbell Bent-Over Row", "requires": ["barbell"], "note": "Heavier, more lower back demand"},
-            {"name": "Dumbbell Row (single arm)", "requires": ["dumbbells", "flat_bench"], "note": "Unilateral, great for imbalances"},
-            {"name": "Inverted Row", "requires": ["pull_up_bar"], "note": "Bodyweight, adjust angle for difficulty"},
-        ],
-    },
-    "DB OHP": {
-        "muscle_group": "shoulders",
-        "requires": ["dumbbells"],
-        "alternatives": [
-            {"name": "Barbell OHP", "requires": ["barbell"], "note": "Standing, heavier loading"},
-            {"name": "Pike Push-Ups", "requires": [], "note": "Bodyweight, hips high"},
-            {"name": "Arnold Press", "requires": ["dumbbells"], "note": "Rotation adds front delt work"},
-        ],
-    },
-    "RDL": {
-        "muscle_group": "hamstrings",
-        "requires": ["barbell"],
-        "alternatives": [
-            {"name": "Dumbbell Romanian Deadlift", "requires": ["dumbbells"], "note": "Lighter, easier to control"},
-            {"name": "Single Leg Deadlift (DB)", "requires": ["dumbbells"], "note": "Unilateral balance work"},
-            {"name": "Kettlebell Deadlift", "requires": ["kettlebells"], "note": "Hip hinge pattern, lighter load"},
-        ],
-    },
-    "DB Lateral Raise": {
-        "muscle_group": "shoulders",
-        "requires": ["dumbbells"],
-        "alternatives": [
-            {"name": "Cable Lateral Raise", "requires": ["cable_machine"], "note": "Constant tension"},
-            {"name": "Band Lateral Raise", "requires": ["resistance_bands"], "note": "Step on band, raise out"},
-            {"name": "Plate Raise", "requires": ["weight_plates"], "note": "Hold plate, raise to shoulder height"},
-        ],
-    },
     "Cable Chest Fly": {
         "muscle_group": "chest",
         "requires": ["cable_machine"],
@@ -648,23 +524,6 @@ EXERCISE_SWAPS = {
             {"name": "Dumbbell Fly", "requires": ["dumbbells", "flat_bench"], "note": "Free weight, stretch at bottom"},
             {"name": "Band Fly", "requires": ["resistance_bands"], "note": "Anchor behind, press and squeeze"},
             {"name": "Incline DB Press", "requires": ["dumbbells", "incline_bench"], "note": "Press alternative for upper chest"},
-        ],
-    },
-    "Push-Up": {
-        "muscle_group": "chest",
-        "requires": [],
-        "alternatives": [
-            {"name": "DB Bench Press", "requires": ["dumbbells", "flat_bench"], "note": "Loaded pressing, more progressive overload"},
-            {"name": "Incline Push-Up", "requires": [], "note": "Hands elevated, easier variation"},
-            {"name": "Diamond Push-Up", "requires": [], "note": "Close hand position, more tricep focus"},
-        ],
-    },
-    "Calf Raise": {
-        "muscle_group": "calves",
-        "requires": ["dumbbells"],
-        "alternatives": [
-            {"name": "Seated Calf Raise", "requires": ["dumbbells"], "note": "Seated, weight on knees"},
-            {"name": "Calf Raises (step)", "requires": [], "note": "Bodyweight on a step, full ROM"},
         ],
     },
     "DB Curl": {
@@ -806,6 +665,71 @@ def auto_swap_workout(exercises, user_equipment):
                 result.append(ex)
                 used_names.add(ex["name"])
     return result
+
+
+def find_swap_entry(exercise_name):
+    """Locate the EXERCISE_SWAPS catalog entry for an exercise.
+
+    Mirrors the lookup chain used by get_alternatives — direct hit, pump-suffix strip,
+    test/prefix fuzzy match — so write-time validation matches the alternatives the UI
+    shows at read time. Returns (catalog_key, swap_dict) or (None, None) when no entry
+    can be located.
+    """
+    import re
+    from workout_data import resolve_name
+    if not exercise_name:
+        return None, None
+    name = resolve_name(exercise_name)
+    if name in EXERCISE_SWAPS:
+        return name, EXERCISE_SWAPS[name]
+    clean = re.sub(r'\s*\(pump\)\s*$', '', name).strip()
+    if clean in EXERCISE_SWAPS:
+        return clean, EXERCISE_SWAPS[clean]
+    clean = re.sub(r'\s*[-–]\s*(1RM test|max weight|pump)$', '', clean).strip()
+    clean = re.sub(r'^(Barbell|DB|Dumbbell|Heavy|Cable)\s+', '', clean).strip()
+    if clean:
+        for key in EXERCISE_SWAPS:
+            if clean.lower() in key.lower() or key.lower() in clean.lower():
+                return key, EXERCISE_SWAPS[key]
+    return None, None
+
+
+def is_valid_swap(original_name, swap_name):
+    """Check whether swap_name is a legitimate swap target for original_name.
+
+    A swap is valid when (a) it equals the original (identity / revert), (b) it appears
+    in the original's catalog alternatives list, or (c) the original is itself an
+    alternative-only name (e.g. an auto_swap_workout substitute like "Glute Bridge
+    (weighted)" that isn't a top-level catalog key) and the swap target lives in the
+    same parent entry's family. Truly unknown originals fail-open so novel exercises
+    don't block legitimate UX. Names are canonicalised via resolve_name on both sides.
+    """
+    from workout_data import resolve_name
+    if not original_name or not swap_name:
+        return False
+    orig = resolve_name(original_name)
+    swap = resolve_name(swap_name)
+    if orig == swap:
+        return True
+    entry = find_swap_entry(orig)[1]
+    if entry is not None:
+        alt_names = {resolve_name(a["name"]) for a in entry.get("alternatives", [])}
+        return swap in alt_names
+
+    # orig isn't a top-level entry — it may be an alternative listed under one
+    # or more parent entries (e.g. auto_swap produced "Glute Bridge (weighted)"
+    # from "Barbell Hip Thrust"). Constrain valid swaps to those parents' family
+    # so cross-muscle-group swaps can't slip through the fail-open gap.
+    family = set()
+    for key, data in EXERCISE_SWAPS.items():
+        alt_set = {resolve_name(a["name"]) for a in data.get("alternatives", [])}
+        if orig in alt_set:
+            family.add(resolve_name(key))
+            family.update(alt_set)
+    if family:
+        return swap in family
+
+    return True
 
 
 def validate_exercise_swaps():
