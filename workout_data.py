@@ -1693,10 +1693,14 @@ def _empty_day(day_idx):
 
 
 def _phase1_week():
-    """Phase 1 (wks 1-3): Hypertrophy / adaptation per spec §2."""
+    """Phase 1 (wks 1-3): Hypertrophy / adaptation per spec §2.
+
+    Each day dict carries the keys the front-end consumes unguarded:
+      - run: {type, label, time, detail}
+      - timing: list of [time, label, time, label, ...] strings
+      - notes: day-level coach note string
+    """
     days = [_empty_day(i) for i in range(7)]
-    # Sun (idx 6) — rest from iron, long fasted run handled at run-plan layer
-    days[6] = {**days[6], "liftName": "Rest (Long Fasted Run)", "isRest": True}
     # Mon — Lower hypertrophy
     days[0] = {
         **days[0],
@@ -1712,6 +1716,12 @@ def _phase1_week():
             {"name": "Standing Calf Raise", "sets": "3x12",
              "rest": "45-60s", "note": "Full ROM, slow eccentric."},
         ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "25-35 min",
+                "detail": "HR 130-145. Conversational pace. Easy aerobic."},
+        "timing": ["6:00", "Lift - Lower Hypertrophy (55 min)",
+                   "7:00", "5 min transition",
+                   "7:05", "Zone 2 easy 25-35 min"],
+        "notes": "Front Squat lead. Build reps 8→12, then bump weight.",
     }
     # Tue — Press + Shoulder
     days[1] = {
@@ -1728,6 +1738,12 @@ def _phase1_week():
             {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural — mandatory each press/pull day."},
         ],
+        "run": {"type": "hiit", "label": "Threshold intervals", "time": "35 min",
+                "detail": "5 min warmup, 8x 2:00 at threshold / 1:00 easy, 5 min cooldown."},
+        "timing": ["6:00", "Lift - Upper Press (50 min)",
+                   "6:55", "5 min transition",
+                   "7:00", "Threshold intervals 35 min"],
+        "notes": "Shoulder warm-up mandatory. Band pull-aparts + face pulls before pressing.",
     }
     # Wed — Shoulder volume + Arms
     days[2] = {
@@ -1747,6 +1763,12 @@ def _phase1_week():
             {"name": "Overhead Tricep Extension", "sets": "3x12",
              "rest": "45-60s", "note": "Long-head tricep."},
         ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "35-45 min",
+                "detail": "HR 130-145. Aerobic volume building."},
+        "timing": ["6:00", "Lift - Shoulder/Arms (50 min)",
+                   "6:55", "5 min transition",
+                   "7:00", "Zone 2 easy 35-45 min"],
+        "notes": "High-volume isolation, low CNS day. Aerobic emphasis on the run.",
     }
     # Thu — Pull + Lat
     days[3] = {
@@ -1765,6 +1787,12 @@ def _phase1_week():
             {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural."},
         ],
+        "run": {"type": "hiit", "label": "Threshold or hill repeats", "time": "35 min",
+                "detail": "5 min warmup, 6-8x hill repeats or 4-min threshold blocks, 5 min cooldown."},
+        "timing": ["6:00", "Lift - Upper Pull (55 min)",
+                   "7:00", "5 min transition",
+                   "7:05", "Threshold/hill repeats 35 min"],
+        "notes": "Heavy pull day. Hill repeats hit posterior chain — keep the lift volume honest.",
     }
     # Fri — Heavy Lower hypertrophy
     days[4] = {
@@ -1780,6 +1808,12 @@ def _phase1_week():
             {"name": "Standing Calf Raise", "sets": "3x12", "rest": "45-60s",
              "note": "Second calf session of the week."},
         ],
+        "run": {"type": "z2", "label": "Recovery jog", "time": "20 min",
+                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
+        "timing": ["6:00", "Lift - Heavy Lower (60 min)",
+                   "7:05", "5 min transition",
+                   "7:10", "Recovery jog 20 min"],
+        "notes": "This is THE strength session of the week. Squat heavy. Recovery jog only — keep HR low.",
     }
     # Sat — Full Body
     days[5] = {
@@ -1797,6 +1831,24 @@ def _phase1_week():
             {"name": "Ab Wheel Rollout", "sets": "3x10", "rest": "60s",
              "note": "Core anti-extension."},
         ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "30 min",
+                "detail": "HR 130-145. Aerobic. Honest, conversational pace."},
+        "timing": ["6:00", "Lift - Full Body (50 min)",
+                   "6:55", "5 min transition",
+                   "7:00", "Zone 2 easy 30 min"],
+        "notes": "Full-body cleanup of weak points. Aerobic emphasis on the run.",
+    }
+    # Sun (idx 6) — rest from iron, long fasted run is the only activity
+    days[6] = {
+        **days[6],
+        "liftName": "Rest (Long Fasted Run)",
+        "isRest": True,
+        "run": {"type": "z2_long", "label": "Long fasted easy run",
+                "time": "60-90 min",
+                "detail": "Fasted state, fat-ox bias. HR under 140. Conversational."},
+        "timing": ["6:00", "Long fasted run 60-90 min",
+                   "8:00", "Refuel"],
+        "notes": "Sunday — deepest fast. Long aerobic only.",
     }
     return days
 
