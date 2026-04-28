@@ -549,6 +549,42 @@ except Exception:
     pass
 
 
+def _heal_prescription_volume_floor(user_id, week):
+    """Bump WeeklyPrescription.sets back to the program's configured floor.
+
+    Existed because compute_next_targets used to copy last_set_count into
+    target_sets unconditionally (training_engine.py before commit cb301e9), so
+    a single low-volume session permanently collapsed the prescription — Phase 2
+    Tuesday's 5x5 Bent-Over Row template was rewritten as 2x12 in the user's
+    plan and never recovered. The engine fix prevents new bad rows; this heals
+    legacy ones lazily on /api/workouts read so users don't have to regenerate.
+
+    Skips source='coach' rows (intentional human/LLM modifications). Only widens
+    sets — never narrows — so there's no risk of clobbering a legit reduction.
+    """
+    from training_engine import _get_configured_sets
+    try:
+        rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=week).all()
+    except Exception:
+        return
+    dirty = False
+    for rx in rows:
+        if getattr(rx, 'source', None) == 'coach':
+            continue
+        try:
+            configured = _get_configured_sets(rx.exercise_name, week, rx.day_idx)
+        except Exception:
+            configured = None
+        if configured and rx.sets and rx.sets < configured:
+            rx.sets = configured
+            dirty = True
+    if dirty:
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
 def _exercise_at_slot(user_id, week, day_idx, exercise_idx, _cache=None):
     """Resolve the original exercise name at (week, day_idx, exercise_idx) for a user.
 
@@ -1870,6 +1906,8 @@ def api_workouts():
         else:
             from workout_data import get_workouts_for_user
             days = get_workouts_for_user(week, has_gym=False)
+
+        _heal_prescription_volume_floor(current_user.id, week)
 
         # Check for user-specific prescriptions
         prescriptions = WeeklyPrescription.query.filter_by(

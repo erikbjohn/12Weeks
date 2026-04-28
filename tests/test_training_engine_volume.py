@@ -103,3 +103,81 @@ class TestVolumeFloor:
             f"Expected fallback to last_set_count=3 when template silent, "
             f"got {t['target_sets']}."
         )
+
+
+class TestHealPrescriptionVolumeFloor:
+    """Lazy heal on /api/workouts read: legacy WeeklyPrescription rows written
+    before the engine fix carried under-volume schemes (e.g. 2x12 instead of
+    5x5). These tests pin the heal's contract: lift engine/template rows up
+    to the configured floor; never touch coach-authored rows."""
+
+    def _make_user(self, app_ctx):
+        app, db = app_ctx
+        from models import User, UserEquipment, PhysicalAssessment
+        _USER_SEQ[0] += 1
+        u = User(email=f"heal-test-{_USER_SEQ[0]}@example.com", password_hash="x")
+        db.session.add(u); db.session.commit()
+        eq = UserEquipment(user_id=u.id, available_equipment=[
+            "barbell", "dumbbells", "ez_bar", "kettlebells", "weight_plates",
+            "lat_pulldown", "cable_machine", "leg_press", "leg_curl_ext",
+            "chest_press_machine", "seated_row_machine", "smith_machine",
+            "ab_machine", "pull_up_bar", "dip_station", "flat_bench",
+            "incline_bench", "decline_bench", "resistance_bands", "trx",
+            "medicine_ball", "foam_roller", "ab_wheel",
+        ])
+        pa = PhysicalAssessment(user_id=u.id, has_gym=True)
+        db.session.add(eq); db.session.add(pa); db.session.commit()
+        return u
+
+    def test_heals_engine_authored_under_volume(self, app_ctx):
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=0,
+                exercise_name="Barbell Bent-Over Row",
+                sets=2, reps="12", rest="2-3 min",
+                source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(u.id, week=5)
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
+        assert row.sets == 5, f"engine row should heal to template's 5, got {row.sets}"
+        # Reps untouched — heal is volume-only.
+        assert row.reps == "12"
+
+    def test_does_not_touch_coach_authored_row(self, app_ctx):
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=0,
+                exercise_name="Barbell Bent-Over Row",
+                sets=2, reps="12", source="coach",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(u.id, week=5)
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
+        assert row.sets == 2, "coach intentions are sacred; heal must skip"
+
+    def test_does_not_widen_above_configured(self, app_ctx):
+        # If a user/coach previously bumped sets HIGHER than configured, leave
+        # it alone. Heal is a floor, not an equality.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=0,
+                exercise_name="Barbell Bent-Over Row",
+                sets=7, reps="5", source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(u.id, week=5)
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
+        assert row.sets == 7
