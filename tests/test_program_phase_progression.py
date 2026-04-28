@@ -135,3 +135,42 @@ class TestPhase3Hold:
             f"Phase 3 should drop weight when last session missed reps; "
             f"got {t['target_weight']}"
         )
+
+
+class TestWeek12Hold:
+    def test_week_12_holds_weight_no_matter_what(
+        self, app_ctx, user_with_history
+    ):
+        # Week 12 mini-taper. HOLD everything regardless of last-session
+        # quality. Even if last session was clean and easy, NO bump.
+        app, _db = app_ctx
+        from training_engine import compute_next_targets
+        u = user_with_history(
+            "Back Squat", week=12, day_idx=4,
+            last_weight=200, last_reps=3, set_count=2,  # one working set
+        )
+        with app.test_request_context():
+            t = compute_next_targets(
+                u.id, "Back Squat", week=12, day_idx=4, exercise_order=0,
+            )
+        assert t["target_weight"] == 200, (
+            f"Week 12 must HOLD weight regardless; got {t['target_weight']}"
+        )
+        assert t["progression_indicator"] == "hold"
+
+    def test_week_12_does_not_drop_on_missed_reps(
+        self, app_ctx, user_with_history
+    ):
+        # Even if last session missed reps, week 12 holds — taper, not deload.
+        app, _db = app_ctx
+        from training_engine import compute_next_targets
+        u = user_with_history(
+            "Back Squat", week=12, day_idx=4,
+            last_weight=200, last_reps=2, set_count=2,
+        )
+        with app.test_request_context():
+            t = compute_next_targets(
+                u.id, "Back Squat", week=12, day_idx=4, exercise_order=0,
+            )
+        # week 12 holds, no drop, no bump
+        assert t["target_weight"] == 200

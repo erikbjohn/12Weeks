@@ -50,6 +50,11 @@ def _is_deload(week):
     return week in (4, 8)
 
 
+def _is_peak_week(week):
+    """Week 12 = peak finish (mini-taper, scale+look). HOLD everything."""
+    return week == 12
+
+
 def _get_progression_increment(exercise_name, is_weak):
     """Get the weight increment for progression."""
     if is_weak:
@@ -177,6 +182,29 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
             "target_reps": rep_range.get(phase, 10),
             "target_sets": 4 if phase <= 2 else 3,
             "adjustment_reason": "First session — establish baseline",
+            "progression_indicator": "hold",
+        }
+
+    # ─── PEAK WEEK (week 12) — HOLD ───
+    # Mini-taper. No bumps, no drops. Maintain Phase 3 lifts at the same
+    # weight, reps, sets. Spec §7.
+    if _is_peak_week(week):
+        last_date = last_sets[0].logged_date
+        session_sets = [s for s in last_sets if s.logged_date == last_date]
+        last_weight = session_sets[0].weight if session_sets else 0
+        last_reps = session_sets[0].reps if session_sets else 0
+        last_set_count = len(session_sets)
+        configured_reps = _get_configured_reps(
+            exercise_name, week, day_idx, exercise_order,
+        )
+        configured_sets_peak = _get_configured_sets(
+            exercise_name, week, day_idx, exercise_order,
+        )
+        return {
+            "target_weight": _round_weight(last_weight),
+            "target_reps": configured_reps or last_reps or 3,
+            "target_sets": configured_sets_peak or last_set_count or 2,
+            "adjustment_reason": "Week 12 peak — HOLD all knobs",
             "progression_indicator": "hold",
         }
 
