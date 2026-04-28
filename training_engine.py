@@ -70,6 +70,18 @@ def _get_progression_increment(exercise_name, is_weak):
 
 def _get_configured_reps(exercise_name, week, day_idx):
     """Look up the configured rep count from workout data for this exercise."""
+    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx)
+    return sets_reps[1] if sets_reps else None
+
+
+def _get_configured_sets(exercise_name, week, day_idx):
+    """Look up the configured set count from workout data for this exercise."""
+    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx)
+    return sets_reps[0] if sets_reps else None
+
+
+def _get_configured_sets_reps(exercise_name, week, day_idx):
+    """Return (sets, reps) from the program template, or None if unknown."""
     from workout_data import resolve_name
     exercise_name = resolve_name(exercise_name)
     try:
@@ -81,7 +93,7 @@ def _get_configured_reps(exercise_name, week, day_idx):
                 if ex.get("name", "").lower() == exercise_name.lower():
                     m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
                     if m:
-                        return int(m.group(2))
+                        return int(m.group(1)), int(m.group(2))
     except Exception:
         pass
     return None
@@ -150,6 +162,16 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     last_reps = session_sets[0].reps if session_sets else 0
     last_set_count = len(session_sets)
 
+    # Volume floor: the program's configured set count is the source of truth.
+    # Without this, every branch below took target_sets = last_set_count, so a
+    # user who logged 2 sets once got prescribed 2 sets forever — the program's
+    # 5x5 template silently collapsed to 2x5. The "Volume is sacred" comment in
+    # SIGNAL 4 only enforced sacred-ness for THAT branch; this generalises it.
+    # When the configured count is unknown (e.g. exercise auto-swapped to one
+    # not in the template), preserve the user's logged effort as a fallback.
+    configured_sets = _get_configured_sets(exercise_name, week, day_idx)
+    target_sets = configured_sets or last_set_count or (4 if phase <= 2 else 3)
+
     # Check if user ACTUALLY decreased weight vs their PREVIOUS session (not vs computed target).
     # The old logic compared against the engine's computed target — if the engine suggested 115
     # but the user was prescribed 110 and lifted 110, it was wrongly flagged as "decreased".
@@ -172,7 +194,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return {
             "target_weight": _round_weight(last_weight * 0.85),
             "target_reps": last_reps,
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": "Deload week — 85% weight, recovery focus",
             "progression_indicator": "deload",
         }
@@ -193,14 +215,14 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
             return {
                 "target_weight": new_weight,
                 "target_reps": target_reps,
-                "target_sets": last_set_count,
+                "target_sets": target_sets,
                 "adjustment_reason": f"3 good sessions — +2.5 lb ({muscle_group}: conservative)",
                 "progression_indicator": "up",
             }
         return {
             "target_weight": _round_weight(last_weight),
             "target_reps": target_reps,
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": f"{muscle_group.capitalize()} weak — holding ({good_sessions}/3 good sessions for increase)",
             "progression_indicator": "weak",
         }
@@ -219,7 +241,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return {
             "target_weight": new_weight,
             "target_reps": last_reps,
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": "You went heavier last time — pushing further",
             "progression_indicator": "up",
         }
@@ -229,7 +251,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         return {
             "target_weight": _round_weight(last_weight),
             "target_reps": last_reps,
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": "Reduced last session — holding weight",
             "progression_indicator": "hold",
         }
@@ -247,7 +269,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         result = {
             "target_weight": new_weight,
             "target_reps": {1: 10, 2: 6, 3: 4}.get(phase, 10),
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": f"Beat rep target — weight +{inc} lb",
             "progression_indicator": "up",
         }
@@ -266,7 +288,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
             result = {
                 "target_weight": new_weight,
                 "target_reps": configured_reps or 10,
-                "target_sets": last_set_count,
+                "target_sets": target_sets,
                 "adjustment_reason": f"Hit {int(avg_reps)} reps — weight +{inc} lb, reps reset to {configured_reps or 10}",
                 "progression_indicator": "up",
             }
@@ -277,7 +299,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         result = {
             "target_weight": _round_weight(last_weight),
             "target_reps": target,
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": f"Building reps: {int(avg_reps)} → {target}",
             "progression_indicator": "up" if avg_reps < phase_max_reps else "hold",
         }
@@ -302,7 +324,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         result = {
             "target_weight": new_weight,
             "target_reps": configured_reps or max(5, last_reps),
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": reason,
             "progression_indicator": "up",
         }
@@ -325,7 +347,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         result = {
             "target_weight": new_weight,
             "target_reps": configured_reps or max(3, last_reps),
-            "target_sets": last_set_count,
+            "target_sets": target_sets,
             "adjustment_reason": reason,
             "progression_indicator": "up",
         }
