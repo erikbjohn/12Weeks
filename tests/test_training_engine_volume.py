@@ -65,17 +65,17 @@ def user_with_sets(app_ctx):
 
 class TestVolumeFloor:
     def test_user_logged_two_sets_template_says_five(self, app_ctx, user_with_sets):
-        # Phase 2 (week 5), Tuesday (day_idx=1), Barbell Bent-Over Row template
-        # is 5x5 per workout_data.py:1035. User did 2 sets last week. Engine
-        # must still prescribe 5 sets — not collapse to the user's bad day.
+        # Phase 2 (week 5), Thursday (day_idx=3), Barbell Bent-Over Row template
+        # is 4x6 per spec §4. User did 2 sets last week. Engine must still
+        # prescribe 4 sets — not collapse to the user's bad day.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=1,
-                           last_weight=95, last_reps=5, set_count=2)
+        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=3,
+                           last_weight=95, last_reps=6, set_count=2)
         with app.test_request_context():
-            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=1)
-        assert t["target_sets"] == 5, (
-            f"Expected 5 sets (template floor), got {t['target_sets']}. "
+            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=3)
+        assert t["target_sets"] == 4, (
+            f"Expected 4 sets (template floor), got {t['target_sets']}. "
             "Engine is letting last_set_count collapse the program's volume."
         )
 
@@ -85,11 +85,11 @@ class TestVolumeFloor:
         # contract, not a floor for max.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=1,
-                           last_weight=95, last_reps=5, set_count=6)
+        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=3,
+                           last_weight=95, last_reps=6, set_count=6)
         with app.test_request_context():
-            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=1)
-        assert t["target_sets"] == 5
+            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=3)
+        assert t["target_sets"] == 4
 
     def test_falls_back_to_last_set_count_when_template_silent(self, app_ctx, user_with_sets):
         # If the exercise isn't in the template at this slot (e.g. user is on
@@ -109,55 +109,38 @@ class TestVolumeFloor:
 
 
 class TestEngineExerciseOrder:
-    """exercise_order disambiguates exercises that appear twice in the same
-    day's template (Phase 2 Tuesday: heavy Lat Pulldown 5x5 at order 0 AND
-    pump Lat Pulldown 3x12 at order 2). Without it, the engine reads the
-    first match and the pump row gets the heavy row's rep-drop compensation.
+    """exercise_order is threaded through compute_next_targets so the engine
+    pulls the correct configured (sets, reps) from the day's template even
+    when the lookup needs to disambiguate slot. Spec §4 Phase 2 doesn't have
+    same-day duplicates, but the engine still needs to honor the explicit
+    slot rather than re-reading by name only.
     """
 
-    def test_phase_1_to_2_transition_pump_row_keeps_pump_weight(
+    def test_phase_2_lat_pulldown_uses_template_reps(
         self, app_ctx, user_with_sets
     ):
-        # The bug: transitioning Phase 1 → Phase 2 produced 105 lb → 140 lb
-        # (33%) on the pump Lat Pulldown. Root cause: engine called
-        # _get_configured_reps without exercise_order, which returned the
-        # heavy 5x5's reps=5 even when computing for the pump 3x12 row.
-        # With last_reps=8 from Phase 1, rep-drop compensation
-        # (5 < 8*0.7) wrongly fired. With exercise_order threaded through,
-        # the pump row sees its own configured_reps=12 and rep-drop stays
-        # off — base + inc only.
+        # Spec §4 Phase 2 Thu (day_idx=3) has Lat Pulldown 3x10 at idx=2.
+        # User came from Phase 1 Wed Lat Pulldown 3x10 at last_reps=10.
+        # When we look up the new prescription with exercise_order=2,
+        # we must read the spec §4 reps (10) and sets (3), not collapse
+        # to a stale value.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Lat Pulldown", week=3, day_idx=2,
-                           last_weight=105, last_reps=8, set_count=4)
+        u = user_with_sets("Lat Pulldown", week=3, day_idx=3,
+                           last_weight=105, last_reps=10, set_count=3)
         with app.test_request_context():
-            # Pump row at Phase 2 Tue (week 5, day_idx=1, order=2).
-            t_pump = compute_next_targets(
-                u.id, "Lat Pulldown", week=5, day_idx=1, exercise_order=2,
+            t = compute_next_targets(
+                u.id, "Lat Pulldown", week=5, day_idx=3, exercise_order=2,
             )
-            # Heavy row at Phase 2 Tue (week 5, day_idx=1, order=0).
-            t_heavy = compute_next_targets(
-                u.id, "Lat Pulldown", week=5, day_idx=1, exercise_order=0,
-            )
-        # Pump: configured_reps=12, last_reps=8 → 12 < 8*0.7=5.6 is FALSE
-        # → no rep drop bump → base = last_weight + inc = 105 + 5 = 110.
-        assert t_pump["target_reps"] == 12, (
-            f"pump row should target 12 reps from its own template, "
-            f"got {t_pump['target_reps']}"
+        assert t["target_reps"] == 10, (
+            f"Phase 2 Thu Lat Pulldown should target 10 reps per spec §4; "
+            f"got {t['target_reps']}"
         )
-        assert t_pump["target_sets"] == 3, (
-            f"pump row should target 3 sets from its own template, "
-            f"got {t_pump['target_sets']}"
+        assert t["target_sets"] == 3, (
+            f"Phase 2 Thu Lat Pulldown should target 3 sets per spec §4; "
+            f"got {t['target_sets']}"
         )
-        assert t_pump["target_weight"] <= 115, (
-            f"pump row should not get aggressive bump, expected ~110, "
-            f"got {t_pump['target_weight']}"
-        )
-        # Heavy: configured_reps=5, last_reps=8 → 5 < 5.6 is TRUE → rep
-        # drop fires legitimately. base = 105*1.10=115.5, +inc=120.5 → 125.
-        assert t_heavy["target_reps"] == 5
-        assert t_heavy["target_sets"] == 5
-        assert t_heavy["target_weight"] is not None
+        assert t["target_weight"] is not None
 
 
 class TestAutoSwapPreservesTemplateDuplicates:

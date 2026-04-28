@@ -1041,60 +1041,84 @@ PHASE_TEMPLATES = {
         6: [],  # Sun rest from iron
     },
 
-    # ── Phase 2: Strength (weeks 5-7) ─────────────────────────────────────
+    # ── Phase 2: Strength (weeks 5-7) per spec §4 ─────────────────────────
     2: {
-        0: [  # Monday — Lower Strength - Squat Focus
-            {"exercise": "Barbell Back Squat", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Heavy. Below parallel every rep."},
-            {"exercise": "Barbell Hip Thrust", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Full extension, squeeze glutes at top"},
-            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Per leg. Rear foot elevated, upright torso."},
-            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
-            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
-            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        0: [  # Mon - Lower POWER + RDL
+            {"exercise": "Box Jump", "sets": 3, "reps": "5",
+             "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset between reps."},
+            {"exercise": "Front Squat", "sets": 4, "reps": "3",
+             "rest": "2-3 min",
+             "note": "Speed-focused. ~70-76% wave (wk5/6/7)."},
+            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "8",
+             "rest": "60-90s",
+             "note": "Each leg. Heavier than P1, explosive up."},
+            {"exercise": "Romanian Deadlift", "sets": 3, "reps": "8",
+             "rest": "60-90s",
+             "note": "RPE 7. Hamstring + glute hinge."},
         ],
-        1: [  # Tuesday — Upper Strength - Pull Focus
-            {"exercise": "Lat Pulldown", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "Heavy. Full stretch, controlled pull to chest."},
-            {"exercise": "Barbell Bent-Over Row", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "45 deg torso, pull to belly button"},
-            {"exercise": "Lat Pulldown", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Full stretch at top"},
-            {"exercise": "Rear Delt Fly", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Bent over or cable, squeeze shoulder blades"},
-            {"exercise": "EZ-Bar Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Full ROM, squeeze at top"},
-            {"exercise": "Hammer Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Neutral grip, both arms alternate"},
+        1: [  # Tue - Upper PRESS + Shoulder Strength
+            {"exercise": "DB Bench Press", "sets": 4, "reps": "5",
+             "rest": "2-3 min",
+             "note": "Neutral grip. 75-82% wave. Shoulder-friendly."},
+            {"exercise": "Landmine Press", "sets": 3, "reps": "6",
+             "rest": "90s",
+             "note": "Each side. Heavier P2 progression."},
+            {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
+             "rest": "60s",
+             "note": "Constant tension. Lateral delt strength."},
+            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+             "rest": "45-60s",
+             "note": "Postural — mandatory each press/pull day."},
         ],
-        2: [  # Wednesday — Full Body - Power + Accessories
-            {"exercise": "Power Clean", "sets": 4, "reps": "5", "rest": "2-3 min", "note": "From floor. Explosive pull, high elbows."},
-            {"exercise": "Box Jump", "sets": 4, "reps": "5", "rest": "2-3 min", "note": "Max effort. Land soft. Reset each rep."},
-            {"exercise": "Conventional Deadlift", "sets": 3, "reps": "5", "rest": "2-3 min", "note": "RPE 9. Top set of the week."},
-            {"exercise": "Barbell Bench Press", "sets": 3, "reps": "5", "rest": "2-3 min", "note": "RPE 8. Push hard."},
-            {"exercise": "Barbell Bent-Over Row", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Controlled, heavy-ish"},
-            {"exercise": "Walking Lunge", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Per leg, weighted"},
-            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
+        2: [  # Wed - Shoulder Volume + Arms
+            {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "15",
+             "rest": "45-60s", "note": "Lateral delt volume."},
+            {"exercise": "Reverse Pec Deck", "sets": 3, "reps": "12",
+             "rest": "45-60s", "note": "Rear delt isolation."},
+            {"exercise": "Hammer Curl", "sets": 3, "reps": "10",
+             "rest": "45-60s", "note": "Brachialis + biceps."},
+            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "12",
+             "rest": "45-60s", "note": "Tricep iso."},
+            {"exercise": "EZ-Bar Curl", "sets": 3, "reps": "10",
+             "rest": "45-60s", "note": "Biceps direct."},
         ],
-        3: [  # Thursday — Lower Strength - Hinge Focus
-            {"exercise": "Conventional Deadlift", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Heavy and controlled. No bouncing."},
-            {"exercise": "Bulgarian Split Squat", "sets": 3, "reps": "10", "rest": "60-90s", "note": "Per leg. Rear foot elevated, upright torso."},
-            {"exercise": "Leg Press", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Feet shoulder-width, full depth"},
-            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Controlled, don't let hips rise"},
-            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
-            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
+        3: [  # Thu - Upper PULL + Lat
+            {"exercise": "Weighted Pull-Up", "sets": 4, "reps": "5",
+             "rest": "2-3 min",
+             "note": "Heavier P2. BW 4×6-10 if not yet weighted."},
+            {"exercise": "Barbell Bent-Over Row", "sets": 4, "reps": "6",
+             "rest": "2 min",
+             "note": "75-82% wave. 45-deg torso, pull to belly button."},
+            {"exercise": "Lat Pulldown", "sets": 3, "reps": "10",
+             "rest": "60-90s", "note": "Neutral grip. Different angle."},
+            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+             "rest": "45-60s", "note": "Postural."},
         ],
-        4: [  # Friday — Upper Strength - Press Focus
-            {"exercise": "Barbell Bench Press", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "RPE 8-9. Spotter or use safeties."},
-            {"exercise": "Barbell OHP", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "Standing strict press. No leg drive."},
-            {"exercise": "Cable Chest Fly", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Arms wide, squeeze hard at center"},
-            {"exercise": "Tricep Dip", "sets": 3, "reps": "12", "rest": "60-90s", "note": "Bodyweight or weighted"},
-            {"exercise": "Face Pull", "sets": 3, "reps": "15", "rest": "45-60s", "note": "External rotation, pull to forehead"},
-            {"exercise": "Lateral Raise", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Slow and controlled, no swinging"},
-            {"exercise": "Cable Tricep Pushdown", "sets": 3, "reps": "12", "rest": "45-60s", "note": "Elbows locked, full extension"},
+        4: [  # Fri - HEAVY Lower
+            {"exercise": "Back Squat", "sets": 4, "reps": "5",
+             "rest": "3-5 min",
+             "note": "78% wk5; engine waves to 82% wk6, 87% wk7."},
+            {"exercise": "Hip Thrust", "sets": 4, "reps": "8",
+             "rest": "90s",
+             "note": "RPE 7. Squeeze glutes hard at top."},
+            {"exercise": "Lying Leg Curl", "sets": 3, "reps": "10",
+             "rest": "60s", "note": "Hamstring isolation."},
         ],
-        5: [  # Saturday — Full Body - Volume + Core
-            {"exercise": "Barbell Back Squat", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Below parallel, controlled descent"},
-            {"exercise": "Barbell Bench Press", "sets": 4, "reps": "10", "rest": "60-90s", "note": "Control the eccentric, 2 sec down"},
-            {"exercise": "Barbell Bent-Over Row", "sets": 5, "reps": "5", "rest": "2-3 min", "note": "45 deg torso, pull to belly button"},
-            {"exercise": "Push Press", "sets": 3, "reps": "8", "rest": "60-90s", "note": "Leg drive to initiate, lock out overhead"},
-            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10", "rest": "60s", "note": "From knees or toes. Don't sag."},
-            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Brace hard - don't sag"},
-            {"exercise": "Standing Calf Raise", "sets": 4, "reps": "15", "rest": "45-60s", "note": "Full stretch at bottom, squeeze at top"},
+        5: [  # Sat - Full Body / Glute Volume
+            {"exercise": "Hip Thrust", "sets": 3, "reps": "10",
+             "rest": "60-90s",
+             "note": "RPE 6. Lighter Sat — second hip thrust of week."},
+            {"exercise": "Cable Chest Fly", "sets": 3, "reps": "12",
+             "rest": "60s", "note": "Chest accessory."},
+            {"exercise": "Single-Arm DB Row", "sets": 3, "reps": "8",
+             "rest": "60s", "note": "Each arm. Unilateral back."},
+            {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
+             "rest": "45-60s", "note": "Lateral volume."},
+            {"exercise": "Ab Wheel Rollout", "sets": 3, "reps": "10",
+             "rest": "60s", "note": "Core anti-extension."},
         ],
-        6: [],  # Sunday — Rest
+        6: [],  # Sun rest from iron
     },
 
     # ── Phase 3: Power (weeks 9-11) ───────────────────────────────────────
@@ -1854,57 +1878,155 @@ def _phase1_week():
 
 
 def _phase2_week():
-    return [
-        {
-            "day": "Mon", "liftName": "Lower Strength - Squat Focus",
-            "exercises": [_ex("squat5"), _ex("hip_thrust"), _ex("split_sq"), _ex("leg_curl"), _ex("calf_stand"), _ex("ab_wheel")],
-            "run": _run("tempo30"),
-            "timing": ["6:00", "Lift - Lower Strength (60 min)", "7:05", "5 min transition", "7:10", "Tempo run 30 min", ],
-            "notes": "5x5 squat is the anchor. Rest 3 min between heavy sets. Don't rush it.",
-        },
-        {
-            "day": "Tue", "liftName": "Upper Strength - Pull Focus",
-            "exercises": [_ex("weighted_pu"), _ex("bb_row"), _ex("pull_down2"), _ex("rear_delt"), _ex("curl_bar"), _ex("hammer")],
-            "run": _run("long75"),
-            "timing": ["6:00", "Lift - Upper Pull (55 min)", "7:00", "5 min transition", "7:05", "Long run 75 min", ],
-            "notes": "Long run day - lift is pull-focused. HR under 140 on the run. Eat 100-150 extra kcal today.",
-        },
-        {
-            "day": "Wed", "liftName": "Full Body - Power + Accessories",
-            "exercises": [_ex("clean"), _ex("box_jump"), _ex("deadlift_p2"), _ex("bench_p2"), _ex("row_p2"), _ex("lunge_p2"), _ex("ab_wheel")],
-            "run": _run("hiit25"),
-            "timing": ["6:00", "Lift - Full Body Power (60 min)", "7:05", "5 min transition", "7:10", "HIIT run 25 min", ],
-            "notes": "Power clean first when CNS is fresh. HIIT after this is peak metabolic demand.",
-        },
-        {
-            "day": "Thu", "liftName": "Lower Strength - Hinge Focus",
-            "exercises": [_ex("deadlift5"), _ex("split_sq"), _ex("leg_press"), _ex("leg_curl"), _ex("calf_stand"), _ex("plank")],
-            "run": _run("z2_40"),
-            "timing": ["6:00", "Lift - Lower Hinge (60 min)", "7:05", "5 min transition", "7:10", "Zone 2 run 40 min", ],
-            "notes": "5x5 deadlift is the centerpiece. Zone 2 after heavy pulls - keep it genuinely easy.",
-        },
-        {
-            "day": "Fri", "liftName": "Upper Strength - Press Focus",
-            "exercises": [_ex("bench5"), _ex("ohp5"), _ex("cable_fly2"), _ex("tri_dip"), _ex("face_pull"), _ex("lat_raise"), _ex("tri_ext")],
-            "run": _run("tempo30"),
-            "timing": ["6:00", "Lift - Upper Press (55 min)", "7:00", "5 min transition", "7:05", "Tempo run 30 min", ],
-            "notes": "Double tempo week - Monday and Friday. Accelerates VO2max and fat oxidation.",
-        },
-        {
-            "day": "Sat", "liftName": "Full Body - Volume + Core",
-            "exercises": [_ex("squat"), _ex("bench"), _ex("bb_row"), _ex("push_press"), _ex("ab_wheel"), _ex("plank"), _ex("calf_stand")],
-            "run": _run("z2_50"),
-            "timing": ["6:00", "Lift - Full Body Volume (55 min)", "7:00", "5 min transition", "7:05", "Zone 2 run 50 min", ],
-            "notes": "Highest aerobic volume day. Lift is compound and moderate.",
-        },
-        {
-            "day": "Sun", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile at easy pace", "-", "No lifting"],
-            "notes": "Complete rest from lifting. One easy mile. Nothing else.",
-            "isRest": True,
-        },
-    ]
+    """Phase 2 (wks 5-7): Strength block per spec §4.
+
+    Each day dict carries the keys the front-end consumes unguarded:
+      - run: {type, label, time, detail}
+      - timing: list of [time, label, time, label, ...] strings
+      - notes: day-level coach note string
+    """
+    days = [_empty_day(i) for i in range(7)]
+    # Mon — Lower POWER + RDL
+    days[0] = {
+        **days[0],
+        "liftName": "Lower POWER + RDL",
+        "exercises": [
+            {"name": "Box Jump", "sets": "3x5", "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset between reps."},
+            {"name": "Front Squat", "sets": "4x3", "rest": "2-3 min",
+             "note": "Speed-focused. ~70-76% wave (wk5/6/7)."},
+            {"name": "Bulgarian Split Squat", "sets": "3x8", "rest": "60-90s",
+             "note": "Each leg. Heavier than P1, explosive up."},
+            {"name": "Romanian Deadlift", "sets": "3x8", "rest": "60-90s",
+             "note": "RPE 7. Hamstring + glute hinge."},
+        ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "25-35 min",
+                "detail": "HR 130-145. Conversational. Easy aerobic after power lower."},
+        "timing": ["6:00", "Lift - Lower POWER (55 min)",
+                   "7:00", "5 min transition",
+                   "7:05", "Zone 2 easy 25-35 min"],
+        "notes": "Box jumps first when CNS is fresh. Front squat speed, not grind.",
+    }
+    # Tue — Upper PRESS + Shoulder Strength
+    days[1] = {
+        **days[1],
+        "liftName": "Upper PRESS + Shoulder Strength",
+        "exercises": [
+            {"name": "DB Bench Press", "sets": "4x5", "rest": "2-3 min",
+             "note": "Neutral grip. 75-82% wave (wk5/6/7). Shoulder-friendly."},
+            {"name": "Landmine Press", "sets": "3x6", "rest": "90s",
+             "note": "Each side. Heavier P2 progression."},
+            {"name": "Cable Lateral Raise", "sets": "3x12", "rest": "60s",
+             "note": "Constant tension. Lateral delt strength."},
+            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+             "note": "Postural — mandatory each press/pull day."},
+        ],
+        "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",
+                "detail": "5 min warmup, 4x 4:00 hard / 3:00 easy, 5 min cooldown. VO2max work."},
+        "timing": ["6:00", "Lift - Upper Press (55 min)",
+                   "7:00", "5 min transition",
+                   "7:05", "VO2 4x4 intervals 35 min"],
+        "notes": "Shoulder warm-up mandatory. VO2 4x4 is hard — pace the first interval honestly.",
+    }
+    # Wed — Shoulder Volume + Arms
+    days[2] = {
+        **days[2],
+        "liftName": "Shoulder Volume + Arms",
+        "exercises": [
+            {"name": "Cable Lateral Raise", "sets": "3x15", "rest": "45-60s",
+             "note": "Lateral delt volume."},
+            {"name": "Reverse Pec Deck", "sets": "3x12", "rest": "45-60s",
+             "note": "Rear delt isolation."},
+            {"name": "Hammer Curl", "sets": "3x10", "rest": "45-60s",
+             "note": "Brachialis + biceps."},
+            {"name": "Cable Tricep Pushdown", "sets": "3x12", "rest": "45-60s",
+             "note": "Tricep iso."},
+            {"name": "EZ-Bar Curl", "sets": "3x10", "rest": "45-60s",
+             "note": "Biceps direct."},
+        ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "35-45 min",
+                "detail": "HR 130-145. Aerobic volume building."},
+        "timing": ["6:00", "Lift - Shoulder/Arms (50 min)",
+                   "6:55", "5 min transition",
+                   "7:00", "Zone 2 easy 35-45 min"],
+        "notes": "Low CNS day. High-volume isolation, aerobic emphasis on the run.",
+    }
+    # Thu — Upper PULL + Lat
+    days[3] = {
+        **days[3],
+        "liftName": "Upper PULL + Lat",
+        "exercises": [
+            {"name": "Weighted Pull-Up", "sets": "4x5", "rest": "2-3 min",
+             "note": "Heavier P2. BW 4×6-10 if not yet weighted."},
+            {"name": "Barbell Bent-Over Row", "sets": "4x6", "rest": "2 min",
+             "note": "75-82% wave. 45-deg torso, pull to belly button."},
+            {"name": "Lat Pulldown", "sets": "3x10", "rest": "60-90s",
+             "note": "Neutral grip. Different angle."},
+            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+             "note": "Postural."},
+        ],
+        "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",
+                "detail": "5 min warmup, 4x 4:00 hard / 3:00 easy, 5 min cooldown. VO2max work."},
+        "timing": ["6:00", "Lift - Upper Pull (55 min)",
+                   "7:00", "5 min transition",
+                   "7:05", "VO2 4x4 intervals 35 min"],
+        "notes": "Heavy pull day. Second VO2 session — keep first interval honest.",
+    }
+    # Fri — HEAVY Lower
+    days[4] = {
+        **days[4],
+        "liftName": "HEAVY Lower — THE Strength Session",
+        "exercises": [
+            {"name": "Back Squat", "sets": "4x5", "rest": "3-5 min",
+             "note": "78% wk5; engine waves to 82% wk6, 87% wk7. Below parallel."},
+            {"name": "Hip Thrust", "sets": "4x8", "rest": "90s",
+             "note": "RPE 7. Squeeze glutes hard at top."},
+            {"name": "Lying Leg Curl", "sets": "3x10", "rest": "60s",
+             "note": "Hamstring isolation."},
+        ],
+        "run": {"type": "z2", "label": "Recovery jog", "time": "20 min",
+                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
+        "timing": ["6:00", "Lift - Heavy Lower (60 min)",
+                   "7:05", "5 min transition",
+                   "7:10", "Recovery jog 20 min"],
+        "notes": "THE strength session of the week. Squat heavy. Recovery jog only — keep HR low.",
+    }
+    # Sat — Full Body / Glute Volume
+    days[5] = {
+        **days[5],
+        "liftName": "Full Body / Glute Volume",
+        "exercises": [
+            {"name": "Hip Thrust", "sets": "3x10", "rest": "60-90s",
+             "note": "RPE 6. Lighter Sat — second hip thrust of the week."},
+            {"name": "Cable Chest Fly", "sets": "3x12", "rest": "60s",
+             "note": "Chest accessory."},
+            {"name": "Single-Arm DB Row", "sets": "3x8", "rest": "60s",
+             "note": "Each arm. Unilateral back."},
+            {"name": "Cable Lateral Raise", "sets": "3x12", "rest": "45-60s",
+             "note": "Lateral volume."},
+            {"name": "Ab Wheel Rollout", "sets": "3x10", "rest": "60s",
+             "note": "Core anti-extension."},
+        ],
+        "run": {"type": "z2", "label": "Zone 2 easy", "time": "30 min",
+                "detail": "HR 130-145. Aerobic. Honest, conversational pace."},
+        "timing": ["6:00", "Lift - Full Body / Glutes (50 min)",
+                   "6:55", "5 min transition",
+                   "7:00", "Zone 2 easy 30 min"],
+        "notes": "Lighter Sat. Glute volume + accessory. Aerobic emphasis on the run.",
+    }
+    # Sun (idx 6) — rest from iron, long fasted run is the only activity
+    days[6] = {
+        **days[6],
+        "liftName": "Rest (Long Fasted Run)",
+        "isRest": True,
+        "run": {"type": "z2_long", "label": "Long fasted easy run",
+                "time": "60-90 min",
+                "detail": "Fasted state, fat-ox bias. HR under 140. Conversational."},
+        "timing": ["6:00", "Long fasted run 60-90 min",
+                   "8:00", "Refuel"],
+        "notes": "Sunday — deepest fast. Long aerobic only.",
+    }
+    return days
 
 
 def _phase3_week():

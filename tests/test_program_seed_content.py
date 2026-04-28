@@ -63,3 +63,66 @@ class TestPhase1Content:
             f"Phase 1 Fri Back Squat should be 4×8 per spec §2; "
             f"got {bs['sets']}"
         )
+
+
+class TestPhase2Content:
+    """Spec §4: Phase 2 (wks 5-7) Strength block."""
+
+    def test_phase_2_thursday_has_lat_pulldown_and_pullup(self, app_ctx):
+        # Spec §4 Thu: Pull + Lat day. Weighted Pull-Up + BB Row + Lat Pulldown.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=5)
+        thu = days[3]
+        names = [e["name"] for e in thu.get("exercises", [])]
+        assert "Weighted Pull-Up" in names, (
+            f"Phase 2 Thu should have Weighted Pull-Up; got {names}"
+        )
+        assert "Lat Pulldown" in names, (
+            f"Phase 2 Thu should have Lat Pulldown; got {names}"
+        )
+        assert "Barbell Bent-Over Row" in names, (
+            f"Phase 2 Thu should have BB Row; got {names}"
+        )
+
+    def test_phase_2_friday_back_squat_4x5(self, app_ctx):
+        # Spec §4: Fri = Heavy Lower, Back Squat top set + back-off,
+        # week 5 starts at 4x5 @ 78%. Template stores the wk-5 seed.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=5)
+        fri = days[4]
+        bs = next((e for e in fri["exercises"]
+                   if "Back Squat" in e["name"]), None)
+        assert bs is not None
+        assert bs["sets"] == "4x5", (
+            f"Phase 2 Fri Back Squat wk5 should be 4×5; got {bs['sets']}"
+        )
+
+    def test_phase_2_monday_front_squat_4x3(self, app_ctx):
+        # Spec §4: Mon Lower POWER. Front Squat 4x3 (speed-focused).
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=5)
+        mon = days[0]
+        fs = next((e for e in mon["exercises"]
+                   if e["name"] == "Front Squat"), None)
+        assert fs is not None
+        assert fs["sets"] == "4x3", (
+            f"Phase 2 Mon Front Squat = 4×3 (speed); got {fs['sets']}"
+        )
+
+    def test_phase_2_tuesday_db_bench_4x5(self, app_ctx):
+        # Spec §4 Tue: DB Bench 4x5 strength wave.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=5)
+        tue = days[1]
+        dbb = next((e for e in tue["exercises"]
+                    if e["name"] == "DB Bench Press"), None)
+        assert dbb is not None
+        assert dbb["sets"] == "4x5"
