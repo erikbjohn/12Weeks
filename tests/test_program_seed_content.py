@@ -126,3 +126,44 @@ class TestPhase2Content:
                     if e["name"] == "DB Bench Press"), None)
         assert dbb is not None
         assert dbb["sets"] == "4x5"
+
+
+class TestPhase3Content:
+    """Spec §6: Phase 3 (wks 9-11) Cut Climax."""
+
+    def test_phase_3_friday_back_squat_3x3(self, app_ctx):
+        # Spec §6: Fri = Heavy Lower, 3×3 @ 87%, HOLD all 3 weeks.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=9)
+        fri = days[4]
+        bs = next((e for e in fri["exercises"]
+                   if "Back Squat" in e["name"]), None)
+        assert bs is not None
+        assert bs["sets"] == "3x3", (
+            f"Phase 3 Fri Back Squat = 3×3 (HOLD); got {bs['sets']}"
+        )
+
+    def test_phase_3_monday_front_squat_3x3(self, app_ctx):
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=9)
+        mon = days[0]
+        fs = next((e for e in mon["exercises"]
+                   if e["name"] == "Front Squat"), None)
+        assert fs is not None
+        assert fs["sets"] == "3x3"
+
+    def test_phase_3_wednesday_no_ezbar_curl(self, app_ctx):
+        # Spec §6 Phase 3 Wed drops EZ-Bar Curl (volume cut on accessories).
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=9)
+        wed = days[2]
+        names = [e["name"] for e in wed.get("exercises", [])]
+        assert "EZ-Bar Curl" not in names, (
+            f"Phase 3 Wed should drop EZ-Bar Curl per spec §6; got {names}"
+        )
