@@ -130,6 +130,11 @@ class TestHealPrescriptionVolumeFloor:
         return u
 
     def test_heals_engine_authored_under_volume(self, app_ctx):
+        # The smoking-gun row from the screenshot: 2x12 stored where the
+        # template prescribes 5x5. The heal must rewrite both dimensions
+        # because the row was written by the old engine and can't be trusted
+        # in any field — and clear target_weight so the next engine pass
+        # picks a weight matching the corrected rep scheme.
         app, db = app_ctx
         from app import _heal_prescription_volume_floor
         from models import WeeklyPrescription
@@ -139,14 +144,18 @@ class TestHealPrescriptionVolumeFloor:
                 user_id=u.id, week=5, day_idx=1, exercise_order=0,
                 exercise_name="Barbell Bent-Over Row",
                 sets=2, reps="12", rest="2-3 min",
+                target_weight=100.0,
                 source="engine",
             ))
             db.session.commit()
             _heal_prescription_volume_floor(u.id, week=5)
             row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.sets == 5, f"engine row should heal to template's 5, got {row.sets}"
-        # Reps untouched — heal is volume-only.
-        assert row.reps == "12"
+        assert row.sets == 5
+        assert row.reps == "5"
+        assert row.target_weight is None, (
+            "target_weight must be cleared so the engine recomputes for the "
+            "corrected rep scheme on next generation"
+        )
 
     def test_does_not_touch_coach_authored_row(self, app_ctx):
         app, db = app_ctx

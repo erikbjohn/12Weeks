@@ -550,19 +550,26 @@ except Exception:
 
 
 def _heal_prescription_volume_floor(user_id, week):
-    """Bump WeeklyPrescription.sets back to the program's configured floor.
+    """Reset legacy under-volume rows to the program's template prescription.
 
-    Existed because compute_next_targets used to copy last_set_count into
-    target_sets unconditionally (training_engine.py before commit cb301e9), so
-    a single low-volume session permanently collapsed the prescription — Phase 2
-    Tuesday's 5x5 Bent-Over Row template was rewritten as 2x12 in the user's
-    plan and never recovered. The engine fix prevents new bad rows; this heals
-    legacy ones lazily on /api/workouts read so users don't have to regenerate.
+    compute_next_targets used to copy last_set_count into target_sets (training_
+    engine.py before commit cb301e9), so a single low-volume session permanently
+    collapsed the prescription — Phase 2 Tuesday's 5x5 Bent-Over Row template
+    became 2x12 in the user's plan. The engine fix prevents new bad rows; this
+    heals legacy ones lazily on /api/workouts read.
 
-    Skips source='coach' rows (intentional human/LLM modifications). Only widens
-    sets — never narrows — so there's no risk of clobbering a legit reduction.
+    Drift signature: stored sets BELOW the template floor. That row was written
+    by the old engine, so trust nothing about it. Reset sets AND reps to the
+    template, and clear target_weight so the next engine pass recomputes a
+    weight appropriate for the corrected rep scheme (a Phase-1 hypertrophy
+    weight at 12 reps is too light for Phase-2 strength at 5 reps; better to
+    recompute than leave a wrong weight wired in).
+
+    Skips source='coach' (intentional modifications). Never narrows sets — only
+    widens to floor. Reps are reset only when the sets-below-floor signature
+    fires; otherwise engine-progressed reps survive untouched.
     """
-    from training_engine import _get_configured_sets
+    from training_engine import _get_configured_sets_reps
     try:
         rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=week).all()
     except Exception:
@@ -572,11 +579,17 @@ def _heal_prescription_volume_floor(user_id, week):
         if getattr(rx, 'source', None) == 'coach':
             continue
         try:
-            configured = _get_configured_sets(rx.exercise_name, week, rx.day_idx)
+            configured = _get_configured_sets_reps(rx.exercise_name, week, rx.day_idx)
         except Exception:
             configured = None
-        if configured and rx.sets and rx.sets < configured:
-            rx.sets = configured
+        if not configured:
+            continue
+        configured_sets, configured_reps = configured
+        if rx.sets and rx.sets < configured_sets:
+            rx.sets = configured_sets
+            rx.reps = str(configured_reps)
+            if rx.target_weight is not None:
+                rx.target_weight = None
             dirty = True
     if dirty:
         try:
