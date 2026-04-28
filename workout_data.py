@@ -1182,37 +1182,61 @@ PHASE_TEMPLATES = {
         6: [],  # Sun rest from iron
     },
 
-    # ── Deload (weeks 4, 8) ───────────────────────────────────────────────
+    # ── Deload (weeks 4, 8) per spec §3 / §5 ──────────────────────────────
     "deload": {
-        0: [  # Monday — Deload Upper (60% load)
-            {"exercise": "DB Bench Press", "sets": 3, "reps": "8", "rest": "60s", "note": "60% normal weight"},
-            {"exercise": "Cable Seated Row", "sets": 3, "reps": "8", "rest": "60s", "note": "Light - focus on squeeze"},
-            {"exercise": "DB Overhead Press", "sets": 3, "reps": "8", "rest": "60s", "note": "60% load"},
-            {"exercise": "Lat Pulldown", "sets": 3, "reps": "6", "rest": "60s", "note": "Bodyweight equivalent, light"},
-            {"exercise": "Face Pull", "sets": 2, "reps": "15", "rest": "60s", "note": "Shoulder health - feel it"},
+        0: [  # Monday — Deload Lower
+            {"exercise": "Box Jump", "sets": 2, "reps": "5", "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset."},
+            {"exercise": "Front Squat", "sets": 3, "reps": "3", "rest": "2 min",
+             "note": "65% of working weight."},
+            {"exercise": "Bulgarian Split Squat", "sets": 2, "reps": "8",
+             "rest": "60-90s", "note": "Each leg. Volume cut 50%."},
         ],
-        1: [  # Tuesday — Deload Lower (60% load)
-            {"exercise": "Goblet Squat", "sets": 3, "reps": "8", "rest": "60s", "note": "Light KB or DB"},
-            {"exercise": "Romanian Deadlift", "sets": 3, "reps": "8", "rest": "60s", "note": "60% load, feel the hamstrings"},
-            {"exercise": "Leg Press", "sets": 3, "reps": "10", "rest": "60s", "note": "Light, full ROM"},
-            {"exercise": "Lying Leg Curl", "sets": 2, "reps": "10", "rest": "60s", "note": "Controlled"},
-            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "12", "rest": "60s", "note": "Slow and controlled"},
+        1: [  # Tuesday — Deload Press + Shoulder
+            {"exercise": "DB Bench Press", "sets": 3, "reps": "5", "rest": "2 min",
+             "note": "70% of working weight."},
+            {"exercise": "Landmine Press", "sets": 2, "reps": "6", "rest": "90s",
+             "note": "Each side. Volume cut."},
+            {"exercise": "Cable Lateral Raise", "sets": 2, "reps": "12",
+             "rest": "60s", "note": "Constant tension, light."},
+            {"exercise": "Face Pull", "sets": 2, "reps": "15", "rest": "45-60s",
+             "note": "Postural — keep doing this."},
         ],
-        2: [  # Wednesday — Deload Full Body (60% load)
-            {"exercise": "Conventional Deadlift", "sets": 2, "reps": "5", "rest": "60s", "note": "60% 1RM. Focus on setup."},
-            {"exercise": "Barbell Bench Press", "sets": 2, "reps": "8", "rest": "60s", "note": "Light - move well"},
-            {"exercise": "Barbell Bent-Over Row", "sets": 2, "reps": "8", "rest": "60s", "note": "Light, controlled"},
-            {"exercise": "Plank", "sets": 2, "reps": "30s", "rest": "60s", "note": "Brace and breathe"},
+        2: [  # Wednesday — Deload Shoulder/Arms (light)
+            {"exercise": "Cable Lateral Raise", "sets": 2, "reps": "15",
+             "rest": "45-60s", "note": "Light. Lateral delt volume cut."},
+            {"exercise": "Reverse Pec Deck", "sets": 2, "reps": "12",
+             "rest": "45-60s", "note": "Light. Rear delt isolation."},
+            {"exercise": "Cable Tricep Pushdown", "sets": 2, "reps": "12",
+             "rest": "45-60s", "note": "Or curl — pick one."},
         ],
-        3: [],  # Thursday — Rest
-        4: [  # Friday — Deload Upper Light
-            {"exercise": "Push-Ups", "sets": 2, "reps": "15", "rest": "60s", "note": "Bodyweight. Just move."},
-            {"exercise": "Ring Row", "sets": 2, "reps": "12", "rest": "60s", "note": "Bodyweight, controlled"},
-            {"exercise": "Lateral Raise", "sets": 2, "reps": "15", "rest": "60s", "note": "Light"},
-            {"exercise": "Hammer Curl", "sets": 2, "reps": "12", "rest": "60s", "note": "Light"},
+        3: [  # Thursday — Deload Pull
+            {"exercise": "Weighted Pull-Up", "sets": 3, "reps": "5", "rest": "2 min",
+             "note": "Bodyweight only. No added weight in deload."},
+            {"exercise": "Barbell Bent-Over Row", "sets": 3, "reps": "6",
+             "rest": "90s-2 min", "note": "70% of working weight."},
+            {"exercise": "Lat Pulldown", "sets": 2, "reps": "10", "rest": "60-90s",
+             "note": "Light. Volume cut."},
+            {"exercise": "Face Pull", "sets": 2, "reps": "15", "rest": "45-60s",
+             "note": "Postural."},
         ],
-        5: [],  # Saturday — Rest
-        6: [],  # Sunday — Rest
+        4: [  # Friday — Deload Heavy Lower (light)
+            {"exercise": "Back Squat", "sets": 3, "reps": "5", "rest": "2-3 min",
+             "note": "65% of working weight. Move well."},
+            {"exercise": "Hip Thrust", "sets": 3, "reps": "8", "rest": "90s",
+             "note": "RPE 6. Light, squeeze glutes."},
+        ],
+        5: [  # Saturday — Deload Full Body Light
+            {"exercise": "Hip Thrust", "sets": 2, "reps": "10", "rest": "60-90s",
+             "note": "Light. Twice/week glute."},
+            {"exercise": "Cable Chest Fly", "sets": 2, "reps": "12", "rest": "60s",
+             "note": "Light. Chest accessory."},
+            {"exercise": "Single-Arm DB Row", "sets": 2, "reps": "8", "rest": "60s",
+             "note": "Each arm. Light."},
+            {"exercise": "Cable Lateral Raise", "sets": 2, "reps": "12",
+             "rest": "45-60s", "note": "Light lateral volume."},
+        ],
+        6: [],  # Sunday — Rest from iron (long fasted run)
     },
 
     # ── Deload BW (weeks 4, 8, bodyweight) ─────────────────────────────────
@@ -1276,35 +1300,57 @@ PHASE_TEMPLATES = {
         6: [],  # Sunday — Rest
     },
 
-    # ── Test Week (week 12) ───────────────────────────────────────────────
+    # ── Week 12 — peak finish per spec §7 (mini-taper, NOT 1RM test) ──────
     "test": {
-        0: [  # Monday — Strength Test - Lower
-            {"exercise": "Barbell Back Squat", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "5->3->2->1 ladder. Rest fully between."},
-            {"exercise": "Conventional Deadlift", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "5->3->2->1 ladder."},
-            {"exercise": "Goblet Squat", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, controlled, feel the burn"},
-            {"exercise": "Standing Calf Raise", "sets": 3, "reps": "20", "rest": "45-60s", "note": "Full stretch, slow."},
+        0: [  # Monday — Wk12 Lower (taper)
+            {"exercise": "Box Jump", "sets": 2, "reps": "5", "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset."},
+            {"exercise": "Front Squat", "sets": 2, "reps": "3", "rest": "2-3 min",
+             "note": "73% — single working set."},
+            {"exercise": "Bulgarian Split Squat", "sets": 1, "reps": "6",
+             "rest": "60-90s", "note": "Each leg. Volume cut from P3."},
         ],
-        1: [  # Tuesday — Strength Test - Upper
-            {"exercise": "Barbell Bench Press", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "Use safeties. Spotter ideal."},
-            {"exercise": "Lat Pulldown", "sets": 1, "reps": "1RM", "rest": "3-5 min", "note": "Find your max single rep weight."},
-            {"exercise": "DB Bench Press", "sets": 3, "reps": "15", "rest": "60-90s", "note": "Light, squeeze, slow eccentric"},
-            {"exercise": "DB Curl", "sets": 3, "reps": "15", "rest": "45-60s", "note": "Controlled, squeeze at top"},
+        1: [  # Tuesday — Wk12 Press + Shoulder (taper)
+            {"exercise": "DB Bench Press", "sets": 2, "reps": "5", "rest": "2-3 min",
+             "note": "80% — single working set. Neutral grip."},
+            {"exercise": "Landmine Press", "sets": 1, "reps": "6", "rest": "90s",
+             "note": "Each side. Single working set."},
+            {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12", "rest": "60s",
+             "note": "KEEP — makes the look."},
+            {"exercise": "Face Pull", "sets": 3, "reps": "15", "rest": "45-60s",
+             "note": "KEEP — postural."},
         ],
-        2: [  # Wednesday — Full Body - Moderate Finish
-            {"exercise": "Goblet Squat", "sets": 3, "reps": "12", "rest": "60s", "note": "Moderate weight"},
-            {"exercise": "DB Bench Press", "sets": 3, "reps": "12", "rest": "60s", "note": "Moderate"},
-            {"exercise": "Single-Arm DB Row", "sets": 3, "reps": "12", "rest": "60s", "note": "Controlled"},
-            {"exercise": "Plank", "sets": 3, "reps": "45s", "rest": "60s", "note": "Solid brace"},
+        2: [  # Wednesday — Wk12 Shoulder Volume Only
+            {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "15",
+             "rest": "45-60s", "note": "KEEP — shoulder volume for the look."},
+            {"exercise": "Reverse Pec Deck", "sets": 2, "reps": "12",
+             "rest": "45-60s", "note": "Rear delt isolation."},
         ],
-        3: [],  # Thursday — Rest
-        4: [  # Friday — Full Body - Final Session
-            {"exercise": "Barbell Back Squat", "sets": 3, "reps": "5", "rest": "60s", "note": "Moderate - not max"},
-            {"exercise": "Barbell Bench Press", "sets": 3, "reps": "5", "rest": "60s", "note": "Moderate"},
-            {"exercise": "Lat Pulldown", "sets": 3, "reps": "5", "rest": "60s", "note": "Light to moderate weight"},
-            {"exercise": "KB Swing", "sets": 3, "reps": "15", "rest": "60s", "note": "Explosive - feel the power"},
+        3: [  # Thursday — Wk12 Pull (taper)
+            {"exercise": "Weighted Pull-Up", "sets": 2, "reps": "5", "rest": "2 min",
+             "note": "Single working set."},
+            {"exercise": "Barbell Bent-Over Row", "sets": 2, "reps": "6",
+             "rest": "90s-2 min", "note": "80% — single working set."},
+            {"exercise": "Lat Pulldown", "sets": 1, "reps": "10", "rest": "60-90s",
+             "note": "Single working set."},
+            {"exercise": "Face Pull", "sets": 2, "reps": "15", "rest": "45-60s",
+             "note": "Postural."},
         ],
-        5: [],  # Saturday — Rest
-        6: [],  # Sunday — Rest
+        4: [  # Friday — Wk12 Heavy Lower (taper)
+            {"exercise": "Back Squat", "sets": 2, "reps": "3", "rest": "3-5 min",
+             "note": "87% — single working set, just to feel it."},
+            {"exercise": "Hip Thrust", "sets": 2, "reps": "8", "rest": "90s",
+             "note": "Glute volume."},
+        ],
+        5: [  # Saturday — Wk12 Full Body (taper)
+            {"exercise": "Hip Thrust", "sets": 2, "reps": "10", "rest": "60-90s",
+             "note": "Light. Twice/week glute."},
+            {"exercise": "Cable Chest Fly", "sets": 2, "reps": "12", "rest": "60s",
+             "note": "Chest accessory."},
+            {"exercise": "Cable Lateral Raise", "sets": 2, "reps": "12",
+             "rest": "45-60s", "note": "Lateral volume — final week."},
+        ],
+        6: [],  # Sunday — Rest from iron (long fasted run)
     },
 }
 
@@ -2175,140 +2221,287 @@ def _phase3_week():
 
 
 def _deload_week():
-    return [
-        {
-            "day": "Mon", "liftName": "Deload - Upper (60% load)",
-            "exercises": [
-                {"name": "DB Bench Press", "sets": "3x8", "note": "60% normal weight", "rest": "60s"},
-                {"name": "Cable Row", "sets": "3x8", "note": "Light - focus on squeeze", "rest": "60s"},
-                {"name": "DB OHP", "sets": "3x8", "note": "60% load", "rest": "60s"},
-                {"name": "Lat Pulldown", "sets": "3x6", "note": "Bodyweight equivalent, light", "rest": "60s"},
-                {"name": "Face Pull", "sets": "2x15", "note": "Shoulder health - feel it", "rest": "60s"},
-            ],
-            "run": _run("easy20"),
-            "timing": ["6:00", "Deload lift - Upper (40 min)", "6:45", "Easy run 20 min", "7:05", "Done"],
-            "notes": "Deload week. Everything at 60% of your working weight. This is where you consolidate adaptation.",
-        },
-        {
-            "day": "Tue", "liftName": "Deload - Lower (60% load)",
-            "exercises": [
-                {"name": "Goblet Squat", "sets": "3x8", "note": "Light KB or DB", "rest": "60s"},
-                {"name": "RDL", "sets": "3x8", "note": "60% load, feel the hamstrings", "rest": "60s"},
-                {"name": "Leg Press", "sets": "3x10", "note": "Light, full ROM", "rest": "60s"},
-                {"name": "Lying Leg Curl", "sets": "2x10", "note": "Controlled", "rest": "60s"},
-                {"name": "Calf Raise", "sets": "3x12", "note": "Slow and controlled", "rest": "60s"},
-            ],
-            "run": _run("easy20"),
-            "timing": ["6:00", "Deload lift - Lower (40 min)", "6:45", "Easy run 20 min", "7:05", "Done"],
-            "notes": "Easy day. Flush the legs. Do not be tempted to go heavy.",
-        },
-        {
-            "day": "Wed", "liftName": "Deload - Full Body (60% load)",
-            "exercises": [
-                {"name": "Deadlift", "sets": "2x5", "note": "60% 1RM. Focus on setup.", "rest": "60s"},
-                {"name": "Bench Press", "sets": "2x8", "note": "Light - move well", "rest": "60s"},
-                {"name": "Bent-Over Row", "sets": "2x8", "note": "Light, controlled", "rest": "60s"},
-                {"name": "Plank", "sets": "2x30s", "note": "Brace and breathe", "rest": "60s"},
-            ],
-            "run": _run("easy20"),
-            "timing": ["6:00", "Deload lift - Full Body (35 min)", "6:40", "Easy run 20 min", "7:00", "Done"],
-            "notes": "Short and easy. The goal this week is active recovery, not training.",
-        },
-        {
-            "day": "Thu", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile - easy", "-", "No lifting"],
-            "notes": "Full rest from lifting. One mile to keep the streak alive.",
-            "isRest": True,
-        },
-        {
-            "day": "Fri", "liftName": "Deload - Upper Light",
-            "exercises": [
-                {"name": "Push-Up", "sets": "2x15", "note": "Bodyweight. Just move.", "rest": "60s"},
-                {"name": "Inverted Row", "sets": "2x12", "note": "Bodyweight, controlled", "rest": "60s"},
-                {"name": "DB Lateral Raise", "sets": "2x15", "note": "Light", "rest": "60s"},
-                {"name": "Hammer Curl", "sets": "2x12", "note": "Light", "rest": "60s"},
-            ],
-            "run": _run("easy20"),
-            "timing": ["6:00", "Deload lift - Upper light (30 min)", "6:35", "Easy run 20 min", "6:55", "Done"],
-            "notes": "Very light. Barely a workout. Perfect for a deload day.",
-        },
-        {
-            "day": "Sat", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile - easy", "-", "No lifting"],
-            "notes": "Rest. Streak mile only. Eat at maintenance today.",
-            "isRest": True,
-        },
-        {
-            "day": "Sun", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile - easy", "-", "No lifting"],
-            "notes": "Rest. Come back Monday ready to work.",
-            "isRest": True,
-        },
-    ]
+    """Deload weeks (4, 8) per spec §3 / §5.
+
+    Volume cut 50%, intensity ~70%. NO HIIT — Tue/Thu HIIT slots become
+    easy zone-2. Sessions cap at 30 min. Long run drops to 60 min Sun.
+
+    Each day dict carries the keys the front-end consumes unguarded:
+      - run: {type, label, time, detail}
+      - timing: list of [time, label, time, label, ...] strings
+      - notes: day-level coach note string
+    """
+    days = [_empty_day(i) for i in range(7)]
+    # Mon — Deload Lower
+    days[0] = {
+        **days[0],
+        "liftName": "Deload — Lower",
+        "exercises": [
+            {"name": "Box Jump", "sets": "2x5", "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset between reps."},
+            {"name": "Front Squat", "sets": "3x3", "rest": "2 min",
+             "note": "65% of working weight. Move well, feel light."},
+            {"name": "Bulgarian Split Squat", "sets": "2x8",
+             "rest": "60-90s", "note": "Each leg. Volume cut 50%."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "25 min",
+                "detail": "HR 130-145. Conversational. Deload — keep it honest."},
+        "timing": ["6:00", "Deload lift - Lower (30 min)",
+                   "6:35", "5 min transition",
+                   "6:40", "Easy zone-2 25 min"],
+        "notes": "Deload. 50% volume cut, ~70% intensity. Move well, recover.",
+    }
+    # Tue — Deload Press + Shoulder (NO HIIT)
+    days[1] = {
+        **days[1],
+        "liftName": "Deload — Press + Shoulder",
+        "exercises": [
+            {"name": "DB Bench Press", "sets": "3x5", "rest": "2 min",
+             "note": "70% of working weight. Shoulder-friendly, controlled."},
+            {"name": "Landmine Press", "sets": "2x6", "rest": "90s",
+             "note": "Each side. Volume cut."},
+            {"name": "Cable Lateral Raise", "sets": "2x12",
+             "rest": "60s", "note": "Constant tension, light."},
+            {"name": "Face Pull", "sets": "2x15", "rest": "45-60s",
+             "note": "Postural — keep doing this."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2 (NO HIIT)", "time": "35 min",
+                "detail": "HR 130-145. Conversational. Deload drops HIIT — easy aerobic only."},
+        "timing": ["6:00", "Deload lift - Press + Shoulder (30 min)",
+                   "6:35", "5 min transition",
+                   "6:40", "Easy zone-2 35 min"],
+        "notes": "Deload. NO HIIT this week — easy aerobic. 70% intensity on press.",
+    }
+    # Wed — Deload Shoulder/Arms (light)
+    days[2] = {
+        **days[2],
+        "liftName": "Deload — Shoulder/Arms (light)",
+        "exercises": [
+            {"name": "Cable Lateral Raise", "sets": "2x15",
+             "rest": "45-60s", "note": "Light. Lateral delt volume cut."},
+            {"name": "Reverse Pec Deck", "sets": "2x12",
+             "rest": "45-60s", "note": "Light. Rear delt isolation."},
+            {"name": "Cable Tricep Pushdown", "sets": "2x12",
+             "rest": "45-60s", "note": "Or curl — pick one. Volume cut."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "35 min",
+                "detail": "HR 130-145. Aerobic recovery during deload."},
+        "timing": ["6:00", "Deload lift - Shoulder/Arms (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy zone-2 35 min"],
+        "notes": "Deload. Pick triceps or curls — not both. Just feel the muscle.",
+    }
+    # Thu — Deload Pull (NO HIIT)
+    days[3] = {
+        **days[3],
+        "liftName": "Deload — Pull",
+        "exercises": [
+            {"name": "Weighted Pull-Up", "sets": "3x5", "rest": "2 min",
+             "note": "Bodyweight only. No added weight in deload."},
+            {"name": "Barbell Bent-Over Row", "sets": "3x6",
+             "rest": "90s-2 min",
+             "note": "70% of working weight. Pull to belly button."},
+            {"name": "Lat Pulldown", "sets": "2x10",
+             "rest": "60-90s", "note": "Light. Volume cut."},
+            {"name": "Face Pull", "sets": "2x15",
+             "rest": "45-60s", "note": "Postural."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2 (NO HIIT)", "time": "35 min",
+                "detail": "HR 130-145. Conversational. Deload drops HIIT — easy aerobic only."},
+        "timing": ["6:00", "Deload lift - Pull (30 min)",
+                   "6:35", "5 min transition",
+                   "6:40", "Easy zone-2 35 min"],
+        "notes": "Deload. NO HIIT. Pull-up at bodyweight only. 70% on row.",
+    }
+    # Fri — Deload Heavy Lower (light)
+    days[4] = {
+        **days[4],
+        "liftName": "Deload — Heavy Lower (light)",
+        "exercises": [
+            {"name": "Back Squat", "sets": "3x5", "rest": "2-3 min",
+             "note": "65% of working weight. Move well — this is the deload Fri."},
+            {"name": "Hip Thrust", "sets": "3x8", "rest": "90s",
+             "note": "RPE 6. Light, squeeze glutes."},
+        ],
+        "run": {"type": "z2", "label": "Easy recovery", "time": "20 min",
+                "detail": "HR under 130. Easy shuffle to flush legs."},
+        "timing": ["6:00", "Deload lift - Heavy Lower light (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy recovery 20 min"],
+        "notes": "Deload Fri. Back Squat 3x5 @ 65% — move well, no grind.",
+    }
+    # Sat — Deload Full Body Light
+    days[5] = {
+        **days[5],
+        "liftName": "Deload — Full Body Light",
+        "exercises": [
+            {"name": "Hip Thrust", "sets": "2x10", "rest": "60-90s",
+             "note": "Light. Twice/week glute."},
+            {"name": "Cable Chest Fly", "sets": "2x12",
+             "rest": "60s", "note": "Light. Chest accessory."},
+            {"name": "Single-Arm DB Row", "sets": "2x8",
+             "rest": "60s", "note": "Each arm. Light."},
+            {"name": "Cable Lateral Raise", "sets": "2x12",
+             "rest": "45-60s", "note": "Light lateral volume."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "25 min",
+                "detail": "HR 130-145. Honest, conversational pace."},
+        "timing": ["6:00", "Deload lift - Full Body light (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy zone-2 25 min"],
+        "notes": "Deload Sat. Light full body cleanup. Recover for next phase.",
+    }
+    # Sun (idx 6) — long fasted run only, deload duration
+    days[6] = {
+        **days[6],
+        "liftName": "Rest (Long Fasted Run, 60 min)",
+        "isRest": True,
+        "run": {"type": "z2_long", "label": "Long fasted easy run",
+                "time": "60 min",
+                "detail": "Fasted. HR under 140. Conversational. Deload — short long run."},
+        "timing": ["6:00", "Long fasted run 60 min",
+                   "7:00", "Refuel"],
+        "notes": "Deload Sun. 60-min long run only. Recover.",
+    }
+    return days
 
 
 def _test_week():
-    return [
-        {
-            "day": "Mon", "liftName": "Strength Test - Lower",
-            "exercises": [_ex("test_sq"), _ex("test_dl"), _ex("pump_sq"), _ex("calf3")],
-            "run": _run("z2_20"),
-            "timing": ["6:00", "Squat 1RM ladder (30 min)", "6:35", "Deadlift 1RM ladder (25 min)", "7:05", "Pump accessories (15 min)", "7:20", "Easy run 20 min", "7:40", "Done"],
-            "notes": "Test week. Warm up thoroughly: 5x5, 3x3, 2x2, 1x1 approach to max. Rest 3-5 min between heavy singles.",
-        },
-        {
-            "day": "Tue", "liftName": "Strength Test - Upper",
-            "exercises": [_ex("test_bench"), _ex("test_pu"), _ex("pump_press"), _ex("pump_curl")],
-            "run": _run("z2_20"),
-            "timing": ["6:00", "Bench 1RM ladder (30 min)", "6:35", "Lat pulldown max weight (20 min)", "7:00", "Pump work (15 min)", "7:15", "Easy run 20 min", "7:35", "Done"],
-            "notes": "Compare your bench and lat pulldown max to week 1. This is your 12-week progress marker.",
-        },
-        {
-            "day": "Wed", "liftName": "Full Body - Moderate Finish",
-            "exercises": [
-                {"name": "Goblet Squat", "sets": "3x12", "note": "Moderate weight", "rest": "60s"},
-                {"name": "DB Bench", "sets": "3x12", "note": "Moderate", "rest": "60s"},
-                {"name": "DB Row", "sets": "3x12", "note": "Controlled", "rest": "60s"},
-                {"name": "Plank", "sets": "3x45s", "note": "Solid brace", "rest": "60s"},
-            ],
-            "run": _run("z2_30"),
-            "timing": ["6:00", "Full body moderate (45 min)", "6:50", "Zone 2 run 30 min", "7:20", "Done"],
-            "notes": "Last real training session. No PRs today - just move well and feel good.",
-        },
-        {
-            "day": "Thu", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile", "-", "Rest"],
-            "notes": "Rest.",
-            "isRest": True,
-        },
-        {
-            "day": "Fri", "liftName": "Full Body - Final Session",
-            "exercises": [
-                {"name": "Squat", "sets": "3x5", "note": "Moderate - not max", "rest": "60s"},
-                {"name": "Bench", "sets": "3x5", "note": "Moderate", "rest": "60s"},
-                {"name": "Lat Pulldown", "sets": "3x5", "note": "Light to moderate weight", "rest": "60s"},
-                {"name": "KB Swing", "sets": "3x15", "note": "Explosive - feel the power", "rest": "60s"},
-            ],
-            "run": _run("z2_30"),
-            "timing": ["6:00", "Final session (40 min)", "6:45", "Zone 2 run 30 min", "7:15", "Done"],
-            "notes": "Final workout of the 12 weeks. Finish clean. Note how this feels vs Week 1.",
-        },
-        {
-            "day": "Sat", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile", "-", "Rest"],
-            "notes": "Rest.",
-            "isRest": True,
-        },
-        {
-            "day": "Sun", "liftName": "Rest - Streak Day Only",
-            "exercises": [], "run": _run("min"),
-            "timing": ["Morning", "Min 1 mile", "-", "Done - 12 weeks complete."],
-            "notes": "You did it.",
-            "isRest": True,
-        },
-    ]
+    """Week 12 = peak finish per spec §7 (mini-taper, scale + look,
+    NOT 1RM test). Volume cut another ~25% from Phase 3. Intensity held
+    on compounds (single working set each). Drop direct arm work. NO HIIT.
+
+    Each day dict carries the keys the front-end consumes unguarded:
+      - run: {type, label, time, detail}
+      - timing: list of [time, label, time, label, ...] strings
+      - notes: day-level coach note string
+    """
+    days = [_empty_day(i) for i in range(7)]
+    # Mon — Wk12 Lower (taper)
+    days[0] = {
+        **days[0],
+        "liftName": "Wk12 — Lower (taper)",
+        "exercises": [
+            {"name": "Box Jump", "sets": "2x5", "rest": "60-90s",
+             "note": "CNS primer. Max height, full reset between reps."},
+            {"name": "Front Squat", "sets": "2x3", "rest": "2-3 min",
+             "note": "73% — single working set. Speed-focused."},
+            {"name": "Bulgarian Split Squat", "sets": "1x6",
+             "rest": "60-90s", "note": "Each leg. Volume cut from P3."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "20 min",
+                "detail": "HR 130-145. Mini-taper — short and easy."},
+        "timing": ["6:00", "Lift - Lower taper (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy zone-2 20 min"],
+        "notes": "Wk12 mini-taper. Single working set on Front Squat. Look + scale, not 1RM.",
+    }
+    # Tue — Wk12 Press + Shoulder (taper, NO HIIT)
+    days[1] = {
+        **days[1],
+        "liftName": "Wk12 — Press + Shoulder (taper)",
+        "exercises": [
+            {"name": "DB Bench Press", "sets": "2x5", "rest": "2-3 min",
+             "note": "80% — single working set. Neutral grip."},
+            {"name": "Landmine Press", "sets": "1x6", "rest": "90s",
+             "note": "Each side. Single working set."},
+            {"name": "Cable Lateral Raise", "sets": "3x12", "rest": "60s",
+             "note": "KEEP — makes the look."},
+            {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
+             "note": "KEEP — postural, mandatory."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2 (NO HIIT)", "time": "35 min",
+                "detail": "HR 130-145. Peak taper drops HIIT — easy aerobic only."},
+        "timing": ["6:00", "Lift - Press + Shoulder taper (30 min)",
+                   "6:35", "5 min transition",
+                   "6:40", "Easy zone-2 35 min"],
+        "notes": "Wk12 taper. NO HIIT. Lateral + face pull volume KEPT — they make the look.",
+    }
+    # Wed — Wk12 Shoulder Volume Only
+    days[2] = {
+        **days[2],
+        "liftName": "Wk12 — Shoulder Volume Only",
+        "exercises": [
+            {"name": "Cable Lateral Raise", "sets": "3x15",
+             "rest": "45-60s", "note": "KEEP — shoulder volume for the look."},
+            {"name": "Reverse Pec Deck", "sets": "2x12",
+             "rest": "45-60s", "note": "Rear delt isolation."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "30 min",
+                "detail": "HR 130-145. Aerobic recovery during peak taper."},
+        "timing": ["6:00", "Lift - Shoulder volume only (15 min)",
+                   "6:20", "5 min transition",
+                   "6:25", "Easy zone-2 30 min"],
+        "notes": "Wk12 taper. Direct arms dropped. Shoulder volume KEPT for the look.",
+    }
+    # Thu — Wk12 Pull (taper, NO HIIT)
+    days[3] = {
+        **days[3],
+        "liftName": "Wk12 — Pull (taper)",
+        "exercises": [
+            {"name": "Weighted Pull-Up", "sets": "2x5", "rest": "2 min",
+             "note": "Single working set. Same load as P3."},
+            {"name": "Barbell Bent-Over Row", "sets": "2x6",
+             "rest": "90s-2 min",
+             "note": "80% — single working set."},
+            {"name": "Lat Pulldown", "sets": "1x10",
+             "rest": "60-90s", "note": "Single working set."},
+            {"name": "Face Pull", "sets": "2x15",
+             "rest": "45-60s", "note": "Postural."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2 (NO HIIT)", "time": "30 min",
+                "detail": "HR 130-145. Peak taper drops HIIT — easy aerobic only."},
+        "timing": ["6:00", "Lift - Pull taper (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy zone-2 30 min"],
+        "notes": "Wk12 taper. NO HIIT. Single working set on each compound.",
+    }
+    # Fri — Wk12 Heavy Lower (taper)
+    days[4] = {
+        **days[4],
+        "liftName": "Wk12 — Heavy Lower (taper)",
+        "exercises": [
+            {"name": "Back Squat", "sets": "2x3", "rest": "3-5 min",
+             "note": "87% — single working set, just to feel it."},
+            {"name": "Hip Thrust", "sets": "2x8", "rest": "90s",
+             "note": "Glute volume."},
+        ],
+        "run": {"type": "z2", "label": "Easy recovery", "time": "15 min",
+                "detail": "HR under 130. Easy shuffle. Mini-taper."},
+        "timing": ["6:00", "Lift - Heavy Lower taper (20 min)",
+                   "6:25", "5 min transition",
+                   "6:30", "Easy recovery 15 min"],
+        "notes": "Wk12 Fri. Back Squat 2x3 @ 87% single working set — feel it, not test it.",
+    }
+    # Sat — Wk12 Full Body (taper)
+    days[5] = {
+        **days[5],
+        "liftName": "Wk12 — Full Body (taper)",
+        "exercises": [
+            {"name": "Hip Thrust", "sets": "2x10", "rest": "60-90s",
+             "note": "Light. Twice/week glute."},
+            {"name": "Cable Chest Fly", "sets": "2x12",
+             "rest": "60s", "note": "Chest accessory."},
+            {"name": "Cable Lateral Raise", "sets": "2x12",
+             "rest": "45-60s", "note": "Lateral volume — final week."},
+        ],
+        "run": {"type": "z2", "label": "Easy zone-2", "time": "20 min",
+                "detail": "HR 130-145. Final aerobic of the program."},
+        "timing": ["6:00", "Lift - Full Body taper (20 min)",
+                   "6:25", "5 min transition",
+                   "6:30", "Easy zone-2 20 min"],
+        "notes": "Wk12 Sat. Final lift. Finish clean — note how this feels vs week 1.",
+    }
+    # Sun (idx 6) — long fasted run only, taper duration
+    days[6] = {
+        **days[6],
+        "liftName": "Rest (Long Fasted Run, 60 min)",
+        "isRest": True,
+        "run": {"type": "z2_long", "label": "Long fasted easy run",
+                "time": "60 min",
+                "detail": "Fasted. HR under 140. Conversational. Final long run."},
+        "timing": ["6:00", "Long fasted run 60 min",
+                   "7:00", "Refuel"],
+        "notes": "Wk12 Sun. 60-min long run. 12 weeks done.",
+    }
+    return days

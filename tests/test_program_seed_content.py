@@ -167,3 +167,43 @@ class TestPhase3Content:
         assert "EZ-Bar Curl" not in names, (
             f"Phase 3 Wed should drop EZ-Bar Curl per spec §6; got {names}"
         )
+
+
+class TestDeloadAndWeek12Content:
+    """Spec §3 (deload), §5 (deload wk8), §7 (week 12 peak)."""
+
+    def test_deload_back_squat_3x5(self, app_ctx):
+        # Spec §5: Fri deload Back Squat 3x5 @ 65%.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=4)  # deload
+        fri = days[4]
+        bs = next((e for e in fri["exercises"]
+                   if "Back Squat" in e["name"]), None)
+        assert bs is not None
+        assert bs["sets"] == "3x5"
+
+    def test_deload_no_amrap(self, app_ctx):
+        # Spec §5: deload caps reps at moderate.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=4)
+        for d in days:
+            for ex in d.get("exercises", []) or []:
+                assert "AMRAP" not in ex.get("reps", ""), (
+                    f"Deload should not have AMRAP: {ex}"
+                )
+
+    def test_week_12_back_squat_2x3(self, app_ctx):
+        # Spec §7: Fri wk12 Back Squat 2x3 (single working set, just to feel it).
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=12)
+        fri = days[4]
+        bs = next((e for e in fri["exercises"]
+                   if "Back Squat" in e["name"]), None)
+        assert bs is not None
+        assert bs["sets"] == "2x3"
