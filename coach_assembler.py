@@ -153,45 +153,81 @@ def _build_garmin():
     return {"garmin": garmin_data, "readiness": readiness}
 
 
+def _resolve_workout_for_day(week, day_idx):
+    """Single source of truth for "what does day N look like for this user".
+
+    Mirrors api_workouts (app.py:1854) so the coach sees what the UI shows:
+      template/prescription → auto_swap_workout (equipment) → validated ExerciseSwap.
+    Without auto_swap the coach prescribed Hip Thrust while the UI rendered Glute
+    Bridge; without is_valid_swap a stale invalid ExerciseSwap row leaked into the
+    coach's mouth. Returns the day dict (with overlaid exercises) or None.
+    """
+    from workout_data import get_workouts, get_workouts_for_user
+    from models import WeeklyPrescription, PhysicalAssessment, UserEquipment, ExerciseSwap
+    from equipment_swaps import auto_swap_workout, is_valid_swap
+
+    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+    has_gym = pa.has_gym if pa else True
+    try:
+        workouts = get_workouts(week) if has_gym else get_workouts_for_user(week, has_gym=False)
+    except Exception:
+        return None
+    if day_idx < 0 or day_idx >= len(workouts):
+        return None
+    day = workouts[day_idx]
+
+    # Prescriptions replace the template wholesale when present.
+    try:
+        rx_rows = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx
+        ).order_by(WeeklyPrescription.exercise_order).all()
+        if rx_rows:
+            day["exercises"] = [{
+                "name": rx.exercise_name,
+                "sets": f"{rx.sets}x{rx.reps}",
+                "rest": rx.rest or "60s",
+                "note": rx.note or "",
+                "target_weight": getattr(rx, 'target_weight', None),
+            } for rx in rx_rows]
+    except Exception:
+        pass
+
+    # Equipment-driven substitution. Same pass api_workouts runs at line 1903.
+    try:
+        eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
+        user_equipment = eq.available_equipment if eq else []
+        if day.get("exercises"):
+            day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+    except Exception:
+        pass
+
+    # Manual swaps last, validated against the post-auto-swap original so a stale
+    # invalid row (the bug from commit ebab5fc) can't whisper to the coach.
+    try:
+        swap_rows = ExerciseSwap.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx
+        ).all()
+        if swap_rows and day.get("exercises"):
+            for sw in swap_rows:
+                if sw.exercise_idx is None or sw.exercise_idx >= len(day["exercises"]):
+                    continue
+                current_original = day["exercises"][sw.exercise_idx].get("name")
+                if not is_valid_swap(current_original, sw.swapped_to):
+                    continue
+                day["exercises"][sw.exercise_idx]["name"] = sw.swapped_to
+    except Exception:
+        pass
+
+    return day
+
+
 @section_builder("workout_today")
 def _build_workout_today():
-    from workout_data import get_workouts, get_workouts_for_user
-    from models import WeeklyPrescription, WeeklyMealPlan, WeeklyRunPlan, WeeklyWarmup, PhysicalAssessment
+    from models import WeeklyMealPlan, WeeklyRunPlan, WeeklyWarmup
     local_today = _user_today()
     week = _current_week()
     today_idx = local_today.weekday()
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    has_gym = pa.has_gym if pa else True
-    workouts = get_workouts(week) if has_gym else get_workouts_for_user(week, has_gym=False)
-    wt = workouts[today_idx] if today_idx < len(workouts) else None
-    # Overlay DB prescriptions + apply exercise swaps
-    try:
-        rx_rows = WeeklyPrescription.query.filter_by(
-            user_id=current_user.id, week=week, day_idx=today_idx
-        ).order_by(WeeklyPrescription.exercise_order).all()
-        if rx_rows and wt:
-            # Load exercise swaps for this day
-            from models import ExerciseSwap
-            swaps = {}
-            try:
-                swap_rows = ExerciseSwap.query.filter_by(
-                    user_id=current_user.id, week=week, day_idx=today_idx
-                ).all()
-                for sw in swap_rows:
-                    swaps[sw.exercise_idx] = sw.swapped_to
-            except Exception:
-                pass
-            exercises = []
-            for i, rx in enumerate(rx_rows):
-                name = swaps.get(i, rx.exercise_name)
-                exercises.append({
-                    "name": name, "sets": f"{rx.sets}x{rx.reps}",
-                    "rest": rx.rest or "60s", "note": rx.note or "",
-                    "target_weight": getattr(rx, 'target_weight', None),
-                })
-            wt["exercises"] = exercises
-    except Exception:
-        pass
+    wt = _resolve_workout_for_day(week, today_idx)
     try:
         mp = WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=week, day_idx=today_idx
@@ -236,6 +272,29 @@ def _build_workout_today():
     except Exception:
         pass
     return {"workout_today": wt}
+
+
+@section_builder("workout_tomorrow")
+def _build_workout_tomorrow():
+    """Tomorrow's exercise prescription, resolved the same way as today's.
+
+    The conversation agent had no view of tomorrow — only today plus a lift-name
+    schedule — so when asked "how many sets tomorrow?" the model invented an
+    answer that diverged from the UI. This closes the hole.
+    """
+    local_today = _user_today()
+    week = _current_week()
+    today_idx = local_today.weekday()
+    # Sunday → Monday rolls into next week. Past week 12 we just stop.
+    if today_idx == 6:
+        next_week = week + 1
+        next_idx = 0
+        if next_week > 12:
+            return {"workout_tomorrow": None}
+        wt = _resolve_workout_for_day(next_week, next_idx)
+    else:
+        wt = _resolve_workout_for_day(week, today_idx + 1)
+    return {"workout_tomorrow": wt}
 
 
 @section_builder("week_schedule")
