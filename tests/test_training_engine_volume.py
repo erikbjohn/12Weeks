@@ -218,6 +218,71 @@ class TestHealPrescriptionVolumeFloor:
             "weight appropriate for the new rep scheme"
         )
 
+    def test_skips_past_and_today_when_caller_pins_now(self, app_ctx):
+        # Caller passes current_week + today_idx. The heal must never rewrite
+        # what the user has already done or is doing right now — only future
+        # slots get touched.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            # Phase-2 week. Bent-Over Row appears at Tue (5x5), Wed (3x8),
+            # Sat (5x5). Each row stores 5x10 (drift). Today is Wed (idx=2).
+            for d in (1, 5):  # Tue past, Sat future
+                db.session.add(WeeklyPrescription(
+                    user_id=u.id, week=5, day_idx=d, exercise_order=0,
+                    exercise_name="Barbell Bent-Over Row",
+                    sets=5, reps="10", source="engine",
+                ))
+            db.session.commit()
+            _heal_prescription_volume_floor(
+                u.id, week=5, current_week=5, today_idx=2
+            )
+            rows = {r.day_idx: r for r in WeeklyPrescription.query
+                    .filter_by(user_id=u.id, week=5).all()}
+        assert rows[1].reps == "10", "past day must not be touched"
+        assert rows[5].reps == "5", "future day must heal"
+
+    def test_skips_today_too(self, app_ctx):
+        # Today's prescription is sacred — user might be mid-workout.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=1, exercise_order=0,
+                exercise_name="Barbell Bent-Over Row",
+                sets=5, reps="10", source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(
+                u.id, week=5, current_week=5, today_idx=1
+            )
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
+        assert row.reps == "10", "today's row must not be rewritten"
+
+    def test_skips_entire_past_week(self, app_ctx):
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=4, day_idx=2, exercise_order=0,
+                exercise_name="Barbell Bent-Over Row",
+                sets=2, reps="12", source="engine",
+            ))
+            db.session.commit()
+            # User is currently on week 5; week 4 is finished history.
+            _heal_prescription_volume_floor(
+                u.id, week=4, current_week=5, today_idx=0
+            )
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=4).first()
+        assert row.sets == 2, "past week must not heal"
+        assert row.reps == "12"
+
     def test_does_not_heal_reps_drift_in_phase_one(self, app_ctx):
         # Phase 1 hypertrophy: engine legitimately builds reps inside a range
         # (configured_reps + 2 capped at phase_max). Reps below template are
@@ -228,9 +293,10 @@ class TestHealPrescriptionVolumeFloor:
         from models import WeeklyPrescription
         u = self._make_user(app_ctx)
         with app.test_request_context():
-            # Week 1, day 0 (Mon), Barbell Back Squat: Phase 1 4x10 template.
+            # Week 1, day 1 (Tue), Barbell Back Squat: Phase 1 prescribes 4x10.
+            # Mid-progression on reps (8 of the 10 ceiling) at sets=4 = floor.
             db.session.add(WeeklyPrescription(
-                user_id=u.id, week=1, day_idx=0, exercise_order=0,
+                user_id=u.id, week=1, day_idx=1, exercise_order=0,
                 exercise_name="Barbell Back Squat",
                 sets=4, reps="8", target_weight=135.0,
                 source="engine",

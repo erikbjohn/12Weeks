@@ -549,7 +549,44 @@ except Exception:
     pass
 
 
-def _heal_prescription_volume_floor(user_id, week):
+def _authoritative_template_for_slot(exercise_name, day_idx):
+    """Find the canonical (sets, reps) for an exercise on a given day-of-week.
+
+    Scans all 12 weeks of the program template. If every match for this
+    (exercise, day_idx) agrees on a single (sets, reps), trust that as the
+    authoritative prescription — it doesn't matter whether the user is
+    currently in the phase that prescribes it; the row was clearly meant to
+    follow this scheme. Returns None when the exercise never appears at this
+    day_idx, or when matches disagree (ambiguous — leave the row alone).
+
+    Why this is safe: an exercise that appears multiple times at the same
+    weekday across the program almost always has the same set/rep contract
+    (Bent-Over Row Tuesday is 5x5 in every Phase 2 week; Bench Press Friday
+    is 5x5 in every strength week). When the contract is consistent, drift
+    from it is bug, not progression.
+    """
+    import re as _re
+    from workout_data import resolve_name, get_workouts
+    name = resolve_name(exercise_name).lower()
+    candidates = set()
+    for w in range(1, 13):
+        try:
+            days = get_workouts(w)
+        except Exception:
+            continue
+        if day_idx < 0 or day_idx >= len(days):
+            continue
+        for ex in days[day_idx].get("exercises", []) or []:
+            if ex.get("name", "").lower() == name:
+                m = _re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
+                if m:
+                    candidates.add((int(m.group(1)), int(m.group(2))))
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return None
+
+
+def _heal_prescription_volume_floor(user_id, week, current_week=None, today_idx=None):
     """Reset legacy drift in WeeklyPrescription rows to the template prescription.
 
     compute_next_targets used to copy last_set_count into target_sets (training_
@@ -559,22 +596,33 @@ def _heal_prescription_volume_floor(user_id, week):
     strength rows ended up at 5x10). The engine fix prevents new bad rows; this
     heals legacy ones lazily on /api/workouts read.
 
-    Two drift signatures fire:
+    Three drift signatures fire:
 
-    1. Sets below template floor — the smoking gun for the volume-collapse bug.
-       The row can't be trusted in any field: reset sets + reps to the template
-       and clear target_weight so the engine recomputes a weight appropriate
-       for the corrected rep scheme.
+    1. Sets below the current week's template floor — the volume-collapse bug.
+       Can't trust the row in any field: reset sets + reps to the template and
+       clear target_weight so the engine recomputes a matching weight.
 
-    2. Reps disagree with template in Phase 2/3 — strength and power phases
-       prescribe a fixed rep count by design. Any reps mismatch is drift.
-       (Phase 1 hypertrophy legitimately progresses reps inside a range, so
-       reps mismatches there are NOT healed by this signature alone.)
+    2. Reps disagree with template in Phase 2/3 — strength and power phases pin
+       reps by design. Any mismatch is drift. (Phase 1 hypertrophy legitimately
+       progresses reps inside a range, so this signature stays out of Phase 1.)
+
+    3. Cross-phase fallback: exercise isn't at this slot in the user's CURRENT
+       week's template (so signature 1 can't fire), but the same exercise is
+       prescribed at this same day_idx in other weeks with a single consistent
+       (sets, reps). Heal to that authoritative scheme — it's the contract the
+       row was meant to follow regardless of what week the user is currently in.
 
     Skips source='coach' (intentional modifications) and never narrows volume.
+    Only heals strictly-future slots — today and past sessions are sacred. The
+    caller passes current_week + today_idx (user-local); rows in past weeks or
+    in today's week up to and including today_idx are left alone so the user's
+    completed/in-progress sessions never have their prescription rewritten
+    underneath them.
     """
     from training_engine import _get_configured_sets_reps
     from workout_data import get_phase
+    if current_week is not None and week < current_week:
+        return
     try:
         rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=week).all()
     except Exception:
@@ -584,10 +632,27 @@ def _heal_prescription_volume_floor(user_id, week):
     for rx in rows:
         if getattr(rx, 'source', None) == 'coach':
             continue
+        # Future slots only. Same week as today: only future days. Past weeks
+        # already short-circuited above.
+        if (current_week is not None and today_idx is not None
+                and week == current_week and rx.day_idx is not None
+                and rx.day_idx <= today_idx):
+            continue
         try:
             configured = _get_configured_sets_reps(rx.exercise_name, week, rx.day_idx)
         except Exception:
             configured = None
+        # Cross-phase fallback only when this week's template is SILENT on the
+        # slot. We track that we used it so Phase 1 healing only fires for
+        # cross-phase rows — the current-week template having the slot AND
+        # disagreeing might just be mid-progression in hypertrophy.
+        used_fallback = False
+        if not configured:
+            try:
+                configured = _authoritative_template_for_slot(rx.exercise_name, rx.day_idx)
+            except Exception:
+                configured = None
+            used_fallback = configured is not None
         if not configured:
             continue
         configured_sets, configured_reps = configured
@@ -603,6 +668,17 @@ def _heal_prescription_volume_floor(user_id, week):
                 rx.target_weight = None
             dirty = True
         elif reps_drift_strength:
+            rx.reps = configured_reps_str
+            if rx.target_weight is not None:
+                rx.target_weight = None
+            dirty = True
+        elif used_fallback and (
+            rx.sets != configured_sets or rx.reps != configured_reps_str
+        ):
+            # Current-week template is silent on this slot but the same
+            # exercise on this same day-of-week has a single consistent
+            # prescription across the rest of the program. Pull into line.
+            rx.sets = configured_sets
             rx.reps = configured_reps_str
             if rx.target_weight is not None:
                 rx.target_weight = None
@@ -1927,6 +2003,11 @@ def api_workouts():
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     has_gym = pa.has_gym if pa else True
 
+    # Heal future prescriptions only — never rewrite the past or in-progress today.
+    _user_today_for_heal = _user_today()
+    _today_idx_for_heal = _user_today_for_heal.weekday()
+    _current_week_for_heal = _current_week()
+
     all_weeks = {}
     for week in range(1, 13):
         phase = get_phase(week)
@@ -1936,7 +2017,11 @@ def api_workouts():
             from workout_data import get_workouts_for_user
             days = get_workouts_for_user(week, has_gym=False)
 
-        _heal_prescription_volume_floor(current_user.id, week)
+        _heal_prescription_volume_floor(
+            current_user.id, week,
+            current_week=_current_week_for_heal,
+            today_idx=_today_idx_for_heal,
+        )
 
         # Check for user-specific prescriptions
         prescriptions = WeeklyPrescription.query.filter_by(
