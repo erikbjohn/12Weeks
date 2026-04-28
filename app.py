@@ -550,30 +550,36 @@ except Exception:
 
 
 def _heal_prescription_volume_floor(user_id, week):
-    """Reset legacy under-volume rows to the program's template prescription.
+    """Reset legacy drift in WeeklyPrescription rows to the template prescription.
 
     compute_next_targets used to copy last_set_count into target_sets (training_
     engine.py before commit cb301e9), so a single low-volume session permanently
-    collapsed the prescription — Phase 2 Tuesday's 5x5 Bent-Over Row template
-    became 2x12 in the user's plan. The engine fix prevents new bad rows; this
+    collapsed the prescription. Some legacy rows also picked up reps drift from
+    earlier engine logic that didn't honour the template's rep scheme (5x5
+    strength rows ended up at 5x10). The engine fix prevents new bad rows; this
     heals legacy ones lazily on /api/workouts read.
 
-    Drift signature: stored sets BELOW the template floor. That row was written
-    by the old engine, so trust nothing about it. Reset sets AND reps to the
-    template, and clear target_weight so the next engine pass recomputes a
-    weight appropriate for the corrected rep scheme (a Phase-1 hypertrophy
-    weight at 12 reps is too light for Phase-2 strength at 5 reps; better to
-    recompute than leave a wrong weight wired in).
+    Two drift signatures fire:
 
-    Skips source='coach' (intentional modifications). Never narrows sets — only
-    widens to floor. Reps are reset only when the sets-below-floor signature
-    fires; otherwise engine-progressed reps survive untouched.
+    1. Sets below template floor — the smoking gun for the volume-collapse bug.
+       The row can't be trusted in any field: reset sets + reps to the template
+       and clear target_weight so the engine recomputes a weight appropriate
+       for the corrected rep scheme.
+
+    2. Reps disagree with template in Phase 2/3 — strength and power phases
+       prescribe a fixed rep count by design. Any reps mismatch is drift.
+       (Phase 1 hypertrophy legitimately progresses reps inside a range, so
+       reps mismatches there are NOT healed by this signature alone.)
+
+    Skips source='coach' (intentional modifications) and never narrows volume.
     """
     from training_engine import _get_configured_sets_reps
+    from workout_data import get_phase
     try:
         rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=week).all()
     except Exception:
         return
+    phase = get_phase(week)
     dirty = False
     for rx in rows:
         if getattr(rx, 'source', None) == 'coach':
@@ -585,9 +591,19 @@ def _heal_prescription_volume_floor(user_id, week):
         if not configured:
             continue
         configured_sets, configured_reps = configured
-        if rx.sets and rx.sets < configured_sets:
+        configured_reps_str = str(configured_reps)
+        sets_drift = bool(rx.sets) and rx.sets < configured_sets
+        reps_drift_strength = (
+            phase >= 2 and bool(rx.reps) and rx.reps != configured_reps_str
+        )
+        if sets_drift:
             rx.sets = configured_sets
-            rx.reps = str(configured_reps)
+            rx.reps = configured_reps_str
+            if rx.target_weight is not None:
+                rx.target_weight = None
+            dirty = True
+        elif reps_drift_strength:
+            rx.reps = configured_reps_str
             if rx.target_weight is not None:
                 rx.target_weight = None
             dirty = True

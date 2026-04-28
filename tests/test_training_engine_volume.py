@@ -190,3 +190,53 @@ class TestHealPrescriptionVolumeFloor:
             _heal_prescription_volume_floor(u.id, week=5)
             row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
         assert row.sets == 7
+
+    def test_heals_strength_reps_drift_when_sets_match(self, app_ctx):
+        # The Back Squat 5x10@135 screenshot: sets matched the Phase 2 5x5
+        # template's volume floor, so the original heal skipped — but reps
+        # had drifted to 10 from the template's 5. Strength phases pin reps
+        # by design, so any mismatch in Phase 2/3 is corruption.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            # Phase 2 Monday (day_idx=0) prescribes Back Squat 5x5.
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=0, exercise_order=0,
+                exercise_name="Barbell Back Squat",
+                sets=5, reps="10", target_weight=135.0,
+                source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(u.id, week=5)
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
+        assert row.sets == 5  # already at floor, unchanged
+        assert row.reps == "5", f"strength reps should heal to template, got {row.reps}"
+        assert row.target_weight is None, (
+            "target_weight must clear when reps change so the engine picks a "
+            "weight appropriate for the new rep scheme"
+        )
+
+    def test_does_not_heal_reps_drift_in_phase_one(self, app_ctx):
+        # Phase 1 hypertrophy: engine legitimately builds reps inside a range
+        # (configured_reps + 2 capped at phase_max). Reps below template are
+        # NOT necessarily corruption — could be mid-progression. Leave alone
+        # absent the sets-below-floor smoking gun.
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            # Week 1, day 0 (Mon), Barbell Back Squat: Phase 1 4x10 template.
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=1, day_idx=0, exercise_order=0,
+                exercise_name="Barbell Back Squat",
+                sets=4, reps="8", target_weight=135.0,
+                source="engine",
+            ))
+            db.session.commit()
+            _heal_prescription_volume_floor(u.id, week=1)
+            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=1).first()
+        assert row.reps == "8", "phase 1 reps progression must survive heal"
+        assert row.target_weight == 135.0
