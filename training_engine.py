@@ -68,15 +68,15 @@ def _get_progression_increment(exercise_name, is_weak):
     return 5.0
 
 
-def _get_configured_reps(exercise_name, week, day_idx):
+def _get_configured_reps(exercise_name, week, day_idx, exercise_order=None):
     """Look up the configured rep count from workout data for this exercise."""
-    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx)
+    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order)
     return sets_reps[1] if sets_reps else None
 
 
-def _get_configured_sets(exercise_name, week, day_idx):
+def _get_configured_sets(exercise_name, week, day_idx, exercise_order=None):
     """Look up the configured set count from workout data for this exercise."""
-    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx)
+    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order)
     return sets_reps[0] if sets_reps else None
 
 
@@ -126,8 +126,15 @@ def _round_weight(weight):
     return int(math.ceil(weight / 5) * 5)
 
 
-def compute_next_targets(user_id, exercise_name, week, day_idx):
+def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=None):
     """Compute targets for the next time this exercise appears.
+
+    exercise_order disambiguates exercises that appear multiple times in the same
+    day (Phase 2 Tuesday lists Lat Pulldown twice — heavy 5x5 at order 0 and pump
+    3x12 at order 2). Without it, the configured-reps lookup returns the first
+    match by name and the pump row gets prescribed the heavy row's rep scheme,
+    which then triggers the rep-drop compensation against last session's reps and
+    bumps weight ~10% on a row that should never see that bump.
 
     Returns: {
         target_weight: float,
@@ -188,7 +195,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     # SIGNAL 4 only enforced sacred-ness for THAT branch; this generalises it.
     # When the configured count is unknown (e.g. exercise auto-swapped to one
     # not in the template), preserve the user's logged effort as a fallback.
-    configured_sets = _get_configured_sets(exercise_name, week, day_idx)
+    configured_sets = _get_configured_sets(exercise_name, week, day_idx, exercise_order)
     target_sets = configured_sets or last_set_count or (4 if phase <= 2 else 3)
 
     # Check if user ACTUALLY decreased weight vs their PREVIOUS session (not vs computed target).
@@ -224,7 +231,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     # cap reps at 12-15 because high-rep shoulder work protects the joint.
     if is_weak:
         good_sessions = _count_consecutive_good_sessions(user_id, exercise_name)
-        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx, exercise_order)
         if muscle_group == 'shoulders':
             target_reps = min(max(last_reps, 12), 15)
         else:
@@ -300,7 +307,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     if phase == 1:
         # Hypertrophy: increase reps, then bump weight
         # Cap at the workout's configured reps if available, otherwise 15
-        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx, exercise_order)
         phase_max_reps = configured_reps if configured_reps else 15
         if avg_reps >= phase_max_reps:
             new_weight = _round_weight(last_weight + inc)
@@ -331,7 +338,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
         # If the rep scheme just dropped (e.g. Phase 1 4x10-12 → Phase 2 5x5),
         # a flat +inc is far too conservative — fewer reps demand more weight.
         # Bump ~10% when this week's configured reps are <70% of last session's.
-        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx, exercise_order)
         rep_drop_factor = 1.0
         if configured_reps and last_reps and configured_reps < last_reps * 0.7:
             rep_drop_factor = 1.10
@@ -354,7 +361,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx):
     else:  # Phase 3
         # Power: aggressive increases. Same rep-drop compensation as Phase 2,
         # plus an additional bump for the typical Phase 2 5x5 → Phase 3 4x3-5 jump.
-        configured_reps = _get_configured_reps(exercise_name, week, day_idx)
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx, exercise_order)
         rep_drop_factor = 1.0
         if configured_reps and last_reps and configured_reps < last_reps * 0.7:
             rep_drop_factor = 1.05

@@ -628,17 +628,22 @@ def check_exercise_available(exercise_name, user_equipment):
 
 def auto_swap_workout(exercises, user_equipment):
     """Auto-swap exercises the user can't do with the best available alternative.
-    Also prevents duplicate exercises in the same day.
+
+    Preserves template duplicates: an exercise listed twice in the same day's
+    template (e.g. Phase 2 Tuesday's Heavy Lat Pulldown 5x5 + pump Lat Pulldown
+    3x12) is intentional, and dropping the second occurrence loses a real
+    prescription. Dedup only protects against SWAPS that would collide with an
+    exercise already on the day's plan.
     """
     result = []
-    used_names = set()
+    used_names = set()  # tracks names already on the plan, so swaps don't collide
 
     for ex in exercises:
         if check_exercise_available(ex["name"], user_equipment):
-            if ex["name"] not in used_names:
-                result.append(ex)
-                used_names.add(ex["name"])
-            # else: skip duplicate
+            # Always keep template entries — duplicates within the template
+            # are deliberate and must survive into the prescription.
+            result.append(ex)
+            used_names.add(ex["name"])
         else:
             alts = get_alternatives(ex["name"], user_equipment)
             # Find first available alternative not already in today's workout

@@ -263,6 +263,76 @@ class TestHealPrescriptionVolumeFloor:
             row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
         assert row.reps == "10", "today's row must not be rewritten"
 
+    def test_phase_1_to_2_transition_pump_row_keeps_pump_weight(
+        self, app_ctx, user_with_sets
+    ):
+        # The bug the user found: transitioning Phase 1 → Phase 2 produced
+        # 105 lb → 140 lb (33%) on the pump Lat Pulldown. Root cause: the
+        # engine called _get_configured_reps without exercise_order, which
+        # returned the heavy 5x5's reps=5 even when computing for the pump
+        # 3x12 row. With last_reps=8 from Phase 1, rep-drop compensation
+        # (5 < 8*0.7) wrongly fired. With exercise_order threaded through,
+        # the pump row sees its own configured_reps=12 and rep-drop stays
+        # off — base + inc only.
+        app, _db = app_ctx
+        from training_engine import compute_next_targets
+        u = user_with_sets("Lat Pulldown", week=3, day_idx=2,
+                           last_weight=105, last_reps=8, set_count=4)
+        with app.test_request_context():
+            # Pump row at Phase 2 Tue (week 5, day_idx=1, order=2).
+            t_pump = compute_next_targets(
+                u.id, "Lat Pulldown", week=5, day_idx=1, exercise_order=2,
+            )
+            # Heavy row at Phase 2 Tue (week 5, day_idx=1, order=0).
+            t_heavy = compute_next_targets(
+                u.id, "Lat Pulldown", week=5, day_idx=1, exercise_order=0,
+            )
+        # Pump: configured_reps=12, last_reps=8 → 12 < 8*0.7=5.6 is FALSE
+        # → no rep drop bump → base = last_weight + inc = 105 + 5 = 110.
+        assert t_pump["target_reps"] == 12, (
+            f"pump row should target 12 reps from its own template, "
+            f"got {t_pump['target_reps']}"
+        )
+        assert t_pump["target_sets"] == 3, (
+            f"pump row should target 3 sets from its own template, "
+            f"got {t_pump['target_sets']}"
+        )
+        assert t_pump["target_weight"] <= 115, (
+            f"pump row should not get aggressive bump, expected ~110, "
+            f"got {t_pump['target_weight']}"
+        )
+        # Heavy: configured_reps=5, last_reps=8 → 5 < 5.6 is TRUE → rep
+        # drop fires legitimately. base = 105*1.10=115.5, +inc=120.5 → 125.
+        assert t_heavy["target_reps"] == 5
+        assert t_heavy["target_sets"] == 5
+        assert t_heavy["target_weight"] is not None
+
+    def test_auto_swap_preserves_template_duplicates(self):
+        # Phase 2 Tuesday's template lists Lat Pulldown twice (heavy 5x5 and
+        # pump 3x12). Before this fix, auto_swap_workout deduped by name,
+        # silently dropping the pump prescription. The user lost a real
+        # accessory exercise from their plan.
+        from equipment_swaps import auto_swap_workout
+        full_gym = [
+            "barbell", "dumbbells", "lat_pulldown", "cable_machine",
+            "leg_press", "leg_curl_ext", "flat_bench", "incline_bench",
+            "decline_bench", "ez_bar", "kettlebells", "pull_up_bar",
+            "dip_station", "ab_machine", "smith_machine",
+        ]
+        exercises = [
+            {"name": "Lat Pulldown", "sets": "5x5", "rest": "2-3 min"},
+            {"name": "Barbell Bent-Over Row", "sets": "5x5", "rest": "2-3 min"},
+            {"name": "Lat Pulldown", "sets": "3x12", "rest": "60-90s"},
+        ]
+        result = auto_swap_workout(exercises, full_gym)
+        names = [e["name"] for e in result]
+        assert names.count("Lat Pulldown") == 2, (
+            f"both Lat Pulldown rows must survive, got {names}"
+        )
+        # And in the same order as the input.
+        assert result[0]["sets"] == "5x5"
+        assert result[2]["sets"] == "3x12"
+
     def test_disambiguates_repeated_exercise_by_order(self, app_ctx):
         # Phase 2 Tuesday has Lat Pulldown TWICE: heavy 5x5 at order=0 and
         # pump 3x12 at order=2 (the heavy template uses the alias "Heavy Lat

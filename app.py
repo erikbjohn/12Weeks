@@ -664,17 +664,14 @@ def _heal_prescription_volume_floor(user_id, week, current_week=None, today_idx=
         reps_drift_strength = (
             phase >= 2 and bool(rx.reps) and rx.reps != configured_reps_str
         )
+        row_dirty = False
         if sets_drift:
             rx.sets = configured_sets
             rx.reps = configured_reps_str
-            if rx.target_weight is not None:
-                rx.target_weight = None
-            dirty = True
+            row_dirty = True
         elif reps_drift_strength:
             rx.reps = configured_reps_str
-            if rx.target_weight is not None:
-                rx.target_weight = None
-            dirty = True
+            row_dirty = True
         elif used_fallback and (
             rx.sets != configured_sets or rx.reps != configured_reps_str
         ):
@@ -683,7 +680,22 @@ def _heal_prescription_volume_floor(user_id, week, current_week=None, today_idx=
             # prescription across the rest of the program. Pull into line.
             rx.sets = configured_sets
             rx.reps = configured_reps_str
-            if rx.target_weight is not None:
+            row_dirty = True
+        if row_dirty:
+            # Recompute target_weight via the engine so the rep-drop
+            # compensation actually applies to the new rep scheme. Without
+            # this the user sees Last weight as the prescription with no
+            # bump (Bent-Over Row 12→5 reps but stuck at 95 lb). The engine
+            # call now disambiguates by exercise_order so the heavy 5x5 row
+            # doesn't get mis-prescribed against the pump 3x12's reps.
+            try:
+                from training_engine import compute_next_targets
+                targets = compute_next_targets(
+                    user_id, rx.exercise_name, week, rx.day_idx,
+                    exercise_order=rx.exercise_order,
+                )
+                rx.target_weight = targets.get('target_weight') if targets else None
+            except Exception:
                 rx.target_weight = None
             dirty = True
     if dirty:
@@ -2632,7 +2644,8 @@ def api_generate_weekly_program():
             # Run training engine for this exercise
             try:
                 targets = compute_next_targets(
-                    current_user.id, exercise_name, target_week, day_idx
+                    current_user.id, exercise_name, target_week, day_idx,
+                    exercise_order=order,
                 )
                 if targets.get('target_weight'):
                     # Engine has a recommendation
