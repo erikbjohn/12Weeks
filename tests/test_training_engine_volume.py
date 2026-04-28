@@ -328,6 +328,56 @@ class TestHealPrescriptionVolumeFloor:
         assert row.sets == 2, "past week must not heal"
         assert row.reps == "12"
 
+    def test_full_phase_2_tuesday_heals_consistently(self, app_ctx):
+        """End-to-end audit: simulate a worst-case drift across every exercise
+        on Phase 2 Tuesday (the user's tomorrow as of 2026-04-27) and verify
+        each row lands at its template prescription. Pinning this prevents
+        future regressions from breaking the day the user is about to train."""
+        app, db = app_ctx
+        from app import _heal_prescription_volume_floor
+        from models import WeeklyPrescription
+        u = self._make_user(app_ctx)
+        # (exercise_name as the engine might store it, drifted_sets, drifted_reps,
+        #  expected_sets_after, expected_reps_after)
+        cases = [
+            # Heavy strength rows: sets-below-floor smoking gun → full reset.
+            ("Lat Pulldown",            4, "12", 5, "5"),   # order=0, alias resolves to canonical
+            ("Barbell Bent-Over Row",   2, "12", 5, "5"),   # order=1
+            # Pump rows: reps-drift in strength phase → reps heal, sets stay.
+            ("Lat Pulldown",            4, "10", 4, "12"),  # order=2 (above floor 3)
+            ("Rear Delt Fly",           3, "10", 3, "15"),  # order=3
+            ("EZ-Bar Curl",             3, "8",  3, "12"),  # order=4
+            ("Hammer Curl",             3, "10", 3, "12"),  # order=5
+        ]
+        with app.test_request_context():
+            for order, (name, s, r, _exp_s, _exp_r) in enumerate(cases):
+                db.session.add(WeeklyPrescription(
+                    user_id=u.id, week=5, day_idx=1, exercise_order=order,
+                    exercise_name=name, sets=s, reps=r,
+                    target_weight=100.0, source="engine",
+                ))
+            db.session.commit()
+            _heal_prescription_volume_floor(
+                u.id, week=5, current_week=5, today_idx=0,  # Mon, so Tue is future
+            )
+            rows = sorted(
+                WeeklyPrescription.query.filter_by(user_id=u.id, week=5, day_idx=1).all(),
+                key=lambda r: r.exercise_order,
+            )
+        for order, (name, _s, _r, exp_s, exp_r) in enumerate(cases):
+            row = rows[order]
+            assert (row.sets, row.reps) == (exp_s, exp_r), (
+                f"{name} (order={order}) expected {exp_s}x{exp_r}, "
+                f"got {row.sets}x{row.reps}"
+            )
+        # Healed rows lose their projected weight so the next plan generation
+        # picks a weight matching the corrected rep scheme.
+        for row in rows:
+            assert row.target_weight is None, (
+                f"{row.exercise_name} (order={row.exercise_order}) should have "
+                f"target_weight cleared after heal, still has {row.target_weight}"
+            )
+
     def test_does_not_heal_reps_drift_in_phase_one(self, app_ctx):
         # Phase 1 hypertrophy: engine legitimately builds reps inside a range
         # (configured_reps + 2 capped at phase_max). Reps below template are
