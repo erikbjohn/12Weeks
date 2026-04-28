@@ -1,4 +1,5 @@
-"""Tests for the volume floor in compute_next_targets.
+"""Tests for the volume floor in compute_next_targets and template-duplicate
+handling in auto_swap_workout.
 
 The bug: every branch of compute_next_targets prescribed target_sets =
 last_set_count (the number of sets in the user's most recent logged session).
@@ -7,6 +8,9 @@ template silently collapsed to 2x5 in the user's plan view. The "Volume is
 sacred — never reduce sets" comment was aspirational; the code did the
 opposite. The fix: configured_sets from the program template is the floor;
 last_set_count only applies when the template is silent.
+
+Also covers the Phase 1 → Phase 2 transition bugs: exercise_order disambiguation
+in the engine, and template-duplicate preservation in auto_swap_workout.
 """
 import pytest
 
@@ -24,9 +28,9 @@ _USER_SEQ = [0]
 
 @pytest.fixture
 def user_with_sets(app_ctx):
-    """Build a user who logged a 2-set session for the given exercise on
-    `last_date` at `last_weight` and `last_reps`. The exercise/week/day_idx
-    are chosen so the program template prescribes a higher set count."""
+    """Build a user who logged a session for the given exercise on `last_date`
+    at `last_weight` and `last_reps`. The exercise/week/day_idx are chosen so
+    the program template prescribes a higher set count."""
     app, db = app_ctx
     from datetime import date, timedelta
     from models import User, UserEquipment, PhysicalAssessment, SetLog
@@ -78,8 +82,7 @@ class TestVolumeFloor:
     def test_user_logged_six_sets_template_says_five(self, app_ctx, user_with_sets):
         # The "max" interpretation is wrong — if the user OVER-delivered,
         # we still hold them to the configured volume. The template is the
-        # contract, not a floor for max. (If we ever want a ceiling that
-        # honours user effort, that's a separate feature.)
+        # contract, not a floor for max.
         app, _db = app_ctx
         from training_engine import compute_next_targets
         u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=1,
@@ -105,172 +108,21 @@ class TestVolumeFloor:
         )
 
 
-class TestHealPrescriptionVolumeFloor:
-    """Lazy heal on /api/workouts read: legacy WeeklyPrescription rows written
-    before the engine fix carried under-volume schemes (e.g. 2x12 instead of
-    5x5). These tests pin the heal's contract: lift engine/template rows up
-    to the configured floor; never touch coach-authored rows."""
-
-    def _make_user(self, app_ctx):
-        app, db = app_ctx
-        from models import User, UserEquipment, PhysicalAssessment
-        _USER_SEQ[0] += 1
-        u = User(email=f"heal-test-{_USER_SEQ[0]}@example.com", password_hash="x")
-        db.session.add(u); db.session.commit()
-        eq = UserEquipment(user_id=u.id, available_equipment=[
-            "barbell", "dumbbells", "ez_bar", "kettlebells", "weight_plates",
-            "lat_pulldown", "cable_machine", "leg_press", "leg_curl_ext",
-            "chest_press_machine", "seated_row_machine", "smith_machine",
-            "ab_machine", "pull_up_bar", "dip_station", "flat_bench",
-            "incline_bench", "decline_bench", "resistance_bands", "trx",
-            "medicine_ball", "foam_roller", "ab_wheel",
-        ])
-        pa = PhysicalAssessment(user_id=u.id, has_gym=True)
-        db.session.add(eq); db.session.add(pa); db.session.commit()
-        return u
-
-    def test_heals_engine_authored_under_volume(self, app_ctx):
-        # The smoking-gun row from the screenshot: 2x12 stored where the
-        # template prescribes 5x5. The heal must rewrite both dimensions
-        # because the row was written by the old engine and can't be trusted
-        # in any field — and clear target_weight so the next engine pass
-        # picks a weight matching the corrected rep scheme.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=0,
-                exercise_name="Barbell Bent-Over Row",
-                sets=2, reps="12", rest="2-3 min",
-                target_weight=100.0,
-                source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(u.id, week=5)
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.sets == 5
-        assert row.reps == "5"
-        assert row.target_weight is None, (
-            "target_weight must be cleared so the engine recomputes for the "
-            "corrected rep scheme on next generation"
-        )
-
-    def test_does_not_touch_coach_authored_row(self, app_ctx):
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=0,
-                exercise_name="Barbell Bent-Over Row",
-                sets=2, reps="12", source="coach",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(u.id, week=5)
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.sets == 2, "coach intentions are sacred; heal must skip"
-
-    def test_does_not_widen_above_configured(self, app_ctx):
-        # If a user/coach previously bumped sets HIGHER than configured, leave
-        # it alone. Heal is a floor, not an equality.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=0,
-                exercise_name="Barbell Bent-Over Row",
-                sets=7, reps="5", source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(u.id, week=5)
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.sets == 7
-
-    def test_heals_strength_reps_drift_when_sets_match(self, app_ctx):
-        # The Back Squat 5x10@135 screenshot: sets matched the Phase 2 5x5
-        # template's volume floor, so the original heal skipped — but reps
-        # had drifted to 10 from the template's 5. Strength phases pin reps
-        # by design, so any mismatch in Phase 2/3 is corruption.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            # Phase 2 Monday (day_idx=0) prescribes Back Squat 5x5.
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=0, exercise_order=0,
-                exercise_name="Barbell Back Squat",
-                sets=5, reps="10", target_weight=135.0,
-                source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(u.id, week=5)
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.sets == 5  # already at floor, unchanged
-        assert row.reps == "5", f"strength reps should heal to template, got {row.reps}"
-        assert row.target_weight is None, (
-            "target_weight must clear when reps change so the engine picks a "
-            "weight appropriate for the new rep scheme"
-        )
-
-    def test_skips_past_and_today_when_caller_pins_now(self, app_ctx):
-        # Caller passes current_week + today_idx. The heal must never rewrite
-        # what the user has already done or is doing right now — only future
-        # slots get touched.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            # Phase-2 week. Bent-Over Row appears at Tue (5x5), Wed (3x8),
-            # Sat (5x5). Each row stores 5x10 (drift). Today is Wed (idx=2).
-            for d in (1, 5):  # Tue past, Sat future
-                db.session.add(WeeklyPrescription(
-                    user_id=u.id, week=5, day_idx=d, exercise_order=0,
-                    exercise_name="Barbell Bent-Over Row",
-                    sets=5, reps="10", source="engine",
-                ))
-            db.session.commit()
-            _heal_prescription_volume_floor(
-                u.id, week=5, current_week=5, today_idx=2
-            )
-            rows = {r.day_idx: r for r in WeeklyPrescription.query
-                    .filter_by(user_id=u.id, week=5).all()}
-        assert rows[1].reps == "10", "past day must not be touched"
-        assert rows[5].reps == "5", "future day must heal"
-
-    def test_skips_today_too(self, app_ctx):
-        # Today's prescription is sacred — user might be mid-workout.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=0,
-                exercise_name="Barbell Bent-Over Row",
-                sets=5, reps="10", source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(
-                u.id, week=5, current_week=5, today_idx=1
-            )
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=5).first()
-        assert row.reps == "10", "today's row must not be rewritten"
+class TestEngineExerciseOrder:
+    """exercise_order disambiguates exercises that appear twice in the same
+    day's template (Phase 2 Tuesday: heavy Lat Pulldown 5x5 at order 0 AND
+    pump Lat Pulldown 3x12 at order 2). Without it, the engine reads the
+    first match and the pump row gets the heavy row's rep-drop compensation.
+    """
 
     def test_phase_1_to_2_transition_pump_row_keeps_pump_weight(
         self, app_ctx, user_with_sets
     ):
-        # The bug the user found: transitioning Phase 1 → Phase 2 produced
-        # 105 lb → 140 lb (33%) on the pump Lat Pulldown. Root cause: the
-        # engine called _get_configured_reps without exercise_order, which
-        # returned the heavy 5x5's reps=5 even when computing for the pump
-        # 3x12 row. With last_reps=8 from Phase 1, rep-drop compensation
+        # The bug: transitioning Phase 1 → Phase 2 produced 105 lb → 140 lb
+        # (33%) on the pump Lat Pulldown. Root cause: engine called
+        # _get_configured_reps without exercise_order, which returned the
+        # heavy 5x5's reps=5 even when computing for the pump 3x12 row.
+        # With last_reps=8 from Phase 1, rep-drop compensation
         # (5 < 8*0.7) wrongly fired. With exercise_order threaded through,
         # the pump row sees its own configured_reps=12 and rep-drop stays
         # off — base + inc only.
@@ -307,11 +159,13 @@ class TestHealPrescriptionVolumeFloor:
         assert t_heavy["target_sets"] == 5
         assert t_heavy["target_weight"] is not None
 
-    def test_auto_swap_preserves_template_duplicates(self):
-        # Phase 2 Tuesday's template lists Lat Pulldown twice (heavy 5x5 and
-        # pump 3x12). Before this fix, auto_swap_workout deduped by name,
-        # silently dropping the pump prescription. The user lost a real
-        # accessory exercise from their plan.
+
+class TestAutoSwapPreservesTemplateDuplicates:
+    """Phase 2 Tuesday lists Lat Pulldown twice (heavy 5x5 + pump 3x12).
+    auto_swap_workout used to dedup by name, dropping the pump prescription
+    silently — the user lost a real accessory exercise."""
+
+    def test_both_lat_pulldown_rows_survive(self):
         from equipment_swaps import auto_swap_workout
         full_gym = [
             "barbell", "dumbbells", "lat_pulldown", "cable_machine",
@@ -329,145 +183,5 @@ class TestHealPrescriptionVolumeFloor:
         assert names.count("Lat Pulldown") == 2, (
             f"both Lat Pulldown rows must survive, got {names}"
         )
-        # And in the same order as the input.
         assert result[0]["sets"] == "5x5"
         assert result[2]["sets"] == "3x12"
-
-    def test_disambiguates_repeated_exercise_by_order(self, app_ctx):
-        # Phase 2 Tuesday has Lat Pulldown TWICE: heavy 5x5 at order=0 and
-        # pump 3x12 at order=2 (the heavy template uses the alias "Heavy Lat
-        # Pulldown" but resolve_name folds it to "Lat Pulldown"). Without
-        # order-aware lookup, the pump row would resolve against the heavy
-        # template's 5x5 floor and erroneously get widened to 5x12. With
-        # order-aware lookup the pump row uses its own 3x12 contract — and
-        # since 4 sets is above the 3-set floor, the heal correctly leaves
-        # it alone.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=0,
-                exercise_name="Lat Pulldown", sets=4, reps="12",
-                source="engine",
-            ))
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=5, day_idx=1, exercise_order=2,
-                exercise_name="Lat Pulldown", sets=4, reps="12",
-                source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(
-                u.id, week=5, current_week=5, today_idx=0
-            )
-            rows = sorted(
-                WeeklyPrescription.query.filter_by(user_id=u.id, week=5).all(),
-                key=lambda r: r.exercise_order,
-            )
-        # Heavy row (order=0): 4 sets is below the 5-set floor → heal to 5x5.
-        assert (rows[0].sets, rows[0].reps) == (5, "5"), (
-            f"heavy row should heal to 5x5, got {rows[0].sets}x{rows[0].reps}"
-        )
-        # Pump row (order=2): 4 sets is above the 3-set floor of its own
-        # template, AND reps already match. Heal skips. Critically, this
-        # only works because the order-aware lookup found template[2] not
-        # template[0] — without disambiguation we'd be comparing against 5x5.
-        assert (rows[1].sets, rows[1].reps) == (4, "12"), (
-            f"pump row should not heal (above its template floor), got "
-            f"{rows[1].sets}x{rows[1].reps}"
-        )
-
-    def test_skips_entire_past_week(self, app_ctx):
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=4, day_idx=2, exercise_order=0,
-                exercise_name="Barbell Bent-Over Row",
-                sets=2, reps="12", source="engine",
-            ))
-            db.session.commit()
-            # User is currently on week 5; week 4 is finished history.
-            _heal_prescription_volume_floor(
-                u.id, week=4, current_week=5, today_idx=0
-            )
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=4).first()
-        assert row.sets == 2, "past week must not heal"
-        assert row.reps == "12"
-
-    def test_full_phase_2_tuesday_heals_consistently(self, app_ctx):
-        """End-to-end audit: simulate a worst-case drift across every exercise
-        on Phase 2 Tuesday (the user's tomorrow as of 2026-04-27) and verify
-        each row lands at its template prescription. Pinning this prevents
-        future regressions from breaking the day the user is about to train."""
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        # (exercise_name as the engine might store it, drifted_sets, drifted_reps,
-        #  expected_sets_after, expected_reps_after)
-        cases = [
-            # Heavy strength rows: sets-below-floor smoking gun → full reset.
-            ("Lat Pulldown",            4, "12", 5, "5"),   # order=0, alias resolves to canonical
-            ("Barbell Bent-Over Row",   2, "12", 5, "5"),   # order=1
-            # Pump rows: reps-drift in strength phase → reps heal, sets stay.
-            ("Lat Pulldown",            4, "10", 4, "12"),  # order=2 (above floor 3)
-            ("Rear Delt Fly",           3, "10", 3, "15"),  # order=3
-            ("EZ-Bar Curl",             3, "8",  3, "12"),  # order=4
-            ("Hammer Curl",             3, "10", 3, "12"),  # order=5
-        ]
-        with app.test_request_context():
-            for order, (name, s, r, _exp_s, _exp_r) in enumerate(cases):
-                db.session.add(WeeklyPrescription(
-                    user_id=u.id, week=5, day_idx=1, exercise_order=order,
-                    exercise_name=name, sets=s, reps=r,
-                    target_weight=100.0, source="engine",
-                ))
-            db.session.commit()
-            _heal_prescription_volume_floor(
-                u.id, week=5, current_week=5, today_idx=0,  # Mon, so Tue is future
-            )
-            rows = sorted(
-                WeeklyPrescription.query.filter_by(user_id=u.id, week=5, day_idx=1).all(),
-                key=lambda r: r.exercise_order,
-            )
-        for order, (name, _s, _r, exp_s, exp_r) in enumerate(cases):
-            row = rows[order]
-            assert (row.sets, row.reps) == (exp_s, exp_r), (
-                f"{name} (order={order}) expected {exp_s}x{exp_r}, "
-                f"got {row.sets}x{row.reps}"
-            )
-        # Healed rows lose their projected weight so the next plan generation
-        # picks a weight matching the corrected rep scheme.
-        for row in rows:
-            assert row.target_weight is None, (
-                f"{row.exercise_name} (order={row.exercise_order}) should have "
-                f"target_weight cleared after heal, still has {row.target_weight}"
-            )
-
-    def test_does_not_heal_reps_drift_in_phase_one(self, app_ctx):
-        # Phase 1 hypertrophy: engine legitimately builds reps inside a range
-        # (configured_reps + 2 capped at phase_max). Reps below template are
-        # NOT necessarily corruption — could be mid-progression. Leave alone
-        # absent the sets-below-floor smoking gun.
-        app, db = app_ctx
-        from app import _heal_prescription_volume_floor
-        from models import WeeklyPrescription
-        u = self._make_user(app_ctx)
-        with app.test_request_context():
-            # Week 1, day 1 (Tue), Barbell Back Squat: Phase 1 prescribes 4x10.
-            # Mid-progression on reps (8 of the 10 ceiling) at sets=4 = floor.
-            db.session.add(WeeklyPrescription(
-                user_id=u.id, week=1, day_idx=1, exercise_order=0,
-                exercise_name="Barbell Back Squat",
-                sets=4, reps="8", target_weight=135.0,
-                source="engine",
-            ))
-            db.session.commit()
-            _heal_prescription_volume_floor(u.id, week=1)
-            row = WeeklyPrescription.query.filter_by(user_id=u.id, week=1).first()
-        assert row.reps == "8", "phase 1 reps progression must survive heal"
-        assert row.target_weight == 135.0
