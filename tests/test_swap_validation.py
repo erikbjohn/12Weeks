@@ -165,21 +165,22 @@ def user_factory(app_ctx):
 
 class TestExerciseAtSlot:
     def test_finds_hammer_curl_in_phase1_wed(self, app_ctx, user_factory):
-        # Phase 1 (week 1-3, non-deload), Wednesday (day 2), idx 6 = Hammer Curl
-        # per workout_data.py:990. This is the slot from the bug screenshot.
+        # Phase 1 (week 1-3), Wednesday (day_idx=2), idx 2 = Hammer Curl
+        # per spec §2 (Shoulder Volume + Arms day).
         app, _db = app_ctx
         from app import _exercise_at_slot
         u = user_factory()
         with app.test_request_context():
-            assert _exercise_at_slot(u.id, 1, 2, 6) == "Hammer Curl"
+            assert _exercise_at_slot(u.id, 1, 2, 2) == "Hammer Curl"
 
-    def test_finds_lying_leg_curl_in_phase1_thu(self, app_ctx, user_factory):
-        # Phase 1, Thursday (day 3), idx 3 = Lying Leg Curl per workout_data.py:997.
+    def test_finds_lying_leg_curl_in_phase1_fri(self, app_ctx, user_factory):
+        # Phase 1, Friday (day_idx=4), idx 2 = Lying Leg Curl per spec §2
+        # (Heavy Lower — Squat Focus).
         app, _db = app_ctx
         from app import _exercise_at_slot
         u = user_factory()
         with app.test_request_context():
-            assert _exercise_at_slot(u.id, 1, 3, 3) == "Lying Leg Curl"
+            assert _exercise_at_slot(u.id, 1, 4, 2) == "Lying Leg Curl"
 
     def test_returns_none_for_out_of_range(self, app_ctx, user_factory):
         app, _db = app_ctx
@@ -212,8 +213,9 @@ class TestParseCoachMarkers:
         from app import _parse_coach_markers
         from models import ExerciseSwap
         u = user_factory()
+        # Phase 1 Wed (day_idx=2), idx=2 is Hammer Curl per spec §2.
         marker = (
-            "[SWAP: day_idx=2, exercise_idx=6, old=Hammer Curl, "
+            "[SWAP: day_idx=2, exercise_idx=2, old=Hammer Curl, "
             "new=Dumbbell Curl, reason=variation]"
         )
         with app.test_request_context():
@@ -230,12 +232,13 @@ class TestApiExerciseSwapsReadFilter:
     def test_purges_stale_cross_muscle_swap(self, app_ctx, user_factory):
         # Seed a bad row (the exact bug shape) and confirm the GET endpoint
         # both omits it from the response and deletes it from the table.
+        # Phase 1 Wed (day_idx=2), idx=2 is Hammer Curl per spec §2.
         app, db = app_ctx
         from models import ExerciseSwap
         u = user_factory()
         with app.app_context():
             db.session.add(ExerciseSwap(
-                user_id=u.id, week=1, day_idx=2, exercise_idx=6,
+                user_id=u.id, week=1, day_idx=2, exercise_idx=2,
                 swapped_to="Lying Leg Curl",  # not in Hammer Curl alternatives
                 original_name=None,  # legacy row, no snapshot
             ))
@@ -248,7 +251,7 @@ class TestApiExerciseSwapsReadFilter:
             resp = client.get("/api/exercise-swaps")
             assert resp.status_code == 200
             data = resp.get_json()
-            assert "1_2_6" not in data, f"stale swap leaked into response: {data}"
+            assert "1_2_2" not in data, f"stale swap leaked into response: {data}"
 
             remaining = ExerciseSwap.query.filter_by(user_id=u.id).all()
             assert remaining == [], "stale row should have been auto-deleted"
@@ -259,7 +262,7 @@ class TestApiExerciseSwapsReadFilter:
         u = user_factory()
         with app.app_context():
             db.session.add(ExerciseSwap(
-                user_id=u.id, week=1, day_idx=2, exercise_idx=6,
+                user_id=u.id, week=1, day_idx=2, exercise_idx=2,
                 swapped_to="Dumbbell Curl",
                 original_name="Hammer Curl",
             ))
@@ -271,7 +274,7 @@ class TestApiExerciseSwapsReadFilter:
                 sess["_fresh"] = True
             resp = client.get("/api/exercise-swaps")
             assert resp.status_code == 200
-            assert resp.get_json().get("1_2_6") == "Dumbbell Curl"
+            assert resp.get_json().get("1_2_2") == "Dumbbell Curl"
 
 
 class TestCarryForwardAcrossPhase:
