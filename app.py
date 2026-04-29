@@ -1901,6 +1901,14 @@ def api_workouts():
         for day in days:
             if "exercises" in day:
                 day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+                # Inject per-exercise metadata (tracked_metric, video) from the
+                # EXERCISES catalog so the client can branch render — e.g. show
+                # an "in" input for plyometric height-tracked lifts (Box Jump)
+                # instead of the default "lb" weight input.
+                for _ex in day["exercises"]:
+                    _info = EXERCISES.get(_ex.get("name", ""), {})
+                    if _info.get("tracked_metric") and not _ex.get("tracked_metric"):
+                        _ex["tracked_metric"] = _info["tracked_metric"]
 
         # Check for user-specific meal plans
         try:

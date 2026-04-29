@@ -10064,6 +10064,10 @@ async function renderDetail() {
 
     // Detect bodyweight exercises (Ring Row, Plank, Push-Ups, etc.)
     const isBW = isBodyweightExercise(displayName, ex.note);
+    // Detect height-tracked plyometrics (Box Jump): the catalog flags these
+    // with tracked_metric: "height" so the input shows "in" not "lb".
+    const isHeight = ex.tracked_metric === 'height';
+    const unit = isHeight ? 'in' : 'lb';
 
     // Build per-set rows
     let setRowsHtml = '';
@@ -10106,7 +10110,7 @@ async function renderDetail() {
             ${setDone ? '&#10003;' : ''}
           </button>
           <span class="set-label">Set ${s + 1}</span>
-          <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="lb" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
+          <input class="weight-input set-wt" type="number" inputmode="decimal" id="wt-${currentWeek}-${currentDay}-${i}-${s}" value="${setWeight}" placeholder="${unit}" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
           <span class="set-x">&times;</span>
           <input class="reps-input set-reps" type="number" inputmode="numeric" id="reps-${currentWeek}-${currentDay}-${i}-${s}" value="${setReps}" placeholder="${targetRepsDisplay}" min="0" max="100" onblur="saveSetField(${currentWeek},${currentDay},${i},${s},'${escapedName}')">
         </div>`;
@@ -10118,7 +10122,7 @@ async function renderDetail() {
         <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
         <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></span>
       </div>
-      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null ? ' · Last: ' + lastWt + ' lb' : ''}${ex.target_weight ? ' → ' + ex.target_weight + ' lb' : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
+      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null ? ' · Last: ' + lastWt + ' ' + unit : ''}${ex.target_weight ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
       ${ex.note ? `<div class="ex-note">${ex.note}</div>` : ''}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>

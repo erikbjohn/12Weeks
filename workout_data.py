@@ -804,6 +804,9 @@ EXERCISES = {
         "category": "power",
         "equipment": [],
         "video": "box jump proper form landing technique",
+        # Tracked in box height (inches), not load (lb). UI swaps the weight
+        # input for a height input. Power work isn't loaded — it's a plyometric.
+        "tracked_metric": "height",
     },
     "Med Ball Slam": {
         "muscle_group": "power",
