@@ -30,7 +30,8 @@ AGENTS = {
         "max_tokens": 200,
         "temperature": 0.6,
         "requires": [
-            "base", "checkins", "workout_today", "garmin", "user_rules",
+            "base", "checkins", "workout_today", "garmin",
+            "fasting", "user_rules",
         ],
     },
     "weekly_planning": {
@@ -61,7 +62,8 @@ AGENTS = {
         "requires": [
             "base", "chat_history", "workout_today", "today_sets",
             "exercise_history", "exercise_analysis",
-            "week_schedule", "next_week", "coach_memories", "user_rules",
+            "week_schedule", "next_week", "coach_memories",
+            "fasting", "user_rules",
         ],
     },
     "run_complete": {
@@ -69,14 +71,15 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "chat_history", "workout_today", "runs",
-            "coach_memories", "user_rules",
+            "coach_memories", "fasting", "user_rules",
         ],
     },
     "meals_complete": {
         "max_tokens": 200,
         "temperature": 0.6,
         "requires": [
-            "base", "meals_today", "goal", "food_safety", "user_rules",
+            "base", "meals_today", "goal", "food_safety",
+            "fasting", "user_rules",
         ],
     },
     "end_of_day": {
@@ -84,7 +87,7 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "workout_today", "week_schedule", "completed_days",
-            "next_week", "user_rules",
+            "next_week", "fasting", "user_rules",
         ],
     },
     "chat_opened": {
