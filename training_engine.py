@@ -74,7 +74,23 @@ def _get_progression_increment(exercise_name, is_weak):
 
 
 def _get_configured_reps(exercise_name, week, day_idx, exercise_order=None):
-    """Look up the configured rep count from workout data for this exercise."""
+    """Configured rep count as int. Returns None when reps is non-numeric
+    (timed exercises like '45s', tests like '1RM', or ranges like '10-12') —
+    callers doing math (rep-drop compensation, comparison) should treat that
+    as 'don't apply progression' rather than crashing on type mismatch."""
+    sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order)
+    if not sets_reps:
+        return None
+    try:
+        return int(sets_reps[1])
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_configured_reps_str(exercise_name, week, day_idx, exercise_order=None):
+    """Configured reps as the raw string — preserves '45s', '1RM', '10-12'.
+    Use this when writing back to WeeklyPrescription.reps so the timed-
+    exercise marker survives engine round-trips."""
     sets_reps = _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order)
     return sets_reps[1] if sets_reps else None
 
@@ -98,6 +114,12 @@ def _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order=None)
     Both sides of the name comparison go through resolve_name so an alias-
     bearing template entry ("Heavy Lat Pulldown") matches a stored canonical
     row ("Lat Pulldown") and vice versa.
+
+    Reps is returned as the raw token, NOT coerced to int — '3x45s' yields
+    (3, '45s'), '4x10-12' yields (4, '10-12'), '1xWork to 1RM' yields
+    (1, 'Work to 1RM'). The earlier regex r'(\\d+)x(\\d+)' silently dropped
+    the 's' / range / suffix, which made plank lose its timed-exercise
+    marker after engine round-trips.
     """
     from workout_data import resolve_name
     canon = resolve_name(exercise_name).lower()
@@ -110,14 +132,14 @@ def _get_configured_sets_reps(exercise_name, week, day_idx, exercise_order=None)
             if (exercise_order is not None and 0 <= exercise_order < len(exercises)):
                 ex = exercises[exercise_order]
                 if resolve_name(ex.get("name", "")).lower() == canon:
-                    m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
+                    m = re.match(r"(\d+)x(.+)", ex.get("sets", ""))
                     if m:
-                        return int(m.group(1)), int(m.group(2))
+                        return int(m.group(1)), m.group(2).strip()
             for ex in exercises:
                 if resolve_name(ex.get("name", "")).lower() == canon:
-                    m = re.match(r"(\d+)x(\d+)", ex.get("sets", ""))
+                    m = re.match(r"(\d+)x(.+)", ex.get("sets", ""))
                     if m:
-                        return int(m.group(1)), int(m.group(2))
+                        return int(m.group(1)), m.group(2).strip()
     except Exception:
         pass
     return None
@@ -154,6 +176,22 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     exercise_name = resolve_name(exercise_name)
     phase = _get_phase(week)
     muscle_group = _get_muscle_group(exercise_name)
+
+    # Timed/non-numeric exercises (Plank "45s", "1RM" tests, "10-12" ranges)
+    # don't have weight progression or rep-drop math. Short-circuit so the
+    # raw reps token survives the engine round-trip — otherwise the regex
+    # collapsed it to int and the JS isTimedEx detector lost the trailing
+    # 's', breaking the inline timer for plank etc.
+    _raw_reps = _get_configured_reps_str(exercise_name, week, day_idx, exercise_order)
+    if _raw_reps and not _raw_reps.strip().isdigit():
+        _sets_for_timed = _get_configured_sets(exercise_name, week, day_idx, exercise_order)
+        return {
+            "target_weight": None,
+            "target_reps": _raw_reps,
+            "target_sets": _sets_for_timed or 3,
+            "adjustment_reason": "Timed/non-numeric reps — no weight progression",
+            "progression_indicator": "hold",
+        }
 
     # Check muscle group strength
     profile = MuscleGroupProfile.query.filter_by(

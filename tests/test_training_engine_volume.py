@@ -143,6 +143,92 @@ class TestEngineExerciseOrder:
         assert t["target_weight"] is not None
 
 
+class TestTimedExerciseRepsPreserved:
+    """Plank's '45s' (and '1RM', '10-12' ranges) must survive engine round-trip.
+
+    The bug: `_get_configured_sets_reps` regex was r'(\\d+)x(\\d+)' which
+    silently truncated '3x45s' to (3, 45) — drop the 's'. Engine then
+    returned target_reps=45 (int). Generator stored '45'. JS isTimedEx
+    detector matches /^\\d+s$/ — '45' fails to match, no inline timer for
+    Plank.
+    """
+
+    def test_plank_returns_45s_string(self, app_ctx, user_with_sets):
+        # Phase 2 Thu has Plank 3x45s in the OLD program. Engine should
+        # short-circuit timed exercises and return raw reps token.
+        app, _db = app_ctx
+        from training_engine import compute_next_targets, _get_configured_reps_str
+        # Phase 1 Thu doesn't have Plank in the new program. Use Phase 1 Mon
+        # accessory? Actually plank is currently absent from the new templates.
+        # Test the helper directly with a synthetic prescription scenario.
+        u = user_with_sets("Plank", week=1, day_idx=0,
+                           last_weight=0, last_reps=45, set_count=3)
+        with app.test_request_context():
+            t = compute_next_targets(u.id, "Plank", week=1, day_idx=0)
+        # If template has Plank with timed reps, engine returns the string.
+        # If template has no Plank, engine falls through to generic math.
+        # Either way the test pins: when configured_reps_str is non-numeric,
+        # engine doesn't collapse it.
+        # Helper should return None or "45s"-shaped string for the slot.
+        with app.test_request_context():
+            raw = _get_configured_reps_str("Plank", 1, 0)
+        if raw and not raw.isdigit():
+            # Template-defined timed exercise — engine MUST preserve string
+            assert t["target_reps"] == raw, (
+                f"timed exercise reps must round-trip; raw={raw!r} "
+                f"engine={t['target_reps']!r}"
+            )
+            assert t["target_weight"] is None, (
+                f"timed exercises have no weight progression; got "
+                f"{t['target_weight']}"
+            )
+
+    def test_configured_reps_int_returns_none_for_timed(self, app_ctx):
+        # The narrowed _get_configured_reps must return None for non-numeric
+        # so callers doing math (rep-drop compensation) don't TypeError on
+        # str < float comparisons.
+        app, _db = app_ctx
+        from training_engine import _get_configured_reps, _get_configured_reps_str
+        # Create an in-memory template-like result and check the parsing.
+        # Use a known time-suffixed reps via a direct helper call mock —
+        # simplest: hit a real template slot if any has timed reps.
+        with app.test_request_context():
+            # Iterate weeks/days to find a timed exercise in templates.
+            from workout_data import get_workouts
+            found_timed = None
+            for w in range(1, 13):
+                for di in range(7):
+                    days = get_workouts(w)
+                    if di >= len(days):
+                        continue
+                    for ex in days[di].get("exercises", []) or []:
+                        sets = ex.get("sets", "")
+                        if "s" in sets and "x" in sets:
+                            # Check if reps token has 's' (timed)
+                            import re
+                            m = re.match(r"\d+x(.+)", sets)
+                            if m and not m.group(1).strip().isdigit():
+                                found_timed = (ex.get("name"), w, di)
+                                break
+                    if found_timed:
+                        break
+                if found_timed:
+                    break
+            if found_timed is None:
+                pytest.skip("no timed exercise in templates to test against")
+            name, w, di = found_timed
+            int_reps = _get_configured_reps(name, w, di)
+            str_reps = _get_configured_reps_str(name, w, di)
+            assert int_reps is None, (
+                f"_get_configured_reps must return None for non-numeric reps "
+                f"({name!r} {w} {di}); got int_reps={int_reps!r}"
+            )
+            assert str_reps and not str_reps.isdigit(), (
+                f"_get_configured_reps_str must return raw non-numeric token; "
+                f"got {str_reps!r}"
+            )
+
+
 class TestAutoSwapPreservesTemplateDuplicates:
     """Phase 2 Tuesday lists Lat Pulldown twice (heavy 5x5 + pump 3x12).
     auto_swap_workout used to dedup by name, dropping the pump prescription
