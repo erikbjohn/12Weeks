@@ -1910,6 +1910,68 @@ def api_workouts():
                     if _info.get("tracked_metric") and not _ex.get("tracked_metric"):
                         _ex["tracked_metric"] = _info["tracked_metric"]
 
+        # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout so a
+        # manual swap overrides the equipment-driven substitution. Recompute
+        # target_weight, note, and catalog metadata against the SWAP TARGET's
+        # actual history rather than letting the slot's original prescription
+        # leak through (which produced 175-lb DB RDL from a Conv DL slot).
+        try:
+            from equipment_swaps import EXERCISE_SWAPS
+            _swap_rows = ExerciseSwap.query.filter_by(
+                user_id=current_user.id, week=week
+            ).all()
+            _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
+                         for s in _swap_rows}
+            for _day_idx, _day in enumerate(days):
+                for _ex_idx, _ex in enumerate(_day.get("exercises", []) or []):
+                    _key = (_day_idx, _ex_idx)
+                    if _key not in _swap_map:
+                        continue
+                    _swap_target, _orig_recorded = _swap_map[_key]
+                    _orig_displayed = _ex.get("name", "")
+                    _ex["swapped_from"] = _orig_displayed
+                    _ex["name"] = _swap_target
+                    # Recompute target_weight via engine using the swap target's
+                    # SetLog history, not the original slot's prescription value.
+                    try:
+                        _t = compute_next_targets(
+                            current_user.id, _swap_target, week, _day_idx,
+                            exercise_order=_ex_idx,
+                        )
+                        if _t and _t.get("target_weight"):
+                            _ex["target_weight"] = _t["target_weight"]
+                        else:
+                            _ex.pop("target_weight", None)
+                    except Exception:
+                        _ex.pop("target_weight", None)
+                    # Pull note from the original's catalog alternative entry.
+                    # If the swap was recorded against a different "original"
+                    # (e.g. earlier auto-swap renamed the slot), fall back to
+                    # the displayed original or the catalog's own note.
+                    _alt_note = None
+                    for _candidate in (_orig_recorded, _orig_displayed):
+                        if not _candidate:
+                            continue
+                        _entry = EXERCISE_SWAPS.get(_candidate) or {}
+                        for _alt in _entry.get("alternatives", []) or []:
+                            if _alt.get("name") == _swap_target:
+                                _alt_note = _alt.get("note")
+                                break
+                        if _alt_note:
+                            break
+                    if _alt_note:
+                        _ex["note"] = _alt_note
+                    else:
+                        _ex["note"] = ""
+                    # Refresh tracked_metric for the swap target.
+                    _info = EXERCISES.get(_swap_target, {})
+                    if _info.get("tracked_metric"):
+                        _ex["tracked_metric"] = _info["tracked_metric"]
+                    elif _ex.get("tracked_metric"):
+                        del _ex["tracked_metric"]
+        except Exception:
+            pass
+
         # Check for user-specific meal plans
         try:
             meal_plans = WeeklyMealPlan.query.filter_by(

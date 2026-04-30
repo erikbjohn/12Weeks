@@ -356,3 +356,121 @@ class TestCarryForwardAcrossPhase:
             f"carry-forward leaked '{swap_target}' from {prev_original} (wk4) "
             f"into {new_original} (wk5)"
         )
+
+
+class TestApiWorkoutsSwapOverlay:
+    """When a swap is active, /api/workouts must return the swap target's
+    own metadata (target_weight via engine on its own SetLog history,
+    note from the catalog alternative entry) — NOT the slot's original
+    prescription leaking through.
+
+    The bug that motivated these tests: prescription stored Conv DL 5x5 at
+    175 lb. User swapped to Dumbbell Romanian Deadlift. They had logged
+    DB RDL at 45 lb. Display showed '5x5 · Last: 45 lb -> 175 lb' — the
+    175 lb was the original Conv DL prescription leaking through to a
+    physically impossible DB RDL load.
+    """
+
+    def test_swap_overlay_replaces_name_and_clears_original_target(
+        self, app_ctx, user_factory
+    ):
+        from datetime import date, timedelta
+        app, db = app_ctx
+        from models import WeeklyPrescription, ExerciseSwap, SetLog
+        u = user_factory()
+        with app.app_context():
+            # Original slot: Conventional Deadlift 5x5 at 175 lb (heavy)
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=3, exercise_order=0,
+                exercise_name="Conventional Deadlift",
+                sets=5, reps="5", rest="2-3 min",
+                target_weight=175.0, note="RPE 8-9. Heavy and controlled.",
+                source="engine",
+            ))
+            # User has DB RDL history at 45 lb (light, real)
+            for i in range(5):
+                db.session.add(SetLog(
+                    user_id=u.id, exercise_name="Dumbbell Romanian Deadlift",
+                    week=4, day_idx=3, set_number=i + 1,
+                    weight=45.0, reps=8, done=True,
+                    logged_date=date.today() - timedelta(days=3),
+                ))
+            # User's explicit swap: Conv DL -> DB RDL on this slot
+            db.session.add(ExerciseSwap(
+                user_id=u.id, week=5, day_idx=3, exercise_idx=0,
+                swapped_to="Dumbbell Romanian Deadlift",
+                original_name="Conventional Deadlift",
+            ))
+            db.session.commit()
+
+            client = app.test_client()
+            with client.session_transaction() as sess:
+                sess["_user_id"] = str(u.id)
+                sess["_fresh"] = True
+            resp = client.get("/api/workouts")
+            assert resp.status_code == 200
+            data = resp.get_json()
+
+            week5 = data.get("5")
+            assert week5, "week 5 missing in response"
+            day = week5["days"][3]
+            ex = day["exercises"][0]
+
+            # Name reflects the swap target
+            assert ex["name"] == "Dumbbell Romanian Deadlift"
+            # swapped_from set so client can render the badge
+            assert ex.get("swapped_from") == "Conventional Deadlift"
+            # target_weight must NOT be the original 175 lb. Engine should
+            # project from DB RDL history (45 lb) — should be ~50 lb after
+            # a small bump, definitely well below 175.
+            tw = ex.get("target_weight")
+            assert tw is None or tw < 100, (
+                f"swap target_weight should reflect DB RDL history (~50), "
+                f"not Conv DL prescription (175); got {tw}"
+            )
+            # Note must NOT be the original Conv DL note
+            assert "Heavy and controlled" not in (ex.get("note") or ""), (
+                f"note leaked from original Conv DL: {ex.get('note')!r}"
+            )
+
+    def test_swap_overlay_pulls_note_from_catalog_alternative(
+        self, app_ctx, user_factory
+    ):
+        # The original's catalog alternative entry has its own note.
+        # The swap overlay should surface that note for the swap target.
+        app, db = app_ctx
+        from models import WeeklyPrescription, ExerciseSwap
+        from equipment_swaps import EXERCISE_SWAPS
+        u = user_factory()
+        # Pick a known original/alt pair from the catalog
+        orig = "Conventional Deadlift"
+        alt_entry = next(
+            (a for a in EXERCISE_SWAPS[orig]["alternatives"]
+             if a["name"] == "Dumbbell Romanian Deadlift"), None,
+        )
+        assert alt_entry, "test fixture assumes Conv DL has DB RDL alternative"
+        expected_note = alt_entry["note"]
+        with app.app_context():
+            db.session.add(WeeklyPrescription(
+                user_id=u.id, week=5, day_idx=3, exercise_order=0,
+                exercise_name=orig, sets=5, reps="5", rest="2-3 min",
+                target_weight=175.0, note="RPE 8-9. Heavy.",
+                source="engine",
+            ))
+            db.session.add(ExerciseSwap(
+                user_id=u.id, week=5, day_idx=3, exercise_idx=0,
+                swapped_to="Dumbbell Romanian Deadlift",
+                original_name=orig,
+            ))
+            db.session.commit()
+
+            client = app.test_client()
+            with client.session_transaction() as sess:
+                sess["_user_id"] = str(u.id)
+                sess["_fresh"] = True
+            resp = client.get("/api/workouts")
+            ex = resp.get_json()["5"]["days"][3]["exercises"][0]
+        assert ex.get("note") == expected_note, (
+            f"swap should surface alternative's catalog note "
+            f"({expected_note!r}); got {ex.get('note')!r}"
+        )
