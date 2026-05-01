@@ -75,7 +75,7 @@ class CoachRules:
 
     fasting_active: bool
     fasting_hours: Optional[float]
-    fasting_target_hours: Optional[float]
+    fasting_target_hours: Optional[int]
     fasting_break_at: Optional[datetime]
 
     directive: Directive
@@ -589,12 +589,18 @@ def _current_week_for_user(user_id: int, today_local) -> int:
 
 
 def _phase_summary_for_week(week: int) -> str:
+    """Phase label matching workout_data.get_phase + deload semantics.
+    Weeks 4 and 8 are intra-phase deload weeks; week 12 is the test/peak week."""
+    if week == 12:
+        return "Phase 3 / test week (week 12)"
+    if week == 4:
+        return "Phase 1 deload (week 4)"
+    if week == 8:
+        return "Phase 2 deload (week 8)"
     if week <= 4:
         return f"Phase 1 (week {week})"
     if week <= 8:
         return f"Phase 2 (week {week})"
-    if week == 9:
-        return f"Deload (week {week})"
     return f"Phase 3 (week {week})"
 
 
