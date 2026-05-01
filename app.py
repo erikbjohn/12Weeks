@@ -1152,6 +1152,72 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/program-friday")
+def debug_program_friday():
+    """Inspect what the program says for a user's Friday — template, prescription
+    override, ExerciseSwap, run dict. UNAUTHENTICATED. Diagnostic only."""
+    email = request.args.get("email", "erik@placemetry.com")
+    week = int(request.args.get("week", 5))
+    day_idx = int(request.args.get("day", 4))  # 4 = Friday
+    try:
+        from models import User, WeeklyPrescription, ExerciseSwap, AppState
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+
+        from workout_data import get_workouts
+        template_days = get_workouts(week)
+        template_day = template_days[day_idx] if day_idx < len(template_days) else None
+
+        rxs = (WeeklyPrescription.query
+               .filter_by(user_id=u.id, week=week, day_idx=day_idx)
+               .all())
+        rx_dump = [{
+            "exercise_idx": r.exercise_idx,
+            "exercise_name": r.exercise_name,
+            "sets": r.sets,
+            "reps": r.reps,
+            "target_weight": r.target_weight,
+        } for r in rxs]
+
+        swaps = (ExerciseSwap.query
+                 .filter_by(user_id=u.id, week=week, day_idx=day_idx)
+                 .all())
+        swap_dump = [{
+            "exercise_idx": s.exercise_idx,
+            "swapped_to": s.swapped_to,
+            "original_name": s.original_name,
+        } for s in swaps]
+
+        state = AppState.query.filter_by(user_id=u.id).first()
+        state_dump = {
+            "start_date": str(state.start_date) if state and state.start_date else None,
+            "current_week": state.current_week if state else None,
+        }
+
+        return jsonify({
+            "email": email,
+            "week": week,
+            "day_idx": day_idx,
+            "template_lift_name": (template_day or {}).get("liftName"),
+            "template_run": (template_day or {}).get("run"),
+            "template_exercises": [
+                {"name": e.get("name"), "sets": e.get("sets")}
+                for e in (template_day or {}).get("exercises", [])
+            ],
+            "weekly_prescription_rows": rx_dump,
+            "exercise_swaps": swap_dump,
+            "app_state": state_dump,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-3000:],
+        }), 500
+
+
 @app.route("/api/debug/coach-error")
 def debug_coach_error():
     """Run the new coach pipeline against a user and return the response or
