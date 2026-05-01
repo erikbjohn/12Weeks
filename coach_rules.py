@@ -326,6 +326,8 @@ _REFUSAL_PATTERNS: list[tuple[re.Pattern, str]] = [
      "partial-compliance proposal"),
     (re.compile(r"\bmaybe i('ll| will)\b.*\b(skip|rest|just)\b", re.I),
      "soft-future skip"),
+    (re.compile(r"\b(what about|how about)\b.*\b(later|tonight|tomorrow|after work|this evening|the morning)\b.*\binstead\b", re.I),
+     "what-about renegotiation"),
 ]
 
 

@@ -280,7 +280,7 @@ class TestRefusalDetection:
         "I'm gonna skip Friday's lift",
         "thinking about resting tomorrow",
         "can I take it easy today",
-        "later I'll do the run instead",
+        "what about doing it tonight instead",
         "should I do the run later",
         "do I really have to lift today",
         "maybe I'll just do the run and skip the lift",
