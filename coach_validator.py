@@ -29,6 +29,11 @@ BANNED_PHRASES: list[str] = [
     # Negotiation
     "if that works", "let's see how", "see how you feel", "play it by ear",
     "if you're up for it",
+    # Soft conversational openers (questions disguised as statements)
+    "what's on your mind", "whats on your mind", "anything else",
+    "anything on your mind", "tell me more", "let me know",
+    "talk to me", "what's up with", "how's it going",
+    "let's hear it", "fill me in", "how do you feel",
 ]
 
 

@@ -1344,9 +1344,14 @@ def assemble_prompt(agent_name, context, rules=None):
 # ---------------------------------------------------------------------------
 
 def render_response_to_user(sections):
-    """Strip tags, join sections in display order. The user never sees tags."""
+    """Strip tags, join sections in display order. The user never sees tags.
+
+    NOTE: <schedule> is INTERNAL context for the LLM (so it grounds in real time
+    + workout state), NOT user-facing. The user sees only directive + motivation
+    + optional refusal. Schedule was leaking into chat bubbles in v1 — fixed.
+    """
     parts = []
-    for key in ("schedule", "directive", "motivation", "refusal"):
+    for key in ("directive", "motivation", "refusal"):
         if key in sections and sections[key]:
             parts.append(sections[key].strip())
     return "\n\n".join(parts)

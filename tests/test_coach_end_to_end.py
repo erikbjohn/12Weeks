@@ -80,7 +80,8 @@ class TestCoachRespond:
                 rules=_stub_rules(),
                 llm_fn=fake_llm,
             )
-        assert "SCHED" in out
+        # schedule is internal context, not user-facing
+        assert "DIR" in out
         assert "DIR" in out
         assert "Lift now" in out
         assert "<schedule>" not in out  # tags stripped
@@ -137,7 +138,8 @@ class TestCoachRespond:
                 user_message="hey", rules=_stub_rules(), llm_fn=fake_llm,
             )
         # Fallback content: pre-filled + "Logged."
-        assert "SCHED" in out
+        # schedule is internal context, not user-facing
+        assert "DIR" in out
         assert "DIR" in out
         assert "Your call" not in out
         assert "Logged" in out
@@ -165,7 +167,7 @@ class TestCoachRespondStreaming:
                 chunk_size=10,  # small enough to guarantee multiple chunks
             ))
         full = " ".join(chunks)
-        assert "SCHED" in full
+        assert "DIR" in full
         assert "DIR" in full
         assert "Lift now" in full
         # Chunks should be smaller than the full text
@@ -193,4 +195,4 @@ class TestCoachRespondStreaming:
         full = " ".join(chunks)
         # Banned phrase blocked → fallback path
         assert "Your call" not in full
-        assert "Logged" in full or "SCHED" in full
+        assert "Logged" in full or "DIR" in full
