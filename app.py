@@ -1234,6 +1234,118 @@ def debug_override_day_with_actual():
         }), 500
 
 
+@app.route("/api/debug/realign-session-week")
+def debug_realign_session_week():
+    """Move a logged session from one week to another. Moves SetLog,
+    RunLog, WeeklyPrescription, DayCompletion. Optionally resets
+    AppState.current_week.
+
+    Token-gated. Query: ?email=...&from_week=6&to_week=5&day_idx=4&date=YYYY-MM-DD&token=...
+    Optional: &reset_current_week=1
+    """
+    email = request.args.get("email", "")
+    from_week = int(request.args.get("from_week", 0))
+    to_week = int(request.args.get("to_week", 0))
+    day_idx = int(request.args.get("day_idx", -1))
+    date_str = request.args.get("date", "")
+    reset_cw = request.args.get("reset_current_week") == "1"
+    token = request.args.get("token", "")
+    if token != "swap-cleanup-2026-04-30":
+        return jsonify({"error": "bad token"}), 403
+    if not email or not from_week or not to_week or day_idx < 0 or not date_str:
+        return jsonify({"error": "email + from_week + to_week + day_idx + date required"}), 400
+    try:
+        from datetime import datetime as _dt
+        from models import (User, SetLog, RunLog, WeeklyPrescription,
+                            DayCompletion, AppState)
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        target_date = _dt.strptime(date_str, "%Y-%m-%d").date()
+
+        # 1. Move SetLog rows
+        sl = SetLog.query.filter_by(
+            user_id=u.id, week=from_week, day_idx=day_idx, logged_date=target_date,
+        ).all()
+        for r in sl:
+            r.week = to_week
+        sl_count = len(sl)
+
+        # 2. Move RunLog rows
+        rl = RunLog.query.filter_by(
+            user_id=u.id, week=from_week, day_idx=day_idx, log_date=target_date,
+        ).all()
+        for r in rl:
+            r.week = to_week
+        rl_count = len(rl)
+
+        # 3. Copy WeeklyPrescription rows from from_week to to_week,
+        # wiping to_week's existing rows for this day_idx first.
+        WeeklyPrescription.query.filter_by(
+            user_id=u.id, week=to_week, day_idx=day_idx,
+        ).delete()
+        src_rx = WeeklyPrescription.query.filter_by(
+            user_id=u.id, week=from_week, day_idx=day_idx,
+        ).all()
+        for r in src_rx:
+            new = WeeklyPrescription(
+                user_id=u.id, week=to_week, day_idx=day_idx,
+                exercise_order=r.exercise_order,
+                exercise_name=r.exercise_name,
+                sets=r.sets, reps=r.reps, rest=r.rest,
+                target_weight=r.target_weight,
+                progression_indicator=r.progression_indicator,
+                adjustment_reason=r.adjustment_reason,
+                note=r.note, source=r.source,
+            )
+            db.session.add(new)
+        WeeklyPrescription.query.filter_by(
+            user_id=u.id, week=from_week, day_idx=day_idx,
+        ).delete()
+        rx_count = len(src_rx)
+
+        # 4. Move DayCompletion
+        dc_from = DayCompletion.query.filter_by(
+            user_id=u.id, week=from_week, day_idx=day_idx,
+        ).first()
+        DayCompletion.query.filter_by(
+            user_id=u.id, week=to_week, day_idx=day_idx,
+        ).delete()
+        if dc_from:
+            new_dc = DayCompletion(
+                user_id=u.id, week=to_week, day_idx=day_idx,
+                done=dc_from.done,
+                workout_started_at=dc_from.workout_started_at,
+                workout_ended_at=dc_from.workout_ended_at,
+            )
+            db.session.add(new_dc)
+            db.session.delete(dc_from)
+        dc_moved = bool(dc_from)
+
+        # 5. Reset AppState.current_week if requested
+        cw_changed = None
+        if reset_cw:
+            state = AppState.query.filter_by(user_id=u.id).first()
+            if state:
+                cw_changed = (state.current_week, to_week)
+                state.current_week = to_week
+
+        db.session.commit()
+        return jsonify({
+            "email": email, "from_week": from_week, "to_week": to_week,
+            "day_idx": day_idx, "date": date_str,
+            "setlogs_moved": sl_count, "runlogs_moved": rl_count,
+            "prescriptions_moved": rx_count, "daycompletion_moved": dc_moved,
+            "current_week_changed": cw_changed,
+        })
+    except Exception as e:
+        import traceback
+        db.session.rollback()
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/api-workouts-as-user")
 def debug_api_workouts_as_user():
     """Run api_workouts as if the given user were logged in, return the JSON
