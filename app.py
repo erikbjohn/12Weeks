@@ -1152,6 +1152,88 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/override-day-with-actual")
+def debug_override_day_with_actual():
+    """Take the user's logged SetLog rows for (logged_date, day_idx) and write
+    them to WeeklyPrescription for (week, day_idx) so the UI shows the actual
+    session that was done instead of the template. One-shot recovery for when
+    the user's session doesn't match the template for that day.
+
+    Token-gated. Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4&token=...
+    """
+    email = request.args.get("email", "")
+    date_str = request.args.get("date", "")
+    week = int(request.args.get("week", 0))
+    day_idx = int(request.args.get("day_idx", -1))
+    token = request.args.get("token", "")
+    if token != "swap-cleanup-2026-04-30":
+        return jsonify({"error": "bad token"}), 403
+    if not email or not date_str or not week or day_idx < 0:
+        return jsonify({"error": "email + date + week + day_idx required"}), 400
+    try:
+        from datetime import datetime as _dt
+        from models import User, SetLog, WeeklyPrescription
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        target_date = _dt.strptime(date_str, "%Y-%m-%d").date()
+
+        # Pull all sets for that user/date — collapse to one row per
+        # (exercise_name) with sets count and rep range.
+        rows = SetLog.query.filter_by(user_id=u.id, logged_date=target_date).all()
+        if not rows:
+            return jsonify({"error": "no SetLog rows on that date"}), 404
+        by_ex: dict = {}
+        for r in rows:
+            by_ex.setdefault(r.exercise_name, []).append(r)
+
+        # Wipe existing WeeklyPrescription for this (week, day_idx) — start clean.
+        WeeklyPrescription.query.filter_by(
+            user_id=u.id, week=week, day_idx=day_idx,
+        ).delete()
+
+        # Insert new prescription rows: one per exercise, sets=count, reps=mode.
+        order = 0
+        created = []
+        for ex_name, sets in by_ex.items():
+            n_sets = len(sets)
+            reps_list = [s.reps for s in sets if s.reps]
+            reps_str = str(max(set(reps_list), key=reps_list.count)) if reps_list else "5"
+            top_weight = max((s.weight or 0) for s in sets) or None
+            wp = WeeklyPrescription(
+                user_id=u.id, week=week, day_idx=day_idx,
+                exercise_order=order, exercise_name=ex_name,
+                sets=n_sets, reps=reps_str, rest="60-90s",
+                target_weight=top_weight, source='actual',
+                note='Logged session — actual content replaces template.',
+            )
+            db.session.add(wp)
+            created.append({"order": order, "exercise": ex_name,
+                            "sets": n_sets, "reps": reps_str,
+                            "target_weight": top_weight})
+            order += 1
+
+        # Move the sets to (week, day_idx) so they line up
+        for r in rows:
+            r.week = week
+            r.day_idx = day_idx
+
+        db.session.commit()
+        return jsonify({
+            "email": email, "date": date_str, "week": week, "day_idx": day_idx,
+            "prescription_rows_created": created,
+            "set_rows_aligned": len(rows),
+        })
+    except Exception as e:
+        import traceback
+        db.session.rollback()
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-2000:],
+        }), 500
+
+
 @app.route("/api/debug/show-sets")
 def debug_show_sets():
     """Dump SetLog rows for a user across recent days. UNAUTH diagnostic.
