@@ -1399,6 +1399,14 @@ def coach_respond(
     if result.ok:
         return render_response_to_user(result.sections)
 
+    import logging
+    log = logging.getLogger(__name__)
+    log.warning(
+        "coach_respond validation failed (1st attempt): %s. Raw response excerpt: %r",
+        result.failure_reason,
+        raw[:300],
+    )
+
     # Retry once with feedback
     retry_messages = messages + [
         {"role": "assistant", "content": raw},
@@ -1418,6 +1426,12 @@ def coach_respond(
     if result2.ok:
         return render_response_to_user(result2.sections)
 
+    log.warning(
+        "coach_respond validation failed (2nd attempt): %s. Falling back. Raw: %r",
+        result2.failure_reason,
+        raw2[:300],
+    )
+
     # Deterministic fallback (austere — better than capitulation)
     return deterministic_fallback(
         prefilled_schedule=rules.prefilled_schedule,
@@ -1430,7 +1444,10 @@ def _real_llm_call(system_prompt, messages, temperature, max_tokens):
     """Production LLM call. Imported lazily so tests don't need the API key."""
     import os
     import anthropic
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        timeout=60.0,  # Non-streaming Opus calls can take 30-45s for long prompts
+    )
     response = client.messages.create(
         model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-7"),
         max_tokens=max_tokens,

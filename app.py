@@ -5125,9 +5125,10 @@ def api_chat_stream():
             logging.warning("Client disconnected mid-stream")
         except Exception as e:
             import logging
-            logging.error("Stream error: %s", e)
-            err_msg = str(e)[:200].replace('\n', ' ')
-            yield f"data: [ERROR: {err_msg}]\n\n"
+            import traceback
+            logging.error("Coach stream error: %s\n%s", e, traceback.format_exc())
+            err_msg = (str(e) or type(e).__name__)[:200].replace('\n', ' ')
+            yield f"data: [ERROR: {type(e).__name__}: {err_msg}]\n\n"
         finally:
             # Save the response (same logic as before)
             if full_text.strip():
