@@ -98,41 +98,6 @@ def _build_checkins():
     } for e in rows]}
 
 
-@section_builder("chat_history")
-def _build_chat_history():
-    from models import ChatMessage
-    local_today = _user_today()
-    week_start = local_today - timedelta(days=local_today.weekday())
-    # Today's messages (most relevant, limit 20 to prevent bloat from planning retries)
-    today_msgs = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(20).all()][::-1]  # reverse to chronological
-    # Earlier this week (limit 15)
-    earlier_week = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= week_start,
-        ChatMessage.log_date < local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(15).all()][::-1]
-    # Older context (last week, limit 10 — memories carry the rest)
-    older = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date < week_start
-    ).order_by(ChatMessage.created_at.desc()).limit(10).all()][::-1]
-    return {"chat_history": older + earlier_week + today_msgs}
-
-
 @section_builder("event_timeline")
 def _build_event_timeline():
     """Structured ground-truth ledger from canonical logs.
