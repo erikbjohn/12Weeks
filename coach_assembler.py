@@ -1432,7 +1432,7 @@ def _real_llm_call(system_prompt, messages, temperature, max_tokens):
     import anthropic
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     response = client.messages.create(
-        model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-20250514"),
+        model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-7"),
         max_tokens=max_tokens,
         temperature=temperature,
         system=system_prompt,

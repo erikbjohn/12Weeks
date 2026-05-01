@@ -45,8 +45,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 # ─── MODEL CONSTANTS ──────────────────────────────────────────────────────
-CLAUDE_OPUS = "claude-opus-4-20250514"
-CLAUDE_SONNET = "claude-sonnet-4-20250514"
+CLAUDE_OPUS = "claude-opus-4-7"
+CLAUDE_SONNET = "claude-sonnet-4-6"
 
 
 # CSRF token helper
