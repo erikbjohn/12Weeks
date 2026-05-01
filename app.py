@@ -4948,13 +4948,25 @@ def api_chat():
     if "good enough" in user_msg.lower():
         context["_force_angry"] = True
 
-    # Get AI response via the new orchestration: rules → assemble → LLM → validate → fallback
-    from coach_assembler import coach_respond
-    response_text = coach_respond(
-        user_id=current_user.id,
-        agent_name=_route_info["agent_name"],
-        user_message=user_msg,
+    # Get AI response
+    from coach_assembler import assemble_prompt
+    from coach import _build_messages
+    from coach_agents import AGENTS
+    import anthropic
+
+    system_prompt = assemble_prompt(_route_info["agent_name"], context)
+    messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
+    agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model=CLAUDE_OPUS,
+        max_tokens=agent_config["max_tokens"],
+        temperature=agent_config["temperature"],
+        system=system_prompt,
+        messages=messages,
     )
+    response_text = response.content[0].text
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -5107,29 +5119,42 @@ def api_chat_stream():
     def generate():
         full_text = ""
         try:
-            from coach_assembler import coach_respond_streaming
-            for chunk in coach_respond_streaming(
-                user_id=_current_user_id,
-                agent_name=_route_info["agent_name"],
-                user_message=user_msg,
-            ):
-                full_text += chunk + " "
-                # SSE data field cannot contain raw newlines — escape them.
-                # Add a leading space between chunks for readability when client concatenates.
-                safe_text = (chunk + " ").replace('\n', '\\n')
-                yield f"data: {safe_text}\n\n"
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
+
+            from coach_assembler import assemble_prompt
+            from coach import _build_messages
+            from coach_agents import AGENTS
+            system_prompt = assemble_prompt(_route_info["agent_name"], context)
+            messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
+            _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+
+            with client.messages.stream(
+                model=CLAUDE_OPUS,
+                max_tokens=_agent_config["max_tokens"],
+                temperature=_agent_config["temperature"],
+                system=system_prompt,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    full_text += text
+                    # SSE data field cannot contain raw newlines — they break the parser
+                    # Replace \n with a placeholder, client converts back
+                    safe_text = text.replace('\n', '\\n')
+                    yield f"data: {safe_text}\n\n"
+
             yield f"data: [DONE]\n\n"
-            full_text = full_text.rstrip()
         except GeneratorExit:
             import logging
             logging.warning("Client disconnected mid-stream")
         except Exception as e:
             import logging
             logging.error("Stream error: %s", e)
+            # Send error details to client so we can diagnose
             err_msg = str(e)[:200].replace('\n', ' ')
             yield f"data: [ERROR: {err_msg}]\n\n"
         finally:
-            # Save the response (same logic as before)
+            # ALWAYS save the response if we got any text — even partial
             if full_text.strip():
                 try:
                     with _app.app_context():
@@ -5139,7 +5164,7 @@ def api_chat_stream():
                 except Exception:
                     pass
 
-                # Extract memories (background thread)
+                # Extract memories from conversation (same as non-streaming endpoint)
                 try:
                     def _save_memories_stream():
                         with _app.app_context():
@@ -5159,12 +5184,13 @@ def api_chat_stream():
                                 if memories:
                                     db.session.commit()
                             except Exception:
-                                pass
+                                pass  # Memory extraction is best-effort
+
                     threading.Thread(target=_save_memories_stream, daemon=True).start()
                 except Exception:
                     pass
 
-                # Parse structured markers
+                # Parse structured markers from coach response
                 try:
                     _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
                 except Exception:
