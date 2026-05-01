@@ -1305,12 +1305,17 @@ def _format_food_safety_block(ctx):
 # assemble_prompt — the main entry point
 # ---------------------------------------------------------------------------
 
-def assemble_prompt(agent_name, context):
+def assemble_prompt(agent_name, context, rules=None):
     """Combine CORE_PROMPT + protocol + formatted data into a system prompt.
 
     Args:
         agent_name: Key into PROTOCOL_MAP (e.g. "morning_checkin", "conversation")
         context: Dict from build_filtered_context()
+        rules: Optional CoachRules dataclass from compute_coach_rules. When
+               provided, pre-filled <schedule> and <directive> blocks are
+               appended to the system prompt, and a refusal instruction is
+               added when rules.refusal_required is True. When None, falls
+               back to legacy behavior (no pre-fills).
 
     Returns:
         Complete system prompt string ready for Claude API.
@@ -1341,7 +1346,7 @@ def assemble_prompt(agent_name, context):
     # Food safety block
     food_safety_block = _format_food_safety_block(context)
 
-    # Assemble
+    # Assemble base prompt via existing format() call
     prompt = CORE_PROMPT.format(
         athlete_name=context.get("athlete_name", "Athlete"),
         anger_level_label=anger_label,
@@ -1350,5 +1355,19 @@ def assemble_prompt(agent_name, context):
         athlete_data_block=athlete_data_block,
         food_safety_block=food_safety_block,
     )
+
+    # New (Task 15): inject rules engine pre-fills + protocol + refusal
+    if rules is not None:
+        prompt += "\n\n# AGENT PROTOCOL\n"
+        prompt += protocol
+        prompt += "\n\n# PRE-FILLED SECTIONS (echo these back byte-identical)\n"
+        prompt += rules.prefilled_schedule
+        prompt += "\n"
+        prompt += rules.prefilled_directive
+        if rules.refusal_required:
+            prompt += (
+                f"\n\n# REFUSAL REQUIRED — reason: {rules.refusal_reason}. "
+                "Emit a <refusal> section that echoes the directive and names the deviation."
+            )
 
     return prompt

@@ -234,3 +234,60 @@ class TestCoachAgentsConfig:
         for name in ALL_SECTIONS:
             assert name in _SECTION_BUILDERS, \
                 f"ALL_SECTIONS includes '{name}' but no @section_builder is registered"
+
+
+class TestAssemblePromptWithRules:
+    def test_prompt_includes_prefilled_sections_when_rules_provided(self, app_ctx):
+        from coach_assembler import assemble_prompt, build_filtered_context
+        from coach_rules import compute_coach_rules
+        from datetime import datetime
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            ctx = build_filtered_context("conversation")
+            rules = compute_coach_rules(
+                user_id=u.id,
+                now=datetime(2026, 4, 30, 14, 0),
+                latest_user_message=None,
+            )
+            prompt = assemble_prompt("conversation", ctx, rules=rules)
+        # Pre-filled blocks injected verbatim
+        assert rules.prefilled_schedule in prompt
+        assert rules.prefilled_directive in prompt
+        assert rules.directive.text in prompt
+
+    def test_prompt_includes_refusal_instruction_when_required(self, app_ctx):
+        from coach_assembler import assemble_prompt, build_filtered_context
+        from coach_rules import compute_coach_rules
+        from datetime import datetime
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            ctx = build_filtered_context("conversation")
+            rules = compute_coach_rules(
+                user_id=u.id,
+                now=datetime(2026, 4, 30, 14, 0),
+                latest_user_message="thinking about resting tomorrow",
+            )
+            prompt = assemble_prompt("conversation", ctx, rules=rules)
+        assert rules.refusal_required is True
+        assert "REFUSAL REQUIRED" in prompt or "refusal_required" in prompt.lower()
+        assert rules.refusal_reason in prompt or "refusal" in prompt.lower()
+
+    def test_prompt_works_without_rules(self, app_ctx):
+        # Backward compat: callers without rules= still work
+        from coach_assembler import assemble_prompt, build_filtered_context
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            ctx = build_filtered_context("conversation")
+            prompt = assemble_prompt("conversation", ctx)  # no rules kwarg
+        assert prompt  # non-empty
+        # No rules-engine injected block since no rules provided
+        assert "# PRE-FILLED SECTIONS (echo these back byte-identical)" not in prompt
