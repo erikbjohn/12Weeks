@@ -1173,7 +1173,7 @@ def debug_program_friday():
                .filter_by(user_id=u.id, week=week, day_idx=day_idx)
                .all())
         rx_dump = [{
-            "exercise_idx": r.exercise_idx,
+            "exercise_order": r.exercise_order,
             "exercise_name": r.exercise_name,
             "sets": r.sets,
             "reps": r.reps,
