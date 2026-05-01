@@ -1152,6 +1152,53 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/show-sets")
+def debug_show_sets():
+    """Dump SetLog rows for a user across recent days. UNAUTH diagnostic.
+    Query: ?email=...&days=7 (default 7)
+    """
+    email = request.args.get("email", "erik@placemetry.com")
+    days_back = int(request.args.get("days", 7))
+    try:
+        from datetime import date as _date, timedelta as _td
+        from models import User, SetLog
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        cutoff = _date.today() - _td(days=days_back)
+        rows = (SetLog.query
+                .filter(SetLog.user_id == u.id, SetLog.logged_date >= cutoff)
+                .order_by(SetLog.logged_date.desc(),
+                          SetLog.day_idx.asc(),
+                          SetLog.exercise_name.asc(),
+                          SetLog.set_number.asc())
+                .all())
+        # Group by (logged_date, day_idx, week)
+        grouped = {}
+        for r in rows:
+            key = f"{r.logged_date}|wk{r.week}|day_idx={r.day_idx}"
+            grouped.setdefault(key, []).append({
+                "exercise": r.exercise_name,
+                "set": r.set_number,
+                "weight": r.weight,
+                "reps": r.reps,
+                "done": r.done,
+            })
+        return jsonify({
+            "email": email,
+            "days_back": days_back,
+            "total_sets": len(rows),
+            "by_day": grouped,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-2000:],
+        }), 500
+
+
 @app.route("/api/debug/move-sets-day")
 def debug_move_sets_day():
     """Move all SetLog rows for a user matching (logged_date, from_day_idx)
