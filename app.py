@@ -4948,25 +4948,13 @@ def api_chat():
     if "good enough" in user_msg.lower():
         context["_force_angry"] = True
 
-    # Get AI response
-    from coach_assembler import assemble_prompt
-    from coach import _build_messages
-    from coach_agents import AGENTS
-    import anthropic
-
-    system_prompt = assemble_prompt(_route_info["agent_name"], context)
-    messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
-    agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
-
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    response = client.messages.create(
-        model=CLAUDE_OPUS,
-        max_tokens=agent_config["max_tokens"],
-        temperature=agent_config["temperature"],
-        system=system_prompt,
-        messages=messages,
+    # Get AI response via the new orchestration: rules → assemble → LLM → validate → fallback
+    from coach_assembler import coach_respond
+    response_text = coach_respond(
+        user_id=current_user.id,
+        agent_name=_route_info["agent_name"],
+        user_message=user_msg,
     )
-    response_text = response.content[0].text
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
