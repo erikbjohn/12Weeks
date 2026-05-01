@@ -284,6 +284,13 @@ class TestRefusalDetection:
         "should I do the run later",
         "do I really have to lift today",
         "maybe I'll just do the run and skip the lift",
+        "I don't think I can lift today",
+        "feeling drained",
+        "too sore today",
+        "do it tomorrow",
+        "switch to a rest day",
+        "need a break",
+        "let me skip just this one",
     ])
     def test_refusal_triggered(self, msg):
         from coach_rules import _detect_refusal
@@ -546,3 +553,46 @@ class TestComputeCoachRulesEnd:
         assert rules.refusal_required is True
         assert rules.refusal_reason
         assert "Train as planned" in rules.directive.text
+
+
+class TestWorkoutStatusVsCompletion:
+    def test_partial_logging_returns_in_progress(self, app_ctx):
+        # User logs 2 sets but never marks DayCompletion.done — should be in_progress, NOT complete
+        from coach_rules import _compute_workout_status
+        from models import SetLog
+        from datetime import date
+        from app import db
+        app_obj, _ = app_ctx
+        from models import User
+        u = User(email=f"status-test-{id(self)}@example.com", password_hash="x")
+        db.session.add(u); db.session.commit()
+        for i in range(2):
+            db.session.add(SetLog(
+                user_id=u.id, exercise_name="Front Squat", week=5, day_idx=0,
+                set_number=i+1, weight=175, reps=5, done=True, logged_date=date.today(),
+            ))
+        db.session.commit()
+        with app_obj.test_request_context():
+            s = _compute_workout_status(
+                user_id=u.id, week=5, day_idx=0,
+                today_date=date.today(), is_rest=False,
+            )
+        assert s == "in_progress", f"expected in_progress (no DayCompletion.done), got {s}"
+
+    def test_day_completion_flag_returns_complete(self, app_ctx):
+        from coach_rules import _compute_workout_status
+        from models import DayCompletion
+        from datetime import date
+        from app import db
+        app_obj, _ = app_ctx
+        from models import User
+        u = User(email=f"dc-test-{id(self)}@example.com", password_hash="x")
+        db.session.add(u); db.session.commit()
+        db.session.add(DayCompletion(user_id=u.id, week=5, day_idx=0, done=True))
+        db.session.commit()
+        with app_obj.test_request_context():
+            s = _compute_workout_status(
+                user_id=u.id, week=5, day_idx=0,
+                today_date=date.today(), is_rest=False,
+            )
+        assert s == "complete"

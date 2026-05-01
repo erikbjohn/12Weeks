@@ -128,33 +128,28 @@ def _compute_workout_status(
 ) -> str:
     """Returns one of: not_started | in_progress | complete | rest.
 
-    Rest takes precedence. For non-rest days:
+    Rest takes precedence. Otherwise:
+    - complete: DayCompletion.done is True for (user, week, day_idx).
     - not_started: zero SetLog rows for this user/week/day_idx today.
-    - in_progress: at least one SetLog row today, but not all configured sets done.
-    - complete: every prescribed set has done=True.
+    - in_progress: at least one SetLog row exists but DayCompletion.done is not True.
     """
     if is_rest:
         return "rest"
-    from models import SetLog
-    sets_today = SetLog.query.filter_by(
+    from models import SetLog, DayCompletion
+
+    # Check authoritative completion flag first
+    dc = DayCompletion.query.filter_by(
         user_id=user_id, week=week, day_idx=day_idx,
-        logged_date=today_date,
-    ).all()
-    if not sets_today:
-        return "not_started"
-    done_count = sum(1 for s in sets_today if s.done)
-    # If any logged sets exist but not all done → in_progress.
-    # We don't try to compute the "expected total" precisely — coach treats
-    # any logged-but-incomplete session as in_progress.
-    if done_count == 0:
-        return "in_progress"
-    # Heuristic: if the user logged any sets and stopped, treat as in_progress
-    # unless the day's known exercise count appears all-completed. Keep it
-    # simple — engine and api_workouts are the source of truth for "complete";
-    # rules engine just needs a 4-bucket signal.
-    if done_count >= len(sets_today):
+    ).first()
+    if dc and dc.done:
         return "complete"
-    return "in_progress"
+
+    # Fall back to SetLog presence
+    has_logged = (SetLog.query
+                  .filter_by(user_id=user_id, week=week, day_idx=day_idx,
+                             logged_date=today_date)
+                  .first() is not None)
+    return "in_progress" if has_logged else "not_started"
 
 
 def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime]:
@@ -328,6 +323,14 @@ _REFUSAL_PATTERNS: list[tuple[re.Pattern, str]] = [
      "soft-future skip"),
     (re.compile(r"\b(what about|how about)\b.*\b(later|tonight|tomorrow|after work|this evening|the morning)\b.*\binstead\b", re.I),
      "what-about renegotiation"),
+    (re.compile(r"\b(too sore|wiped|drained|exhausted|wrecked|beat up|wiped out|not feeling it|don't think i can|can't lift|can't run)\b", re.I),
+     "somatic-complaint"),
+    (re.compile(r"\b(do it tomorrow|do them tomorrow|tomorrow instead|push (it|this) to tomorrow)\b", re.I),
+     "tomorrow-postponement"),
+    (re.compile(r"\b(switch to (a |an )?(rest|easy|recovery)|swap to (a |an )?(rest|easy|recovery)|need (a )?break|take (a )?(break|day off|the day off))\b", re.I),
+     "switch-to-rest"),
+    (re.compile(r"\b(let me skip|skip just this|skip today|just rest)\b", re.I),
+     "soft-skip"),
 ]
 
 
