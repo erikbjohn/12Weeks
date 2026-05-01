@@ -1397,10 +1397,22 @@ def coach_respond(
         refusal_required=rules.refusal_required,
     )
     if result.ok:
-        return render_response_to_user(result.sections)
+        rendered = render_response_to_user(result.sections)
+        if not rendered.strip():
+            # Fix A: validator passed but all section bodies were empty strings.
+            # LLM emitted tags with no inner content — render produces "". Guard here
+            # so the caller never receives an empty string silently.
+            log.warning(
+                "coach_respond: 1st-attempt validation passed but rendered empty. Sections: %r. Falling back.",
+                {k: bool(v) for k, v in result.sections.items()},
+            )
+            return deterministic_fallback(
+                prefilled_schedule=rules.prefilled_schedule,
+                prefilled_directive=rules.prefilled_directive,
+                refusal_required=rules.refusal_required,
+            )
+        return rendered
 
-    import logging
-    log = logging.getLogger(__name__)
     log.warning(
         "coach_respond validation failed (1st attempt): %s. Raw response excerpt: %r",
         result.failure_reason,
@@ -1424,7 +1436,19 @@ def coach_respond(
         refusal_required=rules.refusal_required,
     )
     if result2.ok:
-        return render_response_to_user(result2.sections)
+        rendered2 = render_response_to_user(result2.sections)
+        if not rendered2.strip():
+            # Fix A (retry path): second-attempt validation passed but rendered empty.
+            log.warning(
+                "coach_respond: 2nd-attempt validation passed but rendered empty. Sections: %r. Falling back.",
+                {k: bool(v) for k, v in result2.sections.items()},
+            )
+            return deterministic_fallback(
+                prefilled_schedule=rules.prefilled_schedule,
+                prefilled_directive=rules.prefilled_directive,
+                refusal_required=rules.refusal_required,
+            )
+        return rendered2
 
     log.warning(
         "coach_respond validation failed (2nd attempt): %s. Falling back. Raw: %r",
@@ -1482,7 +1506,12 @@ def coach_respond_streaming(
         llm_fn=llm_fn,
     )
     # Chunk the validated string for streaming. Chunk on word boundaries.
-    if not full_text:
+    if not full_text or not full_text.strip():
+        # Fix B: coach_respond returned None or a whitespace-only string.
+        # Yielding a visible sentinel prevents the client seeing a silent empty bubble.
+        # Server logs (from coach_respond) will have the root cause.
+        log.warning("coach_respond_streaming: coach_respond returned empty/whitespace. Yielding sentinel.")
+        yield "[Coach pipeline returned empty response. Server logs should have details.]"
         return
     words = full_text.split(" ")
     buf = ""

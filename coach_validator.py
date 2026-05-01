@@ -88,10 +88,16 @@ def validate_response(
     """
     sections = parse_envelope(raw)
 
-    # 1. Required sections present
+    # 1. Required sections present (and non-empty)
     missing = [k for k in ("schedule", "directive", "motivation") if k not in sections]
     if missing:
         return ValidationResult(ok=False, failure_reason=f"missing section(s): {missing}")
+    # Fix C: sections present but with empty content also fail. An LLM that emits
+    # <motivation></motivation> would pass the key-presence check above but produce
+    # an empty rendered response. Catch that here so the retry/fallback fires.
+    empty_sections = [k for k in ("motivation",) if not sections[k].strip()]
+    if empty_sections:
+        return ValidationResult(ok=False, failure_reason=f"section(s) present but empty: {empty_sections}")
 
     # 2. Pre-filled byte equality (strip the outer tags before comparing inner content)
     schedule_inner = _strip_outer_tag(prefilled_schedule, "schedule")
