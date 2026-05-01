@@ -1371,3 +1371,106 @@ def assemble_prompt(agent_name, context, rules=None):
             )
 
     return prompt
+
+
+# ---------------------------------------------------------------------------
+# Task 16: coach_respond orchestration
+# Pipeline: rules → assemble → LLM → validate → retry-with-feedback → fallback
+# ---------------------------------------------------------------------------
+
+def render_response_to_user(sections):
+    """Strip tags, join sections in display order. The user never sees tags."""
+    parts = []
+    for key in ("schedule", "directive", "motivation", "refusal"):
+        if key in sections and sections[key]:
+            parts.append(sections[key].strip())
+    return "\n\n".join(parts)
+
+
+def coach_respond(
+    user_id,
+    agent_name,
+    user_message,
+    rules=None,
+    llm_fn=None,
+):
+    """Top-level coach entry. Replaces the inline LLM call in /api/chat.
+
+    Args:
+        user_id: athlete user id.
+        agent_name: agent key from AGENTS dict (e.g. 'conversation').
+        user_message: the user's latest message text (or None for system events).
+        rules: CoachRules dataclass. If None, computed via compute_coach_rules.
+        llm_fn: Callable(system_prompt, messages, temperature, max_tokens) -> str.
+                If None, uses the real Anthropic client. Tests pass a stub.
+
+    Returns: rendered response string for the user (tags stripped).
+    """
+    from coach_rules import compute_coach_rules
+    from coach_validator import validate_response, deterministic_fallback
+    from coach_agents import AGENTS
+
+    if rules is None:
+        rules = compute_coach_rules(user_id=user_id, latest_user_message=user_message)
+
+    context = build_filtered_context(agent_name)
+    context["latest_user_message"] = user_message or ""
+    system_prompt = assemble_prompt(agent_name, context, rules=rules)
+
+    agent_cfg = AGENTS.get(agent_name, AGENTS["conversation"])
+    messages = [{"role": "user", "content": user_message or "(system event)"}]
+
+    if llm_fn is None:
+        llm_fn = _real_llm_call
+
+    raw = llm_fn(system_prompt, messages, agent_cfg["temperature"], agent_cfg["max_tokens"])
+
+    result = validate_response(
+        raw=raw,
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+    if result.ok:
+        return render_response_to_user(result.sections)
+
+    # Retry once with feedback
+    retry_messages = messages + [
+        {"role": "assistant", "content": raw},
+        {"role": "user", "content": (
+            f"Your response failed validation: {result.failure_reason}. "
+            "Re-emit the response, fixing the specific issue. "
+            "Echo the pre-filled <schedule> and <directive> sections byte-identical."
+        )},
+    ]
+    raw2 = llm_fn(system_prompt, retry_messages, agent_cfg["temperature"], agent_cfg["max_tokens"])
+    result2 = validate_response(
+        raw=raw2,
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+    if result2.ok:
+        return render_response_to_user(result2.sections)
+
+    # Deterministic fallback (austere — better than capitulation)
+    return deterministic_fallback(
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+
+
+def _real_llm_call(system_prompt, messages, temperature, max_tokens):
+    """Production LLM call. Imported lazily so tests don't need the API key."""
+    import os
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-7"),
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system_prompt,
+        messages=messages,
+    )
+    return response.content[0].text
