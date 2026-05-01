@@ -1259,10 +1259,9 @@ def debug_api_workouts_as_user():
         else:
             payload = resp[0].get_json() if isinstance(resp, tuple) else None
 
-        # Drill into requested week+day for clarity
-        weeks = (payload or {}).get("weeks", [])
-        target_week = next((w for w in weeks if w.get("week") == week), None)
-        days = (target_week or {}).get("days", [])
+        # api_workouts returns dict keyed by str(week)
+        target_week = (payload or {}).get(str(week)) or {}
+        days = target_week.get("days", [])
         target_day = days[day_idx] if day_idx < len(days) else None
         return jsonify({
             "email": email, "week": week, "day_idx": day_idx,
