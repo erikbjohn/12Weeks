@@ -1465,7 +1465,14 @@ def coach_respond(
 
 
 def _real_llm_call(system_prompt, messages, temperature, max_tokens):
-    """Production LLM call. Imported lazily so tests don't need the API key."""
+    """Production LLM call. Imported lazily so tests don't need the API key.
+
+    NOTE: `temperature` is accepted in the signature for backward compat but
+    NOT forwarded to the API — Opus 4.7+ rejects the parameter (returns
+    BadRequestError "`temperature` is deprecated for this model"). The
+    rules-engine + validator already constrain output behavior, so the loss
+    of temperature control is acceptable.
+    """
     import os
     import anthropic
     client = anthropic.Anthropic(
@@ -1475,7 +1482,6 @@ def _real_llm_call(system_prompt, messages, temperature, max_tokens):
     response = client.messages.create(
         model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-7"),
         max_tokens=max_tokens,
-        temperature=temperature,
         system=system_prompt,
         messages=messages,
     )
