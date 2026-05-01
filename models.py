@@ -627,3 +627,18 @@ class WeeklyDaySchedule(db.Model):
     is_rest = db.Column(db.Boolean, default=False)
     source = db.Column(db.String(20), default='engine')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class CoachFeedback(db.Model):
+    """User flags on bad coach responses. I read these to tune CORE_PROMPT,
+    BANNED_PHRASES, and protocol rules.
+    """
+    __tablename__ = "coach_feedback"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    chat_message_id = db.Column(db.Integer, nullable=True)  # link back if available
+    coach_text = db.Column(db.Text, nullable=False)         # the flagged message
+    category = db.Column(db.String(40), nullable=False)     # robotic|hollow|wrong|sycophantic|capitulation|other
+    note = db.Column(db.Text, nullable=True)                # optional user free text
+    user_message = db.Column(db.Text, nullable=True)        # what the user said before the coach replied
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

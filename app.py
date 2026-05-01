@@ -1480,6 +1480,70 @@ def debug_program_friday():
         }), 500
 
 
+@app.route("/api/coach/flag", methods=["POST"])
+@login_required
+def api_coach_flag():
+    """User flags a bad coach response. Stored in CoachFeedback for tuning."""
+    data = request.get_json() or {}
+    text = (data.get("coach_text") or "").strip()
+    category = (data.get("category") or "other").strip()[:40]
+    note = (data.get("note") or "").strip()[:1000]
+    chat_message_id = data.get("chat_message_id")
+    user_message = (data.get("user_message") or "").strip()[:2000]
+    if not text:
+        return jsonify({"error": "coach_text required"}), 400
+    try:
+        from models import CoachFeedback
+        cf = CoachFeedback(
+            user_id=current_user.id,
+            chat_message_id=chat_message_id,
+            coach_text=text[:5000],
+            category=category,
+            note=note or None,
+            user_message=user_message or None,
+        )
+        db.session.add(cf)
+        db.session.commit()
+        return jsonify({"ok": True, "id": cf.id})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/debug/coach-feedback")
+def debug_coach_feedback():
+    """Dump recent CoachFeedback rows. UNAUTH diagnostic.
+    Query: ?email=...&days=14 (defaults to all users, last 14 days)
+    """
+    email = request.args.get("email", "")
+    days_back = int(request.args.get("days", 14))
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        from models import User, CoachFeedback
+        cutoff = _dt.utcnow() - _td(days=days_back)
+        q = CoachFeedback.query.filter(CoachFeedback.created_at >= cutoff)
+        if email:
+            u = User.query.filter_by(email=email).first()
+            if u:
+                q = q.filter(CoachFeedback.user_id == u.id)
+        rows = q.order_by(CoachFeedback.created_at.desc()).limit(200).all()
+        return jsonify({
+            "count": len(rows),
+            "feedback": [{
+                "id": r.id, "user_id": r.user_id,
+                "category": r.category, "note": r.note,
+                "user_message": r.user_message,
+                "coach_text": r.coach_text,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            } for r in rows],
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/coach-error")
 def debug_coach_error():
     """Run the new coach pipeline against a user and return the response or

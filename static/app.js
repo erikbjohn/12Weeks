@@ -1,3 +1,130 @@
+// ─── COACH FEEDBACK FLAG (👎 button on coach bubbles) ───────────────────────
+// Delegated click handler — works on every coach bubble regardless of which
+// SSE consumer rendered it. Adds 👎 button on hover, opens category picker on
+// click, posts to /api/coach/flag.
+(function setupCoachFlagging() {
+  if (typeof document === 'undefined') return;
+
+  function injectFlagButton(bubble) {
+    if (bubble.querySelector('.mc-flag-btn')) return;
+    var btn = document.createElement('button');
+    btn.className = 'mc-flag-btn';
+    btn.title = 'Flag this response';
+    btn.textContent = '👎';
+    btn.onclick = function(e) {
+      e.stopPropagation();
+      openFlagPicker(bubble, btn);
+    };
+    bubble.appendChild(btn);
+  }
+
+  function getRecentUserMessage(bubble) {
+    // Walk previous siblings to find the nearest user bubble
+    var el = bubble.previousElementSibling;
+    while (el) {
+      if (el.classList && el.classList.contains('mc-user-bubble')) {
+        return (el.textContent || '').trim();
+      }
+      el = el.previousElementSibling;
+    }
+    return '';
+  }
+
+  function openFlagPicker(bubble, btn) {
+    // Close any other open picker
+    document.querySelectorAll('.mc-flag-picker').forEach(function(p) { p.remove(); });
+
+    var picker = document.createElement('div');
+    picker.className = 'mc-flag-picker';
+    var categories = [
+      ['robotic',      'Robotic / one-word'],
+      ['hollow',       'Hollow / no substance'],
+      ['wrong',        'Wrong info / hallucination'],
+      ['sycophantic',  'Sycophantic / soft'],
+      ['capitulation', 'Capitulation / negotiating'],
+      ['repetitive',   'Repetitive / boring'],
+      ['other',        'Other'],
+    ];
+    categories.forEach(function(cat) {
+      var b = document.createElement('button');
+      b.textContent = cat[1];
+      b.onclick = function(e) {
+        e.stopPropagation();
+        submitFlag(bubble, btn, cat[0]);
+        picker.remove();
+      };
+      picker.appendChild(b);
+    });
+    bubble.appendChild(picker);
+
+    // Click outside to close
+    setTimeout(function() {
+      function close(ev) {
+        if (!picker.contains(ev.target)) {
+          picker.remove();
+          document.removeEventListener('click', close);
+        }
+      }
+      document.addEventListener('click', close);
+    }, 0);
+  }
+
+  function submitFlag(bubble, btn, category) {
+    // Strip flag button text from coach_text
+    var clone = bubble.cloneNode(true);
+    clone.querySelectorAll('.mc-flag-btn, .mc-flag-picker').forEach(function(el) { el.remove(); });
+    var coachText = (clone.textContent || '').trim();
+    var userMessage = getRecentUserMessage(bubble);
+    fetch('/api/coach/flag', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        coach_text: coachText,
+        user_message: userMessage,
+        category: category,
+      }),
+    }).then(function(r) {
+      btn.classList.add('flagged');
+      btn.textContent = '✓';
+      btn.title = 'Flagged: ' + category;
+      setTimeout(function() {
+        btn.textContent = '👎';
+      }, 1500);
+    }).catch(function() {
+      btn.title = 'Flag failed — try again';
+    });
+  }
+
+  // Inject buttons into existing bubbles (already rendered)
+  function scan() {
+    document.querySelectorAll('.mc-coach-bubble').forEach(injectFlagButton);
+  }
+
+  // Watch for new bubbles via MutationObserver
+  document.addEventListener('DOMContentLoaded', function() {
+    scan();
+    var mo = new MutationObserver(function(muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType !== 1) continue;
+          if (n.classList && n.classList.contains('mc-coach-bubble')) {
+            injectFlagButton(n);
+          } else if (n.querySelectorAll) {
+            n.querySelectorAll('.mc-coach-bubble').forEach(injectFlagButton);
+          }
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  });
+  // If the script runs after DOMContentLoaded already fired:
+  if (document.readyState !== 'loading') {
+    setTimeout(scan, 0);
+  }
+})();
+
 // ─── DATA CACHES ────────────────────────────────────────────────────────────
 let _weightsCache = null;
 let _completionsCache = null;
