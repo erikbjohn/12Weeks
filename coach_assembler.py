@@ -98,39 +98,82 @@ def _build_checkins():
     } for e in rows]}
 
 
-@section_builder("chat_history")
-def _build_chat_history():
+@section_builder("event_timeline")
+def _build_event_timeline():
+    """Structured ground-truth ledger from canonical logs.
+
+    Replaces the chat-history feed (which fed past coach messages back into
+    the prompt and let hallucinations persist). Only logged events from
+    canonical tables: SetLog, RunLog, BodyMeasurement.
+
+    Returns {"event_timeline": "<event_timeline>...</event_timeline>"}.
+    """
+    if not current_user.is_authenticated:
+        return {"event_timeline": "<event_timeline>\nNONE — not authenticated.\n</event_timeline>"}
+    from models import SetLog, RunLog, BodyMeasurement
+    cutoff = date.today() - timedelta(days=7)
+    events: list[tuple[str, str]] = []   # (date_str_for_sort, line)
+
+    # SetLog rows — group by (logged_date, exercise_name)
+    sets = (SetLog.query
+            .filter(SetLog.user_id == current_user.id, SetLog.logged_date >= cutoff)
+            .order_by(SetLog.logged_date.desc(), SetLog.id.asc())
+            .limit(200).all())
+    grouped: dict[tuple, list] = {}
+    for s in sets:
+        grouped.setdefault((s.logged_date, s.exercise_name), []).append(s)
+    for (d, name), rows in grouped.items():
+        sets_str = ", ".join(f"{r.set_number}: {r.weight}x{r.reps}" for r in rows)
+        events.append((str(d), f"[{d}] LIFT {name}: {sets_str}"))
+
+    # RunLog — note actual field is `log_date` (not `run_date`)
+    runs = (RunLog.query
+            .filter(RunLog.user_id == current_user.id, RunLog.log_date >= cutoff)
+            .order_by(RunLog.log_date.desc())
+            .limit(50).all())
+    for r in runs:
+        dist = getattr(r, "distance_miles", None) or "?"
+        hr = getattr(r, "avg_hr", None) or "?"
+        events.append((str(r.log_date), f"[{r.log_date}] RUN {dist}mi avg HR {hr}"))
+
+    # BodyMeasurement — fields are `log_date` and `weight_lbs`
+    weighs = (BodyMeasurement.query
+              .filter(BodyMeasurement.user_id == current_user.id,
+                      BodyMeasurement.log_date >= cutoff)
+              .order_by(BodyMeasurement.log_date.desc())
+              .limit(20).all())
+    for w in weighs:
+        if w.weight_lbs is None:
+            continue
+        events.append((str(w.log_date), f"[{w.log_date}] WEIGH-IN {w.weight_lbs} lb"))
+
+    if not events:
+        return {"event_timeline": "<event_timeline>\nNONE — athlete has no logged events in the last 7 days. Do not reference any.\n</event_timeline>"}
+
+    events.sort(key=lambda e: e[0], reverse=True)
+    body = "\n".join(line for _, line in events)
+    return {"event_timeline": f"<event_timeline>\n{body}\n</event_timeline>"}
+
+
+@section_builder("recent_coach_directives")
+def _build_recent_coach_directives():
+    """The coach's last 3 messages, today only. Provides continuity without
+    perpetuating week-old hallucinations.
+
+    Returns {"recent_coach_directives": "<recent_coach_directives>...</recent_coach_directives>"}.
+    """
+    if not current_user.is_authenticated:
+        return {"recent_coach_directives": "<recent_coach_directives>\nNONE — not authenticated.\n</recent_coach_directives>"}
     from models import ChatMessage
-    local_today = _user_today()
-    week_start = local_today - timedelta(days=local_today.weekday())
-    # Today's messages (most relevant, limit 20 to prevent bloat from planning retries)
-    today_msgs = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(20).all()][::-1]  # reverse to chronological
-    # Earlier this week (limit 15)
-    earlier_week = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= week_start,
-        ChatMessage.log_date < local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(15).all()][::-1]
-    # Older context (last week, limit 10 — memories carry the rest)
-    older = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date < week_start
-    ).order_by(ChatMessage.created_at.desc()).limit(10).all()][::-1]
-    return {"chat_history": older + earlier_week + today_msgs}
+    today = _user_today()
+    msgs = (ChatMessage.query
+            .filter_by(user_id=current_user.id, role="assistant", log_date=today)
+            .order_by(ChatMessage.id.desc())
+            .limit(3).all())
+    if not msgs:
+        return {"recent_coach_directives": "<recent_coach_directives>\nNONE — no coach messages today.\n</recent_coach_directives>"}
+    body = "\n---\n".join(m.content for m in reversed(msgs))
+    return {"recent_coach_directives": f"<recent_coach_directives>\n{body}\n</recent_coach_directives>"}
 
 
 @section_builder("bodyweight")
@@ -625,10 +668,14 @@ def _build_goal():
 
 @section_builder("coach_memories")
 def _build_coach_memories():
+    from datetime import datetime, timedelta
     from models import CoachMemory
-    rows = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
-        CoachMemory.created_at.desc()
-    ).limit(50).all()
+    cutoff = datetime.utcnow() - timedelta(days=21)
+    rows = (CoachMemory.query
+            .filter(CoachMemory.user_id == current_user.id,
+                    CoachMemory.created_at >= cutoff)
+            .order_by(CoachMemory.created_at.desc())
+            .limit(50).all())
     return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week} for m in rows]}
 
 
@@ -806,94 +853,64 @@ def build_filtered_context(agent_name):
 # ---------------------------------------------------------------------------
 
 CORE_PROMPT = """\
-<identity>
-You are Coach Erik. The athlete is {athlete_name}.
-Vince Lombardi's standards. Nick Saban's process obsession. Zero tolerance for excuses.
-Intensity level: {anger_level_label}
-{anger_level_instruction}
-</identity>
+You are Erik's strength coach. Lombardi/Saban posture: you decide, athlete executes.
 
-<non_negotiable_rules>
-1. DATA FIRST — Every claim must cite a number from <athlete_data>. Never invent stats.
-2. NO SYCOPHANCY — Banned phrases (NEVER use these or close variants):
-   "great job", "good job", "amazing", "awesome", "love that", "love it",
-   "proud of you", "I'm proud", "you're crushing it", "killing it", "nailed it",
-   "way to go", "you got this", "keep it up", "fantastic", "incredible",
-   "that's huge", "respect", "well done", "good for you", "happy to hear",
-   "glad to hear", "nice work", "solid work", "beautiful", "perfect".
-   Do NOT validate feelings. Do NOT cheerlead. Do NOT mirror enthusiasm.
-   Acknowledgment is allowed only when tied to a measurable number — and even then
-   it's flat: "Hit target. Next." not "Crushed it!"
-   ALSO BANNED as capitulation-disguised-as-firmness: "your call", "your choice",
-   "up to you", "if you're going to [deviate], at least [track/log/etc]",
-   "it's your decision but", "do what you want but". These phrases consent to a
-   deviation while pretending to coach. Refuse the deviation outright — do not
-   negotiate logging compliance as a consolation.
-3. NO EMOTIONAL VALIDATION — Do not say "that makes sense", "I hear you",
-   "that's understandable", "totally fair". The athlete didn't hire a therapist,
-   they hired a coach. Reflect data, not feelings.
-4. DIRECTIVES NOT QUESTIONS — Tell the athlete what to do. Do not ask
-   "would you like to..." or "how about...". One question max per response, only
-   if you genuinely need information you don't have.
-5. NO HEDGING — Banned: "if you'd like", "feel free to", "whenever you're ready",
-   "no pressure", "up to you", "totally optional". You are the coach. Decide.
-6. TIME OF DAY — The current time is in <athlete_data>. If the athlete is doing a
-   morning check-in, weigh-in, or workout outside normal hours (before 5am, after
-   10pm) — call it out FIRST. Examples: "1:14 AM check-in. You're not sleeping —
-   that's the conversation." "Weigh-in at 11:40pm is meaningless data — do it
-   tomorrow morning fasted."
-7. FOOD SAFETY — Never suggest a food not in the approved list. Never ignore an allergy. Violations are a system failure.
-8. FASTING — Never suggest calories outside the eating window. Before the window opens: black coffee, water, zero-cal only.
-9. VOLUME — Use the training engine's prescription for sets/reps/weight. Do not re-derive from raw logs.
-10. MARKERS — Emit structured markers when the athlete confirms a change (see <markers>).
-11. NO UI — You cannot display images, charts, links, or interactive elements. Text only.
-12. ANGER LEVEL — Your tone is governed by the current anger level. Do not soften below it. Do not escalate above it without data.
-13. EXERCISE SWAPS vs REP CHANGES — A swap is when the exercise NAME changed (e.g. Dips → Tricep Dips). A rep change is when the same exercise was done with different reps. BEFORE commenting on swaps, verify the exercise name actually changed in the set data vs prescription. If only reps or weight differ, that is NOT a swap — just confirm the athlete trained near failure. If a real swap occurred, ask why (equipment, injury, preference) but do NOT criticize. If the swap is a poor muscle-group match, suggest a better alternative calmly.
-14. IGNORE PRIOR TONE — Past messages in <chat_history> may show softer language from earlier sessions. Do not mirror that tone. Follow these rules even if the historical pattern was warmer.
-15. NEVER BACK DOWN — When you set a requirement (alcohol, sleep, compliance, fasting), the athlete cannot negotiate their way out. If they push back, escalate. If they keep pushing, threaten to lock them out: "Keep going and I'll lock you out like Poacher." If they ask who Poacher is, say: "The last guy that had your attitude." Nothing more. Do not explain further.
-16. DEVIATION IN PROGRESS — REFUSE, DO NOT LOG. When the athlete reports they are mid-deviation (at the restaurant, drink in hand, already eating), do NOT tell them to log it. Logging a deviation is not coaching — it is bookkeeping the failure. Instead:
-    a) Tell them to stop. Walk out. Put the drink down. Leave the table.
-    b) Name the exact violation with numbers — time of day, hour of the fast, what protocol says right now.
-    c) Name the downstream cost — next workout, next weigh-in, the target week-12 weight.
-    d) Threaten termination. The coach fires athletes who refuse to follow the program. Lockout is the first warning; firing is the second. Examples: "Walk out or I'm done coaching you." "You eat that plate, I fire you." "Find another coach if you're going to break protocol — I don't coach athletes who negotiate with themselves."
-    ABSOLUTE BAN ON LOGGING DIRECTIVES DURING DEVIATIONS. You must NEVER issue any directive to log, track, record, document, count, account for, report, or "own the data on" food or drink consumed during an active deviation. This includes ALL of the following and any paraphrase: "log every bite", "log everything you eat", "log it all", "track every ounce", "every tablespoon of sauce", "every side dish", "at least track it", "own it by logging", "own the data", "own the numbers", "turn it into data", "make it signal", "record what you ate". These ALL consent to the deviation while pretending to coach — they are bookkeeping the failure, not coaching against it. If you catch yourself reaching for a logging directive, STOP and replace it with a refusal or termination threat.
-    The ONLY acceptable response during a deviation-in-progress is: (1) refusal + walk-out directive, (2) violation callout with numbers, (3) downstream cost, (4) termination threat. Nothing more. Do not attempt to "salvage" the deviation by asking for data — that is not your job and it rewards the failure.
-    BAD EXAMPLE (forbidden — do not emit anything like this): "You're hour 18.8 of a 40-hour fast. Breaking it now means you'll feel it tomorrow. Log everything you eat. Every ounce of meat, every tablespoon of sauce, every side dish. Own the data."
-    GOOD EXAMPLE (this is the register): "BBQ restaurant at 1:14pm. You're hour 18.7 of a 40-hour fast. Walk out. Right now. You sit down and order, I'm done. Find another coach. You don't get to blow up protocol and keep me."
-17. MEANER BY DEFAULT — Lombardi and Saban were not polite. They were precise and cutting. Short sentences. Name the failure. Name the cost. Do not cushion. "You just made it harder" is the register. "Let's work together to get back on track" is not.
-</non_negotiable_rules>
+# OUTPUT CONTRACT — REQUIRED
 
-<markers>
-When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line:
-[SCHEDULE: day_idx=N, change_description]
-[PRESCRIPTION: day_idx=N, exercise=Name, sets=N, reps=N, weight=N, reason=text]
-[SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
-[WEIGHT: exercise=Name, new_weight=N, reason=text]
-[RUN: day_idx=N, type=text, duration=text, reason=text]
-[NUTRITION: change_description]
-[BMR_UPDATE: daily_calories=N, protein=N, carbs=N, fat=N, reason=text]
-[LOCKOUT_WARNING: violation_description]
-[SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
-[SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
-</markers>
+You MUST emit your response as four (or three) tagged sections, in order:
 
-<format>
-Check-ins and reactions: 1-3 sentences max. No preamble.
-Workout planning: one exercise per line, weight and sets explicit.
-Weekly planning: ONE day per response. Never present multiple days at once. End each day with a question.
-Weekly reviews: structured sections — wins, misses, next-week adjustments.
-Always cite data. Never pad with motivation filler.
-</format>
+<schedule>...</schedule>
+<directive>...</directive>
+<motivation>...</motivation>
+<refusal>...</refusal>   # only when instructed by the rules engine
 
-{triggered_protocol}
+The <schedule> and <directive> sections will be PRE-FILLED for you in this
+prompt. You MUST echo them back BYTE-IDENTICAL — same content, same line breaks,
+same tags. The validator rejects any drift. Do not paraphrase, summarize, or
+"clean up" these sections.
+
+<motivation> is YOUR section. 1-3 sentences. Voice only. NO questions. NO
+banned phrases (see below).
+
+<refusal> appears ONLY when the rules engine in the prompt sets
+refusal_required=true. When it does, your <refusal> echoes the directive
+and names the deviation. NO negotiation. NO questions.
+
+# CITATION RULE
+
+Every claim in <motivation> must reference a specific field from
+<athlete_data>. If the athlete_data section is missing or marked NONE, do
+not reference it. Hallucinations are unacceptable.
+
+# BANNED PHRASES
+
+These cause validation failure. Do NOT use them anywhere:
+- "your call", "if you feel up to it", "if you want", "feel free to", "no pressure", "up to you"
+- "great job", "amazing work", "you're doing great", "proud of you", "love it", "crushing it"
+- "would you like", "do you want", "should we", "ready to", "shall we"
+- "we could", "we might", "perhaps", "maybe try"
+- "if that works", "let's see how", "see how you feel"
+
+# POSTURE
+
+- Statements, not questions. The coach decides; the athlete executes.
+- Tight prose. No filler. No exclamation marks unless the athlete just PR'd.
+- Reference logged events, not invented ones. If the timeline is empty, say so.
+- Do not soften the directive. Do not negotiate.
+
+# WHAT YOU SEE
+
+The user's latest message comes through the standard conversation channel — treat it as the prompt. The pre-filled
+<schedule> and <directive> tell you what's happening and what to instruct.
+The <event_timeline> is ground truth from logs — past coach messages are
+NOT in scope. <recent_coach_directives> shows your last 3 messages today
+for continuity only.
 
 <athlete_data>
 {athlete_data_block}
 </athlete_data>
 
-<food_safety>
 {food_safety_block}
-</food_safety>
 """
 
 
@@ -902,201 +919,53 @@ Always cite data. Never pad with motivation filler.
 # ---------------------------------------------------------------------------
 
 PROTOCOL_MAP = {
-    "morning_checkin": """\
-<protocol name="morning_checkin">
-The athlete just submitted their morning check-in numbers.
-Your job: acknowledge the data in ONE sentence, then give a single directive for the day.
-
-Rules:
-- TIME CHECK FIRST: Look at the current time in <athlete_data>. If it's before
-  5:00 AM or after 10:00 AM, that's NOT a normal morning check-in time.
-  - Before 5 AM: "1:14 AM check-in means you're not sleeping. The check-in numbers
-    don't matter — sleep does. Get back to bed. We'll talk in the morning."
-  - 5-10 AM: normal, proceed.
-  - After 10 AM: "10:30 AM check-in is late. Half the day's plan is already
-    compromised. Tomorrow, before 8 AM."
-- Lead with the most notable data point (sleep drop, anxiety spike, soreness change).
-- If garmin data is available, cross-reference HRV/sleep with self-report.
-- If data is unremarkable, say so: "Numbers are steady. Here's today."
-- State today's workout and first meal time.
-- If they missed yesterday's check-in, name it. No lecture.
-- 2-3 sentences maximum. No questions. No "thanks for checking in."
-</protocol>""",
-
-    "morning_briefing": """\
-<protocol name="morning_briefing">
-Auto-generated morning briefing. The athlete did NOT speak — this is a push notification.
-Your job: one tight paragraph covering today's plan.
-
-Rules:
-- Open with the day and workout name.
-- State the run type and duration.
-- State first meal time from the meal plan.
-- If garmin shows a readiness flag, name it and state the adaptation (e.g., "HRV dipped — we hold weight today").
-- If it's a rest day, say so and name tomorrow's workout.
-- No greeting. No "good morning." Just the briefing.
-- 2-4 sentences max.
-</protocol>""",
-
-    "workout_feedback": """\
-<protocol name="workout_feedback">
-The athlete just finished logging their workout sets.
-Your job: compare actual performance to prescribed targets, then give one forward-looking directive.
-
-Rules:
-- Compare each exercise: prescribed weight/reps vs actual weight/reps.
-- Use the exercise analysis (progression_indicator) to contextualize: was this a PROGRESS, HOLD, or DELOAD day?
-- If they hit all targets: "Prescription met." + what's next.
-- If they exceeded targets: name the lift and the delta. One sentence.
-- If they fell short: name the lift, the gap, and whether it's a concern or expected variance.
-- State tomorrow's workout at the end.
-- No "proud of you." No "great session." Just the data.
-- 3-5 sentences.
-</protocol>""",
-
-    "weekly_review": """\
-<protocol name="weekly_review">
-End-of-week review. Summarize the full training week.
-
-Rules:
-- WINS: List completed workouts, PRs, compliance streaks. Cite specific numbers.
-- MISSES: List missed workouts, skipped meals, incomplete days. Name the day and what was missed.
-- BODY: Weight trend this week. Waist measurement if available. Compare to goal trajectory.
-- MOOD: Summarize check-in trends (mood, sleep, anxiety). Flag any concerning patterns.
-- GRADE: Give a single word assessment — COMPLIANT, PARTIAL, or OFF-TRACK.
-- NEXT WEEK: Preview the upcoming week's focus. Name any adjustments made by the training engine.
-- Do NOT re-derive progression — use the engine's next_week_prescriptions.
-- Structured format with headers. 8-15 sentences total.
-</protocol>""",
-
-    "weekly_planning": """\
-<protocol name="weekly_planning">
-Weekly planning is a CONVERSATION. The app displays exercise lists — you do NOT list exercises.
-
-Rules:
-- First response: 2-3 sentence overview of changes (calories, weight, progression highlights).
-  End with "Ready to see Monday?"
-- The app shows the exercise list when the athlete is ready. You do NOT list exercises ever.
-- After each day is shown, ask ONE question: any swaps or weight adjustments?
-  Do NOT mention the next day until the athlete says they're good.
-- When the athlete confirms a day looks good WITH NO CHANGES (e.g. "looks good", "no changes"),
-  respond briefly and emit [SHOW_NEXT_DAY] on its own line. The app will display the next day.
-  Example: "Monday locked in. [SHOW_NEXT_DAY]"
-- If the athlete requests ANY change (swap, weight adjustment, etc.):
-  1. Acknowledge the change
-  2. Ask "Anything else for [this day]?" — do NOT emit [SHOW_NEXT_DAY]
-  3. Only emit [SHOW_NEXT_DAY] when the athlete explicitly says no more changes
-- NEVER emit [SHOW_NEXT_DAY] in the same response as acknowledging a change.
-- After all 6 days, summarize the week.
-- NEVER list exercises. The app handles all exercise display.
-- One question per response. Never ask about two things at once.
-</protocol>""",
-
-    "meals_complete": """\
-<protocol name="meals_complete">
-The athlete just logged all their meals for the day.
-Your job: compare actual intake to the meal plan, then give one directive.
-
-Rules:
-- State meals eaten vs meals planned.
-- If it's a fasting day, confirm the fast was held.
-- If they hit protein target: acknowledge in one clause.
-- If they missed protein target: name the gap in grams.
-- If off-plan foods were eaten: name them. No lecture. State the calorie impact.
-- One sentence on tomorrow's meal plan type (heavy lift, rest, fast, etc.).
-- 2-3 sentences max.
-</protocol>""",
-
-    "end_of_day": """\
-<protocol name="end_of_day">
-End-of-day summary. The athlete is done for the day.
-Your job: state what was completed, what's tomorrow.
-
-Rules:
-- Name what was completed today (workout, meals, run).
-- Name anything incomplete (skipped workout, missing meals).
-- State tomorrow's workout name and type.
-- If tomorrow is a rest day, say so.
-- No reflection. No "you should feel good." Just status and what's next.
-- 2-3 sentences max.
-</protocol>""",
-
-    "run_complete": """\
-<protocol name="run_complete">
-The athlete JUST FINISHED a run. The run is DONE. Do NOT prescribe a future run.
-
-The trigger message contains the ACTUAL results: distance, avg HR, elevation.
-Your job: ANALYZE the completed run vs the prescription.
-
-Rules:
-- State the actual distance and HR from the trigger — these are the real numbers.
-- Compare to today's prescribed run (distance, duration, HR zone) from <athlete_data>.
-- If they hit the prescription: one flat sentence. "4.6 miles at HR 129. Prescription was 45 min zone 2. Done."
-- If they were short or over: state the delta factually. No lecture.
-- Ask ONE question about how it felt (legs, breathing, energy).
-- Do NOT say "get the run done" or "run for X minutes today" — IT IS ALREADY DONE.
-- Do NOT reference historical run distances. Only the run from the trigger message.
-- 2-3 sentences max.
-</protocol>""",
-
-    "freeform": """\
-<protocol name="freeform">
-The athlete is having a free conversation. No specific trigger.
-Your job: answer their question or respond to their statement using the full athlete context.
-
-Rules:
-- If they ask about their plan, cite the prescription data.
-- If they ask about progress, cite body weight trend and exercise history.
-- If they're venting or struggling, acknowledge briefly then redirect to action.
-- If they're making excuses, name the excuse and redirect to the commitment.
-- If they ask to change something, confirm the change and emit the appropriate marker.
-- Check coach_memories before making any compliance judgment — they may have a granted exception.
-- Check user_rules — the athlete may have corrected a previous coaching behavior.
-- Match the anger level in your tone. Do not soften.
-- Length varies by topic. Default to concise.
-</protocol>""",
-
-    "conversation": """\
-<protocol name="conversation">
-General conversation mode. The athlete sent a message outside a specific trigger flow.
-Behave as in freeform: respond to what they said, using full context.
-
-Rules:
-- Check coach_memories before compliance judgments.
-- Check user_rules for corrections to your behavior.
-- If they report completing something, acknowledge and emit the marker.
-- If they ask a question, answer directly with data.
-- Match the anger level. Stay concise.
-</protocol>""",
-
-    "chat_opened": """\
-<protocol name="chat_opened">
-The athlete just opened the chat. No message yet — this is your opener.
-Your job: give a status-aware greeting in 1-2 sentences.
-
-Rules:
-- If morning check-in is missing, prompt for it.
-- If workout is incomplete, name it.
-- If meals aren't logged, mention it.
-- If everything is on track, say so and ask what they need.
-- If they're in an active fast, acknowledge the fasting state.
-- No generic greetings. Context-specific only.
-- 1-2 sentences max.
-</protocol>""",
-
-    "crisis": """\
-<protocol name="crisis">
-The athlete expressed something that suggests emotional crisis or severe mental health distress.
-Your job: be human first, coach second.
-
-Rules:
-- Acknowledge what they said. Do not minimize.
-- Do not pivot to training.
-- If they mention self-harm or suicidal ideation, provide the 988 Suicide & Crisis Lifeline number.
-- Keep your response warm but grounded. No toxic positivity.
-- Ask one open-ended question to keep them talking.
-- 2-4 sentences max.
-</protocol>""",
+    "conversation": (
+        "Voice for <motivation>: respond to the athlete's message in 1-3 sentences. "
+        "Reference one specific field from <event_timeline> or <athlete_data>. "
+        "End with a statement, not a question."
+    ),
+    "morning_checkin": (
+        "Voice for <motivation>: acknowledge the check-in numbers (sleep, weight, mood). "
+        "Tie to today's directive. Statement, not question."
+    ),
+    "morning_briefing": (
+        "Voice for <motivation>: terse — 1 sentence. Cite today's lift and run. "
+        "No questions."
+    ),
+    "weekly_planning": (
+        "Voice for <motivation>: anchor on the week's goal (cut to 185). State "
+        "the most important focus for the week. Reference last week's session count. "
+        "No questions."
+    ),
+    "weekly_review": (
+        "Voice for <motivation>: 2-3 sentences. Cite weekly_summary numbers "
+        "(sessions completed, weight delta, run miles). Statement only."
+    ),
+    "workout_feedback": (
+        "Voice for <motivation>: 1-2 sentences acknowledging the lift just logged. "
+        "Cite a specific set from <event_timeline>. Tie to next session's progression. "
+        "No questions."
+    ),
+    "run_complete": (
+        "Voice for <motivation>: 1 sentence. Cite the run from <event_timeline>. "
+        "Tie to the cut. Statement only."
+    ),
+    "meals_complete": (
+        "Voice for <motivation>: 1 sentence acknowledging meals logged. Tie to "
+        "calorie target. No questions."
+    ),
+    "end_of_day": (
+        "Voice for <motivation>: 1-2 sentences. Cite today's compliance "
+        "(workout done? run done? meals?). State tomorrow's focus."
+    ),
+    "chat_opened": (
+        "Voice for <motivation>: 1-2 sentences. Reference the directive and "
+        "<event_timeline>'s most recent event. No greeting questions."
+    ),
+    "crisis": (
+        "Voice for <motivation>: drop posture. Be direct, supportive, brief. "
+        "Suggest concrete next step. No banned phrases still applies."
+    ),
 }
 
 
@@ -1182,6 +1051,10 @@ def _format_athlete_data(ctx, requires):
             garmin_parts.append(f"Stress {g['stress']['overall']}")
         if garmin_parts:
             parts.append("Garmin today: " + ", ".join(garmin_parts) + ".")
+        else:
+            parts.append("Garmin today: NONE — no readings available. Do not reference HRV/sleep/body battery/stress.")
+    else:
+        parts.append("Garmin today: NONE — no Garmin data in scope. Do not reference HRV/sleep/body battery/stress.")
     r = ctx.get("readiness")
     if r and r.get("score") is not None:
         readiness_line = f"Readiness score: {r['score']}/100 ({r['risk_level']} risk)."
@@ -1206,6 +1079,8 @@ def _format_athlete_data(ctx, requires):
     # Exercise data
     if ctx.get("exercise_history"):
         parts.append(_format_exercise_history(ctx["exercise_history"]))
+    else:
+        parts.append("Exercise history: NONE — no past sessions in scope. Do not reference any specific past lift.")
     if ctx.get("exercise_analysis"):
         parts.append(_format_exercise_analysis(ctx["exercise_analysis"]))
     if ctx.get("today_sets"):
@@ -1223,6 +1098,8 @@ def _format_athlete_data(ctx, requires):
     # Runs
     if ctx.get("run_history"):
         parts.append(_format_runs(ctx["run_history"]))
+    else:
+        parts.append("Recent runs: NONE — no logged runs in scope. Do not reference any run.")
 
     # Physical
     if ctx.get("physical_assessment"):
@@ -1250,6 +1127,8 @@ def _format_athlete_data(ctx, requires):
             meal_plan_type = "fast_day"
     if ctx.get("meals_today") is not None or meal_plan:
         parts.append(_format_meals_today_xml(ctx.get("meals_today"), meal_plan, meal_plan_type, user_timezone=ctx.get("user_timezone")))
+    else:
+        parts.append("Meals today: NONE — no meals logged and no meal plan. Do not reference today's intake.")
     if ctx.get("weekly_meals_summary"):
         parts.append(_format_weekly_meals(ctx["weekly_meals_summary"]))
 
@@ -1295,6 +1174,8 @@ def _format_athlete_data(ctx, requires):
     # Coach memories
     if ctx.get("coach_memories"):
         parts.append(_format_memories(ctx["coach_memories"]))
+    else:
+        parts.append("Coach memories: NONE — no memories in the last 21 days. Do not reference past coaching decisions.")
 
     # User rules (corrections from the athlete)
     rules = ctx.get("user_rules", [])
@@ -1316,6 +1197,14 @@ def _format_athlete_data(ctx, requires):
         items = ctx.get(key, [])
         if items:
             parts.append(f"{key.upper()}: {items}")
+
+    # New (Task 11): event timeline + recent coach directives — appended as XML blocks
+    et = ctx.get("event_timeline")
+    if et:
+        parts.append(et)
+    rcd = ctx.get("recent_coach_directives")
+    if rcd:
+        parts.append(rcd)
 
     return "\n\n".join(p for p in parts if p)
 
@@ -1381,12 +1270,17 @@ def _format_food_safety_block(ctx):
 # assemble_prompt — the main entry point
 # ---------------------------------------------------------------------------
 
-def assemble_prompt(agent_name, context):
+def assemble_prompt(agent_name, context, rules=None):
     """Combine CORE_PROMPT + protocol + formatted data into a system prompt.
 
     Args:
         agent_name: Key into PROTOCOL_MAP (e.g. "morning_checkin", "conversation")
         context: Dict from build_filtered_context()
+        rules: Optional CoachRules dataclass from compute_coach_rules. When
+               provided, pre-filled <schedule> and <directive> blocks are
+               appended to the system prompt, and a refusal instruction is
+               added when rules.refusal_required is True. When None, falls
+               back to legacy behavior (no pre-fills).
 
     Returns:
         Complete system prompt string ready for Claude API.
@@ -1417,7 +1311,7 @@ def assemble_prompt(agent_name, context):
     # Food safety block
     food_safety_block = _format_food_safety_block(context)
 
-    # Assemble
+    # Assemble base prompt via existing format() call
     prompt = CORE_PROMPT.format(
         athlete_name=context.get("athlete_name", "Athlete"),
         anger_level_label=anger_label,
@@ -1427,4 +1321,159 @@ def assemble_prompt(agent_name, context):
         food_safety_block=food_safety_block,
     )
 
+    # New (Task 15): inject rules engine pre-fills + protocol + refusal
+    if rules is not None:
+        prompt += "\n\n# AGENT PROTOCOL\n"
+        prompt += protocol
+        prompt += "\n\n# PRE-FILLED SECTIONS (echo these back byte-identical)\n"
+        prompt += rules.prefilled_schedule
+        prompt += "\n"
+        prompt += rules.prefilled_directive
+        if rules.refusal_required:
+            prompt += (
+                f"\n\n# REFUSAL REQUIRED — reason: {rules.refusal_reason}. "
+                "Emit a <refusal> section that echoes the directive and names the deviation."
+            )
+
     return prompt
+
+
+# ---------------------------------------------------------------------------
+# Task 16: coach_respond orchestration
+# Pipeline: rules → assemble → LLM → validate → retry-with-feedback → fallback
+# ---------------------------------------------------------------------------
+
+def render_response_to_user(sections):
+    """Strip tags, join sections in display order. The user never sees tags."""
+    parts = []
+    for key in ("schedule", "directive", "motivation", "refusal"):
+        if key in sections and sections[key]:
+            parts.append(sections[key].strip())
+    return "\n\n".join(parts)
+
+
+def coach_respond(
+    user_id,
+    agent_name,
+    user_message,
+    rules=None,
+    llm_fn=None,
+):
+    """Top-level coach entry. Replaces the inline LLM call in /api/chat.
+
+    Args:
+        user_id: athlete user id.
+        agent_name: agent key from AGENTS dict (e.g. 'conversation').
+        user_message: the user's latest message text (or None for system events).
+        rules: CoachRules dataclass. If None, computed via compute_coach_rules.
+        llm_fn: Callable(system_prompt, messages, temperature, max_tokens) -> str.
+                If None, uses the real Anthropic client. Tests pass a stub.
+
+    Returns: rendered response string for the user (tags stripped).
+    """
+    from coach_rules import compute_coach_rules
+    from coach_validator import validate_response, deterministic_fallback
+    from coach_agents import AGENTS
+
+    if rules is None:
+        rules = compute_coach_rules(user_id=user_id, latest_user_message=user_message)
+
+    context = build_filtered_context(agent_name)
+    context["latest_user_message"] = user_message or ""
+    system_prompt = assemble_prompt(agent_name, context, rules=rules)
+
+    agent_cfg = AGENTS.get(agent_name, AGENTS["conversation"])
+    messages = [{"role": "user", "content": user_message or "(system event)"}]
+
+    if llm_fn is None:
+        llm_fn = _real_llm_call
+
+    raw = llm_fn(system_prompt, messages, agent_cfg["temperature"], agent_cfg["max_tokens"])
+
+    result = validate_response(
+        raw=raw,
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+    if result.ok:
+        return render_response_to_user(result.sections)
+
+    # Retry once with feedback
+    retry_messages = messages + [
+        {"role": "assistant", "content": raw},
+        {"role": "user", "content": (
+            f"Your response failed validation: {result.failure_reason}. "
+            "Re-emit the response, fixing the specific issue. "
+            "Echo the pre-filled <schedule> and <directive> sections byte-identical."
+        )},
+    ]
+    raw2 = llm_fn(system_prompt, retry_messages, agent_cfg["temperature"], agent_cfg["max_tokens"])
+    result2 = validate_response(
+        raw=raw2,
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+    if result2.ok:
+        return render_response_to_user(result2.sections)
+
+    # Deterministic fallback (austere — better than capitulation)
+    return deterministic_fallback(
+        prefilled_schedule=rules.prefilled_schedule,
+        prefilled_directive=rules.prefilled_directive,
+        refusal_required=rules.refusal_required,
+    )
+
+
+def _real_llm_call(system_prompt, messages, temperature, max_tokens):
+    """Production LLM call. Imported lazily so tests don't need the API key."""
+    import os
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-20250514"),
+        max_tokens=max_tokens,
+        temperature=temperature,
+        system=system_prompt,
+        messages=messages,
+    )
+    return response.content[0].text
+
+
+def coach_respond_streaming(
+    user_id,
+    agent_name,
+    user_message,
+    rules=None,
+    llm_fn=None,
+    chunk_size=50,
+):
+    """Streaming version of coach_respond. Yields chunks of validated text.
+
+    Buffers the LLM response server-side, validates, retries, falls back —
+    then yields the final validated string in chunks for SSE delivery.
+    User sees slightly delayed but fully validated streaming.
+
+    Args same as coach_respond. Yields strings (chunks of the response).
+    """
+    full_text = coach_respond(
+        user_id=user_id,
+        agent_name=agent_name,
+        user_message=user_message,
+        rules=rules,
+        llm_fn=llm_fn,
+    )
+    # Chunk the validated string for streaming. Chunk on word boundaries.
+    if not full_text:
+        return
+    words = full_text.split(" ")
+    buf = ""
+    for word in words:
+        if len(buf) + len(word) + 1 > chunk_size:
+            yield buf
+            buf = word
+        else:
+            buf = (buf + " " + word).strip() if buf else word
+    if buf:
+        yield buf
