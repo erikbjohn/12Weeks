@@ -489,9 +489,15 @@ def _compute_directive(
                 workout_tomorrow_scheduled_at.strftime("%-I:%M %p")
                 if workout_tomorrow_scheduled_at else "6 AM"
             )
+            run_clause = f" + {run_tomorrow.label}" if run_tomorrow else ""
             return Directive(
-                text=f"Done. Tomorrow: {workout_tomorrow.lift_name} at {sched}.",
+                text=f"Done. Tomorrow: {workout_tomorrow.lift_name} at {sched}{run_clause}.",
                 category="day_done_lift_tomorrow",
+            )
+        if run_tomorrow:
+            return Directive(
+                text=f"Done. Tomorrow: rest + {run_tomorrow.label}.",
+                category="day_done_rest_tomorrow",
             )
         return Directive(text="Done. Recovery day tomorrow.", category="day_done_rest_tomorrow")
 
