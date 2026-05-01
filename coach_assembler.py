@@ -927,6 +927,18 @@ NEUTRAL (default for routine on-plan sessions):
 
 The bar: would Lombardi or Saban say this in a film review session? Specific. Honest. No softness, no cushion. If a comment is hollow or generic, cut it.
 
+# LENGTH + ENDINGS
+
+<motivation> is 2-4 sentences. It carries substance — observations on the work, programmatic context, what's next, the cut math, training history. Not a one-liner unless the moment is genuinely simple ("Lift now. Front Squat 5x5.").
+
+NEVER end with a one-word imperative ("Speak." "Talk." "Go." "Lift."). They read as robotic. They're not allowed.
+
+End with one of:
+- A forward-looking statement: "Front squat at 175 next session. Build through wk7."
+- An observation: "That's the third session this week with HR under 145 on Z2 — your aerobic floor is holding."
+- A specific cue: "Tomorrow morning: hip thrust 80×8, RPE 6. Lighter than today on purpose — recovery."
+- The directive's logical follow-on, not a hollow command.
+
 # WHAT YOU SEE
 
 The user's latest message comes through the standard conversation channel — treat it as the prompt. The pre-filled
@@ -1532,12 +1544,26 @@ def coach_respond_streaming(
 ):
     """Streaming version of coach_respond. Yields chunks of validated text.
 
-    Buffers the LLM response server-side, validates, retries, falls back —
-    then yields the final validated string in chunks for SSE delivery.
-    User sees slightly delayed but fully validated streaming.
+    Yields the rules-engine directive IMMEDIATELY (no LLM dependency, no
+    perceived delay), then buffers the LLM motivation, validates, retries,
+    falls back, then yields the rest. User sees the directive within ~100ms
+    while the LLM (5-10s for Opus on a real prompt) computes the motivation.
 
     Args same as coach_respond. Yields strings (chunks of the response).
     """
+    from coach_rules import compute_coach_rules
+    if rules is None:
+        rules = compute_coach_rules(user_id=user_id, latest_user_message=user_message)
+
+    # Yield the directive first — instant, deterministic. User sees this at
+    # ~100ms instead of waiting for the full LLM response.
+    directive_text = rules.prefilled_directive
+    if directive_text.startswith("<directive>") and directive_text.endswith("</directive>"):
+        directive_text = directive_text[len("<directive>"):-len("</directive>")].strip()
+    if directive_text:
+        yield directive_text
+
+    # Now run the full pipeline (validates motivation, retries, falls back).
     full_text = coach_respond(
         user_id=user_id,
         agent_name=agent_name,
@@ -1545,6 +1571,11 @@ def coach_respond_streaming(
         rules=rules,
         llm_fn=llm_fn,
     )
+
+    # The directive is included at the start of full_text by render_response_to_user.
+    # Strip it from full_text so we don't double-emit.
+    if full_text and directive_text and full_text.startswith(directive_text):
+        full_text = full_text[len(directive_text):].lstrip("\n")
     # Chunk the validated string for streaming. Chunk on word boundaries.
     if not full_text or not full_text.strip():
         # Fix B: coach_respond returned None or a whitespace-only string.
