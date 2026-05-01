@@ -161,6 +161,10 @@ def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime
 
     v1: hardcoded 6 AM default. UserPreferences override deferred to v2 —
     no users have a different preference today.
+
+    NOTE: `user_id` is currently unused — all users get the same default.
+    Kept in the signature for consistency with _compute_workout_status and
+    to anticipate per-user preferences in v2.
     """
     if is_rest:
         return None
