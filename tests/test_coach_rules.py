@@ -114,18 +114,18 @@ class TestWorkoutResolution:
         db.session.add(eq); db.session.add(pa); db.session.commit()
         return u
 
-    def test_workout_today_resolves_for_phase_2_friday(self, app_ctx):
-        # Phase 2, Friday (day_idx=4) — Pull + Lat (post-swap).
+    def test_workout_today_resolves_for_phase_2_thursday(self, app_ctx):
+        # Phase 2, Thursday (day_idx=3) — Erik's deadlift/back-side day.
         from coach_rules import _resolve_workout_for_day_summary
         app, _ = app_ctx
         u = self._make_user(app_ctx)
         with app.test_request_context():
             from flask_login import login_user
             login_user(u)
-            summary = _resolve_workout_for_day_summary(u.id, week=5, day_idx=4)
+            summary = _resolve_workout_for_day_summary(u.id, week=5, day_idx=3)
         assert summary is not None
         assert summary.is_rest is False
-        # Phase 2 Fri (post-swap) has Weighted Pull-Up + BB Row
+        # Phase 2 Thu has Weighted Pull-Up + BB Row per spec §4
         assert any("Row" in n or "Pull-Up" in n for n in summary.exercise_names)
 
     def test_workout_today_rest_day(self, app_ctx):
@@ -184,11 +184,11 @@ class TestWorkoutScheduledAt:
 
 
 class TestRunResolution:
-    def test_run_today_phase_2_friday_is_hiit(self, app_ctx):
+    def test_run_today_phase_2_thursday_is_hiit(self, app_ctx):
         from coach_rules import _resolve_run_for_day
         app, _ = app_ctx
         with app.test_request_context():
-            r = _resolve_run_for_day(week=5, day_idx=4)
+            r = _resolve_run_for_day(week=5, day_idx=3)
         assert r is not None
         assert r.run_type == "hiit"
 
