@@ -1234,6 +1234,77 @@ def debug_override_day_with_actual():
         }), 500
 
 
+@app.route("/api/debug/full-day-state")
+def debug_full_day_state():
+    """Dump everything stored for a user on a date: SetLog, RunLog,
+    WeeklyPrescription, WeeklyRunPlan. Read-only diagnostic.
+    Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4
+    """
+    email = request.args.get("email", "erik@placemetry.com")
+    date_str = request.args.get("date", "")
+    week = request.args.get("week", type=int)
+    day_idx = request.args.get("day_idx", type=int)
+    try:
+        from datetime import datetime as _dt
+        from models import (User, SetLog, RunLog, WeeklyPrescription,
+                            WeeklyRunPlan, DayCompletion, AppState)
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        target_date = _dt.strptime(date_str, "%Y-%m-%d").date() if date_str else None
+
+        out = {"email": email, "user_id": u.id}
+
+        state = AppState.query.filter_by(user_id=u.id).first()
+        out["app_state"] = {
+            "current_week": state.current_week if state else None,
+            "start_date": str(state.start_date) if state and state.start_date else None,
+        }
+
+        if target_date:
+            sl = SetLog.query.filter_by(user_id=u.id, logged_date=target_date).all()
+            out["setlogs_on_date"] = [{
+                "id": r.id, "exercise": r.exercise_name,
+                "set": r.set_number, "weight": r.weight, "reps": r.reps,
+                "done": r.done, "week": r.week, "day_idx": r.day_idx,
+            } for r in sl]
+            rl = RunLog.query.filter_by(user_id=u.id, log_date=target_date).all()
+            out["runlogs_on_date"] = [{
+                "id": r.id, "week": r.week, "day_idx": r.day_idx,
+                "distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
+                "duration_min": r.duration_min,
+            } for r in rl]
+
+        if week is not None and day_idx is not None:
+            wp = (WeeklyPrescription.query
+                  .filter_by(user_id=u.id, week=week, day_idx=day_idx)
+                  .order_by(WeeklyPrescription.exercise_order).all())
+            out[f"prescription_w{week}_d{day_idx}"] = [{
+                "order": r.exercise_order, "exercise": r.exercise_name,
+                "sets": r.sets, "reps": r.reps,
+                "target_weight": r.target_weight, "source": r.source,
+            } for r in wp]
+            wrp = WeeklyRunPlan.query.filter_by(user_id=u.id, week=week).all()
+            out[f"runplan_w{week}"] = [{
+                "day_idx": r.day_idx, "type": r.run_type,
+                "label": r.label, "duration": r.duration,
+                "source": r.source,
+            } for r in wrp]
+            dc = DayCompletion.query.filter_by(
+                user_id=u.id, week=week, day_idx=day_idx,
+            ).first()
+            out[f"daycompletion_w{week}_d{day_idx}"] = (
+                {"done": dc.done} if dc else None
+            )
+
+        return jsonify(out)
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/show-sets")
 def debug_show_sets():
     """Dump SetLog rows for a user across recent days. UNAUTH diagnostic.
