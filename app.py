@@ -1152,6 +1152,45 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/run-plan")
+def debug_run_plan():
+    """Show user's stored WeeklyRunPlan rows + what coach_rules will resolve.
+    UNAUTH. Diagnostic.
+    """
+    email = request.args.get("email", "erik@placemetry.com")
+    week = int(request.args.get("week", 5))
+    try:
+        from models import User, WeeklyRunPlan
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        rows = WeeklyRunPlan.query.filter_by(user_id=u.id, week=week).all()
+        from coach_rules import _resolve_run_for_day
+        resolved = {}
+        for d in range(7):
+            r = _resolve_run_for_day(week, d, user_id=u.id)
+            resolved[d] = {
+                "type": r.run_type, "label": r.label, "detail": r.detail,
+            } if r else None
+        return jsonify({
+            "email": email, "week": week,
+            "stored_run_plan_rows": [
+                {"day_idx": r.day_idx, "run_type": r.run_type,
+                 "label": r.label, "duration": r.duration,
+                 "source": r.source, "detail": (r.detail or "")[:100]}
+                for r in rows
+            ],
+            "coach_resolves_per_day": resolved,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-2000:],
+        }), 500
+
+
 @app.route("/api/debug/clear-stale-prescriptions")
 def debug_clear_stale_prescriptions():
     """Delete all WeeklyPrescription rows for a user+week so api_workouts
