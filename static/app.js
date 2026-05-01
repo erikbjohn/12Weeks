@@ -91,7 +91,9 @@ function isBodyweightExercise(name, note) {
     if (!hasGym) return true;
     return false; // gym user — show weight input
   }
-  if (note && /\bbodyweight\b|\bBW\b/i.test(note)) return true;
+  // Intentionally NOT note-based: notes like "BW 4×6-10 if not yet weighted"
+  // for Weighted Pull-Up were falsely flipping the whole exercise to BW-only.
+  // The exercise list above is the source of truth.
   return false;
 }
 
