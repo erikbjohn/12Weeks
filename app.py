@@ -1234,6 +1234,53 @@ def debug_override_day_with_actual():
         }), 500
 
 
+@app.route("/api/debug/api-workouts-as-user")
+def debug_api_workouts_as_user():
+    """Run api_workouts as if the given user were logged in, return the JSON
+    payload the UI would actually receive. UNAUTH diagnostic.
+    Query: ?email=...&week=6&day_idx=4
+    """
+    email = request.args.get("email", "erik@placemetry.com")
+    week = int(request.args.get("week", 6))
+    day_idx = int(request.args.get("day_idx", 4))
+    try:
+        from models import User
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        from flask_login import login_user as _login_user
+        with app.test_request_context():
+            _login_user(u, force=True)
+            # Call api_workouts and pull the JSON
+            resp = api_workouts()
+        # api_workouts returns a Flask Response; extract the data
+        if hasattr(resp, "get_json"):
+            payload = resp.get_json()
+        else:
+            payload = resp[0].get_json() if isinstance(resp, tuple) else None
+
+        # Drill into requested week+day for clarity
+        weeks = (payload or {}).get("weeks", [])
+        target_week = next((w for w in weeks if w.get("week") == week), None)
+        days = (target_week or {}).get("days", [])
+        target_day = days[day_idx] if day_idx < len(days) else None
+        return jsonify({
+            "email": email, "week": week, "day_idx": day_idx,
+            "lift_name": (target_day or {}).get("liftName"),
+            "exercises": [{
+                "name": e.get("name"), "sets": e.get("sets"),
+                "target_weight": e.get("target_weight"),
+            } for e in (target_day or {}).get("exercises", [])],
+            "run": (target_day or {}).get("run"),
+            "is_rest": (target_day or {}).get("isRest"),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/copy-runplan")
 def debug_copy_runplan():
     """Copy WeeklyRunPlan rows from one week to another. Used when the run
