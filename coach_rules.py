@@ -12,7 +12,7 @@ docs/superpowers/research/2026-04-30-coach-audit.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time as dtime, timezone
+from datetime import date, datetime, time as dtime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -90,7 +90,15 @@ def _resolve_workout_for_day_summary(user_id: int, week: int, day_idx: int) -> O
 
     Returns a lean WorkoutSummary (lift_name + exercise names), or None if the
     week/day cannot be resolved at all. Returns is_rest=True with empty exercises
-    for rest days."""
+    for rest days.
+
+    NOTE: `user_id` is currently unused — the underlying
+    `coach_assembler._resolve_workout_for_day` reads `current_user` from
+    Flask-Login. Callers MUST establish an authenticated session (e.g.
+    `login_user(user, force=True)` inside a `test_request_context`) for
+    this function to return that user's data. The `user_id` parameter is
+    kept in the signature so callers can be explicit about whose data is
+    being requested, anticipating a future decoupling."""
     from coach_assembler import _resolve_workout_for_day
     day = _resolve_workout_for_day(week, day_idx)
     if day is None:
@@ -113,7 +121,7 @@ def _compute_workout_status(
     user_id: int,
     week: int,
     day_idx: int,
-    today_date,
+    today_date: date,
     is_rest: bool,
 ) -> str:
     """Returns one of: not_started | in_progress | complete | rest.
