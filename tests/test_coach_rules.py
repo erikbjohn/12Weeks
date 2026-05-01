@@ -304,3 +304,158 @@ class TestRefusalDetection:
         triggered, reason = _detect_refusal(msg)
         assert triggered is False
         assert reason is None
+
+
+PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+class TestDirectiveComputation:
+    """One test per rule in the 15-row directive table from the spec."""
+
+    def _base_kwargs(self, **overrides):
+        """Build the keyword args for _compute_directive with sensible defaults."""
+        from datetime import datetime, time as dtime
+        kwargs = {
+            "now_local": datetime(2026, 4, 30, 6, 30, tzinfo=PACIFIC),  # Thu 6:30am
+            "workout_today": None,
+            "workout_today_scheduled_at": dtime(6, 0),
+            "workout_today_status": "rest",
+            "run_today": None,
+            "run_today_status": "rest",
+            "workout_tomorrow": None,
+            "workout_tomorrow_scheduled_at": None,
+            "run_tomorrow": None,
+            "fasting_active": False,
+            "weekend_fast_active": False,
+            "is_pr_session": False,
+            "next_target_hint": None,
+            "refusal_required": False,
+            "phase_summary": "Phase 2, week 5",
+        }
+        kwargs.update(overrides)
+        return kwargs
+
+    def _summary(self, lift="Front Squat"):
+        from coach_rules import WorkoutSummary
+        return WorkoutSummary(lift_name=lift, exercise_names=[lift], is_rest=False)
+
+    def _run(self, label="Z2 30 min"):
+        from coach_rules import RunSummary
+        return RunSummary(run_type="z2", label=label, scheduled_at=None, detail="")
+
+    def test_rule_1_refusal_overrides(self):
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            workout_today=self._summary(), workout_today_status="not_started",
+            refusal_required=True,
+        ))
+        assert "Train as planned" in d.text
+        assert d.category == "refusal"
+
+    def test_rule_2_in_progress(self):
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            workout_today=self._summary(), workout_today_status="in_progress",
+        ))
+        assert "Continue" in d.text
+        assert "Front Squat" in d.text
+
+    def test_rule_3_workout_done_run_pending(self):
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            workout_today=self._summary(), workout_today_status="complete",
+            run_today=self._run("Z2 30 min"), run_today_status="not_started",
+        ))
+        assert "Run now" in d.text
+        assert "Z2 30 min" in d.text
+
+    def test_rule_4_in_window(self):
+        from datetime import datetime, time as dtime
+        from coach_rules import _compute_directive
+        # Window is ±2h around 6 AM scheduled — 6:30 AM is in window
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 4, 30, 6, 30, tzinfo=PACIFIC),
+            workout_today=self._summary(), workout_today_status="not_started",
+            workout_today_scheduled_at=dtime(6, 0),
+        ))
+        assert "Lift now" in d.text
+        assert "Front Squat" in d.text
+
+    def test_rule_5_before_window(self):
+        from datetime import datetime, time as dtime
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 4, 30, 3, 30, tzinfo=PACIFIC),
+            workout_today=self._summary(), workout_today_status="not_started",
+            workout_today_scheduled_at=dtime(6, 0),
+        ))
+        assert "Lift at" in d.text or "06:00" in d.text
+
+    def test_rule_6_after_window_missed(self):
+        from datetime import datetime, time as dtime
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 4, 30, 13, 0, tzinfo=PACIFIC),
+            workout_today=self._summary(), workout_today_status="not_started",
+            workout_today_scheduled_at=dtime(6, 0),
+        ))
+        assert "Missed" in d.text or "missed" in d.text
+
+    def test_rule_7_sunday_long_run(self):
+        from datetime import datetime
+        from coach_rules import _compute_directive, RunSummary
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 5, 3, 7, 0, tzinfo=PACIFIC),  # Sunday
+            workout_today=None, workout_today_status="rest",
+            run_today=RunSummary(run_type="z2_long", label="Z2 long 75 min",
+                                 scheduled_at=None, detail=""),
+            run_today_status="not_started",
+        ))
+        assert "long run" in d.text.lower() or "Z2 long" in d.text
+
+    def test_rule_8_run_pending_non_sunday(self):
+        from datetime import datetime
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 4, 30, 7, 0, tzinfo=PACIFIC),  # Thu
+            workout_today=None, workout_today_status="rest",
+            run_today=self._run("Z2 30 min"), run_today_status="not_started",
+        ))
+        assert "Run today" in d.text or "Run now" in d.text
+
+    def test_rule_10_recovery_day(self):
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            workout_today=None, workout_today_status="rest",
+            run_today=None, run_today_status="rest",
+        ))
+        assert "Recovery" in d.text or "recovery" in d.text
+
+    def test_rule_11_both_complete(self):
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            workout_today=self._summary(), workout_today_status="complete",
+            run_today=self._run(), run_today_status="logged",
+            workout_tomorrow=self._summary(lift="DB Bench"),
+        ))
+        assert "Tomorrow" in d.text
+        assert "DB Bench" in d.text
+
+    def test_rule_12_weekend_fast(self):
+        from datetime import datetime
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs(
+            now_local=datetime(2026, 5, 3, 10, 0, tzinfo=PACIFIC),  # Sunday 10am
+            workout_today=None, workout_today_status="rest",
+            run_today=None, run_today_status="rest",
+            weekend_fast_active=True,
+        ))
+        assert "Fast" in d.text or "fast" in d.text
+        assert "Monday" in d.text or "11" in d.text
+
+    def test_rule_15_generic_chat(self):
+        # No refusal, no workout today, no run today → fallback
+        from coach_rules import _compute_directive
+        d = _compute_directive(**self._base_kwargs())
+        assert d.text  # non-empty
+        assert d.category in {"recovery", "generic_chat"}

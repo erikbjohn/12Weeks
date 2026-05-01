@@ -343,3 +343,173 @@ def _detect_refusal(latest_user_message: Optional[str]) -> tuple[bool, Optional[
         if pattern.search(latest_user_message):
             return (True, reason)
     return (False, None)
+
+
+WORKOUT_WINDOW_HOURS = 2  # ±2h around scheduled time = "in window"
+
+
+def _in_workout_window(now_local: datetime, scheduled_at: Optional[dtime]) -> str:
+    """Return 'before' | 'in' | 'after' relative to ±2h window."""
+    if scheduled_at is None:
+        return "in"
+    sched_dt = datetime.combine(now_local.date(), scheduled_at, tzinfo=PACIFIC)
+    delta = (now_local - sched_dt).total_seconds() / 3600.0
+    if delta < -WORKOUT_WINDOW_HOURS:
+        return "before"
+    if delta > WORKOUT_WINDOW_HOURS:
+        return "after"
+    return "in"
+
+
+def _compute_directive(
+    *,
+    now_local: datetime,
+    workout_today: Optional[WorkoutSummary],
+    workout_today_scheduled_at: Optional[dtime],
+    workout_today_status: str,
+    run_today: Optional[RunSummary],
+    run_today_status: str,
+    workout_tomorrow: Optional[WorkoutSummary],
+    workout_tomorrow_scheduled_at: Optional[dtime],
+    run_tomorrow: Optional[RunSummary],
+    fasting_active: bool,
+    weekend_fast_active: bool,
+    is_pr_session: bool,
+    next_target_hint: Optional[str],
+    refusal_required: bool,
+    phase_summary: str,
+) -> Directive:
+    """The 15-rule directive table from the spec. First match wins."""
+
+    # Rule 1 — refusal overrides everything
+    if refusal_required:
+        prescribed = (
+            workout_today.lift_name if workout_today and not workout_today.is_rest
+            else (run_today.label if run_today else "Recovery day")
+        )
+        return Directive(
+            text=f"Train as planned. {prescribed}.",
+            category="refusal",
+        )
+
+    # Rule 2 — workout in progress
+    if workout_today_status == "in_progress" and workout_today:
+        return Directive(
+            text=f"Continue. Finish {workout_today.lift_name}.",
+            category="workout_in_progress",
+        )
+
+    # Rule 3 — workout complete, run pending
+    if workout_today_status == "complete" and run_today_status == "not_started" and run_today:
+        return Directive(
+            text=f"Run now. {run_today.label}.",
+            category="workout_done_run_pending",
+        )
+
+    # Rule 4 — workout pending, in window
+    if workout_today_status == "not_started" and workout_today and not workout_today.is_rest:
+        window = _in_workout_window(now_local, workout_today_scheduled_at)
+        if window == "in":
+            return Directive(
+                text=f"Lift now. {workout_today.lift_name}.",
+                category="workout_in_window",
+            )
+        # Rule 5 — before window
+        if window == "before":
+            sched = workout_today_scheduled_at.strftime("%-I:%M %p") if workout_today_scheduled_at else ""
+            return Directive(
+                text=f"Lift at {sched}. {workout_today.lift_name}.",
+                category="workout_before_window",
+            )
+        # Rule 6 — after window (missed)
+        sched = workout_today_scheduled_at.strftime("%-I:%M %p") if workout_today_scheduled_at else ""
+        return Directive(
+            text=f"Missed the {sched} window. Lift now or move to evening. Log it.",
+            category="workout_missed_window",
+        )
+
+    # Rule 7 — Sunday long run pending
+    if (
+        run_today
+        and run_today.run_type == "z2_long"
+        and run_today_status == "not_started"
+    ):
+        return Directive(
+            text=f"Sunday long run. {run_today.label}. Fasted.",
+            category="sunday_long_run",
+        )
+
+    # Rule 8 — generic run pending (non-Sunday)
+    if (
+        run_today
+        and run_today_status == "not_started"
+        and (workout_today is None or workout_today.is_rest)
+    ):
+        sched = (
+            run_today.scheduled_at.strftime("%-I:%M %p")
+            if run_today.scheduled_at else ""
+        )
+        suffix = f" at {sched}" if sched else ""
+        return Directive(
+            text=f"Run today. {run_today.label}{suffix}.",
+            category="run_pending",
+        )
+
+    # Rule 11 — both complete (subsumes rule 9)
+    if (
+        (workout_today_status in ("complete", "rest"))
+        and (run_today_status in ("logged", "rest"))
+        and (workout_today_status == "complete" or run_today_status == "logged")
+    ):
+        if workout_tomorrow and not workout_tomorrow.is_rest:
+            sched = (
+                workout_tomorrow_scheduled_at.strftime("%-I:%M %p")
+                if workout_tomorrow_scheduled_at else "6 AM"
+            )
+            return Directive(
+                text=f"Done. Tomorrow: {workout_tomorrow.lift_name} at {sched}.",
+                category="day_done_lift_tomorrow",
+            )
+        return Directive(text="Done. Recovery day tomorrow.", category="day_done_rest_tomorrow")
+
+    # Rule 12 — weekend fast active
+    if weekend_fast_active:
+        return Directive(
+            text="Fast holds. Break Monday 11 AM.",
+            category="weekend_fast",
+        )
+
+    # Rule 13 — Sunday evening planning (only if no run pending — rule 7 caught that)
+    if now_local.weekday() == 6 and now_local.hour >= 18:  # Sunday 6 PM+
+        if workout_tomorrow and not workout_tomorrow.is_rest:
+            sched = (
+                workout_tomorrow_scheduled_at.strftime("%-I:%M %p")
+                if workout_tomorrow_scheduled_at else "6 AM"
+            )
+            return Directive(
+                text=f"Monday: {workout_tomorrow.lift_name} at {sched}. Be on the platform.",
+                category="sunday_eve_plan",
+            )
+
+    # Rule 14 — PR / weight bump cue
+    if is_pr_session and next_target_hint:
+        return Directive(
+            text=f"PR logged. Next session: {next_target_hint}.",
+            category="pr_logged",
+        )
+
+    # Rule 10 — recovery day fallback
+    if (
+        (workout_today is None or workout_today.is_rest)
+        and (run_today is None)
+    ):
+        return Directive(
+            text="Recovery day. Eat clean, sleep early.",
+            category="recovery",
+        )
+
+    # Rule 15 — generic chat
+    return Directive(
+        text=f"{phase_summary}. Stay on plan.",
+        category="generic_chat",
+    )
