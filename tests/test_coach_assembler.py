@@ -187,3 +187,50 @@ class TestCorePromptRewrite:
         # No KeyError from .format() means the placeholders match
         assert "<schedule>" in prompt
         assert "<directive>" in prompt
+
+
+class TestProtocolMapRewrite:
+    def test_no_protocol_asks_questions(self):
+        from coach_assembler import PROTOCOL_MAP
+        forbidden = ["ask one question", "ask the athlete", "ask what they"]
+        for agent, protocol in PROTOCOL_MAP.items():
+            for phrase in forbidden:
+                assert phrase not in protocol.lower(), \
+                    f"agent {agent} still contains forbidden phrase: {phrase}"
+
+    def test_all_agents_have_protocol(self):
+        from coach_assembler import PROTOCOL_MAP
+        from coach_agents import AGENTS
+        for agent in AGENTS:
+            assert agent in PROTOCOL_MAP, f"missing protocol for {agent}"
+
+
+class TestCoachAgentsConfig:
+    def test_all_temps_are_06_except_crisis(self):
+        from coach_agents import AGENTS
+        for agent, cfg in AGENTS.items():
+            if agent == "crisis":
+                continue
+            assert cfg["temperature"] == 0.6, \
+                f"{agent} has temp {cfg['temperature']} (expected 0.6)"
+
+    def test_all_agents_use_all_sections(self):
+        from coach_agents import AGENTS, ALL_SECTIONS
+        for agent, cfg in AGENTS.items():
+            assert cfg["requires"] == ALL_SECTIONS, \
+                f"{agent} requires != ALL_SECTIONS"
+
+    def test_all_sections_includes_event_timeline(self):
+        from coach_agents import ALL_SECTIONS
+        assert "event_timeline" in ALL_SECTIONS
+        assert "recent_coach_directives" in ALL_SECTIONS
+        # chat_history is intentionally absent — being phased out
+        assert "chat_history" not in ALL_SECTIONS
+
+    def test_all_sections_match_registered_builders(self):
+        from coach_agents import ALL_SECTIONS
+        from coach_assembler import _SECTION_BUILDERS
+        # Every name in ALL_SECTIONS must have a registered builder
+        for name in ALL_SECTIONS:
+            assert name in _SECTION_BUILDERS, \
+                f"ALL_SECTIONS includes '{name}' but no @section_builder is registered"
