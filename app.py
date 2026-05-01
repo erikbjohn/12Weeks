@@ -1234,6 +1234,54 @@ def debug_override_day_with_actual():
         }), 500
 
 
+@app.route("/api/debug/copy-runplan")
+def debug_copy_runplan():
+    """Copy WeeklyRunPlan rows from one week to another. Used when the run
+    engine hasn't generated the next week yet and the user is already there.
+
+    Token-gated. Query: ?email=...&from_week=5&to_week=6&token=...
+    """
+    email = request.args.get("email", "")
+    from_week = int(request.args.get("from_week", 0))
+    to_week = int(request.args.get("to_week", 0))
+    token = request.args.get("token", "")
+    if token != "swap-cleanup-2026-04-30":
+        return jsonify({"error": "bad token"}), 403
+    if not email or not from_week or not to_week:
+        return jsonify({"error": "email + from_week + to_week required"}), 400
+    try:
+        from models import User, WeeklyRunPlan
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        # Wipe destination
+        WeeklyRunPlan.query.filter_by(user_id=u.id, week=to_week).delete()
+        # Copy
+        src = WeeklyRunPlan.query.filter_by(user_id=u.id, week=from_week).all()
+        copied = []
+        for r in src:
+            new = WeeklyRunPlan(
+                user_id=u.id, week=to_week, day_idx=r.day_idx,
+                run_type=r.run_type, label=r.label,
+                duration=r.duration, detail=r.detail,
+                source=r.source,
+            )
+            db.session.add(new)
+            copied.append({"day_idx": r.day_idx, "label": r.label,
+                           "duration": r.duration})
+        db.session.commit()
+        return jsonify({
+            "email": email, "from_week": from_week, "to_week": to_week,
+            "copied": copied, "count": len(copied),
+        })
+    except Exception as e:
+        import traceback
+        db.session.rollback()
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/full-day-state")
 def debug_full_day_state():
     """Dump everything stored for a user on a date: SetLog, RunLog,
