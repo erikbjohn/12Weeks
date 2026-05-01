@@ -459,3 +459,34 @@ class TestDirectiveComputation:
         d = _compute_directive(**self._base_kwargs())
         assert d.text  # non-empty
         assert d.category in {"recovery", "generic_chat"}
+
+
+class TestPrefillRendering:
+    def test_schedule_includes_now_and_workout_and_run(self):
+        from coach_rules import _render_prefilled_schedule, WorkoutSummary, RunSummary
+        from datetime import datetime, time as dtime
+        s = _render_prefilled_schedule(
+            now_local=datetime(2026, 4, 30, 6, 30, tzinfo=PACIFIC),
+            workout_today=WorkoutSummary(
+                lift_name="Front Squat", exercise_names=["Front Squat"], is_rest=False,
+            ),
+            workout_today_scheduled_at=dtime(6, 0),
+            run_today=RunSummary(run_type="z2", label="Z2 30 min",
+                                 scheduled_at=dtime(6, 45), detail=""),
+            workout_tomorrow=None,
+            workout_tomorrow_scheduled_at=None,
+            run_tomorrow=None,
+        )
+        assert s.startswith("<schedule>")
+        assert s.endswith("</schedule>")
+        assert "Thursday" in s
+        assert "06:30" in s or "6:30" in s
+        assert "Front Squat" in s
+        assert "Z2 30 min" in s
+
+    def test_directive_renders_clean(self):
+        from coach_rules import _render_prefilled_directive, Directive
+        s = _render_prefilled_directive(
+            Directive(text="Lift now. Front Squat.", category="workout_in_window")
+        )
+        assert s == "<directive>Lift now. Front Squat.</directive>"

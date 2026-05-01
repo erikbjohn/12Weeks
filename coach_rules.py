@@ -513,3 +513,58 @@ def _compute_directive(
         text=f"{phase_summary}. Stay on plan.",
         category="generic_chat",
     )
+
+
+def _render_prefilled_schedule(
+    *,
+    now_local: datetime,
+    workout_today: Optional[WorkoutSummary],
+    workout_today_scheduled_at: Optional[dtime],
+    run_today: Optional[RunSummary],
+    workout_tomorrow: Optional[WorkoutSummary],
+    workout_tomorrow_scheduled_at: Optional[dtime],
+    run_tomorrow: Optional[RunSummary],
+) -> str:
+    """Build the <schedule>...</schedule> block. Echoed byte-identical
+    by the LLM. Validator rejects any drift."""
+    lines = ["<schedule>"]
+    weekday = now_local.strftime("%A")
+    date_str = now_local.strftime("%Y-%m-%d")
+    time_str = now_local.strftime("%H:%M")
+    lines.append(f"Now: {weekday} {date_str} {time_str} Pacific")
+
+    if workout_today is None:
+        lines.append("Today workout: (none)")
+    elif workout_today.is_rest:
+        lines.append("Today workout: REST")
+    else:
+        sched = workout_today_scheduled_at.strftime("%H:%M") if workout_today_scheduled_at else "(unscheduled)"
+        lines.append(f"Today workout: {workout_today.lift_name} at {sched}")
+
+    if run_today is None:
+        lines.append("Today run: (none)")
+    else:
+        sched = run_today.scheduled_at.strftime("%H:%M") if run_today.scheduled_at else "(unscheduled)"
+        lines.append(f"Today run: {run_today.label} at {sched}")
+
+    if workout_tomorrow is None:
+        lines.append("Tomorrow workout: (none)")
+    elif workout_tomorrow.is_rest:
+        lines.append("Tomorrow workout: REST")
+    else:
+        sched = workout_tomorrow_scheduled_at.strftime("%H:%M") if workout_tomorrow_scheduled_at else "(unscheduled)"
+        lines.append(f"Tomorrow workout: {workout_tomorrow.lift_name} at {sched}")
+
+    if run_tomorrow is None:
+        lines.append("Tomorrow run: (none)")
+    else:
+        sched = run_tomorrow.scheduled_at.strftime("%H:%M") if run_tomorrow.scheduled_at else "(unscheduled)"
+        lines.append(f"Tomorrow run: {run_tomorrow.label} at {sched}")
+
+    lines.append("</schedule>")
+    return "\n".join(lines)
+
+
+def _render_prefilled_directive(directive: Directive) -> str:
+    """Build the <directive>...</directive> block on a single line."""
+    return f"<directive>{directive.text}</directive>"
