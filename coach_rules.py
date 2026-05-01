@@ -633,19 +633,27 @@ def _render_prefilled_directive(directive: Directive) -> str:
 def _current_week_for_user(user_id: int, today_local) -> int:
     """Return the user's current 12-week phase week from AppState.
 
-    Mirrors the logic in coach_assembler._current_week():
-    - Read AppState by user_id
-    - If start_date set: weeks elapsed since start (clamped 1..12)
-    - Else: fall back to AppState.current_week, default 1
+    Takes MAX of two sources to prevent drift between rules engine and UI:
+    - start_date math: (today - start_date).days // 7 + 1
+    - AppState.current_week: bumped by the UI's advance-week flow
+
+    Erik's bug: rules engine returned 5 (start_date math) while UI showed 6
+    (current_week). Sets logged via UI went to week 6; rules engine searched
+    week 5; status query returned no rows; coach falsely said "Lift now"
+    after the session was already done. Taking MAX keeps both sources in
+    sync — whichever is ahead wins.
     """
     from models import AppState
     state = AppState.query.filter_by(user_id=user_id).first()
     if state is None:
         return 1
+    candidates = [1]
     if state.start_date:
         diff_days = (today_local - state.start_date).days
-        return max(1, min(12, (diff_days // 7) + 1))
-    return state.current_week or 1
+        candidates.append((diff_days // 7) + 1)
+    if state.current_week:
+        candidates.append(state.current_week)
+    return max(1, min(12, max(candidates)))
 
 
 def _phase_summary_for_week(week: int) -> str:

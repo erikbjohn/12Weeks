@@ -46,13 +46,21 @@ def _user_today():
 
 
 def _current_week():
+    """Take MAX of start_date math and AppState.current_week so neither
+    source can drift behind the other. See coach_rules._current_week_for_user
+    for the full rationale."""
     try:
         from models import AppState
         s = AppState.query.filter_by(user_id=current_user.id).first()
-        if s and s.start_date:
+        if s is None:
+            return 1
+        candidates = [1]
+        if s.start_date:
             diff_days = (_user_today() - s.start_date).days
-            return min(12, max(1, diff_days // 7 + 1))
-        return s.current_week if s else 1
+            candidates.append(diff_days // 7 + 1)
+        if s.current_week:
+            candidates.append(s.current_week)
+        return max(1, min(12, max(candidates)))
     except Exception:
         return 1
 
