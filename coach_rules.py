@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
+DEFAULT_WORKOUT_TIME = dtime(6, 0)   # Erik's AM-stacked default
 
 
 def _user_local_now(now: Optional[datetime] = None) -> datetime:
@@ -153,3 +154,14 @@ def _compute_workout_status(
     if done_count >= len(sets_today):
         return "complete"
     return "in_progress"
+
+
+def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime]:
+    """Return the user's preferred workout time for the day, or None on rest.
+
+    v1: hardcoded 6 AM default. UserPreferences override deferred to v2 —
+    no users have a different preference today.
+    """
+    if is_rest:
+        return None
+    return DEFAULT_WORKOUT_TIME

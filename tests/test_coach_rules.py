@@ -165,3 +165,19 @@ class TestWorkoutStatus:
                 today_date=date.today(), is_rest=True,
             )
         assert s == "rest"
+
+
+class TestWorkoutScheduledAt:
+    def test_default_6am_for_non_rest(self, app_ctx):
+        from coach_rules import _compute_workout_scheduled_at
+        app, _ = app_ctx
+        with app.test_request_context():
+            t = _compute_workout_scheduled_at(user_id=999, is_rest=False)
+        assert t == dtime(6, 0)
+
+    def test_none_for_rest(self, app_ctx):
+        from coach_rules import _compute_workout_scheduled_at
+        app, _ = app_ctx
+        with app.test_request_context():
+            t = _compute_workout_scheduled_at(user_id=999, is_rest=True)
+        assert t is None
