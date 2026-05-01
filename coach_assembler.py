@@ -133,6 +133,84 @@ def _build_chat_history():
     return {"chat_history": older + earlier_week + today_msgs}
 
 
+@section_builder("event_timeline")
+def _build_event_timeline():
+    """Structured ground-truth ledger from canonical logs.
+
+    Replaces the chat-history feed (which fed past coach messages back into
+    the prompt and let hallucinations persist). Only logged events from
+    canonical tables: SetLog, RunLog, BodyMeasurement.
+
+    Returns {"event_timeline": "<event_timeline>...</event_timeline>"}.
+    """
+    if not current_user.is_authenticated:
+        return {"event_timeline": "<event_timeline>\nNONE — not authenticated.\n</event_timeline>"}
+    from models import SetLog, RunLog, BodyMeasurement
+    cutoff = date.today() - timedelta(days=7)
+    events: list[tuple[str, str]] = []   # (date_str_for_sort, line)
+
+    # SetLog rows — group by (logged_date, exercise_name)
+    sets = (SetLog.query
+            .filter(SetLog.user_id == current_user.id, SetLog.logged_date >= cutoff)
+            .order_by(SetLog.logged_date.desc(), SetLog.id.asc())
+            .limit(200).all())
+    grouped: dict[tuple, list] = {}
+    for s in sets:
+        grouped.setdefault((s.logged_date, s.exercise_name), []).append(s)
+    for (d, name), rows in grouped.items():
+        sets_str = ", ".join(f"{r.set_number}: {r.weight}x{r.reps}" for r in rows)
+        events.append((str(d), f"[{d}] LIFT {name}: {sets_str}"))
+
+    # RunLog — note actual field is `log_date` (not `run_date`)
+    runs = (RunLog.query
+            .filter(RunLog.user_id == current_user.id, RunLog.log_date >= cutoff)
+            .order_by(RunLog.log_date.desc())
+            .limit(50).all())
+    for r in runs:
+        dist = getattr(r, "distance_miles", None) or "?"
+        hr = getattr(r, "avg_hr", None) or "?"
+        events.append((str(r.log_date), f"[{r.log_date}] RUN {dist}mi avg HR {hr}"))
+
+    # BodyMeasurement — fields are `log_date` and `weight_lbs`
+    weighs = (BodyMeasurement.query
+              .filter(BodyMeasurement.user_id == current_user.id,
+                      BodyMeasurement.log_date >= cutoff)
+              .order_by(BodyMeasurement.log_date.desc())
+              .limit(20).all())
+    for w in weighs:
+        if w.weight_lbs is None:
+            continue
+        events.append((str(w.log_date), f"[{w.log_date}] WEIGH-IN {w.weight_lbs} lb"))
+
+    if not events:
+        return {"event_timeline": "<event_timeline>\nNONE — athlete has no logged events in the last 7 days. Do not reference any.\n</event_timeline>"}
+
+    events.sort(key=lambda e: e[0], reverse=True)
+    body = "\n".join(line for _, line in events)
+    return {"event_timeline": f"<event_timeline>\n{body}\n</event_timeline>"}
+
+
+@section_builder("recent_coach_directives")
+def _build_recent_coach_directives():
+    """The coach's last 3 messages, today only. Provides continuity without
+    perpetuating week-old hallucinations.
+
+    Returns {"recent_coach_directives": "<recent_coach_directives>...</recent_coach_directives>"}.
+    """
+    if not current_user.is_authenticated:
+        return {"recent_coach_directives": "<recent_coach_directives>\nNONE — not authenticated.\n</recent_coach_directives>"}
+    from models import ChatMessage
+    today = _user_today()
+    msgs = (ChatMessage.query
+            .filter_by(user_id=current_user.id, role="assistant", log_date=today)
+            .order_by(ChatMessage.id.desc())
+            .limit(3).all())
+    if not msgs:
+        return {"recent_coach_directives": "<recent_coach_directives>\nNONE — no coach messages today.\n</recent_coach_directives>"}
+    body = "\n---\n".join(m.content for m in reversed(msgs))
+    return {"recent_coach_directives": f"<recent_coach_directives>\n{body}\n</recent_coach_directives>"}
+
+
 @section_builder("bodyweight")
 def _build_bodyweight():
     from models import BodyWeight
@@ -1316,6 +1394,14 @@ def _format_athlete_data(ctx, requires):
         items = ctx.get(key, [])
         if items:
             parts.append(f"{key.upper()}: {items}")
+
+    # New (Task 11): event timeline + recent coach directives — appended as XML blocks
+    et = ctx.get("event_timeline")
+    if et:
+        parts.append(et)
+    rcd = ctx.get("recent_coach_directives")
+    if rcd:
+        parts.append(rcd)
 
     return "\n\n".join(p for p in parts if p)
 
