@@ -1152,6 +1152,58 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/move-sets-day")
+def debug_move_sets_day():
+    """Move all SetLog rows for a user matching (logged_date, from_day_idx)
+    to to_day_idx. Used to relocate sets logged under one day to another
+    when the template layout changed underneath the user.
+
+    Token-gated. Query: ?email=...&date=YYYY-MM-DD&from=4&to=3&token=...
+    """
+    email = request.args.get("email", "")
+    date_str = request.args.get("date", "")
+    from_day = int(request.args.get("from", -1))
+    to_day = int(request.args.get("to", -1))
+    token = request.args.get("token", "")
+    if token != "swap-cleanup-2026-04-30":
+        return jsonify({"error": "bad token"}), 403
+    if not email or not date_str or from_day < 0 or to_day < 0:
+        return jsonify({"error": "email + date + from + to required"}), 400
+    try:
+        from datetime import datetime as _dt
+        from models import User, SetLog
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        target_date = _dt.strptime(date_str, "%Y-%m-%d").date()
+        rows = SetLog.query.filter_by(
+            user_id=u.id, day_idx=from_day, logged_date=target_date,
+        ).all()
+        moved_summary = [{
+            "id": r.id, "exercise_name": r.exercise_name,
+            "set_number": r.set_number, "weight": r.weight, "reps": r.reps,
+        } for r in rows]
+        for r in rows:
+            r.day_idx = to_day
+        db.session.commit()
+        return jsonify({
+            "email": email,
+            "date": date_str,
+            "from_day_idx": from_day,
+            "to_day_idx": to_day,
+            "moved_count": len(rows),
+            "moved": moved_summary,
+        })
+    except Exception as e:
+        import traceback
+        db.session.rollback()
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-2000:],
+        }), 500
+
+
 @app.route("/api/debug/run-plan")
 def debug_run_plan():
     """Show user's stored WeeklyRunPlan rows + what coach_rules will resolve.
