@@ -181,3 +181,47 @@ class TestWorkoutScheduledAt:
         with app.test_request_context():
             t = _compute_workout_scheduled_at(user_id=999, is_rest=True)
         assert t is None
+
+
+class TestRunResolution:
+    def test_run_today_phase_2_thursday_is_hiit(self, app_ctx):
+        from coach_rules import _resolve_run_for_day
+        app, _ = app_ctx
+        with app.test_request_context():
+            r = _resolve_run_for_day(week=5, day_idx=3)
+        assert r is not None
+        assert r.run_type == "hiit"
+
+    def test_run_today_sunday_is_long(self, app_ctx):
+        from coach_rules import _resolve_run_for_day
+        app, _ = app_ctx
+        with app.test_request_context():
+            r = _resolve_run_for_day(week=5, day_idx=6)
+        assert r is not None
+        assert r.run_type == "z2_long"
+
+
+class TestRunStatus:
+    def test_status_not_started_when_no_log(self, app_ctx):
+        from coach_rules import _compute_run_status
+        from datetime import date
+        app, _ = app_ctx
+        with app.test_request_context():
+            s = _compute_run_status(
+                user_id=999_999,
+                today_date=date.today(),
+                run_planned=True,
+            )
+        assert s == "not_started"
+
+    def test_status_rest_when_no_run_planned(self, app_ctx):
+        from coach_rules import _compute_run_status
+        from datetime import date
+        app, _ = app_ctx
+        with app.test_request_context():
+            s = _compute_run_status(
+                user_id=999_999,
+                today_date=date.today(),
+                run_planned=False,
+            )
+        assert s == "rest"

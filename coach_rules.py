@@ -169,3 +169,66 @@ def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime
     if is_rest:
         return None
     return DEFAULT_WORKOUT_TIME
+
+
+def _resolve_run_for_day(week: int, day_idx: int) -> Optional[RunSummary]:
+    """Read the day's run dict from PHASE_TEMPLATES and project to RunSummary.
+
+    Run dict shape: {"type": "z2"|"hiit"|"z2_long", "label": str,
+                    "time": str, "detail": str}. None if no run scheduled.
+    """
+    from workout_data import get_workouts
+    days = get_workouts(week)
+    if day_idx >= len(days):
+        return None
+    run = days[day_idx].get("run")
+    if not run:
+        return None
+    # Time may be e.g. "6:45 AM" — parse loosely; rules engine only needs a dtime.
+    scheduled_at: Optional[dtime] = None
+    raw_time = run.get("time", "")
+    if raw_time:
+        scheduled_at = _parse_time_loose(raw_time)
+    return RunSummary(
+        run_type=run.get("type", "z2"),
+        label=run.get("label", ""),
+        scheduled_at=scheduled_at,
+        detail=run.get("detail", ""),
+    )
+
+
+def _parse_time_loose(raw: str) -> Optional[dtime]:
+    """Parse loose time strings like '6:45 AM' or '6 AM' or '06:45'.
+    Returns None if unparseable — rules engine treats None as 'unscheduled'."""
+    import re
+    s = raw.strip().upper()
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$", s)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mm = int(m.group(2) or 0)
+    suffix = m.group(3)
+    if suffix == "PM" and h < 12:
+        h += 12
+    if suffix == "AM" and h == 12:
+        h = 0
+    if not (0 <= h < 24 and 0 <= mm < 60):
+        return None
+    return dtime(h, mm)
+
+
+def _compute_run_status(user_id: int, today_date: date, run_planned: bool) -> str:
+    """Returns one of: not_started | logged | skipped | rest.
+
+    rest: no run planned for today.
+    not_started: run planned, no RunLog for today.
+    logged: RunLog row exists for today.
+    skipped: not used in v1 — would require explicit skip signal.
+    """
+    if not run_planned:
+        return "rest"
+    from models import RunLog
+    log = RunLog.query.filter_by(
+        user_id=user_id, log_date=today_date,
+    ).first()
+    return "logged" if log else "not_started"
