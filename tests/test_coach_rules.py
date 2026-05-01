@@ -96,3 +96,72 @@ class TestDataclassesShape:
         # Frozen — should raise FrozenInstanceError
         with pytest.raises(Exception):
             r.local_weekday = "Friday"
+
+
+class TestWorkoutResolution:
+    def _make_user(self, app_ctx):
+        from models import User, UserEquipment, PhysicalAssessment
+        app, db = app_ctx
+        u = User(email=f"rules-{id(self)}@example.com", password_hash="x")
+        db.session.add(u); db.session.commit()
+        eq = UserEquipment(user_id=u.id, available_equipment=[
+            "barbell", "dumbbells", "lat_pulldown", "cable_machine",
+            "leg_press", "leg_curl_ext", "flat_bench", "incline_bench",
+            "decline_bench", "ez_bar", "kettlebells", "pull_up_bar",
+            "dip_station", "ab_machine", "smith_machine",
+        ])
+        pa = PhysicalAssessment(user_id=u.id, has_gym=True)
+        db.session.add(eq); db.session.add(pa); db.session.commit()
+        return u
+
+    def test_workout_today_resolves_for_phase_2_thursday(self, app_ctx):
+        # Phase 2, Thursday (day_idx=3) — Erik's deadlift/back-side day.
+        from coach_rules import _resolve_workout_for_day_summary
+        app, _ = app_ctx
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            from flask_login import login_user
+            login_user(u)
+            summary = _resolve_workout_for_day_summary(u.id, week=5, day_idx=3)
+        assert summary is not None
+        assert summary.is_rest is False
+        # Phase 2 Thu has Weighted Pull-Up + BB Row per spec §4
+        assert any("Row" in n or "Pull-Up" in n for n in summary.exercise_names)
+
+    def test_workout_today_rest_day(self, app_ctx):
+        # Phase 1 Sunday (day_idx=6) is rest in the new program.
+        from coach_rules import _resolve_workout_for_day_summary
+        app, _ = app_ctx
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            from flask_login import login_user
+            login_user(u)
+            summary = _resolve_workout_for_day_summary(u.id, week=1, day_idx=6)
+        assert summary is not None
+        assert summary.is_rest is True
+        assert summary.exercise_names == []
+
+
+class TestWorkoutStatus:
+    def test_status_not_started_when_no_sets_logged(self, app_ctx):
+        from coach_rules import _compute_workout_status
+        from datetime import date
+        app, _ = app_ctx
+        # No sets — status is "not_started" for a non-rest day
+        with app.test_request_context():
+            s = _compute_workout_status(
+                user_id=999_999, week=5, day_idx=3,
+                today_date=date.today(), is_rest=False,
+            )
+        assert s == "not_started"
+
+    def test_status_rest_when_is_rest(self, app_ctx):
+        from coach_rules import _compute_workout_status
+        from datetime import date
+        app, _ = app_ctx
+        with app.test_request_context():
+            s = _compute_workout_status(
+                user_id=999_999, week=5, day_idx=6,
+                today_date=date.today(), is_rest=True,
+            )
+        assert s == "rest"

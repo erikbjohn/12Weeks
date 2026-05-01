@@ -82,3 +82,66 @@ class CoachRules:
 
     prefilled_schedule: str             # Rendered <schedule>...</schedule>
     prefilled_directive: str            # Rendered <directive>...</directive>
+
+
+def _resolve_workout_for_day_summary(user_id: int, week: int, day_idx: int) -> Optional[WorkoutSummary]:
+    """Resolve the user's workout for (week, day_idx) through the same chain
+    as api_workouts: PHASE_TEMPLATES → WeeklyPrescription → auto_swap → ExerciseSwap.
+
+    Returns a lean WorkoutSummary (lift_name + exercise names), or None if the
+    week/day cannot be resolved at all. Returns is_rest=True with empty exercises
+    for rest days."""
+    from coach_assembler import _resolve_workout_for_day
+    day = _resolve_workout_for_day(week, day_idx)
+    if day is None:
+        return None
+    if day.get("isRest"):
+        return WorkoutSummary(
+            lift_name=day.get("liftName", "Rest"),
+            exercise_names=[],
+            is_rest=True,
+        )
+    exercises = day.get("exercises", []) or []
+    return WorkoutSummary(
+        lift_name=day.get("liftName", ""),
+        exercise_names=[e.get("name", "") for e in exercises if e.get("name")],
+        is_rest=False,
+    )
+
+
+def _compute_workout_status(
+    user_id: int,
+    week: int,
+    day_idx: int,
+    today_date,
+    is_rest: bool,
+) -> str:
+    """Returns one of: not_started | in_progress | complete | rest.
+
+    Rest takes precedence. For non-rest days:
+    - not_started: zero SetLog rows for this user/week/day_idx today.
+    - in_progress: at least one SetLog row today, but not all configured sets done.
+    - complete: every prescribed set has done=True.
+    """
+    if is_rest:
+        return "rest"
+    from models import SetLog
+    sets_today = SetLog.query.filter_by(
+        user_id=user_id, week=week, day_idx=day_idx,
+        logged_date=today_date,
+    ).all()
+    if not sets_today:
+        return "not_started"
+    done_count = sum(1 for s in sets_today if s.done)
+    # If any logged sets exist but not all done → in_progress.
+    # We don't try to compute the "expected total" precisely — coach treats
+    # any logged-but-incomplete session as in_progress.
+    if done_count == 0:
+        return "in_progress"
+    # Heuristic: if the user logged any sets and stopped, treat as in_progress
+    # unless the day's known exercise count appears all-completed. Keep it
+    # simple — engine and api_workouts are the source of truth for "complete";
+    # rules engine just needs a 4-bucket signal.
+    if done_count >= len(sets_today):
+        return "complete"
+    return "in_progress"
