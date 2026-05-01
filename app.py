@@ -5149,18 +5149,26 @@ def api_chat_stream():
         full_text = ""
         try:
             from coach_assembler import coach_respond_streaming
-            for chunk in coach_respond_streaming(
-                user_id=_current_user_id,
-                agent_name=_route_info["agent_name"],
-                user_message=user_msg,
-            ):
-                full_text += chunk + " "
-                # SSE data field cannot contain raw newlines — escape them.
-                # Add a leading space between chunks for readability when client concatenates.
-                safe_text = (chunk + " ").replace('\n', '\\n')
-                yield f"data: {safe_text}\n\n"
-            yield f"data: [DONE]\n\n"
-            full_text = full_text.rstrip()
+            from models import User as _User
+            from flask_login import login_user as _login_user
+            # SSE generators run after the request context is torn down. Re-establish
+            # an app + test request context AND log the user in so coach_assembler's
+            # current_user-dependent builders (a dozen of them) keep working.
+            with _app.test_request_context():
+                _u = _User.query.get(_current_user_id)
+                if _u is not None:
+                    _login_user(_u, force=True)
+                for chunk in coach_respond_streaming(
+                    user_id=_current_user_id,
+                    agent_name=_route_info["agent_name"],
+                    user_message=user_msg,
+                ):
+                    full_text += chunk + " "
+                    # SSE data field cannot contain raw newlines — escape them.
+                    safe_text = (chunk + " ").replace('\n', '\\n')
+                    yield f"data: {safe_text}\n\n"
+                yield f"data: [DONE]\n\n"
+                full_text = full_text.rstrip()
         except GeneratorExit:
             import logging
             logging.warning("Client disconnected mid-stream")
