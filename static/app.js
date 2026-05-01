@@ -5469,15 +5469,26 @@ async function _startSundayReviewStream(trigger) {
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
       var lines = chunk.split('\n');
+      var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            bubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -5607,15 +5618,26 @@ async function _startMcChat() {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
+      let stop = false;
       for (const line of chunk.split('\n')) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            bubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -5677,15 +5699,26 @@ async function sendMcChat() {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
+      let stop = false;
       for (const line of chunk.split('\n')) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            bubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory) {
       _chatHistory.push({ role: 'user', content: text, date: todayStr() });
@@ -5878,21 +5911,28 @@ async function sendMorningCoachReply() {
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
       const lines = chunk.split('\n');
+      let stop = false;
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
-          if (data === '[DONE]') break;
-          if (data === '[ERROR]') {
-            fullText = fullText || 'Connection issue. Try again.';
-            break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            if (streamBubble) streamBubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
           }
           fullText += data.replace(/\\n/g, '\n');
           if (streamBubble) {
-            streamBubble.textContent = fullText;
+            streamBubble.innerHTML = renderCoachMarkdown(fullText);
             if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
           }
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      if (streamBubble) streamBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
 
     if (_chatHistory) {
@@ -6294,21 +6334,31 @@ async function sendChatMessage(inputId, containerId) {
 
             const chunk = decoder.decode(value, { stream: true });
             const lines = chunk.split('\n');
+            let stop = false;
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
                     const data = line.slice(6);
-                    if (data === '[DONE]') break;
-                    if (data === '[ERROR]') {
-                        fullText = fullText || 'Erik stepped away. He\'ll be back in a moment.';
-                        break;
+                    if (data === '[DONE]') { stop = true; break; }
+                    if (data.startsWith('[ERROR')) {
+                        const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        if (streamBubble) {
+                            streamBubble.innerHTML = renderCoachMarkdown(fullText);
+                            if (container) container.scrollTop = container.scrollHeight;
+                        }
+                        stop = true; break;
                     }
                     fullText += data.replace(/\\n/g, '\n');
                     if (streamBubble) {
-                        streamBubble.textContent = fullText;
+                        streamBubble.innerHTML = renderCoachMarkdown(fullText);
                         if (container) container.scrollTop = container.scrollHeight;
                     }
                 }
             }
+            if (stop) break;
+        }
+        if (!fullText.trim()) {
+            if (streamBubble) streamBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
         }
 
         // Finalize
@@ -7129,18 +7179,26 @@ async function _fetchRunCoachOpener(triggerMsg) {
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
       var lines = chunk.split('\n');
+      var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
     }
     if (!fullText.trim()) {
-      if (bubble) bubble.textContent = 'Nice run! How did it feel out there?';
+      if (bubble) bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory && fullText.trim()) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -7190,15 +7248,26 @@ async function sendRunCoachMsg() {
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
       var lines = chunk.split('\n');
+      var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            typingBubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      typingBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory) {
       _chatHistory.push({ role: 'user', content: text, date: todayStr() });
@@ -9124,19 +9193,26 @@ async function launchWeeklyPlanning(weekOverride) {
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
             var lines = chunk.split('\n');
+            var stop = false;
             for (var li = 0; li < lines.length; li++) {
                 if (lines[li].startsWith('data: ')) {
                     var data = lines[li].slice(6);
-                    if (data === '[DONE]') break;
+                    if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
-                        if (bubble) bubble.innerHTML = '<span style="color:#ef4444">' + data + '</span>';
-                        break;
+                        var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
+                        stop = true; break;
                     }
                     fullText += data.replace(/\\n/g, '\n');
                     if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
+            if (stop) break;
+        }
+        if (!fullText.trim()) {
+            if (bubble) bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
         }
         if (_chatHistory) {
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -9185,15 +9261,26 @@ async function _fetchInlineCoachOpener() {
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
             var lines = chunk.split('\n');
+            var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
-                    if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+                    if (data === '[DONE]') { stop = true; break; }
+                    if (data.startsWith('[ERROR')) {
+                        var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
+                        stop = true; break;
+                    }
                     fullText += data.replace(/\\n/g, '\n');
                     if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
+            if (stop) break;
+        }
+        if (!fullText.trim()) {
+            if (bubble) bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
         }
         if (_chatHistory) {
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -9300,15 +9387,26 @@ async function sendInlineCoachMsg() {
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
             var lines = chunk.split('\n');
+            var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
-                    if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+                    if (data === '[DONE]') { stop = true; break; }
+                    if (data.startsWith('[ERROR')) {
+                        var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        typingBubble.innerHTML = renderCoachMarkdown(fullText);
+                        stop = true; break;
+                    }
                     fullText += data.replace(/\\n/g, '\n');
                     typingBubble.innerHTML = renderCoachMarkdown(fullText);
                     messagesEl.scrollTop = messagesEl.scrollHeight;
                 }
             }
+            if (stop) break;
+        }
+        if (!fullText.trim()) {
+            typingBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
         }
         if (_chatHistory) {
             _chatHistory.push({ role: 'user', content: text, date: todayStr() });
@@ -9354,19 +9452,31 @@ async function sendInlineCoachMsg() {
                         var _fbDec = new TextDecoder();
                         (function _readFb() {
                             _fbReader.read().then(function(res) {
-                                if (res.done) return;
+                                if (res.done) {
+                                    if (!_fbFull.trim()) {
+                                        _fbBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
+                                    }
+                                    return;
+                                }
                                 var ch = _fbDec.decode(res.value, { stream: true });
                                 var ls = ch.split('\n');
+                                var fbStop = false;
                                 for (var li = 0; li < ls.length; li++) {
                                     if (ls[li].startsWith('data: ')) {
                                         var dd = ls[li].slice(6);
-                                        if (dd === '[DONE]' || dd.startsWith('[ERROR')) return;
+                                        if (dd === '[DONE]') { fbStop = true; break; }
+                                        if (dd.startsWith('[ERROR')) {
+                                            var fbErr = dd.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                                            _fbFull += '\n\n[Coach error: ' + fbErr + ']';
+                                            _fbBubble.innerHTML = renderCoachMarkdown(_fbFull);
+                                            fbStop = true; break;
+                                        }
                                         _fbFull += dd.replace(/\\n/g, '\n');
                                         _fbBubble.innerHTML = renderCoachMarkdown(_fbFull);
                                         if (_mel) _mel.scrollTop = _mel.scrollHeight;
                                     }
                                 }
-                                _readFb();
+                                if (!fbStop) _readFb();
                             });
                         })();
                     }).catch(function(){});
@@ -9401,14 +9511,25 @@ async function _refreshCoachAccordionMsg() {
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
             var lines = chunk.split('\n');
+            var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
                     var data = lines[i].slice(6);
-                    if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+                    if (data === '[DONE]') { stop = true; break; }
+                    if (data.startsWith('[ERROR')) {
+                        var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        el.textContent = fullText;
+                        stop = true; break;
+                    }
                     fullText += data.replace(/\\n/g, '\n');
                     el.textContent = fullText;
                 }
             }
+            if (stop) break;
+        }
+        if (!fullText.trim()) {
+            el.textContent = '(Coach returned an empty response — check server logs)';
         }
         if (_chatHistory) {
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -10802,18 +10923,26 @@ async function _fetchLiftCoachOpener(triggerMsg) {
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
       var lines = chunk.split('\n');
+      var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
     }
     if (!fullText.trim()) {
-      if (bubble) bubble.textContent = 'Nice work! How did the session feel?';
+      if (bubble) bubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory && fullText.trim()) {
       _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
@@ -10863,15 +10992,26 @@ async function sendLiftCoachMsg() {
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
       var lines = chunk.split('\n');
+      var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
           var data = lines[i].slice(6);
-          if (data === '[DONE]' || data.startsWith('[ERROR')) break;
+          if (data === '[DONE]') { stop = true; break; }
+          if (data.startsWith('[ERROR')) {
+            var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
+            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            typingBubble.innerHTML = renderCoachMarkdown(fullText);
+            stop = true; break;
+          }
           fullText += data.replace(/\\n/g, '\n');
           typingBubble.innerHTML = renderCoachMarkdown(fullText);
           messagesEl.scrollTop = messagesEl.scrollHeight;
         }
       }
+      if (stop) break;
+    }
+    if (!fullText.trim()) {
+      typingBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
     }
     if (_chatHistory) {
       _chatHistory.push({ role: 'user', content: text, date: todayStr() });
