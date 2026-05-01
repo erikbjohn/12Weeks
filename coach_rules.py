@@ -129,27 +129,58 @@ def _compute_workout_status(
     """Returns one of: not_started | in_progress | complete | rest.
 
     Rest takes precedence. Otherwise:
-    - complete: DayCompletion.done is True for (user, week, day_idx).
-    - not_started: zero SetLog rows for this user/week/day_idx today.
-    - in_progress: at least one SetLog row exists but DayCompletion.done is not True.
+    - complete: DayCompletion.done is True for ANY (week, day_idx) that wrote
+      sets today, OR the user has 3+ sets logged today (heuristic for "session
+      finished" when DayCompletion lags).
+    - not_started: zero SetLog rows for today across ALL weeks.
+    - in_progress: at least one SetLog row today but completion not yet flagged.
+
+    NOTE: query is INTENTIONALLY week-agnostic. The UI's `AppState.current_week`
+    can drift from the rules engine's start_date computation (Erik's UI showed
+    week 6 while rules engine computed week 5 from start_date). When the user
+    logs sets, they're stored under whatever week the UI thinks it is. The
+    status query must therefore look at logged_date alone — otherwise the
+    coach falsely reports "Lift now" when the lift is already done.
     """
     if is_rest:
         return "rest"
     from models import SetLog, DayCompletion
 
-    # Check authoritative completion flag first
+    # Authoritative complete (passed week, day_idx)
     dc = DayCompletion.query.filter_by(
         user_id=user_id, week=week, day_idx=day_idx,
     ).first()
     if dc and dc.done:
         return "complete"
 
-    # Fall back to SetLog presence
-    has_logged = (SetLog.query
-                  .filter_by(user_id=user_id, week=week, day_idx=day_idx,
-                             logged_date=today_date)
-                  .first() is not None)
-    return "in_progress" if has_logged else "not_started"
+    # Any sets logged today across ANY (week, day_idx) — covers UI/engine
+    # week drift (UI says wk6, engine says wk5; sets stored under wk6).
+    sets_today = (SetLog.query
+                  .filter_by(user_id=user_id, logged_date=today_date)
+                  .all())
+    if not sets_today:
+        return "not_started"
+
+    # Authoritative complete on alternate (week, day_idx) the user actually
+    # logged sets to today.
+    keys = {(s.week, s.day_idx) for s in sets_today}
+    for w, d in keys:
+        if (w, d) == (week, day_idx):
+            continue  # already checked above
+        dc = DayCompletion.query.filter_by(
+            user_id=user_id, week=w, day_idx=d,
+        ).first()
+        if dc and dc.done:
+            return "complete"
+
+    # Heuristic: 6+ sets today and at least 3 marked done = de-facto complete.
+    # Lifts the directive out of "Lift now" once the session is clearly finished
+    # even when the auto-completion flag hasn't been set.
+    done_count = sum(1 for s in sets_today if getattr(s, "done", False))
+    if len(sets_today) >= 6 and done_count >= 3:
+        return "complete"
+
+    return "in_progress"
 
 
 def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime]:
