@@ -141,3 +141,56 @@ class TestCoachRespond:
         assert "DIR" in out
         assert "Your call" not in out
         assert "Logged" in out
+
+
+class TestCoachRespondStreaming:
+    def test_streaming_yields_validated_chunks(self, app_ctx):
+        from coach_assembler import coach_respond_streaming
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+
+        def fake_llm(system_prompt, messages, temperature, max_tokens):
+            return (
+                "<schedule>SCHED</schedule>\n"
+                "<directive>DIR</directive>\n"
+                "<motivation>Lift now. Front Squat 5x5.</motivation>"
+            )
+
+        with app.test_request_context():
+            login_user(u, force=True)
+            chunks = list(coach_respond_streaming(
+                user_id=u.id, agent_name="conversation",
+                user_message="hey", rules=_stub_rules(), llm_fn=fake_llm,
+                chunk_size=10,  # small enough to guarantee multiple chunks
+            ))
+        full = " ".join(chunks)
+        assert "SCHED" in full
+        assert "DIR" in full
+        assert "Lift now" in full
+        # Chunks should be smaller than the full text
+        assert len(chunks) >= 2
+
+    def test_streaming_runs_validator(self, app_ctx):
+        from coach_assembler import coach_respond_streaming
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+
+        def fake_llm(system_prompt, messages, temperature, max_tokens):
+            return (
+                "<schedule>SCHED</schedule>\n"
+                "<directive>DIR</directive>\n"
+                "<motivation>Your call!</motivation>"
+            )
+
+        with app.test_request_context():
+            login_user(u, force=True)
+            chunks = list(coach_respond_streaming(
+                user_id=u.id, agent_name="conversation",
+                user_message="hey", rules=_stub_rules(), llm_fn=fake_llm,
+            ))
+        full = " ".join(chunks)
+        # Banned phrase blocked → fallback path
+        assert "Your call" not in full
+        assert "Logged" in full or "SCHED" in full

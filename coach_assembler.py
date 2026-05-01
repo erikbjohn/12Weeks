@@ -900,7 +900,7 @@ These cause validation failure. Do NOT use them anywhere:
 
 # WHAT YOU SEE
 
-The user message is wrapped in <latest_user_message>. The pre-filled
+The user's latest message comes through the standard conversation channel — treat it as the prompt. The pre-filled
 <schedule> and <directive> tell you what's happening and what to instruct.
 The <event_timeline> is ground truth from logs — past coach messages are
 NOT in scope. <recent_coach_directives> shows your last 3 messages today
@@ -1439,3 +1439,41 @@ def _real_llm_call(system_prompt, messages, temperature, max_tokens):
         messages=messages,
     )
     return response.content[0].text
+
+
+def coach_respond_streaming(
+    user_id,
+    agent_name,
+    user_message,
+    rules=None,
+    llm_fn=None,
+    chunk_size=50,
+):
+    """Streaming version of coach_respond. Yields chunks of validated text.
+
+    Buffers the LLM response server-side, validates, retries, falls back —
+    then yields the final validated string in chunks for SSE delivery.
+    User sees slightly delayed but fully validated streaming.
+
+    Args same as coach_respond. Yields strings (chunks of the response).
+    """
+    full_text = coach_respond(
+        user_id=user_id,
+        agent_name=agent_name,
+        user_message=user_message,
+        rules=rules,
+        llm_fn=llm_fn,
+    )
+    # Chunk the validated string for streaming. Chunk on word boundaries.
+    if not full_text:
+        return
+    words = full_text.split(" ")
+    buf = ""
+    for word in words:
+        if len(buf) + len(word) + 1 > chunk_size:
+            yield buf
+            buf = word
+        else:
+            buf = (buf + " " + word).strip() if buf else word
+    if buf:
+        yield buf
