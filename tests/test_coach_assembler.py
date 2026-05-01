@@ -70,3 +70,68 @@ class TestRecentCoachDirectives:
         assert "recent_coach_directives" in out
         assert "<recent_coach_directives>" in out["recent_coach_directives"]
         assert "NONE" in out["recent_coach_directives"]
+
+
+class TestCoachMemoriesWindow:
+    def test_filters_to_last_21_days(self, app_ctx):
+        from coach_assembler import _build_coach_memories
+        from models import CoachMemory
+        from datetime import datetime, timedelta
+        from app import db
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        # Old memory (40 days ago) — must be excluded
+        old = CoachMemory(
+            user_id=u.id, content="old memory",
+            memory_type="event", week=1,
+        )
+        old.created_at = datetime.utcnow() - timedelta(days=40)
+        # Recent memory (5 days ago)
+        new = CoachMemory(
+            user_id=u.id, content="recent memory",
+            memory_type="event", week=5,
+        )
+        new.created_at = datetime.utcnow() - timedelta(days=5)
+        db.session.add(old); db.session.add(new); db.session.commit()
+        with app.test_request_context():
+            login_user(u, force=True)
+            out = _build_coach_memories()
+        memories = out["coach_memories"]
+        contents = [m["content"] for m in memories]
+        assert "recent memory" in contents
+        assert "old memory" not in contents
+
+
+class TestAthleteDataSentinels:
+    def test_empty_garmin_emits_sentinel(self):
+        from coach_assembler import _format_athlete_data
+        ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
+        out = _format_athlete_data(ctx, ["base"])
+        # Should have a Garmin sentinel since ctx has no garmin key
+        assert "Garmin" in out and "NONE" in out
+
+    def test_empty_runs_emits_sentinel(self):
+        from coach_assembler import _format_athlete_data
+        ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
+        out = _format_athlete_data(ctx, ["base"])
+        # Should have a recent-runs sentinel
+        assert "runs" in out.lower() and "NONE" in out
+
+    def test_empty_meals_emits_sentinel(self):
+        from coach_assembler import _format_athlete_data
+        ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
+        out = _format_athlete_data(ctx, ["base"])
+        assert "Meals" in out and "NONE" in out
+
+    def test_empty_coach_memories_emits_sentinel(self):
+        from coach_assembler import _format_athlete_data
+        ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
+        out = _format_athlete_data(ctx, ["base"])
+        assert "memories" in out.lower() and "NONE" in out
+
+    def test_empty_exercise_history_emits_sentinel(self):
+        from coach_assembler import _format_athlete_data
+        ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
+        out = _format_athlete_data(ctx, ["base"])
+        assert "Exercise history" in out and "NONE" in out

@@ -703,10 +703,14 @@ def _build_goal():
 
 @section_builder("coach_memories")
 def _build_coach_memories():
+    from datetime import datetime, timedelta
     from models import CoachMemory
-    rows = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
-        CoachMemory.created_at.desc()
-    ).limit(50).all()
+    cutoff = datetime.utcnow() - timedelta(days=21)
+    rows = (CoachMemory.query
+            .filter(CoachMemory.user_id == current_user.id,
+                    CoachMemory.created_at >= cutoff)
+            .order_by(CoachMemory.created_at.desc())
+            .limit(50).all())
     return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week} for m in rows]}
 
 
@@ -1260,6 +1264,10 @@ def _format_athlete_data(ctx, requires):
             garmin_parts.append(f"Stress {g['stress']['overall']}")
         if garmin_parts:
             parts.append("Garmin today: " + ", ".join(garmin_parts) + ".")
+        else:
+            parts.append("Garmin today: NONE — no readings available. Do not reference HRV/sleep/body battery/stress.")
+    else:
+        parts.append("Garmin today: NONE — no Garmin data in scope. Do not reference HRV/sleep/body battery/stress.")
     r = ctx.get("readiness")
     if r and r.get("score") is not None:
         readiness_line = f"Readiness score: {r['score']}/100 ({r['risk_level']} risk)."
@@ -1284,6 +1292,8 @@ def _format_athlete_data(ctx, requires):
     # Exercise data
     if ctx.get("exercise_history"):
         parts.append(_format_exercise_history(ctx["exercise_history"]))
+    else:
+        parts.append("Exercise history: NONE — no past sessions in scope. Do not reference any specific past lift.")
     if ctx.get("exercise_analysis"):
         parts.append(_format_exercise_analysis(ctx["exercise_analysis"]))
     if ctx.get("today_sets"):
@@ -1301,6 +1311,8 @@ def _format_athlete_data(ctx, requires):
     # Runs
     if ctx.get("run_history"):
         parts.append(_format_runs(ctx["run_history"]))
+    else:
+        parts.append("Recent runs: NONE — no logged runs in scope. Do not reference any run.")
 
     # Physical
     if ctx.get("physical_assessment"):
@@ -1328,6 +1340,8 @@ def _format_athlete_data(ctx, requires):
             meal_plan_type = "fast_day"
     if ctx.get("meals_today") is not None or meal_plan:
         parts.append(_format_meals_today_xml(ctx.get("meals_today"), meal_plan, meal_plan_type, user_timezone=ctx.get("user_timezone")))
+    else:
+        parts.append("Meals today: NONE — no meals logged and no meal plan. Do not reference today's intake.")
     if ctx.get("weekly_meals_summary"):
         parts.append(_format_weekly_meals(ctx["weekly_meals_summary"]))
 
@@ -1373,6 +1387,8 @@ def _format_athlete_data(ctx, requires):
     # Coach memories
     if ctx.get("coach_memories"):
         parts.append(_format_memories(ctx["coach_memories"]))
+    else:
+        parts.append("Coach memories: NONE — no memories in the last 21 days. Do not reference past coaching decisions.")
 
     # User rules (corrections from the athlete)
     rules = ctx.get("user_rules", [])
