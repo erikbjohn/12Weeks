@@ -2628,7 +2628,14 @@ def api_workouts():
         all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
     except Exception:
         all_weeks["_exerciseNames"] = []
-    return jsonify(all_weeks)
+    response = jsonify(all_weeks)
+    # Force fresh — iOS PWA + Cloudflare have layered caches that have
+    # been serving stale workout data after server-side template/prescription
+    # changes. Hard refresh wasn't enough.
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route("/api/workouts/<int:week>")
