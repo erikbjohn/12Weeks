@@ -12,8 +12,8 @@ docs/superpowers/research/2026-04-30-coach-audit.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timezone
-from typing import Optional
+from datetime import date, datetime, time as dtime, timedelta, timezone
+from typing import NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
 
@@ -232,3 +232,76 @@ def _compute_run_status(user_id: int, today_date: date, run_planned: bool) -> st
         user_id=user_id, log_date=today_date,
     ).first()
     return "logged" if log else "not_started"
+
+
+class FastingState(NamedTuple):
+    fasting_active: bool
+    fasting_hours: Optional[float]
+    fasting_target_hours: Optional[int]
+    fasting_break_at: Optional[datetime]
+
+
+# Erik's fixed protocol — codified here. If we add per-user protocols later,
+# move these to UserPreferences and pass them into compute_coach_rules.
+EATING_WINDOW_START = dtime(11, 0)   # 11 AM
+EATING_WINDOW_END = dtime(19, 0)     # 7 PM
+WEEKEND_FAST_START_DAY = 5            # Saturday (Mon=0)
+WEEKEND_FAST_START_TIME = dtime(19, 0)
+WEEKEND_FAST_BREAK_DAY = 0            # Monday
+WEEKEND_FAST_BREAK_TIME = dtime(11, 0)
+
+
+def _compute_fasting_state(now_local: datetime) -> FastingState:
+    """Compute current fasting state from local time alone.
+
+    Protocol:
+    - Mon 11 AM through Sat 7 PM: 16:8 IF — eat 11 AM to 7 PM, fast 7 PM to 11 AM.
+    - Sat 7 PM through Mon 11 AM: 40-hour weekend fast.
+    """
+    weekday = now_local.weekday()
+    today = now_local.date()
+    t = now_local.time()
+
+    weekend_start = datetime.combine(
+        today - timedelta(days=(weekday - WEEKEND_FAST_START_DAY) % 7),
+        WEEKEND_FAST_START_TIME,
+        tzinfo=PACIFIC,
+    )
+    weekend_break = weekend_start + timedelta(hours=40)
+
+    # Are we inside the weekend fast window?
+    if weekend_start <= now_local < weekend_break:
+        hours = (now_local - weekend_start).total_seconds() / 3600.0
+        return FastingState(
+            fasting_active=True,
+            fasting_hours=round(hours, 2),
+            fasting_target_hours=40,
+            fasting_break_at=weekend_break,
+        )
+
+    # Inside weekday eating window?
+    if EATING_WINDOW_START <= t < EATING_WINDOW_END:
+        return FastingState(
+            fasting_active=False,
+            fasting_hours=None,
+            fasting_target_hours=None,
+            fasting_break_at=None,
+        )
+
+    # Otherwise: in 16:8 IF fast.
+    if t >= EATING_WINDOW_END:
+        # Fast started today at 7 PM
+        fast_start = datetime.combine(today, EATING_WINDOW_END, tzinfo=PACIFIC)
+        break_at = datetime.combine(today + timedelta(days=1), EATING_WINDOW_START, tzinfo=PACIFIC)
+    else:
+        # Fast started yesterday at 7 PM
+        fast_start = datetime.combine(today - timedelta(days=1), EATING_WINDOW_END, tzinfo=PACIFIC)
+        break_at = datetime.combine(today, EATING_WINDOW_START, tzinfo=PACIFIC)
+
+    hours = (now_local - fast_start).total_seconds() / 3600.0
+    return FastingState(
+        fasting_active=True,
+        fasting_hours=round(hours, 2),
+        fasting_target_hours=16,
+        fasting_break_at=break_at,
+    )

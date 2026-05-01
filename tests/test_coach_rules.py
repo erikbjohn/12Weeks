@@ -225,3 +225,51 @@ class TestRunStatus:
                 run_planned=False,
             )
         assert s == "rest"
+
+
+class TestFastingState:
+    def test_weekday_morning_in_16h_fast(self, app_ctx):
+        # Wednesday 9 AM — fasting since Tue 7 PM = 14h into 16h IF
+        from coach_rules import _compute_fasting_state
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        app, _ = app_ctx
+        PACIFIC = ZoneInfo("America/Los_Angeles")
+        wed_9am = datetime(2026, 4, 29, 9, 0, tzinfo=PACIFIC)
+        with app.test_request_context():
+            state = _compute_fasting_state(now_local=wed_9am)
+        assert state.fasting_active is True
+        assert state.fasting_target_hours == 16
+        assert 13.5 <= state.fasting_hours <= 14.5
+        # Break expected at 11 AM the same day
+        assert state.fasting_break_at.hour == 11
+
+    def test_weekday_eating_window(self, app_ctx):
+        # Wednesday 1 PM — inside 11AM-7PM eating window
+        from coach_rules import _compute_fasting_state
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        app, _ = app_ctx
+        PACIFIC = ZoneInfo("America/Los_Angeles")
+        wed_1pm = datetime(2026, 4, 29, 13, 0, tzinfo=PACIFIC)
+        with app.test_request_context():
+            state = _compute_fasting_state(now_local=wed_1pm)
+        assert state.fasting_active is False
+        assert state.fasting_hours is None
+
+    def test_weekend_long_fast_active(self, app_ctx):
+        # Sunday 10 AM — 15h into Sat-7PM-to-Mon-11AM fast
+        from coach_rules import _compute_fasting_state
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        app, _ = app_ctx
+        PACIFIC = ZoneInfo("America/Los_Angeles")
+        sun_10am = datetime(2026, 5, 3, 10, 0, tzinfo=PACIFIC)
+        with app.test_request_context():
+            state = _compute_fasting_state(now_local=sun_10am)
+        assert state.fasting_active is True
+        assert state.fasting_target_hours == 40
+        assert 14.5 <= state.fasting_hours <= 15.5
+        # Break Monday 11 AM
+        assert state.fasting_break_at.weekday() == 0  # Monday
+        assert state.fasting_break_at.hour == 11
