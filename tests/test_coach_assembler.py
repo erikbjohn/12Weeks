@@ -135,3 +135,55 @@ class TestAthleteDataSentinels:
         ctx = {"week": 1, "phase": {"label": "Phase 1", "focus": "build"}}
         out = _format_athlete_data(ctx, ["base"])
         assert "Exercise history" in out and "NONE" in out
+
+
+class TestCorePromptRewrite:
+    def test_includes_envelope_contract(self):
+        from coach_assembler import CORE_PROMPT
+        # The new prompt MUST instruct the LLM to emit sectioned responses
+        assert "<schedule>" in CORE_PROMPT
+        assert "<directive>" in CORE_PROMPT
+        assert "<motivation>" in CORE_PROMPT
+        assert "<refusal>" in CORE_PROMPT
+
+    def test_includes_byte_identical_instruction(self):
+        from coach_assembler import CORE_PROMPT
+        assert "byte" in CORE_PROMPT.lower() or "echo" in CORE_PROMPT.lower()
+
+    def test_no_ask_questions_instruction(self):
+        from coach_assembler import CORE_PROMPT
+        # The new CORE_PROMPT must not instruct the LLM to ask questions
+        forbidden = ["ask the athlete", "ask one question", "ask what they"]
+        for phrase in forbidden:
+            assert phrase not in CORE_PROMPT.lower(), f"forbidden phrase present: {phrase}"
+
+    def test_includes_banned_phrase_list(self):
+        from coach_assembler import CORE_PROMPT
+        # The prompt should list banned phrases inline
+        assert "your call" in CORE_PROMPT.lower()
+        assert "great job" in CORE_PROMPT.lower()
+
+    def test_keeps_required_placeholders_for_format(self):
+        from coach_assembler import CORE_PROMPT
+        # Until Task 15 rewrites assemble_prompt, these placeholders must stay
+        # so the existing .format() call doesn't fail.
+        assert "{athlete_data_block}" in CORE_PROMPT
+        assert "{food_safety_block}" in CORE_PROMPT
+
+    def test_assemble_prompt_still_works(self, app_ctx):
+        from coach_assembler import assemble_prompt
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            ctx = {
+                "athlete_name": "Erik",
+                "week": 5,
+                "phase": {"label": "Phase 2", "focus": "build"},
+                "requires": ["base"],
+            }
+            prompt = assemble_prompt("conversation", ctx)
+        # No KeyError from .format() means the placeholders match
+        assert "<schedule>" in prompt
+        assert "<directive>" in prompt
