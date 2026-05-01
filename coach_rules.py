@@ -568,3 +568,131 @@ def _render_prefilled_schedule(
 def _render_prefilled_directive(directive: Directive) -> str:
     """Build the <directive>...</directive> block on a single line."""
     return f"<directive>{directive.text}</directive>"
+
+
+def _current_week_for_user(user_id: int, today_local) -> int:
+    """Return the user's current 12-week phase week from AppState.
+
+    Mirrors the logic in coach_assembler._current_week():
+    - Read AppState by user_id
+    - If start_date set: weeks elapsed since start (clamped 1..12)
+    - Else: fall back to AppState.current_week, default 1
+    """
+    from models import AppState
+    state = AppState.query.filter_by(user_id=user_id).first()
+    if state is None:
+        return 1
+    if state.start_date:
+        diff_days = (today_local - state.start_date).days
+        return max(1, min(12, (diff_days // 7) + 1))
+    return state.current_week or 1
+
+
+def _phase_summary_for_week(week: int) -> str:
+    if week <= 4:
+        return f"Phase 1 (week {week})"
+    if week <= 8:
+        return f"Phase 2 (week {week})"
+    if week == 9:
+        return f"Deload (week {week})"
+    return f"Phase 3 (week {week})"
+
+
+def compute_coach_rules(
+    user_id: int,
+    now: Optional[datetime] = None,
+    latest_user_message: Optional[str] = None,
+) -> CoachRules:
+    """Top-level entry. Pure function (modulo DB reads).
+
+    Args:
+        user_id: The athlete's user ID.
+        now: Override clock (UTC, tz-aware OR naive treated as UTC). Production passes None.
+        latest_user_message: The user's latest chat message (for refusal scan).
+    """
+    now_local = _user_local_now(now)
+    today = now_local.date()
+    weekday_idx = now_local.weekday()  # Mon=0
+    tomorrow_idx = (weekday_idx + 1) % 7
+    week = _current_week_for_user(user_id, today)
+    next_week = week + 1 if tomorrow_idx == 0 else week  # rolls Sunday→Monday
+
+    # Workout today
+    workout_today = _resolve_workout_for_day_summary(user_id, week, weekday_idx)
+    is_rest_today = bool(workout_today and workout_today.is_rest) or workout_today is None
+    workout_today_scheduled_at = _compute_workout_scheduled_at(user_id, is_rest_today)
+    workout_today_status = _compute_workout_status(
+        user_id, week, weekday_idx, today, is_rest_today,
+    )
+
+    # Workout tomorrow (clamp to week 12)
+    next_week_clamped = min(12, next_week)
+    workout_tomorrow = _resolve_workout_for_day_summary(user_id, next_week_clamped, tomorrow_idx)
+    is_rest_tomorrow = bool(workout_tomorrow and workout_tomorrow.is_rest) or workout_tomorrow is None
+    workout_tomorrow_scheduled_at = _compute_workout_scheduled_at(user_id, is_rest_tomorrow)
+
+    # Run today / tomorrow
+    run_today = _resolve_run_for_day(week, weekday_idx)
+    run_today_status = _compute_run_status(user_id, today, run_planned=run_today is not None)
+    run_tomorrow = _resolve_run_for_day(next_week_clamped, tomorrow_idx)
+
+    # Fasting
+    fasting = _compute_fasting_state(now_local)
+
+    # Refusal
+    refusal_required, refusal_reason = _detect_refusal(latest_user_message)
+
+    # Directive
+    directive = _compute_directive(
+        now_local=now_local,
+        workout_today=workout_today,
+        workout_today_scheduled_at=workout_today_scheduled_at,
+        workout_today_status=workout_today_status,
+        run_today=run_today,
+        run_today_status=run_today_status,
+        workout_tomorrow=workout_tomorrow,
+        workout_tomorrow_scheduled_at=workout_tomorrow_scheduled_at,
+        run_tomorrow=run_tomorrow,
+        fasting_active=fasting.fasting_active,
+        weekend_fast_active=(fasting.fasting_active and fasting.fasting_target_hours == 40),
+        is_pr_session=False,  # v1 — wire PR detection in v2
+        next_target_hint=None,
+        refusal_required=refusal_required,
+        phase_summary=_phase_summary_for_week(week),
+    )
+
+    prefilled_schedule = _render_prefilled_schedule(
+        now_local=now_local,
+        workout_today=workout_today,
+        workout_today_scheduled_at=workout_today_scheduled_at,
+        run_today=run_today,
+        workout_tomorrow=workout_tomorrow,
+        workout_tomorrow_scheduled_at=workout_tomorrow_scheduled_at,
+        run_tomorrow=run_tomorrow,
+    )
+    prefilled_directive = _render_prefilled_directive(directive)
+
+    return CoachRules(
+        now_utc=now_local.astimezone(timezone.utc),
+        now_local=now_local,
+        local_date_iso=now_local.strftime("%Y-%m-%d"),
+        local_weekday=now_local.strftime("%A"),
+        local_time_hhmm=now_local.strftime("%H:%M"),
+        workout_today=workout_today,
+        workout_today_scheduled_at=workout_today_scheduled_at,
+        workout_today_status=workout_today_status,
+        run_today=run_today,
+        run_today_status=run_today_status,
+        workout_tomorrow=workout_tomorrow,
+        workout_tomorrow_scheduled_at=workout_tomorrow_scheduled_at,
+        run_tomorrow=run_tomorrow,
+        fasting_active=fasting.fasting_active,
+        fasting_hours=fasting.fasting_hours,
+        fasting_target_hours=fasting.fasting_target_hours,
+        fasting_break_at=fasting.fasting_break_at,
+        directive=directive,
+        refusal_required=refusal_required,
+        refusal_reason=refusal_reason,
+        prefilled_schedule=prefilled_schedule,
+        prefilled_directive=prefilled_directive,
+    )

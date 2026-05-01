@@ -490,3 +490,59 @@ class TestPrefillRendering:
             Directive(text="Lift now. Front Squat.", category="workout_in_window")
         )
         assert s == "<directive>Lift now. Front Squat.</directive>"
+
+
+class TestComputeCoachRulesEnd:
+    def _make_user(self, app_ctx):
+        from models import User, UserEquipment, PhysicalAssessment
+        app, db = app_ctx
+        u = User(email=f"end-{id(self)}@example.com", password_hash="x")
+        db.session.add(u); db.session.commit()
+        eq = UserEquipment(user_id=u.id, available_equipment=[
+            "barbell", "dumbbells", "lat_pulldown", "cable_machine",
+            "leg_press", "leg_curl_ext", "flat_bench", "incline_bench",
+            "decline_bench", "ez_bar", "kettlebells", "pull_up_bar",
+            "dip_station", "ab_machine", "smith_machine",
+        ])
+        pa = PhysicalAssessment(user_id=u.id, has_gym=True)
+        db.session.add(eq); db.session.add(pa); db.session.commit()
+        return u
+
+    def test_end_to_end_thursday_morning(self, app_ctx):
+        from coach_rules import compute_coach_rules
+        from datetime import datetime
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            rules = compute_coach_rules(
+                user_id=u.id,
+                now=datetime(2026, 4, 30, 13, 30),  # naive UTC → 06:30 PDT Thursday
+                latest_user_message=None,
+            )
+        assert rules.local_weekday in {
+            "Monday", "Tuesday", "Wednesday", "Thursday",
+            "Friday", "Saturday", "Sunday",
+        }
+        assert rules.prefilled_schedule.startswith("<schedule>")
+        assert rules.prefilled_directive.startswith("<directive>")
+        assert rules.directive.text  # non-empty
+        assert rules.refusal_required is False
+
+    def test_refusal_propagates_to_directive_and_flag(self, app_ctx):
+        from coach_rules import compute_coach_rules
+        from datetime import datetime
+        from flask_login import login_user
+        app, _ = app_ctx
+        u = self._make_user(app_ctx)
+        with app.test_request_context():
+            login_user(u, force=True)
+            rules = compute_coach_rules(
+                user_id=u.id,
+                now=datetime(2026, 4, 30, 13, 30),
+                latest_user_message="thinking about resting tomorrow",
+            )
+        assert rules.refusal_required is True
+        assert rules.refusal_reason
+        assert "Train as planned" in rules.directive.text
