@@ -11,6 +11,7 @@ docs/superpowers/research/2026-04-30-coach-audit.md.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import NamedTuple, Optional
@@ -305,3 +306,38 @@ def _compute_fasting_state(now_local: datetime) -> FastingState:
         fasting_target_hours=16,
         fasting_break_at=break_at,
     )
+
+
+# Each pattern is a (regex, reason) tuple. Order matters — first match wins.
+_REFUSAL_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(skip|skipping|skipped)\b.*\b(lift|workout|run|train)", re.I),
+     "future-tense skip request"),
+    (re.compile(r"\b(rest|resting|take it easy|easy day)\b.*\b(today|tomorrow|tonight)\b", re.I),
+     "rest/easy-day request"),
+    (re.compile(r"\b(can|could|should)\s+i\b.*\b(rest|skip|wait|delay)\b", re.I),
+     "permission-to-skip"),
+    (re.compile(r"\b(later|tonight|tomorrow|move it|push it|reschedule)\b.*\b(workout|run|lift|session)\b", re.I),
+     "time-renegotiation"),
+    (re.compile(r"\b(do i (really )?have to|do i need to|is it ok to skip)\b", re.I),
+     "questioning-prescription"),
+    (re.compile(r"\bshould i\b.*\b(lift|run|train|workout|do it)\b", re.I),
+     "should-i-asking"),
+    (re.compile(r"\bjust (do|skip)\b.*\b(the run|the lift|today|tomorrow)\b", re.I),
+     "partial-compliance proposal"),
+    (re.compile(r"\bmaybe i('ll| will)\b.*\b(skip|rest|just)\b", re.I),
+     "soft-future skip"),
+]
+
+
+def _detect_refusal(latest_user_message: Optional[str]) -> tuple[bool, Optional[str]]:
+    """Scan the latest user message for refusal/renegotiation patterns.
+
+    Returns (triggered, reason). The reason is logged for telemetry and
+    fed back to the LLM in the <refusal> section of the prompt.
+    """
+    if not latest_user_message:
+        return (False, None)
+    for pattern, reason in _REFUSAL_PATTERNS:
+        if pattern.search(latest_user_message):
+            return (True, reason)
+    return (False, None)

@@ -273,3 +273,34 @@ class TestFastingState:
         # Break Monday 11 AM
         assert state.fasting_break_at.weekday() == 0  # Monday
         assert state.fasting_break_at.hour == 11
+
+
+class TestRefusalDetection:
+    @pytest.mark.parametrize("msg", [
+        "I'm gonna skip Friday's lift",
+        "thinking about resting tomorrow",
+        "can I take it easy today",
+        "later I'll do the run instead",
+        "should I do the run later",
+        "do I really have to lift today",
+        "maybe I'll just do the run and skip the lift",
+    ])
+    def test_refusal_triggered(self, msg):
+        from coach_rules import _detect_refusal
+        triggered, reason = _detect_refusal(msg)
+        assert triggered is True
+        assert reason  # non-empty
+
+    @pytest.mark.parametrize("msg", [
+        "just finished the lift, felt great",
+        "logged my run, hr was 142",
+        "what's tomorrow",
+        "phase 2 thursday — what's the plan",
+        "",
+        None,
+    ])
+    def test_refusal_not_triggered(self, msg):
+        from coach_rules import _detect_refusal
+        triggered, reason = _detect_refusal(msg)
+        assert triggered is False
+        assert reason is None
