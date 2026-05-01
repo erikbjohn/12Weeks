@@ -1152,6 +1152,48 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/clear-stale-prescriptions")
+def debug_clear_stale_prescriptions():
+    """Delete all WeeklyPrescription rows for a user+week so api_workouts
+    falls through to the fresh template. Used to recover from program rebuilds
+    where stored prescriptions don't match the new template (e.g., Erik's
+    week 5 had Push exercises stored on Friday from the old program).
+
+    Token-gated to prevent abuse.
+    Query: ?email=...&week=5&token=swap-cleanup-2026-04-30
+    """
+    email = request.args.get("email", "")
+    week = int(request.args.get("week", 0))
+    token = request.args.get("token", "")
+    if token != "swap-cleanup-2026-04-30":
+        return jsonify({"error": "bad token"}), 403
+    if not email or not week:
+        return jsonify({"error": "email + week required"}), 400
+    try:
+        from models import User, WeeklyPrescription
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        deleted = WeeklyPrescription.query.filter_by(
+            user_id=u.id, week=week,
+        ).delete()
+        db.session.commit()
+        return jsonify({
+            "email": email,
+            "week": week,
+            "deleted_rows": deleted,
+            "note": "Template will now drive api_workouts for this week.",
+        })
+    except Exception as e:
+        import traceback
+        db.session.rollback()
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-2000:],
+        }), 500
+
+
 @app.route("/api/debug/program-friday")
 def debug_program_friday():
     """Inspect what the program says for a user's Friday — template, prescription
