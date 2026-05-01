@@ -65,15 +65,15 @@ def user_with_sets(app_ctx):
 
 class TestVolumeFloor:
     def test_user_logged_two_sets_template_says_five(self, app_ctx, user_with_sets):
-        # Phase 2 (week 5), Thursday (day_idx=3), Barbell Bent-Over Row template
+        # Phase 2 (week 5), Friday (day_idx=4), Barbell Bent-Over Row template
         # is 4x6 per spec §4. User did 2 sets last week. Engine must still
         # prescribe 4 sets — not collapse to the user's bad day.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=3,
+        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=4,
                            last_weight=95, last_reps=6, set_count=2)
         with app.test_request_context():
-            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=3)
+            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=4)
         assert t["target_sets"] == 4, (
             f"Expected 4 sets (template floor), got {t['target_sets']}. "
             "Engine is letting last_set_count collapse the program's volume."
@@ -85,10 +85,10 @@ class TestVolumeFloor:
         # contract, not a floor for max.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=3,
+        u = user_with_sets("Barbell Bent-Over Row", week=5, day_idx=4,
                            last_weight=95, last_reps=6, set_count=6)
         with app.test_request_context():
-            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=3)
+            t = compute_next_targets(u.id, "Barbell Bent-Over Row", week=5, day_idx=4)
         assert t["target_sets"] == 4
 
     def test_falls_back_to_last_set_count_when_template_silent(self, app_ctx, user_with_sets):
@@ -119,25 +119,25 @@ class TestEngineExerciseOrder:
     def test_phase_2_lat_pulldown_uses_template_reps(
         self, app_ctx, user_with_sets
     ):
-        # Spec §4 Phase 2 Thu (day_idx=3) has Lat Pulldown 3x10 at idx=2.
+        # Spec §4 Phase 2 Thu (day_idx=4) has Lat Pulldown 3x10 at idx=2.
         # User came from Phase 1 Wed Lat Pulldown 3x10 at last_reps=10.
         # When we look up the new prescription with exercise_order=2,
         # we must read the spec §4 reps (10) and sets (3), not collapse
         # to a stale value.
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        u = user_with_sets("Lat Pulldown", week=3, day_idx=3,
+        u = user_with_sets("Lat Pulldown", week=3, day_idx=4,
                            last_weight=105, last_reps=10, set_count=3)
         with app.test_request_context():
             t = compute_next_targets(
-                u.id, "Lat Pulldown", week=5, day_idx=3, exercise_order=2,
+                u.id, "Lat Pulldown", week=5, day_idx=4, exercise_order=2,
             )
         assert t["target_reps"] == 10, (
-            f"Phase 2 Thu Lat Pulldown should target 10 reps per spec §4; "
+            f"Phase 2 Fri Lat Pulldown should target 10 reps per spec §4; "
             f"got {t['target_reps']}"
         )
         assert t["target_sets"] == 3, (
-            f"Phase 2 Thu Lat Pulldown should target 3 sets per spec §4; "
+            f"Phase 2 Fri Lat Pulldown should target 3 sets per spec §4; "
             f"got {t['target_sets']}"
         )
         assert t["target_weight"] is not None

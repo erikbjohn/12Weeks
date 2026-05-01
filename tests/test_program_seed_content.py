@@ -51,6 +51,7 @@ class TestPhase1Content:
 
     def test_phase_1_friday_back_squat_4x8(self, app_ctx):
         # Spec §2: Fri Heavy Lower hypertrophy = Back Squat 4×8 @ ~70%.
+        # Phase 1 unchanged — heavy lower stays Friday in P1.
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
@@ -68,37 +69,38 @@ class TestPhase1Content:
 class TestPhase2Content:
     """Spec §4: Phase 2 (wks 5-7) Strength block."""
 
-    def test_phase_2_thursday_has_lat_pulldown_and_pullup(self, app_ctx):
-        # Spec §4 Thu: Pull + Lat day. Weighted Pull-Up + BB Row + Lat Pulldown.
-        app, _ = app_ctx
-        from workout_data import get_workouts
-        with app.app_context():
-            days = get_workouts(week=5)
-        thu = days[3]
-        names = [e["name"] for e in thu.get("exercises", [])]
-        assert "Weighted Pull-Up" in names, (
-            f"Phase 2 Thu should have Weighted Pull-Up; got {names}"
-        )
-        assert "Lat Pulldown" in names, (
-            f"Phase 2 Thu should have Lat Pulldown; got {names}"
-        )
-        assert "Barbell Bent-Over Row" in names, (
-            f"Phase 2 Thu should have BB Row; got {names}"
-        )
-
-    def test_phase_2_friday_back_squat_4x5(self, app_ctx):
-        # Spec §4: Fri = Heavy Lower, Back Squat top set + back-off,
-        # week 5 starts at 4x5 @ 78%. Template stores the wk-5 seed.
+    def test_phase_2_friday_has_lat_pulldown_and_pullup(self, app_ctx):
+        # Spec §4 (post-swap): Pull + Lat day moved to Fri (day_idx=4).
+        # Heavy Lower took Thu (day_idx=3) to match Erik's actual cadence.
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=5)
         fri = days[4]
-        bs = next((e for e in fri["exercises"]
+        names = [e["name"] for e in fri.get("exercises", [])]
+        assert "Weighted Pull-Up" in names, (
+            f"Phase 2 Fri should have Weighted Pull-Up; got {names}"
+        )
+        assert "Lat Pulldown" in names, (
+            f"Phase 2 Fri should have Lat Pulldown; got {names}"
+        )
+        assert "Barbell Bent-Over Row" in names, (
+            f"Phase 2 Fri should have BB Row; got {names}"
+        )
+
+    def test_phase_2_thursday_back_squat_4x5(self, app_ctx):
+        # Spec §4: Thu = Heavy Lower (moved from Fri), Back Squat top set + back-off,
+        # week 5 starts at 4x5 @ 78%. Template stores the wk-5 seed.
+        app, _ = app_ctx
+        from workout_data import get_workouts
+        with app.app_context():
+            days = get_workouts(week=5)
+        thu = days[3]
+        bs = next((e for e in thu["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
         assert bs["sets"] == "4x5", (
-            f"Phase 2 Fri Back Squat wk5 should be 4×5; got {bs['sets']}"
+            f"Phase 2 Thu Back Squat wk5 should be 4×5; got {bs['sets']}"
         )
 
     def test_phase_2_monday_front_squat_4x3(self, app_ctx):
@@ -131,14 +133,14 @@ class TestPhase2Content:
 class TestPhase3Content:
     """Spec §6: Phase 3 (wks 9-11) Cut Climax."""
 
-    def test_phase_3_friday_back_squat_3x3(self, app_ctx):
-        # Spec §6: Fri = Heavy Lower, 3×3 @ 87%, HOLD all 3 weeks.
+    def test_phase_3_thursday_back_squat_3x3(self, app_ctx):
+        # Spec §6: Thu = Heavy Lower (moved from Fri), 3×3 @ 87%, HOLD all 3 weeks.
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=9)
-        fri = days[4]
-        bs = next((e for e in fri["exercises"]
+        thu = days[3]
+        bs = next((e for e in thu["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
         assert bs["sets"] == "3x3", (
@@ -178,8 +180,8 @@ class TestDeloadAndWeek12Content:
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=4)  # deload
-        fri = days[4]
-        bs = next((e for e in fri["exercises"]
+        thu = days[3]
+        bs = next((e for e in thu["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
         assert bs["sets"] == "3x5"
@@ -202,8 +204,8 @@ class TestDeloadAndWeek12Content:
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=12)
-        fri = days[4]
-        bs = next((e for e in fri["exercises"]
+        thu = days[3]
+        bs = next((e for e in thu["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
         assert bs["sets"] == "2x3"

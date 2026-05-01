@@ -2083,9 +2083,28 @@ def _phase2_week():
                    "7:00", "Zone 2 easy 35-45 min"],
         "notes": "Low CNS day. High-volume isolation, aerobic emphasis on the run.",
     }
-    # Thu — Upper PULL + Lat
+    # Thu — HEAVY Lower (THE strength session — moved here to match Erik's cadence)
     days[3] = {
         **days[3],
+        "liftName": "HEAVY Lower — THE Strength Session",
+        "exercises": [
+            {"name": "Back Squat", "sets": "4x5", "rest": "3-5 min",
+             "note": "78% wk5; engine waves to 82% wk6, 87% wk7. Below parallel."},
+            {"name": "Hip Thrust", "sets": "4x8", "rest": "90s",
+             "note": "RPE 7. Squeeze glutes hard at top."},
+            {"name": "Lying Leg Curl", "sets": "3x10", "rest": "60s",
+             "note": "Hamstring isolation."},
+        ],
+        "run": {"type": "z2", "label": "Recovery jog", "time": "20 min",
+                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
+        "timing": ["6:00", "Lift - Heavy Lower (60 min)",
+                   "7:05", "5 min transition",
+                   "7:10", "Recovery jog 20 min"],
+        "notes": "THE strength session of the week. Squat heavy. Recovery jog only — keep HR low.",
+    }
+    # Fri — Upper PULL + Lat (moved from Thu)
+    days[4] = {
+        **days[4],
         "liftName": "Upper PULL + Lat",
         "exercises": [
             {"name": "Weighted Pull-Up", "sets": "4x5", "rest": "2-3 min",
@@ -2103,25 +2122,6 @@ def _phase2_week():
                    "7:00", "5 min transition",
                    "7:05", "VO2 4x4 intervals 35 min"],
         "notes": "Heavy pull day. Second VO2 session — keep first interval honest.",
-    }
-    # Fri — HEAVY Lower
-    days[4] = {
-        **days[4],
-        "liftName": "HEAVY Lower — THE Strength Session",
-        "exercises": [
-            {"name": "Back Squat", "sets": "4x5", "rest": "3-5 min",
-             "note": "78% wk5; engine waves to 82% wk6, 87% wk7. Below parallel."},
-            {"name": "Hip Thrust", "sets": "4x8", "rest": "90s",
-             "note": "RPE 7. Squeeze glutes hard at top."},
-            {"name": "Lying Leg Curl", "sets": "3x10", "rest": "60s",
-             "note": "Hamstring isolation."},
-        ],
-        "run": {"type": "z2", "label": "Recovery jog", "time": "20 min",
-                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
-        "timing": ["6:00", "Lift - Heavy Lower (60 min)",
-                   "7:05", "5 min transition",
-                   "7:10", "Recovery jog 20 min"],
-        "notes": "THE strength session of the week. Squat heavy. Recovery jog only — keep HR low.",
     }
     # Sat — Full Body / Glute Volume
     days[5] = {
@@ -2233,9 +2233,26 @@ def _phase3_week():
                    "6:50", "Zone 2 easy 35 min"],
         "notes": "Accessory volume cut for cut climax. Lateral raises KEPT — shoulder is the priority muscle. EZ-Bar Curl dropped per spec §6.",
     }
-    # Thu — Pull + Lat (HOLD)
+    # Thu — HEAVY Lower (HOLD) — moved to Thu to match Erik's cadence
     days[3] = {
         **days[3],
+        "liftName": "HEAVY Lower (HOLD)",
+        "exercises": [
+            {"name": "Back Squat", "sets": "3x3", "rest": "4 min",
+             "note": "87% HOLD all 3 wks. RPE 8 cap. NO bumps."},
+            {"name": "Hip Thrust", "sets": "3x8", "rest": "90s",
+             "note": "RPE 7. Volume slightly cut."},
+        ],
+        "run": {"type": "z2", "label": "Recovery jog", "time": "15 min",
+                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
+        "timing": ["6:00", "Lift - HEAVY Lower HOLD (45 min)",
+                   "6:50", "5 min transition",
+                   "6:55", "Recovery jog 15 min"],
+        "notes": "THE strength session. Back Squat 3x3 @ 87% — HOLD all 3 wks. RPE 8 cap. NO bumps. Win = maintain Phase 2 lifts in deficit.",
+    }
+    # Fri — Pull + Lat (HOLD) — moved from Thu
+    days[4] = {
+        **days[4],
         "liftName": "Pull + Lat (HOLD)",
         "exercises": [
             {"name": "Weighted Pull-Up", "sets": "3x5", "rest": "2 min",
@@ -2253,23 +2270,6 @@ def _phase3_week():
                    "6:45", "5 min transition",
                    "6:50", "Threshold intervals 35 min"],
         "notes": "Pull-up + Row HOLD. Hill repeats dropped this phase — straight threshold for more recovery in deficit.",
-    }
-    # Fri — HEAVY Lower (HOLD)
-    days[4] = {
-        **days[4],
-        "liftName": "HEAVY Lower (HOLD)",
-        "exercises": [
-            {"name": "Back Squat", "sets": "3x3", "rest": "4 min",
-             "note": "87% HOLD all 3 wks. RPE 8 cap. NO bumps."},
-            {"name": "Hip Thrust", "sets": "3x8", "rest": "90s",
-             "note": "RPE 7. Volume slightly cut."},
-        ],
-        "run": {"type": "z2", "label": "Recovery jog", "time": "15 min",
-                "detail": "HR under 130. Easy shuffle to flush legs after heavy squats."},
-        "timing": ["6:00", "Lift - HEAVY Lower HOLD (45 min)",
-                   "6:50", "5 min transition",
-                   "6:55", "Recovery jog 15 min"],
-        "notes": "THE strength session. Back Squat 3x3 @ 87% — HOLD all 3 wks. RPE 8 cap. NO bumps. Win = maintain Phase 2 lifts in deficit.",
     }
     # Sat — Full Body (volume cut)
     days[5] = {
@@ -2379,8 +2379,26 @@ def _deload_week():
         "notes": "Deload. Pick triceps or curls — not both. Just feel the muscle.",
     }
     # Thu — Deload Pull (NO HIIT)
+    # Thu — Deload Heavy Lower (light) — moved to Thu to match cadence
     days[3] = {
         **days[3],
+        "liftName": "Deload — Heavy Lower (light)",
+        "exercises": [
+            {"name": "Back Squat", "sets": "3x5", "rest": "2-3 min",
+             "note": "65% of working weight. Move well — deload."},
+            {"name": "Hip Thrust", "sets": "3x8", "rest": "90s",
+             "note": "RPE 6. Light, squeeze glutes."},
+        ],
+        "run": {"type": "z2", "label": "Easy recovery", "time": "20 min",
+                "detail": "HR under 130. Easy shuffle to flush legs."},
+        "timing": ["6:00", "Deload lift - Heavy Lower light (25 min)",
+                   "6:30", "5 min transition",
+                   "6:35", "Easy recovery 20 min"],
+        "notes": "Deload Thu. Back Squat 3x5 @ 65% — move well, no grind.",
+    }
+    # Fri — Deload Pull
+    days[4] = {
+        **days[4],
         "liftName": "Deload — Pull",
         "exercises": [
             {"name": "Weighted Pull-Up", "sets": "3x5", "rest": "2 min",
@@ -2398,24 +2416,7 @@ def _deload_week():
         "timing": ["6:00", "Deload lift - Pull (30 min)",
                    "6:35", "5 min transition",
                    "6:40", "Easy zone-2 35 min"],
-        "notes": "Deload. NO HIIT. Pull-up at bodyweight only. 70% on row.",
-    }
-    # Fri — Deload Heavy Lower (light)
-    days[4] = {
-        **days[4],
-        "liftName": "Deload — Heavy Lower (light)",
-        "exercises": [
-            {"name": "Back Squat", "sets": "3x5", "rest": "2-3 min",
-             "note": "65% of working weight. Move well — this is the deload Fri."},
-            {"name": "Hip Thrust", "sets": "3x8", "rest": "90s",
-             "note": "RPE 6. Light, squeeze glutes."},
-        ],
-        "run": {"type": "z2", "label": "Easy recovery", "time": "20 min",
-                "detail": "HR under 130. Easy shuffle to flush legs."},
-        "timing": ["6:00", "Deload lift - Heavy Lower light (25 min)",
-                   "6:30", "5 min transition",
-                   "6:35", "Easy recovery 20 min"],
-        "notes": "Deload Fri. Back Squat 3x5 @ 65% — move well, no grind.",
+        "notes": "Deload Fri. NO HIIT. Pull-up at bodyweight only. 70% on row.",
     }
     # Sat — Deload Full Body Light
     days[5] = {
@@ -2524,6 +2525,23 @@ def _test_week():
     # Thu — Wk12 Pull (taper, NO HIIT)
     days[3] = {
         **days[3],
+        "liftName": "Wk12 — Heavy Lower (taper)",
+        "exercises": [
+            {"name": "Back Squat", "sets": "2x3", "rest": "3-5 min",
+             "note": "87% — single working set, just to feel it."},
+            {"name": "Hip Thrust", "sets": "2x8", "rest": "90s",
+             "note": "Glute volume."},
+        ],
+        "run": {"type": "z2", "label": "Easy recovery", "time": "15 min",
+                "detail": "HR under 130. Easy shuffle. Mini-taper."},
+        "timing": ["6:00", "Lift - Heavy Lower taper (20 min)",
+                   "6:25", "5 min transition",
+                   "6:30", "Easy recovery 15 min"],
+        "notes": "Wk12 Thu. Back Squat 2x3 @ 87% single working set — feel it, not test it.",
+    }
+    # Fri — Wk12 Pull (taper) — moved from Thu
+    days[4] = {
+        **days[4],
         "liftName": "Wk12 — Pull (taper)",
         "exercises": [
             {"name": "Weighted Pull-Up", "sets": "2x5", "rest": "2 min",
@@ -2541,24 +2559,7 @@ def _test_week():
         "timing": ["6:00", "Lift - Pull taper (25 min)",
                    "6:30", "5 min transition",
                    "6:35", "Easy zone-2 30 min"],
-        "notes": "Wk12 taper. NO HIIT. Single working set on each compound.",
-    }
-    # Fri — Wk12 Heavy Lower (taper)
-    days[4] = {
-        **days[4],
-        "liftName": "Wk12 — Heavy Lower (taper)",
-        "exercises": [
-            {"name": "Back Squat", "sets": "2x3", "rest": "3-5 min",
-             "note": "87% — single working set, just to feel it."},
-            {"name": "Hip Thrust", "sets": "2x8", "rest": "90s",
-             "note": "Glute volume."},
-        ],
-        "run": {"type": "z2", "label": "Easy recovery", "time": "15 min",
-                "detail": "HR under 130. Easy shuffle. Mini-taper."},
-        "timing": ["6:00", "Lift - Heavy Lower taper (20 min)",
-                   "6:25", "5 min transition",
-                   "6:30", "Easy recovery 15 min"],
-        "notes": "Wk12 Fri. Back Squat 2x3 @ 87% single working set — feel it, not test it.",
+        "notes": "Wk12 Fri taper. NO HIIT. Single working set on each compound.",
     }
     # Sat — Wk12 Full Body (taper)
     days[5] = {
