@@ -1248,23 +1248,23 @@ def debug_api_workouts_as_user():
         u = User.query.filter_by(email=email).first()
         if u is None:
             return jsonify({"error": f"user {email!r} not found"}), 404
-        from flask_login import login_user as _login_user
-        with app.test_request_context():
-            _login_user(u, force=True)
-            # Call api_workouts and pull the JSON
-            resp = api_workouts()
-        # api_workouts returns a Flask Response; extract the data
-        if hasattr(resp, "get_json"):
-            payload = resp.get_json()
-        else:
-            payload = resp[0].get_json() if isinstance(resp, tuple) else None
+        # Login via test_client so @login_required passes; this gives us
+        # the real Flask response payload the UI would receive.
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["_user_id"] = str(u.id)
+                sess["_fresh"] = True
+            r = c.get("/api/workouts")
+            payload = r.get_json() if r.is_json else None
+            status_code = r.status_code
 
-        # api_workouts returns dict keyed by str(week)
         target_week = (payload or {}).get(str(week)) or {}
         days = target_week.get("days", [])
         target_day = days[day_idx] if day_idx < len(days) else None
         return jsonify({
             "email": email, "week": week, "day_idx": day_idx,
+            "status_code": status_code,
+            "payload_keys": list((payload or {}).keys())[:20],
             "lift_name": (target_day or {}).get("liftName"),
             "exercises": [{
                 "name": e.get("name"), "sets": e.get("sets"),
