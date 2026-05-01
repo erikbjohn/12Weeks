@@ -1152,6 +1152,47 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
+@app.route("/api/debug/coach-error")
+def debug_coach_error():
+    """Run the new coach pipeline against a user and return the response or
+    full traceback on failure. UNAUTHENTICATED — same pattern as /api/debug/health.
+    Useful for diagnosing production coach failures from outside the app.
+
+    Query: ?email=erik@placemetry.com&msg=hello
+    """
+    import traceback
+    email = request.args.get("email", "erik@placemetry.com")
+    msg = request.args.get("msg", "what should I do right now")
+    try:
+        from models import User
+        user = User.query.filter_by(email=email).first()
+        if user is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        from flask_login import login_user
+        login_user(user, force=True)
+        from coach_assembler import coach_respond
+        reply = coach_respond(
+            user_id=user.id,
+            agent_name="conversation",
+            user_message=msg,
+        )
+        return jsonify({
+            "email": email,
+            "msg": msg,
+            "reply_len": len(reply or ""),
+            "reply_preview": (reply or "")[:1000],
+            "reply_full": reply or "",
+        })
+    except Exception as e:
+        return jsonify({
+            "error_class": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc()[-3000:],
+            "email": email,
+            "msg": msg,
+        }), 500
+
+
 # ─── AUTH ──────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
