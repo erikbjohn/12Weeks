@@ -167,12 +167,33 @@ def _compute_workout_scheduled_at(user_id: int, is_rest: bool) -> Optional[dtime
     return DEFAULT_WORKOUT_TIME
 
 
-def _resolve_run_for_day(week: int, day_idx: int) -> Optional[RunSummary]:
-    """Read the day's run dict from PHASE_TEMPLATES and project to RunSummary.
+def _resolve_run_for_day(week: int, day_idx: int, user_id: Optional[int] = None) -> Optional[RunSummary]:
+    """Resolve the day's run for a user.
 
-    Run dict shape: {"type": "z2"|"hiit"|"z2_long", "label": str,
-                    "time": str, "detail": str}. None if no run scheduled.
+    Resolution chain (matches what api_workouts shows the UI):
+      WeeklyRunPlan (per-user override) → PHASE_TEMPLATES day["run"]
+    The override path is critical: users see whatever WeeklyRunPlan stores,
+    so the coach must reference the same run, not the raw template. Without
+    this, the coach said "Recovery jog" while the UI displayed "Tempo run".
     """
+    # 1. Per-user WeeklyRunPlan override
+    if user_id is not None:
+        try:
+            from models import WeeklyRunPlan
+            plan = WeeklyRunPlan.query.filter_by(
+                user_id=user_id, week=week, day_idx=day_idx,
+            ).first()
+            if plan and plan.run_type:
+                return RunSummary(
+                    run_type=plan.run_type,
+                    label=plan.label or plan.run_type.title(),
+                    scheduled_at=None,
+                    detail=plan.detail or "",
+                )
+        except Exception:
+            pass  # fall back to template
+
+    # 2. Template
     from workout_data import get_workouts
     days = get_workouts(week)
     if day_idx >= len(days):
@@ -180,7 +201,6 @@ def _resolve_run_for_day(week: int, day_idx: int) -> Optional[RunSummary]:
     run = days[day_idx].get("run")
     if not run:
         return None
-    # Time may be e.g. "6:45 AM" — parse loosely; rules engine only needs a dtime.
     scheduled_at: Optional[dtime] = None
     raw_time = run.get("time", "")
     if raw_time:
@@ -641,9 +661,9 @@ def compute_coach_rules(
     workout_tomorrow_scheduled_at = _compute_workout_scheduled_at(user_id, is_rest_tomorrow)
 
     # Run today / tomorrow
-    run_today = _resolve_run_for_day(week, weekday_idx)
+    run_today = _resolve_run_for_day(week, weekday_idx, user_id=user_id)
     run_today_status = _compute_run_status(user_id, today, run_planned=run_today is not None)
-    run_tomorrow = _resolve_run_for_day(next_week_clamped, tomorrow_idx)
+    run_tomorrow = _resolve_run_for_day(next_week_clamped, tomorrow_idx, user_id=user_id)
 
     # Fasting
     fasting = _compute_fasting_state(now_local)
