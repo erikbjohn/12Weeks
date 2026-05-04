@@ -1,7 +1,7 @@
 """Audit-specific pytest fixtures."""
 from __future__ import annotations
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def pytest_addoption(parser):
@@ -16,7 +16,7 @@ def pytest_addoption(parser):
 
 @pytest.fixture(scope="session")
 def run_id() -> str:
-    return datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 @pytest.fixture(scope="session")

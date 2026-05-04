@@ -1,7 +1,7 @@
-"""Top-level audit suite. Parametrized over `ALL_PROMPTS`."""
+"""Audit suite test entry point. Parametrized over `ALL_PROMPTS`."""
 import pytest
-from tests.coach_audit.prompts import ALL_PROMPTS
-from tests.coach_audit.runner import run_prompt
+from .prompts import ALL_PROMPTS
+from .runner import run_prompt
 
 
 @pytest.mark.parametrize("case", [p for p in ALL_PROMPTS if p.category == "smoke"],
@@ -11,7 +11,7 @@ def test_smoke(case, run_id):
     finding = run_prompt(
         case=case,
         user_id=0,
-        invoke_coach=lambda msg: "pong",
+        invoke_coach=lambda _msg: "pong",
         run_id=run_id,
     )
     assert finding.heuristic.passed, (
