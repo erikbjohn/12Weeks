@@ -5,6 +5,61 @@ from datetime import date, datetime, timedelta, timezone
 from models import db, SetLog, MuscleGroupProfile, SessionAnalysis
 
 
+def _get_equivalent_names(exercise_name: str) -> list[str]:
+    """All exercise names a user's history might be logged under, including
+    cross-equipment swaps. When a user moves from a Phase-1 dumbbell version
+    of a lift to a Phase-2 barbell version (or vice versa), exact-match name
+    lookups miss the prior history. This walks the EXERCISE_SWAPS map in
+    BOTH directions: canonical → alternatives AND alternative → canonical
+    (and sibling alternatives), so the engine sees the full strength
+    baseline regardless of which name the rows were filed under."""
+    try:
+        from equipment_swaps import EXERCISE_SWAPS
+    except Exception:
+        return [exercise_name]
+    names = [exercise_name]
+    info = EXERCISE_SWAPS.get(exercise_name)
+    if info:
+        for alt in info.get("alternatives", []):
+            n = alt.get("name")
+            if n and n not in names:
+                names.append(n)
+    for canonical, info in EXERCISE_SWAPS.items():
+        for alt in info.get("alternatives", []):
+            if alt.get("name") == exercise_name:
+                if canonical not in names:
+                    names.append(canonical)
+                for sibling in info.get("alternatives", []):
+                    sn = sibling.get("name")
+                    if sn and sn != exercise_name and sn not in names:
+                        names.append(sn)
+    return names
+
+
+def _equipment_swap_factor(prior_name: str, current_name: str) -> float:
+    """Weight-scaling factor for transferring a user's prior-equipment lift
+    weight to the current-equipment prescription.
+
+    Example: prior 55 lb dumbbell RDL → current barbell RDL. We expect the
+    barbell version to handle ~1.4-1.5× the dumbbell-per-hand weight (the
+    inverse of equipment_swaps.scale_for_swap which only models the
+    barbell→dumbbell direction at 0.7×). Returns 1.0 when no transition is
+    detected — caller should treat that as 'use weight as-is'."""
+    if not prior_name or not current_name or prior_name == current_name:
+        return 1.0
+    try:
+        from equipment_swaps import scale_for_swap
+    except Exception:
+        return 1.0
+    fwd = scale_for_swap(prior_name, current_name)
+    if fwd and fwd != 1.0:
+        return fwd
+    rev = scale_for_swap(current_name, prior_name)
+    if rev and rev != 1.0:
+        return 1.0 / rev
+    return 1.0
+
+
 # Exercise → muscle group mapping (pulled from equipment_swaps at runtime)
 def _get_muscle_group(exercise_name):
     """Get the muscle group for an exercise."""
@@ -200,11 +255,14 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     is_weak = profile and (profile.user_flagged_weak or profile.relative_strength in ('weak', 'very_weak'))
 
     # Get last session data for this exercise. Historical SetLog rows may have
-    # been stored under either the un-resolved alias (e.g. "Back Squat") or the
-    # canonical name (e.g. "Barbell Back Squat") — query both so we don't miss
-    # a user's own history just because the alias map evolved.
-    name_candidates = [exercise_name]
-    if raw_exercise_name and raw_exercise_name != exercise_name:
+    # been stored under either the un-resolved alias, the canonical name, OR
+    # any cross-equipment alternative (e.g. user did "Dumbbell Romanian
+    # Deadlift" in Phase 1 with no barbell available; current prescription is
+    # "Romanian Deadlift" with barbell). Walk EXERCISE_SWAPS in both
+    # directions so the engine sees the full strength baseline regardless of
+    # which name carries the rows.
+    name_candidates = _get_equivalent_names(exercise_name)
+    if raw_exercise_name and raw_exercise_name not in name_candidates:
         name_candidates.append(raw_exercise_name)
     last_sets = SetLog.query.filter(
         SetLog.user_id == user_id,
@@ -289,6 +347,41 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     last_weight = session_sets[0].weight if session_sets else 0
     last_reps = session_sets[0].reps if session_sets else 0
     last_set_count = len(session_sets)
+
+    # ─── EQUIPMENT-SWAP RESCALE ───
+    # If the user's most recent session was logged under a DIFFERENT exercise
+    # name than the current prescription (e.g. they did Dumbbell Romanian
+    # Deadlift in Phase 1 with no barbell, prescription now calls for the
+    # barbell version), short-circuit normal progression. Carry the strength
+    # baseline forward by scaling the prior weight to the current equipment
+    # and treat the next session as 'establish'. Without this, the engine
+    # falls into the no-history branch and the lifting-agent over-prescribes
+    # by 2-3× (this caused the 145% RDL jump audit finding).
+    prior_logged_name = (
+        session_sets[0].exercise_name if session_sets else exercise_name
+    )
+    if prior_logged_name and prior_logged_name != exercise_name:
+        scale = _equipment_swap_factor(prior_logged_name, exercise_name)
+        if scale != 1.0 and scale > 0:
+            scaled = _round_weight(last_weight / scale)
+            configured_reps_at_swap = _get_configured_reps(
+                exercise_name, week, day_idx, exercise_order,
+            )
+            configured_sets_at_swap = _get_configured_sets(
+                exercise_name, week, day_idx, exercise_order,
+            )
+            return {
+                "target_weight": scaled,
+                "target_reps": configured_reps_at_swap or last_reps or {1: 10, 2: 6, 3: 4}.get(phase, 10),
+                "target_sets": configured_sets_at_swap or last_set_count or 4,
+                "adjustment_reason": (
+                    f"Equipment swap: last logged as {prior_logged_name} "
+                    f"@ {last_weight} lb. Scaled to {scaled} lb for "
+                    f"{exercise_name} (factor {round(1/scale, 2)}x). "
+                    f"Confirm at RPE before bumping."
+                ),
+                "progression_indicator": "establish",
+            }
 
     # Volume floor: the program's configured set count is the source of truth.
     # Without this, every branch below took target_sets = last_set_count, so a

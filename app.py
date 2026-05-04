@@ -866,12 +866,27 @@ def _user_today():
         return date.today()
 
 def _current_week():
-    """Compute current program week from start_date (not stale DB value)."""
+    """Compute current program week from start_date (not stale DB value).
+
+    Persists the computed value back to AppState when it has drifted, so any
+    code that reads state.current_week directly (admin queries, exports,
+    audit fixtures, debug dashboards) sees the same value the rest of the
+    app derives. AppState.current_week was being initialized at 1 and never
+    auto-incrementing as time passed — Erik's row sat at 5 even after he
+    started training Week 6, which broke the audit harness's ground-truth
+    assumptions and made admin queries misleading."""
     try:
         s = _get_state()
         if s.start_date:
             diff_days = (_user_today() - s.start_date).days
-            return min(12, max(1, diff_days // 7 + 1))
+            week = min(12, max(1, diff_days // 7 + 1))
+            if s.current_week != week:
+                s.current_week = week
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+            return week
         return s.current_week or 1
     except Exception:
         return 1
