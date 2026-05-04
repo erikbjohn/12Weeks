@@ -1,0 +1,282 @@
+"""Tools the coach can call mid-response to look up data.
+
+Eliminates the hallucination class where the coach confidently invents
+facts (e.g. "Monday is Back Squat 160×4×5" when Monday is actually Front
+Squat 4×3) because the prompt didn't have the data and posture forbade
+saying "I don't know."
+
+The coach gets a small set of focused tools — workout/history/1RM/body —
+calls them when needed, gets structured data back, then writes its reply.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import date, timedelta
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+
+# ─── Tool schemas (Anthropic format) ─────────────────────────────────────────
+
+TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "get_workout",
+        "description": (
+            "Get the exact prescribed workout for a specific week + day. "
+            "Returns lift name, exercises (with sets/reps/target_weight/notes), "
+            "and run plan. Use this whenever the athlete asks about a specific "
+            "day's workout (Monday, Tuesday, tomorrow, this Friday, etc.). "
+            "DO NOT guess; call this."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "week": {
+                    "type": "integer", "minimum": 1, "maximum": 12,
+                    "description": "Program week (1-12)",
+                },
+                "day_idx": {
+                    "type": "integer", "minimum": 0, "maximum": 6,
+                    "description": "Day index: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun",
+                },
+            },
+            "required": ["week", "day_idx"],
+        },
+    },
+    {
+        "name": "get_recent_sets",
+        "description": (
+            "Get the athlete's most recent logged sets for a specific exercise. "
+            "Use when the athlete asks 'what did I do last [exercise]', or you "
+            "need to check recent performance to suggest a weight."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "exercise_name": {"type": "string"},
+                "limit": {"type": "integer", "default": 12, "minimum": 1, "maximum": 50},
+            },
+            "required": ["exercise_name"],
+        },
+    },
+    {
+        "name": "get_e1rm",
+        "description": (
+            "Get the athlete's estimated 1-rep max history for an exercise. "
+            "Use when discussing strength, percentages, or progression goals."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "exercise_name": {"type": "string"},
+            },
+            "required": ["exercise_name"],
+        },
+    },
+    {
+        "name": "get_body_state",
+        "description": (
+            "Get the athlete's current body weight, waist, recent body measurements, "
+            "fasting state, and progress toward goal. Use for cut/recomp questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_today_status",
+        "description": (
+            "Summary of today: what workout/run is scheduled, what's been logged so far, "
+            "what's still pending. Use for 'where am I today' / 'what's left' questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+]
+
+
+# ─── Executors ───────────────────────────────────────────────────────────────
+
+
+def _tool_get_workout(user_id: int, week: int, day_idx: int) -> str:
+    """Resolve the day through the same chain as api_workouts."""
+    from coach_assembler import _resolve_workout_for_day
+    from flask_login import current_user
+    # _resolve_workout_for_day reads current_user — already authenticated via the
+    # endpoint's Flask context. user_id passed for future explicit migration.
+    day = _resolve_workout_for_day(week, day_idx)
+    if day is None:
+        return json.dumps({
+            "error": f"No data for week {week} day_idx {day_idx}",
+            "user_id_arg": user_id,
+        })
+    out = {
+        "week": week,
+        "day_idx": day_idx,
+        "day_name": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day_idx],
+        "lift_name": day.get("liftName"),
+        "is_rest": bool(day.get("isRest")),
+        "exercises": [
+            {
+                "name": e.get("name"),
+                "sets": e.get("sets"),
+                "rest": e.get("rest"),
+                "target_weight": e.get("target_weight"),
+                "note": e.get("note"),
+            }
+            for e in (day.get("exercises") or [])
+        ],
+        "run": day.get("run"),
+        "notes": day.get("notes"),
+    }
+    return json.dumps(out, default=str)
+
+
+def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> str:
+    from models import SetLog
+    rows = (SetLog.query
+            .filter(SetLog.user_id == user_id,
+                    SetLog.exercise_name == exercise_name,
+                    SetLog.done.is_(True))
+            .order_by(SetLog.logged_date.desc(), SetLog.set_number.asc())
+            .limit(int(limit))
+            .all())
+    if not rows:
+        return json.dumps({
+            "exercise": exercise_name,
+            "sets": [],
+            "note": f"No logged sets found for {exercise_name!r}.",
+        })
+    return json.dumps({
+        "exercise": exercise_name,
+        "sets": [
+            {
+                "date": str(r.logged_date),
+                "week": r.week,
+                "day_idx": r.day_idx,
+                "set": r.set_number,
+                "weight": r.weight,
+                "reps": r.reps,
+            }
+            for r in rows
+        ],
+    }, default=str)
+
+
+def _tool_get_e1rm(user_id: int, exercise_name: str) -> str:
+    from models import ExerciseLog
+    rows = (ExerciseLog.query
+            .filter_by(user_id=user_id, exercise_name=exercise_name)
+            .order_by(ExerciseLog.id.desc())
+            .limit(20).all())
+    if not rows:
+        return json.dumps({
+            "exercise": exercise_name,
+            "e1rm_history": [],
+            "note": f"No e1RM history for {exercise_name!r}.",
+        })
+    return json.dumps({
+        "exercise": exercise_name,
+        "current": rows[0].estimated_1rm,
+        "e1rm_history": [
+            {"date": str(getattr(r, "log_date", None) or getattr(r, "created_at", None)),
+             "e1rm": r.estimated_1rm}
+            for r in rows if r.estimated_1rm is not None
+        ],
+    }, default=str)
+
+
+def _tool_get_body_state(user_id: int) -> str:
+    from models import BodyWeight, BodyMeasurement, TrainingGoal
+    bw = (BodyWeight.query
+          .filter_by(user_id=user_id)
+          .order_by(BodyWeight.log_date.desc())
+          .limit(14).all())
+    measurements = (BodyMeasurement.query
+                    .filter_by(user_id=user_id)
+                    .order_by(BodyMeasurement.log_date.desc())
+                    .limit(8).all())
+    goal = TrainingGoal.query.filter_by(user_id=user_id).first()
+    return json.dumps({
+        "recent_weights": [
+            {"date": str(b.log_date), "lbs": b.weight_lbs}
+            for b in bw
+        ],
+        "recent_measurements": [
+            {"date": str(m.log_date), "waist": m.waist_inches,
+             "weight_lbs": m.weight_lbs}
+            for m in measurements
+        ],
+        "goal": {
+            "target_weight": goal.target_weight if goal else None,
+            "goal_type": goal.goal_type if goal else None,
+            "daily_calories": goal.daily_calories if goal else None,
+            "fasting_protocol": goal.fasting_protocol if goal else None,
+        } if goal else None,
+    }, default=str)
+
+
+def _tool_get_today_status(user_id: int) -> str:
+    from datetime import date as _date
+    from models import SetLog, RunLog, DayCompletion
+    today = _date.today()
+    sets_today = SetLog.query.filter_by(
+        user_id=user_id, logged_date=today,
+    ).all()
+    runs_today = RunLog.query.filter_by(
+        user_id=user_id, log_date=today,
+    ).all()
+    # Aggregate by exercise
+    by_ex: dict = {}
+    for s in sets_today:
+        d = by_ex.setdefault(s.exercise_name, {
+            "sets": 0, "done": 0, "top_weight": 0, "reps_seq": [],
+        })
+        d["sets"] += 1
+        if s.done:
+            d["done"] += 1
+        if s.weight and s.weight > d["top_weight"]:
+            d["top_weight"] = s.weight
+        d["reps_seq"].append(s.reps)
+    return json.dumps({
+        "date": str(today),
+        "weekday": today.strftime("%A"),
+        "logged_exercises": by_ex,
+        "runs_logged": [
+            {"distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
+             "duration_min": r.duration_min, "notes": r.notes}
+            for r in runs_today
+        ],
+        "day_completions_today": [
+            {"week": dc.week, "day_idx": dc.day_idx, "done": dc.done}
+            for dc in DayCompletion.query.filter_by(user_id=user_id).all()
+            if (dc.workout_started_at or "")[:10] == str(today)
+            or (dc.workout_ended_at or "")[:10] == str(today)
+        ],
+    }, default=str)
+
+
+_DISPATCH = {
+    "get_workout": _tool_get_workout,
+    "get_recent_sets": _tool_get_recent_sets,
+    "get_e1rm": _tool_get_e1rm,
+    "get_body_state": _tool_get_body_state,
+    "get_today_status": _tool_get_today_status,
+}
+
+
+def execute_tool(tool_name: str, tool_input: dict, user_id: int) -> str:
+    """Run a tool. Always returns a JSON string (never raises)."""
+    fn = _DISPATCH.get(tool_name)
+    if fn is None:
+        return json.dumps({"error": f"Unknown tool {tool_name!r}"})
+    try:
+        return fn(user_id=user_id, **tool_input)
+    except Exception as e:
+        log.warning("Tool %s failed: %s", tool_name, e, exc_info=True)
+        return json.dumps({"error": f"{type(e).__name__}: {e}"})

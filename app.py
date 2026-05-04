@@ -5669,21 +5669,21 @@ def api_chat():
     from coach_assembler import assemble_prompt
     from coach import _build_messages
     from coach_agents import AGENTS
-    import anthropic
 
     system_prompt = assemble_prompt(_route_info["agent_name"], context)
     messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
     agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    response = client.messages.create(
-        model=CLAUDE_OPUS,
-        max_tokens=agent_config["max_tokens"],
-        # temperature removed — Opus 4.7 rejects it ("temperature is deprecated for this model")
-        system=system_prompt,
+    # Tool-using coach: model can call get_workout / get_recent_sets / etc.
+    # mid-response to look up data instead of guessing. Eliminates the
+    # "Monday is Back Squat 160×4×5" hallucination class.
+    from coach_with_tools import coach_chat
+    response_text = coach_chat(
+        user_id=current_user.id,
+        system_prompt=system_prompt,
         messages=messages,
+        max_tokens=agent_config["max_tokens"],
     )
-    response_text = response.content[0].text
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -5834,31 +5834,28 @@ def api_chat_stream():
     def generate():
         full_text = ""
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
-
             from coach_assembler import assemble_prompt
             from coach import _build_messages
             from coach_agents import AGENTS
+            from coach_with_tools import coach_chat_stream
             system_prompt = assemble_prompt(_route_info["agent_name"], context)
             messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
             _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-            with client.messages.stream(
-                model=CLAUDE_OPUS,
-                max_tokens=_agent_config["max_tokens"],
-                # temperature removed — Opus 4.7 rejects it
-                system=system_prompt,
+            # Tool-using coach: server-side tool loop, then chunked stream of
+            # the final reply. User sees a 2-5s pause (tool calls), then text.
+            for chunk in coach_chat_stream(
+                user_id=_current_user_id,
+                system_prompt=system_prompt,
                 messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    full_text += text
-                    # SSE data field cannot contain raw newlines — they break the parser
-                    # Replace \n with a placeholder, client converts back
-                    safe_text = text.replace('\n', '\\n')
-                    yield f"data: {safe_text}\n\n"
+                max_tokens=_agent_config["max_tokens"],
+            ):
+                full_text += chunk + " "
+                safe_text = (chunk + " ").replace('\n', '\\n')
+                yield f"data: {safe_text}\n\n"
 
             yield f"data: [DONE]\n\n"
+            full_text = full_text.rstrip()
         except GeneratorExit:
             import logging
             logging.warning("Client disconnected mid-stream")
