@@ -8053,8 +8053,12 @@ def api_physical_assessment_reset():
     return jsonify({"ok": True})
 
 
-# ─── BODYWEIGHT RETEST (week 6 and week 12) ────────────────────────────────
-RETEST_WEEKS = (6, 12)
+# ─── BODYWEIGHT RETEST (week 12 only) ──────────────────────────────────────
+# Week 6 retest disabled per Erik's request — it was an intrusive blocking
+# gate that interrupted the program at the phase 1→2 boundary. The week 12
+# retest still fires for the program-wrap delta against PhysicalAssessment
+# baseline.
+RETEST_WEEKS = (12,)
 
 
 @app.route("/api/bodyweight-retest/status")
