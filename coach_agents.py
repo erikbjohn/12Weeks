@@ -14,7 +14,7 @@ AGENTS = {
             "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
             "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
             "food_safety", "fasting", "user_rules",
-            "today_sets", "today_status", "completed_days", "overrides",
+            "today_sets", "today_status", "cut_status", "completed_days", "overrides",
         ],
     },
     "morning_checkin": {

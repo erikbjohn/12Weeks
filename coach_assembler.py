@@ -437,6 +437,107 @@ def _build_runs():
     } for r in rows]}
 
 
+@section_builder("cut_status")
+def _build_cut_status():
+    """Cut progress signal: weekly intake-vs-TDEE deficit, pace toward
+    target weight, projection to week 12, and weigh-in sodium-prep
+    reminder on Fri/Sat. Composed for cuts only — bulk/recomp users get
+    an empty block (still injected; coach reads emptiness as 'no signal').
+
+    Pulls:
+      - BodyWeight history → linear regression for pace / projection
+      - MealLog (last 7 days) → actual intake totals
+      - TrainingGoal.tdee → baseline burn estimate
+      - Today's weekday → sodium-prep flag
+    """
+    from datetime import timedelta as _td
+    from models import BodyWeight, MealLog, TrainingGoal, AppState
+    today = _user_today()
+
+    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    if not goal or goal.goal_type != "cut":
+        return {"cut_status": None}
+    target_weight = goal.target_weight
+    tdee = goal.tdee or (goal.daily_calories or 0) + 1500  # fall-back estimate
+
+    # ── Body-weight pace ─────────────────────────────────────────────────────
+    bws = (BodyWeight.query
+           .filter_by(user_id=current_user.id)
+           .order_by(BodyWeight.log_date.asc()).all())
+    pace_per_week = None
+    weeks_to_target = None
+    proj_at_week_12 = None
+    current_weight = None
+    if bws:
+        current_weight = bws[-1].weight_lbs
+        if len(bws) >= 2:
+            first, last = bws[0], bws[-1]
+            days = max(1, (last.log_date - first.log_date).days)
+            pace_per_week = round((last.weight_lbs - first.weight_lbs) / (days / 7), 2)
+            if target_weight and pace_per_week and pace_per_week < 0:
+                weeks_to_target = round(
+                    (current_weight - target_weight) / abs(pace_per_week), 1,
+                )
+        # Project end-of-program weight
+        state = AppState.query.filter_by(user_id=current_user.id).first()
+        if state and state.start_date and pace_per_week is not None:
+            weeks_elapsed = max(0, (today - state.start_date).days // 7)
+            weeks_left = max(0, 12 - weeks_elapsed)
+            proj_at_week_12 = round(current_weight + (pace_per_week * weeks_left), 1)
+
+    # ── Weekly deficit (last 7 days) ─────────────────────────────────────────
+    week_ago = today - _td(days=6)
+    mlog_rows = (MealLog.query
+                 .filter(MealLog.user_id == current_user.id,
+                         MealLog.log_date >= week_ago,
+                         MealLog.log_date <= today)
+                 .all())
+    intake_by_day = {}
+    for ml in mlog_rows:
+        eaten_idxs = ml.eaten or []
+        # Per-row macros aren't on MealLog yet; approximate intake via
+        # WeeklyMealPlan macros below. This dict tracks meal-count per day
+        # so we can surface adherence even without exact macro arithmetic.
+        intake_by_day[ml.log_date] = len(eaten_idxs)
+    # Approximate weekly intake = sum(daily_calories of meal plan rows for
+    # days where any meals were eaten). This is a low-rigor proxy until the
+    # MealLog stores per-row macro contributions.
+    from models import WeeklyMealPlan
+    week = _current_week()
+    plan_rows = (WeeklyMealPlan.query
+                 .filter_by(user_id=current_user.id, week=week)
+                 .all())
+    weekly_intake_est = 0
+    weekly_burn_est = 0
+    days_logged = 0
+    for plan in plan_rows:
+        if plan.day_idx in [(today - _td(days=i)).weekday() for i in range(7)]:
+            weekly_intake_est += plan.daily_calories or 0
+            weekly_burn_est += tdee  # rough — same TDEE per day; differentiation later
+            days_logged += 1
+    weekly_deficit = weekly_burn_est - weekly_intake_est if days_logged else None
+
+    # ── Sodium-prep flag for weigh-in ────────────────────────────────────────
+    weekday = today.weekday()  # Mon=0
+    sodium_prep_active = weekday in (4, 5)  # Fri / Sat
+
+    return {"cut_status": {
+        "current_weight": current_weight,
+        "target_weight": target_weight,
+        "pace_per_week": pace_per_week,
+        "weeks_to_target": weeks_to_target,
+        "projected_week_12_weight": proj_at_week_12,
+        "weekly_deficit_estimate": weekly_deficit,
+        "tdee": tdee,
+        "sodium_prep_active": sodium_prep_active,
+        "sodium_prep_note": (
+            "Weigh-in tomorrow (or Sun) — cut sodium today and tomorrow. "
+            "Plain water, no soy/cured/processed. Drops 2-3 lb water by Sun morning."
+            if sodium_prep_active else None
+        ),
+    }}
+
+
 @section_builder("today_status")
 def _build_today_status():
     """One-glance signal of what's done vs pending TODAY. Prevents the coach
@@ -1187,6 +1288,36 @@ def _format_athlete_data(ctx, requires):
     phase = ctx.get("phase", {})
     week = ctx.get("week", 1)
     parts.append(f"Week {week}/12 — Phase: {phase.get('label', '?')} — Focus: {phase.get('focus', '?')}")
+
+    # Cut status — pace, projection, deficit, sodium-prep. Coach reads this
+    # before any cut-mode advice so the answers are anchored to live data
+    # instead of stored TrainingGoal numbers (which can drift).
+    cs = ctx.get("cut_status")
+    if cs:
+        cs_lines = ["<cut_status>"]
+        if cs.get("current_weight") is not None:
+            cs_lines.append(
+                f"  current: {cs['current_weight']} lb → target: {cs.get('target_weight','?')} lb"
+            )
+        if cs.get("pace_per_week") is not None:
+            cs_lines.append(f"  pace: {cs['pace_per_week']} lb/wk (overall, since wk 1)")
+        if cs.get("weeks_to_target") is not None:
+            cs_lines.append(f"  weeks_to_target_at_pace: {cs['weeks_to_target']}")
+        if cs.get("projected_week_12_weight") is not None:
+            cs_lines.append(f"  projected_week_12_weight: {cs['projected_week_12_weight']} lb")
+        if cs.get("weekly_deficit_estimate") is not None:
+            cs_lines.append(
+                f"  est_weekly_deficit: {cs['weekly_deficit_estimate']} cal "
+                f"(intake vs TDEE {cs.get('tdee','?')})"
+            )
+        if cs.get("sodium_prep_active"):
+            cs_lines.append(f"  SODIUM_PREP: {cs['sodium_prep_note']}")
+        cs_lines.append("</cut_status>")
+        cs_lines.append(
+            "Use cut_status as the source of truth for pace, projection, deficit. "
+            "If sodium_prep_active is true, surface the reminder to the athlete."
+        )
+        parts.append("\n".join(cs_lines))
 
     # Today's status — explicit DONE/PENDING signal so the coach doesn't tell
     # the athlete to "get the run done" five minutes after it was logged.

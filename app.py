@@ -8506,6 +8506,14 @@ def api_admin_generate_meals():
                 day_meal_type = 'fast_day'
                 cal_day_type = 'rest'
 
+        # Force-zero macros when fast_day is active (override OR template). The
+        # earlier flow computed day_macros from the lift/run-derived day type
+        # BEFORE checking overrides — so a Wed override to fast_day kept the
+        # heavy_lift 1512 cal target and the saved row showed daily_calories=1512
+        # even though the meal plan itself was 'Fasting (water + coffee).'
+        if day_meal_type == 'fast_day':
+            day_macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+
         try:
             meal_plan = generate_meal_plan(
                 selected_foods=fs.selected_foods,
