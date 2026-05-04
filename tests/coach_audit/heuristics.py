@@ -9,7 +9,7 @@ from .types import HeuristicResult, PromptCase
 # stays consistent.
 BANNED_PHRASES: list[str] = [
     "what's on your mind",
-    "let's get after it",
+    "get after it",            # catches both "get after it" and "let's get after it"
     "speak.",
     "great work",
     "done. tomorrow:",

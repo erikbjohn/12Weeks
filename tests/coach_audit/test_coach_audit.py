@@ -44,7 +44,7 @@ def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
 def test_real_coach_with_judge(case, phase_2_mid_program, app_ctx, run_id):
     app, _ = app_ctx
     invoke = make_coach_invoker(app, phase_2_mid_program)
-    judge = make_judge_invoker()
+    judge = make_judge_invoker(app, phase_2_mid_program)
     finding = run_prompt(
         case=case,
         user_id=phase_2_mid_program.id,

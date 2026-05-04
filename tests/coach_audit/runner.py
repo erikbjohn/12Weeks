@@ -47,14 +47,36 @@ def run_prompt(
     return finding
 
 
-def make_judge_invoker():
-    """Returns a judge function bound to ARCHETYPE_DESCRIPTIONS lookup."""
+def make_judge_invoker(app, user):
+    """Return a judge function bound to (app, user). The judge gets the
+    user's archetype description PLUS the actual prescribed full-week
+    program block (same content the coach sees via athlete_data injection),
+    so it doesn't over-flag accessories the coarse archetype description
+    didn't enumerate."""
     from .judge import judge_response
     from .users import ARCHETYPE_DESCRIPTIONS
+    from coach_assembler import _format_full_week_program
+    from flask_login import login_user
+    from models import AppState
+
+    uid = user.id
+    # Build the ground-truth block once at construction. Need a request
+    # context for current_user-aware code paths inside _format_full_week_program.
+    with app.test_request_context():
+        login_user(user, force=True)
+        state = AppState.query.filter_by(user_id=uid).first()
+        week = state.current_week if state else 1
+        program_block = _format_full_week_program(week)
 
     def invoke(case, response):
-        desc = ARCHETYPE_DESCRIPTIONS.get(case.user_fixture, "")
-        return judge_response(case, response, desc)
+        archetype_desc = ARCHETYPE_DESCRIPTIONS.get(case.user_fixture, "")
+        ground_truth = (
+            f"{archetype_desc}\n\n"
+            "ACTUAL PRESCRIBED PROGRAM (cite from this — anything matching "
+            "this is NOT a hallucination):\n\n"
+            f"{program_block}"
+        )
+        return judge_response(case, response, ground_truth)
     return invoke
 
 
