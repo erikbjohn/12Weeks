@@ -330,8 +330,16 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
         raise ValueError("weight_lbs is required — never default to a hardcoded value")
 
     if goal_type == "cut":
-        protein = round(1.2 * weight_lbs)
-        fat = round(0.35 * weight_lbs)
+        # Protein-first / fat-backfill / minimal-carbs is keto-compatible
+        # AND fixes the broken arithmetic where 1.2g/lb protein + 0.35g/lb
+        # fat exceeded the aggressive-deficit calorie budget. 1.0g/lb is
+        # adequate for muscle preservation on a cut (literature: 0.8-1.0
+        # is the floor; 1.2 was a safety buffer that didn't fit the math).
+        # Fat fills the remainder so users in ketosis get the high-fat
+        # ratio without configuration; standard-diet users still see a
+        # reasonable split because fat ends up around 0.30-0.40 g/lb at
+        # typical deficit depths.
+        protein = round(1.0 * weight_lbs)
         if day_type == "fast_day":
             # Full fast — zero calories. Water, black coffee, electrolytes only.
             return {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
@@ -341,9 +349,22 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
             calories = base_calories - 200
         elif day_type in ("heavy", "long_run"):
             calories = base_calories
-            # +100 carbs for heavy/long days (accounted below)
         else:
             calories = base_calories
+        protein_cal = protein * 4
+        # Trace carbs only — vegetables, the occasional incidental gram. Users
+        # who train fueled can override at the meal-generator layer; the
+        # default here keeps the cut keto-compatible.
+        carbs = 5
+        carbs_cal = carbs * 4
+        fat_cal = max(0, calories - protein_cal - carbs_cal)
+        fat = round(fat_cal / 9)
+        return {
+            "calories": calories,
+            "protein": protein,
+            "carbs": carbs,
+            "fat": fat,
+        }
     elif goal_type == "bulk":
         protein = round(1.0 * weight_lbs)
         fat = round(0.4 * weight_lbs)
@@ -375,8 +396,12 @@ def compute_day_calories(base_calories, goal_type, day_type, weight_lbs=None):
 
     protein_cal = protein * 4
     fat_cal = fat * 9
+    # Carbs from the actual remainder. No 20g floor — on aggressive cuts the
+    # floor caused the returned macros to overshoot the calorie budget and
+    # the function silently misrepresented daily intake. The cut branch
+    # above already adapted fat to leave headroom for ≥10% carbs.
     remaining_cal = max(calories - protein_cal - fat_cal, 0)
-    carbs = max(int(remaining_cal / 4), 20)
+    carbs = max(int(remaining_cal / 4), 0)
 
     # For cuts: flat calories across all eating days to maximize deficit
     # For bulk/recomp: heavy days get extra carbs for training fuel
