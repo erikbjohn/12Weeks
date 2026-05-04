@@ -533,6 +533,47 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             "foods": foods,
         })
 
+    # ── Protein shortfall closer ─────────────────────────────────────────────
+    # The per-meal scaling clamps at max_portion (8 oz for most proteins).
+    # When the target is high relative to that ceiling, the generated meals
+    # cap out below target and the user can hit every prescribed meal yet
+    # still miss the daily protein number. Detect the shortfall and append a
+    # supplement so the prescribed plan is physically achievable.
+    plan_total_protein = sum(
+        f.get("protein", 0) or 0
+        for m in meals
+        for f in (m.get("foods") or [])
+    )
+    shortfall = adj_protein - plan_total_protein
+    if shortfall >= 15:
+        # Prefer whey (24g/scoop, easy to scale). Fall back to cottage cheese
+        # then Greek yogurt — both are reasonable evening protein sources.
+        # Auto-pulled from catalog regardless of user selections; users who
+        # explicitly hate whey can mark this supplement uneaten and adjust.
+        supp_food = None
+        for supp_id, max_units in (
+            ("whey_protein", 3), ("cottage_cheese", 2), ("greek_yogurt", 2),
+        ):
+            food_info = get_food(supp_id)
+            if not food_info or not food_info.get("protein"):
+                continue
+            per_unit = food_info["protein"] * food_info["default_portion"]
+            if per_unit <= 0:
+                continue
+            units = max(1, round(shortfall / per_unit))
+            units = min(units, max_units)
+            scaled = _scale_food(supp_id, units)
+            if scaled:
+                supp_food = scaled
+                break
+        if supp_food:
+            meals.append({
+                "time": "8:00pm",
+                "name": f"Protein Supplement (closes {shortfall}g gap)",
+                "optional": False,
+                "foods": [supp_food],
+            })
+
     return {
         "label": label,
         "targetCal": adj_cal,
