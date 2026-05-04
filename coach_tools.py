@@ -104,17 +104,35 @@ TOOLS: list[dict[str, Any]] = [
 
 
 def _tool_get_workout(user_id: int, week: int, day_idx: int) -> str:
-    """Resolve the day through the same chain as api_workouts."""
+    """Resolve the day through the same chain as api_workouts, with the
+    user's actual WeeklyRunPlan layered over the template's default run.
+    """
     from coach_assembler import _resolve_workout_for_day
-    from flask_login import current_user
-    # _resolve_workout_for_day reads current_user — already authenticated via the
-    # endpoint's Flask context. user_id passed for future explicit migration.
+    from models import WeeklyRunPlan
     day = _resolve_workout_for_day(week, day_idx)
     if day is None:
         return json.dumps({
             "error": f"No data for week {week} day_idx {day_idx}",
             "user_id_arg": user_id,
         })
+
+    # Overlay user's actual run from WeeklyRunPlan (template's run is just
+    # default program guidance — user's plan can have a different run).
+    template_run = day.get("run")
+    user_run_row = WeeklyRunPlan.query.filter_by(
+        user_id=user_id, week=week, day_idx=day_idx,
+    ).first()
+    if user_run_row and user_run_row.run_type:
+        actual_run = {
+            "type": user_run_row.run_type,
+            "label": user_run_row.label,
+            "duration": user_run_row.duration,
+            "detail": user_run_row.detail,
+            "source": user_run_row.source,
+        }
+    else:
+        actual_run = template_run
+
     out = {
         "week": week,
         "day_idx": day_idx,
@@ -131,8 +149,14 @@ def _tool_get_workout(user_id: int, week: int, day_idx: int) -> str:
             }
             for e in (day.get("exercises") or [])
         ],
-        "run": day.get("run"),
+        "run": actual_run,
+        "template_run": template_run if actual_run is not template_run else None,
         "notes": day.get("notes"),
+        "_notes_caveat": (
+            "The 'notes' field is program-default guidance and may not apply if "
+            "the user's actual run (above) differs from template_run. "
+            "Always cite the user's actual run, not the template note."
+        ),
     }
     return json.dumps(out, default=str)
 
