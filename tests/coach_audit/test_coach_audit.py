@@ -80,7 +80,11 @@ def test_phase_3_cut_has_plateau_pattern(phase_3_cut):
         exercise_name="Barbell Bench Press",
     ).all()
     weights = sorted({r.weight for r in bench_rows})
-    assert 165 in weights, "phase_3_cut should have bench plateau at 165"
+    # Plateau invariant: ALL bench sets at 165 — adding a fourth week at a
+    # different weight would silently break the deload-prescription test case.
+    assert weights == [165], (
+        f"phase_3_cut bench weights must be a flat plateau at 165, got {weights}"
+    )
 
 
 def test_no_gym_bw_lacks_barbell(no_gym_bw):
