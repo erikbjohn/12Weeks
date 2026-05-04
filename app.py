@@ -8516,6 +8516,18 @@ def api_admin_generate_meals():
         except Exception as e:
             continue
 
+        # Don't overwrite days the athlete has already logged meals for.
+        # Mirror the protection in /api/meals/regenerate so admin tools can't
+        # silently rewrite history either.
+        from datetime import timedelta as _timedelta, date as _date
+        from models import AppState as _AppState
+        _state = _AppState.query.filter_by(user_id=user.id).first()
+        if _state and _state.start_date:
+            _day_date = _state.start_date + _timedelta(days=(week - 1) * 7 + day_idx)
+            _mlog = MealLog.query.filter_by(user_id=user.id, log_date=_day_date).first()
+            if _mlog and (_mlog.eaten or []):
+                continue
+
         # Save
         save_day_type = day_meal_type if day_meal_type != 'standard' else cal_day_type
         existing = WeeklyMealPlan.query.filter_by(user_id=user.id, week=week, day_idx=day_idx).first()
