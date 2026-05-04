@@ -5679,7 +5679,7 @@ def api_chat():
     response = client.messages.create(
         model=CLAUDE_OPUS,
         max_tokens=agent_config["max_tokens"],
-        temperature=agent_config["temperature"],
+        # temperature removed — Opus 4.7 rejects it ("temperature is deprecated for this model")
         system=system_prompt,
         messages=messages,
     )
@@ -5847,7 +5847,7 @@ def api_chat_stream():
             with client.messages.stream(
                 model=CLAUDE_OPUS,
                 max_tokens=_agent_config["max_tokens"],
-                temperature=_agent_config["temperature"],
+                # temperature removed — Opus 4.7 rejects it
                 system=system_prompt,
                 messages=messages,
             ) as stream:
