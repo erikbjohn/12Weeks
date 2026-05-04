@@ -99,3 +99,13 @@ def test_no_gym_bw_lacks_barbell(no_gym_bw):
     eq = UserEquipment.query.filter_by(user_id=no_gym_bw.id).first()
     assert "barbell" not in (eq.available_equipment or [])
     assert "kettlebells" in (eq.available_equipment or [])
+
+
+@pytest.mark.real_data
+def test_real_erik_fixture_loads(real_erik, audit_mode):
+    if audit_mode != "full":
+        pytest.skip("requires --audit-mode=full")
+    from models import AppState
+    state = AppState.query.filter_by(user_id=real_erik.id).first()
+    assert state is not None
+    assert state.current_week >= 1

@@ -64,3 +64,20 @@ def fixture_by_name(request):
     def _resolve(name):
         return request.getfixturevalue(name)
     return _resolve
+
+
+@pytest.fixture(scope="function")
+def real_erik(app_ctx, audit_mode):
+    import os
+    if audit_mode != "full":
+        pytest.skip("requires --audit-mode=full")
+    if not os.environ.get("ADMIN_API_KEY"):
+        pytest.skip("ADMIN_API_KEY not set")
+    from tests.coach_audit.users import make_real_erik
+    return make_real_erik()
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "real_data: opt-in, hits prod via /api/admin/debug/sql"
+    )

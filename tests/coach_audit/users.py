@@ -223,6 +223,103 @@ def make_no_gym_bw():
     return u
 
 
+def make_real_erik():
+    """Pull Erik's current state from production via /api/admin/debug/sql,
+    mirror into the local test DB. Read-only against prod — writes only to
+    the test sqlite DB."""
+    import os
+    import requests
+    from app import db
+    from models import (
+        User, UserEquipment, PhysicalAssessment, AppState,
+        WeeklyRunPlan, SetLog,
+    )
+
+    api_key = os.environ.get("ADMIN_API_KEY")
+    if not api_key:
+        raise RuntimeError("ADMIN_API_KEY not set — cannot mirror real Erik state.")
+    base = os.environ.get("PLACEMETRY_PROD_URL", "https://12weeks-app.onrender.com")
+
+    def q(sql: str) -> list[dict]:
+        r = requests.post(
+            f"{base}/api/admin/debug/sql",
+            headers={"X-Admin-Key": api_key, "Content-Type": "application/json"},
+            json={"sql": sql},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json().get("rows") or []
+
+    # 1) Resolve Erik's user_id via email
+    user_rows = q("SELECT id, email FROM \"user\" WHERE email = 'erik@placemetry.com' LIMIT 1")
+    if not user_rows:
+        raise RuntimeError("real Erik not found in prod by email")
+    src_id = user_rows[0]["id"]
+
+    # 2) Mirror — local copies get fresh PKs
+    u = User(email=_next_email("erik"), password_hash="x")
+    db.session.add(u)
+    db.session.commit()
+    new_id = u.id
+
+    # AppState
+    rows = q(f"SELECT current_week, start_date FROM app_state WHERE user_id = {src_id}")
+    if rows:
+        r = rows[0]
+        sd = r["start_date"]
+        if isinstance(sd, str):
+            sd = date.fromisoformat(sd[:10])
+        db.session.add(AppState(user_id=new_id, current_week=r["current_week"], start_date=sd))
+
+    # UserEquipment
+    rows = q(f"SELECT available_equipment FROM user_equipment WHERE user_id = {src_id}")
+    if rows:
+        eq = rows[0]["available_equipment"] or []
+        db.session.add(UserEquipment(user_id=new_id, available_equipment=eq))
+
+    # PhysicalAssessment
+    rows = q(f"SELECT has_gym FROM physical_assessment WHERE user_id = {src_id}")
+    if rows:
+        db.session.add(PhysicalAssessment(user_id=new_id, has_gym=bool(rows[0]["has_gym"])))
+
+    # SetLog (last 60 days)
+    rows = q(f"""
+        SELECT week, day_idx, exercise_name, set_number, weight, reps, done, logged_date
+        FROM set_log
+        WHERE user_id = {src_id} AND logged_date > current_date - 60
+        ORDER BY logged_date DESC LIMIT 500
+    """)
+    for r in rows:
+        ld = r["logged_date"]
+        if isinstance(ld, str):
+            ld = date.fromisoformat(ld[:10])
+        db.session.add(SetLog(
+            user_id=new_id,
+            week=r["week"], day_idx=r["day_idx"],
+            exercise_name=r["exercise_name"],
+            set_number=r["set_number"],
+            weight=r["weight"], reps=r["reps"],
+            done=bool(r["done"]),
+            logged_date=ld,
+        ))
+
+    # WeeklyRunPlan (current week's plan)
+    rows = q(f"""
+        SELECT week, day_idx, run_type, label, duration, detail, source
+        FROM weekly_run_plan WHERE user_id = {src_id}
+    """)
+    for r in rows:
+        db.session.add(WeeklyRunPlan(
+            user_id=new_id,
+            week=r["week"], day_idx=r["day_idx"],
+            run_type=r["run_type"], label=r["label"],
+            duration=r["duration"], detail=r["detail"], source=r["source"],
+        ))
+
+    db.session.commit()
+    return u
+
+
 ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
     "phase_2_mid_program": (
         "Week 6 of a 12-week program. Phase 2 (weeks 5-8). "
