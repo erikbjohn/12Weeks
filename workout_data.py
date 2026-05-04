@@ -313,6 +313,38 @@ DAY_MEAL_TYPES = {
 }
 
 
+def derive_meal_type(day_dict, weekday):
+    """Derive meal-day type from a day's actual run + lift content rather
+    than the weekday alone. DAY_MEAL_TYPES is a stale-by-design fallback;
+    when the program rotates a long run from Tuesday to Sunday (Phase 2 did
+    exactly this), the weekday map keeps carb-loading Tuesday for an
+    intervals workout that doesn't need it. Real fix: read the day's run
+    type and liftName.
+
+    Returns one of: long_run, heavy_lift, moderate, fast_day, rest, deload.
+    Falls back to DAY_MEAL_TYPES[weekday] when no run+lift signal is
+    available (preserves Sunday=fast_day, etc.)."""
+    run = (day_dict or {}).get("run") or {}
+    rtype = (run.get("type") or "").lower()
+    is_rest = bool((day_dict or {}).get("isRest"))
+    lift_name = ((day_dict or {}).get("liftName") or "").strip().lower()
+    has_lift = bool(lift_name and lift_name not in ("rest", "rest day", ""))
+
+    if is_rest and not has_lift:
+        # Defer to weekday default — Sunday is fast_day in the rotation.
+        return DAY_MEAL_TYPES.get(weekday, "rest")
+    if rtype == "z2_long":
+        return "long_run"
+    if rtype in ("hiit", "vo2", "threshold"):
+        # Intervals: short high-intensity. Need fuel, NOT endurance carb-load.
+        return "heavy_lift" if has_lift else "moderate"
+    if rtype == "z2":
+        return "heavy_lift" if has_lift else "moderate"
+    if has_lift:
+        return "heavy_lift"
+    return DAY_MEAL_TYPES.get(weekday, "moderate")
+
+
 def get_meal_plan(meal_type):
     """Return the full meal plan dict for a given meal type."""
     return dict(MEAL_PLANS.get(meal_type, MEAL_PLANS["moderate"]))
@@ -1738,7 +1770,7 @@ def get_workouts(week):
         if is_deload:
             meal_type = "deload"
         else:
-            meal_type = DAY_MEAL_TYPES.get(d["day"], "moderate")
+            meal_type = derive_meal_type(d, d.get("day", "Mon"))
         d["mealType"] = meal_type
         d["mealPlan"] = get_meal_plan(meal_type)
 
@@ -1817,7 +1849,7 @@ def get_workouts_for_user(week, has_gym=True):
         if is_deload:
             meal_type = "deload"
         else:
-            meal_type = DAY_MEAL_TYPES.get(day_name, "moderate")
+            meal_type = derive_meal_type(d, day_name)
         d["mealType"] = meal_type
         d["mealPlan"] = get_meal_plan(meal_type)
 

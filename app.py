@@ -1098,20 +1098,38 @@ def api_regenerate_meals():
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
 
-        # Delete ALL meal plans for today+future (including coach-modified ones)
-        WeeklyMealPlan.query.filter_by(
-            user_id=current_user.id, week=target_week
-        ).filter(
-            WeeklyMealPlan.day_idx >= _user_today().weekday()
-        ).delete()
+        # Identify days the athlete has already logged meals for — those are
+        # historical and must not be overwritten. Even today, if any meal is
+        # checked off, the prescription view becomes a record of what was
+        # consumed; regenerating would wipe that.
+        today = _user_today()
+        week_monday = today - timedelta(days=today.weekday())
+        protected_dates = set()
+        for d_idx in range(7):
+            d_date = week_monday + timedelta(days=d_idx)
+            mlog = MealLog.query.filter_by(
+                user_id=current_user.id, log_date=d_date,
+            ).first()
+            if mlog and (mlog.eaten or []):
+                protected_dates.add(d_date)
+            elif d_date < today:
+                # Past dates with no log are still 'past' — don't regenerate.
+                protected_dates.add(d_date)
 
-        # Only regenerate today and future days
-        week_monday = _user_today() - timedelta(days=_user_today().weekday())
+        # Delete only meal plans for days we'll actually regenerate
+        for d_idx in range(7):
+            d_date = week_monday + timedelta(days=d_idx)
+            if d_date in protected_dates:
+                continue
+            WeeklyMealPlan.query.filter_by(
+                user_id=current_user.id, week=target_week, day_idx=d_idx,
+            ).delete()
+
         meal_summary = []
         for day_idx in range(7):
             day_date = week_monday + timedelta(days=day_idx)
-            if day_date < _user_today():
-                continue  # Skip past days — don't overwrite eaten meals
+            if day_date in protected_dates:
+                continue  # Logged meals or past day — preserve history
             day_type = day_types[day_idx]
             if day_type == 'fast_day':
                 # Use user's selected foods with fast-day calorie target
