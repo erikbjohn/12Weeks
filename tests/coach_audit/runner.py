@@ -57,13 +57,17 @@ def make_coach_invoker(app, user, agent_name: str = "conversation"):
     from coach_with_tools import coach_chat
     from flask_login import login_user
 
+    # Capture the primary key now so the closure stays valid even if `user`
+    # later detaches from its session (e.g. session-scoped fixtures in Task 6+).
+    uid = user.id
+
     def invoke(user_message: str) -> str:
         with app.test_request_context():
             login_user(user, force=True)
             ctx = build_filtered_context(agent_name)
             system_prompt = assemble_prompt(agent_name, ctx)
             return coach_chat(
-                user_id=user.id,
+                user_id=uid,
                 system_prompt=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
             )
