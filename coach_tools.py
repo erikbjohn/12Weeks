@@ -211,11 +211,23 @@ def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> 
 
 
 def _tool_get_e1rm(user_id: int, exercise_name: str) -> str:
+    """Same exact-then-fuzzy fallback pattern as get_recent_sets — exercise
+    naming has drifted ('Front Squat' vs 'Barbell Front Squat' etc.) and
+    exact match was making real e1RM history invisible to the coach."""
     from models import ExerciseLog
-    rows = (ExerciseLog.query
-            .filter_by(user_id=user_id, exercise_name=exercise_name)
+    base = ExerciseLog.query.filter_by(user_id=user_id)
+    rows = (base
+            .filter(ExerciseLog.exercise_name == exercise_name)
             .order_by(ExerciseLog.id.desc())
             .limit(20).all())
+    matched_name = exercise_name
+    if not rows:
+        rows = (base
+                .filter(ExerciseLog.exercise_name.ilike(f"%{exercise_name}%"))
+                .order_by(ExerciseLog.id.desc())
+                .limit(20).all())
+        if rows:
+            matched_name = rows[0].exercise_name
     if not rows:
         return json.dumps({
             "exercise": exercise_name,
@@ -223,7 +235,8 @@ def _tool_get_e1rm(user_id: int, exercise_name: str) -> str:
             "note": f"No e1RM history for {exercise_name!r}.",
         })
     return json.dumps({
-        "exercise": exercise_name,
+        "exercise": matched_name,
+        "queried_as": exercise_name,
         "current": rows[0].estimated_1rm,
         "e1rm_history": [
             {"date": str(getattr(r, "log_date", None) or getattr(r, "created_at", None)),
