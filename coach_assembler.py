@@ -1317,7 +1317,70 @@ def _format_athlete_data(ctx, requires):
         if items:
             parts.append(f"{key.upper()}: {items}")
 
+    # FULL WEEK PROGRAM — all 7 days inline so the model can't conflate days.
+    # Stops the "Monday is Back Squat 4×5 @ 160" hallucination (Friday's scheme
+    # bleeding into Monday's slot) by putting every day's exact prescription
+    # in the prompt.
+    try:
+        week_block = _format_full_week_program(ctx.get("week", 1))
+        if week_block:
+            parts.append(week_block)
+    except Exception as e:
+        log.warning("full-week program block failed: %s", e)
+
     return "\n\n".join(p for p in parts if p)
+
+
+def _format_full_week_program(week):
+    """Render the entire week's program (all 7 days) as a structured text
+    block. Each day shows lift name + exercises (with sets/reps/target_weight)
+    + run (with user override applied). Pulled through the same resolution
+    chain the UI uses so the coach sees exactly what the user sees.
+    """
+    from models import WeeklyRunPlan
+    DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                 "Friday", "Saturday", "Sunday"]
+    out = [f"FULL WEEK {week} PROGRAM (all 7 days — cite from this, do not invent):"]
+    for d in range(7):
+        try:
+            day = _resolve_workout_for_day(week, d)
+        except Exception:
+            day = None
+        if not day:
+            out.append(f"  {DAY_NAMES[d]}: (no data)")
+            continue
+
+        lift = day.get("liftName") or ("Rest" if day.get("isRest") else "?")
+        out.append(f"  {DAY_NAMES[d]} — {lift}:")
+
+        if day.get("isRest"):
+            out.append("    (rest day from lifting)")
+        for ex in (day.get("exercises") or []):
+            tw = f" @ {ex['target_weight']}lb" if ex.get("target_weight") else ""
+            note = f"  // {ex['note']}" if ex.get("note") else ""
+            out.append(f"    - {ex.get('name')}: {ex.get('sets')}{tw}{note}")
+
+        # Run — overlay WeeklyRunPlan (user-specific) on top of template
+        try:
+            run_plan = WeeklyRunPlan.query.filter_by(
+                user_id=current_user.id, week=week, day_idx=d,
+            ).first()
+        except Exception:
+            run_plan = None
+        if run_plan and run_plan.run_type:
+            out.append(
+                f"    Run: {run_plan.label} ({run_plan.run_type}) "
+                f"{run_plan.duration or ''}".rstrip()
+            )
+        else:
+            template_run = day.get("run")
+            if template_run:
+                out.append(
+                    f"    Run: {template_run.get('label', '')} "
+                    f"({template_run.get('type', '')}) "
+                    f"{template_run.get('time', '')}".rstrip()
+                )
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------------------
