@@ -258,7 +258,11 @@ def rank_fixes(themes: list[dict], prompt_to_category: dict[str, str]) -> list[d
     ranked = []
     for t in themes:
         prompts = t.get("prompts") or []
-        cats = [prompt_to_category.get(p) for p in prompts if prompt_to_category.get(p)]
+        # Walrus narrows the Optional[str] from .get() so the inner .get(c, 1)
+        # never sees None.
+        cats: list[str] = [
+            c for p in prompts if (c := prompt_to_category.get(p)) is not None
+        ]
         if not cats:
             sev = 1
         else:
