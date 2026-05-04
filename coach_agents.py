@@ -14,7 +14,7 @@ AGENTS = {
             "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
             "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
             "food_safety", "fasting", "user_rules",
-            "today_sets", "completed_days", "overrides",
+            "today_sets", "today_status", "completed_days", "overrides",
         ],
     },
     "morning_checkin": {
@@ -23,7 +23,7 @@ AGENTS = {
         "requires": [
             "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
             "week_schedule", "bodyweight", "garmin", "coach_memories", "missed_checkin",
-            "food_safety", "fasting", "user_rules",
+            "food_safety", "fasting", "user_rules", "today_status",
         ],
     },
     "morning_briefing": {
@@ -31,7 +31,7 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "checkins", "workout_today", "garmin",
-            "fasting", "user_rules",
+            "fasting", "user_rules", "today_status",
         ],
     },
     "weekly_planning": {
@@ -40,7 +40,7 @@ AGENTS = {
         "requires": [
             "base", "checkins", "chat_history", "bodyweight", "workout_today",
             "week_schedule", "exercise_history", "exercise_analysis",
-            "today_sets", "runs", "physical", "meals_today",
+            "today_sets", "today_status", "runs", "physical", "meals_today",
             "coach_memories", "goal", "food_safety", "fasting",
             "completed_days", "overrides", "next_week",
             "session_analysis", "equipment", "user_rules",
@@ -53,14 +53,14 @@ AGENTS = {
             "base", "checkins", "chat_history", "bodyweight", "workout_today",
             "week_schedule", "exercise_history", "runs", "physical",
             "meals_today", "coach_memories", "goal", "food_safety",
-            "completed_days", "session_analysis", "user_rules",
+            "completed_days", "session_analysis", "user_rules", "today_status",
         ],
     },
     "workout_feedback": {
         "max_tokens": 800,
         "temperature": 0.6,
         "requires": [
-            "base", "chat_history", "workout_today", "today_sets",
+            "base", "chat_history", "workout_today", "today_sets", "today_status",
             "exercise_history", "exercise_analysis",
             "week_schedule", "next_week", "coach_memories",
             "fasting", "user_rules",
@@ -71,7 +71,7 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "chat_history", "workout_today", "runs",
-            "coach_memories", "fasting", "user_rules",
+            "coach_memories", "fasting", "user_rules", "today_status",
         ],
     },
     "meals_complete": {
@@ -79,7 +79,7 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "meals_today", "goal", "food_safety",
-            "fasting", "user_rules",
+            "fasting", "user_rules", "today_status",
         ],
     },
     "end_of_day": {
@@ -87,7 +87,7 @@ AGENTS = {
         "temperature": 0.6,
         "requires": [
             "base", "workout_today", "week_schedule", "completed_days",
-            "next_week", "fasting", "user_rules",
+            "next_week", "fasting", "user_rules", "today_status",
         ],
     },
     "chat_opened": {
@@ -97,7 +97,7 @@ AGENTS = {
             "base", "checkins", "chat_history", "workout_today",
             "meals_today", "completed_days", "coach_memories",
             "fasting", "user_rules",
-            "today_sets", "overrides",
+            "today_sets", "today_status", "overrides",
         ],
     },
     "crisis": {

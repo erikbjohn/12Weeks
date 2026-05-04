@@ -437,6 +437,57 @@ def _build_runs():
     } for r in rows]}
 
 
+@section_builder("today_status")
+def _build_today_status():
+    """One-glance signal of what's done vs pending TODAY. Prevents the coach
+    from telling the athlete to 'get the run done' five minutes after it
+    was logged — buried in run_history the model would sometimes miss
+    today's row, default to 'do today's run', and contradict its own
+    previous turn.
+
+    Surfaces:
+      - workout_prescribed / workout_logged
+      - run_prescribed (from WeeklyRunPlan) / run_logged
+      - actual numbers from today's RunLog if present
+    """
+    from models import SetLog, RunLog, WeeklyPrescription, WeeklyRunPlan
+    today = _user_today()
+    today_idx = today.weekday()
+    week = _current_week()
+
+    workout_prescribed = WeeklyPrescription.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=today_idx,
+    ).first() is not None
+
+    workout_logged_any = SetLog.query.filter(
+        SetLog.user_id == current_user.id,
+        SetLog.week == week,
+        SetLog.day_idx == today_idx,
+        SetLog.done == True,  # noqa: E712
+    ).first() is not None
+
+    run_plan = WeeklyRunPlan.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=today_idx,
+    ).first()
+    run_today_log = RunLog.query.filter_by(
+        user_id=current_user.id, log_date=today,
+    ).order_by(RunLog.id.desc()).first()
+
+    return {"today_status": {
+        "date": today.isoformat(),
+        "weekday": today.strftime("%A"),
+        "workout_prescribed": workout_prescribed,
+        "workout_logged": workout_logged_any,
+        "run_prescribed": run_plan.run_type if run_plan else None,
+        "run_label": run_plan.label if run_plan else None,
+        "run_duration": run_plan.duration if run_plan else None,
+        "run_logged": run_today_log is not None,
+        "run_distance_today": run_today_log.distance_miles if run_today_log else None,
+        "run_duration_today": run_today_log.duration_min if run_today_log else None,
+        "run_avg_hr_today": run_today_log.avg_hr if run_today_log else None,
+    }}
+
+
 @section_builder("physical")
 def _build_physical():
     from models import PhysicalAssessment, BodyMeasurement
@@ -866,6 +917,11 @@ Intensity level: {anger_level_label}
     - get_recent_sets(exercise) for what was logged historically
     - the FULL WEEK block in <athlete_data> for the current week
     Diff the data: name the prior load, name the current load, compute the delta, name the likely cause (phase transition, equipment change, RPE shift, periodization step). If volume jumped >50% week-over-week, name it explicitly as a "phase reset" event and call out whether it was equipment-limited or strength-limited. Read the data and explain it — never hide behind "I don't know why the engine did that."
+19. STATE BEFORE PRESCRIPTION — Before saying ANY of "lift now", "get the run done", "today's workout is", "you still owe", "go do X" — read <today_status> in <athlete_data>. That block is the source of truth for what's already happened today.
+    - If workout: DONE → the athlete already trained. Talk about the session they did. Do NOT prescribe a workout for today again.
+    - If run: DONE → the athlete already ran. Cite the actual mileage/HR. Do NOT say "still owed" or "go run."
+    - If both DONE → it's a recovery/recap conversation. Do NOT manufacture work that isn't there.
+    Crossing turns counts. If turn N said "good run", turn N+1 cannot say "get ready for your run" — same day, same state. The athlete's chat_history plus today_status is the joint state; reconcile both before responding.
 </non_negotiable_rules>
 
 <markers>
@@ -1131,6 +1187,43 @@ def _format_athlete_data(ctx, requires):
     phase = ctx.get("phase", {})
     week = ctx.get("week", 1)
     parts.append(f"Week {week}/12 — Phase: {phase.get('label', '?')} — Focus: {phase.get('focus', '?')}")
+
+    # Today's status — explicit DONE/PENDING signal so the coach doesn't tell
+    # the athlete to "get the run done" five minutes after it was logged.
+    ts = ctx.get("today_status")
+    if ts:
+        ts_lines = ["<today_status>"]
+        ts_lines.append(f"  date: {ts.get('weekday')} {ts.get('date')}")
+        if ts.get("workout_prescribed"):
+            if ts.get("workout_logged"):
+                ts_lines.append("  workout: DONE (sets logged for today)")
+            else:
+                ts_lines.append("  workout: PENDING (prescribed but not yet logged)")
+        else:
+            ts_lines.append("  workout: REST DAY (no workout prescribed today)")
+        if ts.get("run_logged"):
+            d = ts.get("run_distance_today")
+            dur = ts.get("run_duration_today")
+            hr = ts.get("run_avg_hr_today")
+            bits = []
+            if d: bits.append(f"{d} mi")
+            if dur: bits.append(f"{dur} min")
+            if hr: bits.append(f"avg HR {hr}")
+            ts_lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
+        elif ts.get("run_prescribed"):
+            ts_lines.append(
+                f"  run: PENDING — {ts.get('run_label') or ts.get('run_prescribed')} "
+                f"{ts.get('run_duration') or ''}".rstrip()
+            )
+        else:
+            ts_lines.append("  run: REST (no run prescribed today)")
+        ts_lines.append("</today_status>")
+        ts_lines.append(
+            "READ THIS BLOCK BEFORE recommending any workout or run for today. "
+            "If workout: DONE, the athlete already trained — do not prescribe a workout. "
+            "If run: DONE, the athlete already ran — do not say 'get the run done'."
+        )
+        parts.append("\n".join(ts_lines))
     # Ground phase explanations in the actual program structure so the coach
     # doesn't hallucinate (e.g. "Phase 2 drops to 3-4 days" — false; all phases run 6 lift days).
     if phase.get("lift_days_per_week") or phase.get("weekly_structure"):
