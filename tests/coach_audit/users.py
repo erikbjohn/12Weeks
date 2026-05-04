@@ -125,3 +125,37 @@ def make_phase_2_mid_program():
 
     db.session.commit()
     return u
+
+
+ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
+    "phase_2_mid_program": (
+        "Week 6 of a 12-week program. Phase 2 (weeks 5-8). "
+        "Monday: Lower POWER — Front Squat 4x3 (heavy, low rep). "
+        "Tuesday: Upper PRESS — DB Bench Press, with secondary work. "
+        "Wednesday: Shoulder Volume + tempo run. "
+        "Thursday: Upper PULL — Weighted Pull-Up + Barbell Row. "
+        "Friday: HEAVY Lower — Back Squat 4x5. "
+        "Saturday: Full Body, lighter. Sunday: Long fasted run, rest from lifting. "
+        "Currently cutting at ~-0.5 lb/week. Has full gym access."
+    ),
+    "phase_1_newbie": (
+        "Week 2. Just onboarded — minimal SetLog history. Phase 1 (weeks 1-4) "
+        "establishes movement competency at moderate weights. Coach must use the "
+        "lifting_agent to set starting weights, NOT extrapolate from non-existent history."
+    ),
+    "phase_3_cut": (
+        "Week 9. Phase 3 (weeks 9-12). Hit a progression plateau on bench press "
+        "(stuck at 165 for 3+ weeks). Ahead on weight-loss target. Coach should "
+        "address plateau with deload or accessory shift, not push for PR."
+    ),
+    "no_gym_bw": (
+        "Week 3. No gym, bodyweight + kettlebells only. Coach MUST NOT prescribe "
+        "barbell lifts. Programming is push-up / pull-up progressions, "
+        "kettlebell goblet squats, KB swings, single-leg work."
+    ),
+    "real_erik": (
+        "Live athlete. Pull current state from production. Whatever the program "
+        "says is ground truth — coach should cite from `get_workout` tool results "
+        "and the full-week block in athlete_data."
+    ),
+}

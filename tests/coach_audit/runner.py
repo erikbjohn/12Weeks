@@ -47,6 +47,17 @@ def run_prompt(
     return finding
 
 
+def make_judge_invoker():
+    """Returns a judge function bound to ARCHETYPE_DESCRIPTIONS lookup."""
+    from .judge import judge_response
+    from .users import ARCHETYPE_DESCRIPTIONS
+
+    def invoke(case, response):
+        desc = ARCHETYPE_DESCRIPTIONS.get(case.user_fixture, "")
+        return judge_response(case, response, desc)
+    return invoke
+
+
 def make_coach_invoker(app, user, agent_name: str = "conversation"):
     """Return a callable(user_message: str) -> str that runs the production
     coach pipeline against this user's seeded data.

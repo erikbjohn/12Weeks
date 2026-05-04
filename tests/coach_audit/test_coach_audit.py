@@ -2,7 +2,7 @@
 import os
 import pytest
 from .prompts import ALL_PROMPTS
-from .runner import run_prompt, make_coach_invoker
+from .runner import run_prompt, make_coach_invoker, make_judge_invoker
 
 
 @pytest.mark.parametrize("case", [p for p in ALL_PROMPTS if p.category == "smoke"],
@@ -34,25 +34,31 @@ def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
 
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY for live coach call",
+    reason="needs ANTHROPIC_API_KEY for live coach + judge",
 )
 @pytest.mark.parametrize(
     "case",
     [p for p in ALL_PROMPTS if p.id == "cross_day_001"],
     ids=lambda c: c.id,
 )
-def test_real_coach_heuristic_only(case, phase_2_mid_program, app_ctx, run_id):
+def test_real_coach_with_judge(case, phase_2_mid_program, app_ctx, run_id):
     app, _ = app_ctx
     invoke = make_coach_invoker(app, phase_2_mid_program)
+    judge = make_judge_invoker()
     finding = run_prompt(
         case=case,
         user_id=phase_2_mid_program.id,
         invoke_coach=invoke,
+        invoke_judge=judge,
         run_id=run_id,
     )
     assert finding.heuristic.passed, (
-        f"missing={finding.heuristic.missing_expected} "
+        f"heuristic: missing={finding.heuristic.missing_expected} "
         f"must_not={finding.heuristic.matched_must_not} "
-        f"banned={finding.heuristic.matched_banned}\n"
-        f"--- response ---\n{finding.coach_response}"
+        f"banned={finding.heuristic.matched_banned}"
+    )
+    assert finding.judge.passed, (
+        f"judge: violations={finding.judge.violations}\n"
+        f"scores={finding.judge.scores}\n"
+        f"evidence={finding.judge.evidence}"
     )
