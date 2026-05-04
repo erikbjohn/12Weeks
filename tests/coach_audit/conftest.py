@@ -37,3 +37,21 @@ def app_ctx():
 def phase_2_mid_program(app_ctx):
     from tests.coach_audit.users import make_phase_2_mid_program
     return make_phase_2_mid_program()
+
+
+@pytest.fixture(scope="function")
+def phase_1_newbie(app_ctx):
+    from tests.coach_audit.users import make_phase_1_newbie
+    return make_phase_1_newbie()
+
+
+@pytest.fixture(scope="function")
+def phase_3_cut(app_ctx):
+    from tests.coach_audit.users import make_phase_3_cut
+    return make_phase_3_cut()
+
+
+@pytest.fixture(scope="function")
+def no_gym_bw(app_ctx):
+    from tests.coach_audit.users import make_no_gym_bw
+    return make_no_gym_bw()

@@ -127,6 +127,102 @@ def make_phase_2_mid_program():
     return u
 
 
+def make_phase_1_newbie():
+    """Week 2, gym, just-onboarded — no SetLog history yet so the coach
+    must lean on `lifting_agent` for starting weights instead of
+    extrapolating from non-existent data."""
+    from app import db
+    from models import User, UserEquipment, PhysicalAssessment, AppState
+
+    u = User(email=_next_email("p1"), password_hash="x")
+    db.session.add(u)
+    db.session.commit()
+
+    db.session.add(UserEquipment(
+        user_id=u.id,
+        available_equipment=["barbell", "dumbbells", "flat_bench", "pull_up_bar"],
+    ))
+    db.session.add(PhysicalAssessment(user_id=u.id, has_gym=True))
+    db.session.add(AppState(
+        user_id=u.id,
+        start_date=date.today() - timedelta(days=7),
+        current_week=2,
+    ))
+    db.session.commit()
+    return u
+
+
+def make_phase_3_cut():
+    """Week 9, gym, bench plateau (3 weeks all at 165 lb), ahead on
+    weight-loss target. Coach should propose deload or accessory shift,
+    not push for a PR."""
+    from app import db
+    from models import (
+        User, UserEquipment, PhysicalAssessment, AppState, TrainingGoal,
+    )
+
+    u = User(email=_next_email("p3"), password_hash="x")
+    db.session.add(u)
+    db.session.commit()
+
+    db.session.add(UserEquipment(
+        user_id=u.id,
+        available_equipment=[
+            "barbell", "dumbbells", "flat_bench", "pull_up_bar",
+            "lat_pulldown", "cable_machine",
+        ],
+    ))
+    db.session.add(PhysicalAssessment(user_id=u.id, has_gym=True))
+    db.session.add(AppState(
+        user_id=u.id,
+        start_date=date.today() - timedelta(days=56),
+        current_week=9,
+    ))
+    db.session.add(TrainingGoal(
+        user_id=u.id, goal_type="cut", target_weight=175.0, daily_calories=2000,
+    ))
+
+    # Plateau pattern — 3 weeks of bench at 165, all the same.
+    _seed_progressive_setlog(
+        user_id=u.id,
+        progression={"Barbell Bench Press": [(165, 4), (165, 4), (165, 4)]},
+        lift_day={"Barbell Bench Press": 1},
+    )
+
+    # Weight ahead of target (181 lb with target 175 — 6 lb to go in 4 weeks).
+    _seed_bodyweight_trend(
+        u.id,
+        [(28, 188.0), (21, 185.0), (14, 183.0), (7, 181.0)],
+    )
+
+    db.session.commit()
+    return u
+
+
+def make_no_gym_bw():
+    """Week 3, no gym — bodyweight + kettlebells + pull-up bar only.
+    Coach must NOT prescribe barbell lifts."""
+    from app import db
+    from models import User, UserEquipment, PhysicalAssessment, AppState
+
+    u = User(email=_next_email("bw"), password_hash="x")
+    db.session.add(u)
+    db.session.commit()
+
+    db.session.add(UserEquipment(
+        user_id=u.id,
+        available_equipment=["kettlebells", "pull_up_bar"],
+    ))
+    db.session.add(PhysicalAssessment(user_id=u.id, has_gym=False))
+    db.session.add(AppState(
+        user_id=u.id,
+        start_date=date.today() - timedelta(days=14),
+        current_week=3,
+    ))
+    db.session.commit()
+    return u
+
+
 ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
     "phase_2_mid_program": (
         "Week 6 of a 12-week program. Phase 2 (weeks 5-8). "

@@ -62,3 +62,29 @@ def test_real_coach_with_judge(case, phase_2_mid_program, app_ctx, run_id):
         f"scores={finding.judge.scores}\n"
         f"evidence={finding.judge.evidence}"
     )
+
+
+def test_phase_1_newbie_has_no_history(phase_1_newbie):
+    from models import SetLog, AppState
+    user = phase_1_newbie
+    rows = SetLog.query.filter_by(user_id=user.id).all()
+    assert len(rows) == 0, "phase_1_newbie should have no SetLog history"
+    state = AppState.query.filter_by(user_id=user.id).first()
+    assert state.current_week == 2
+
+
+def test_phase_3_cut_has_plateau_pattern(phase_3_cut):
+    from models import SetLog
+    bench_rows = SetLog.query.filter_by(
+        user_id=phase_3_cut.id,
+        exercise_name="Barbell Bench Press",
+    ).all()
+    weights = sorted({r.weight for r in bench_rows})
+    assert 165 in weights, "phase_3_cut should have bench plateau at 165"
+
+
+def test_no_gym_bw_lacks_barbell(no_gym_bw):
+    from models import UserEquipment
+    eq = UserEquipment.query.filter_by(user_id=no_gym_bw.id).first()
+    assert "barbell" not in (eq.available_equipment or [])
+    assert "kettlebells" in (eq.available_equipment or [])
