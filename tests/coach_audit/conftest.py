@@ -81,3 +81,23 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "real_data: opt-in, hits prod via /api/admin/debug/sql"
     )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """After all audit tests run, write a markdown report."""
+    rid = getattr(session.config, "_audit_run_id_resolved", None)
+    if rid is None:
+        return
+    try:
+        from tests.coach_audit.report import build_report
+        out = build_report(rid)
+        print(f"\n[coach-audit] report written to {out}")
+    except Exception as e:
+        print(f"\n[coach-audit] report generation failed: {e}")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _stash_run_id(run_id, request):
+    """Make run_id discoverable by pytest_sessionfinish."""
+    request.config._audit_run_id_resolved = run_id
+    yield
