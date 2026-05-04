@@ -83,3 +83,20 @@ def test_cluster_patterns_returns_themes(monkeypatch):
     ]
     themes = report_module.cluster_patterns(failures)
     assert themes == fake_response["themes"]
+
+
+def test_rank_recommended_fixes():
+    from tests.coach_audit.report import rank_fixes
+    themes = [
+        {"name": "Cross-day", "count": 4, "prompts": ["cross_day_001", "cross_day_002"], "fix": "Tighten injection"},
+        {"name": "Tone slip", "count": 8, "prompts": ["banned_001"], "fix": "Tighten BANNED_PHRASES"},
+    ]
+    by_prompt_category = {
+        "cross_day_001": "cross_day_hallucination",
+        "cross_day_002": "cross_day_hallucination",
+        "banned_001": "banned_phrases",
+    }
+    ranked = rank_fixes(themes, by_prompt_category)
+    assert ranked[0]["name"] == "Cross-day"          # count×severity 4×3 = 12 vs 8×1 = 8
+    assert "[HIGH]" in ranked[0]["badge"]
+    assert ranked[1]["name"] == "Tone slip"

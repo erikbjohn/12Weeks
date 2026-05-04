@@ -206,9 +206,14 @@ def build_report(run_id: str) -> Path:
         try:
             themes = cluster_patterns(failed_findings)
             if themes:
+                prompt_to_category = {f["prompt_id"]: f["category"] for f in findings}
+                ranked = rank_fixes(themes, prompt_to_category)
                 lines += ["## Top failure patterns (clustered)", ""]
-                for t in themes:
-                    lines.append(f"### {t.get('name','(unnamed)')} ({t.get('count', 0)} occurrences)")
+                for t in ranked:
+                    lines.append(
+                        f"### {t.get('badge','')} {t.get('name','(unnamed)')} "
+                        f"(score {t.get('score', 0)}; {t.get('count', 0)} occurrences)"
+                    )
                     prompts = t.get("prompts") or []
                     if prompts:
                         lines.append(f"- Affected prompts: {', '.join(prompts)}")
@@ -216,8 +221,49 @@ def build_report(run_id: str) -> Path:
                     if fix:
                         lines.append(f"- Recommended fix: {fix}")
                     lines.append("")
+                lines += ["## Recommended fixes (ranked)", ""]
+                for i, t in enumerate(ranked, 1):
+                    lines.append(
+                        f"{i}. {t['badge']} {t['name']} — {t.get('fix','(no fix supplied)')} "
+                        f"(score {t['score']})"
+                    )
+                lines.append("")
         except Exception as e:
             lines += [f"_Pattern clustering failed: {e}_", ""]
 
     out_path.write_text("\n".join(lines))
     return out_path
+
+
+SEVERITY_BY_CATEGORY: dict[str, int] = {
+    "cross_day_hallucination": 3,
+    "schedule_leak":           3,
+    "progression_citation":    3,
+    "edge_cases":              3,   # equipment hallucination is high-impact
+    "swap_logic":              2,
+    "session_status":          2,
+    "deload_handling":         2,
+    "week_drift":              2,
+    "boundary_pushback":       2,
+    "run_pacing":              2,
+    "psych_intake_resume":     1,
+    "banned_phrases":          1,
+    "smoke":                   0,
+}
+
+SEVERITY_BADGE = {3: "[HIGH]", 2: "[MED]", 1: "[LOW]", 0: "[INFO]"}
+
+
+def rank_fixes(themes: list[dict], prompt_to_category: dict[str, str]) -> list[dict]:
+    ranked = []
+    for t in themes:
+        prompts = t.get("prompts") or []
+        cats = [prompt_to_category.get(p) for p in prompts if prompt_to_category.get(p)]
+        if not cats:
+            sev = 1
+        else:
+            sev = max(SEVERITY_BY_CATEGORY.get(c, 1) for c in cats)
+        score = (t.get("count", 0)) * sev
+        ranked.append({**t, "severity": sev, "score": score, "badge": SEVERITY_BADGE[sev]})
+    ranked.sort(key=lambda r: r["score"], reverse=True)
+    return ranked
