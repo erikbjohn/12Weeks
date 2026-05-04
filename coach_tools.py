@@ -162,14 +162,31 @@ def _tool_get_workout(user_id: int, week: int, day_idx: int) -> str:
 
 
 def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> str:
+    """Look up recent SetLog rows for an exercise. Tries an exact-name match
+    first; if that comes back empty, falls back to a case-insensitive
+    substring match so the coach asking for 'Front Squat' still finds rows
+    logged as 'Barbell Front Squat' (or vice versa) — exercise naming has
+    drifted over the program's history and exact match was missing real data.
+    """
     from models import SetLog
-    rows = (SetLog.query
-            .filter(SetLog.user_id == user_id,
-                    SetLog.exercise_name == exercise_name,
-                    SetLog.done.is_(True))
+    base = SetLog.query.filter(
+        SetLog.user_id == user_id, SetLog.done.is_(True),
+    )
+    rows = (base
+            .filter(SetLog.exercise_name == exercise_name)
             .order_by(SetLog.logged_date.desc(), SetLog.set_number.asc())
             .limit(int(limit))
             .all())
+    matched_name = exercise_name
+    if not rows:
+        rows = (base
+                .filter(SetLog.exercise_name.ilike(f"%{exercise_name}%"))
+                .order_by(SetLog.logged_date.desc(), SetLog.set_number.asc())
+                .limit(int(limit))
+                .all())
+        if rows:
+            # Use the first row's actual name so the coach sees what was logged.
+            matched_name = rows[0].exercise_name
     if not rows:
         return json.dumps({
             "exercise": exercise_name,
@@ -177,7 +194,8 @@ def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> 
             "note": f"No logged sets found for {exercise_name!r}.",
         })
     return json.dumps({
-        "exercise": exercise_name,
+        "exercise": matched_name,
+        "queried_as": exercise_name,
         "sets": [
             {
                 "date": str(r.logged_date),

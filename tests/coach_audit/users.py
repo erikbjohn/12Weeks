@@ -104,17 +104,19 @@ def make_phase_2_mid_program():
     ))
 
     # 5 weeks × 3 lifts × SETS_PER_LIFT = 60 progressive SetLog rows.
+    # Names match production canonical (workout_data.py): no "Barbell" prefix
+    # on Front Squat; Phase 2 bench is DB; rows are "Barbell Bent-Over Row".
     _seed_progressive_setlog(
         user_id=u.id,
         progression={
-            "Barbell Front Squat": [(135, 5), (145, 5), (155, 4), (165, 3), (170, 3)],
-            "Barbell Bench Press": [(135, 6), (145, 5), (150, 5), (155, 4), (160, 4)],
-            "Barbell Row":          [(115, 8), (125, 8), (135, 8), (140, 8), (145, 7)],
+            "Front Squat":           [(135, 5), (145, 5), (155, 4), (165, 3), (170, 3)],
+            "DB Bench Press":        [(60, 6),  (65, 5),  (70, 5),  (72, 4),  (75, 4)],
+            "Barbell Bent-Over Row": [(115, 8), (125, 8), (135, 8), (140, 8), (145, 7)],
         },
         lift_day={
-            "Barbell Front Squat": 0,
-            "Barbell Bench Press": 1,
-            "Barbell Row":         3,
+            "Front Squat":           0,
+            "DB Bench Press":        1,
+            "Barbell Bent-Over Row": 3,
         },
     )
 
@@ -183,10 +185,11 @@ def make_phase_3_cut():
     ))
 
     # Plateau pattern — 3 weeks of bench at 165, all the same.
+    # Phase 3 still uses DB Bench Press as the canonical Tuesday lift name.
     _seed_progressive_setlog(
         user_id=u.id,
-        progression={"Barbell Bench Press": [(165, 4), (165, 4), (165, 4)]},
-        lift_day={"Barbell Bench Press": 1},
+        progression={"DB Bench Press": [(165, 4), (165, 4), (165, 4)]},
+        lift_day={"DB Bench Press": 1},
     )
 
     # Weight ahead of target (181 lb with target 175 — 6 lb to go in 4 weeks).

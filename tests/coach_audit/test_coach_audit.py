@@ -84,7 +84,7 @@ def test_phase_3_cut_has_plateau_pattern(phase_3_cut):
     from models import SetLog
     bench_rows = SetLog.query.filter_by(
         user_id=phase_3_cut.id,
-        exercise_name="Barbell Bench Press",
+        exercise_name="DB Bench Press",
     ).all()
     weights = sorted({r.weight for r in bench_rows})
     # Plateau invariant: ALL bench sets at 165 — adding a fourth week at a
