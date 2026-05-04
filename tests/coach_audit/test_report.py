@@ -58,3 +58,28 @@ def test_build_report_emits_summary(fake_run):
     assert "Pass rate by category" in text
     assert "cross_day_hallucination" in text
     assert "50%" in text or "1 / 2" in text
+
+
+def test_cluster_patterns_returns_themes(monkeypatch):
+    from tests.coach_audit import report as report_module
+
+    fake_response = {
+        "themes": [
+            {"name": "Cross-day workout confusion", "count": 4,
+             "prompts": ["cross_day_001", "cross_day_002"],
+             "fix": "Tighten full-week injection in athlete_data"}
+        ]
+    }
+
+    def fake_call(failures):
+        return fake_response["themes"]
+    monkeypatch.setattr(report_module, "_call_clustering_llm", fake_call)
+
+    failures = [
+        {"prompt_id": "cross_day_001", "category": "cross_day_hallucination",
+         "judge": {"violations": ["Said Back Squat for Monday"]}},
+        {"prompt_id": "cross_day_002", "category": "cross_day_hallucination",
+         "judge": {"violations": ["Said Deadlift for Friday"]}},
+    ]
+    themes = report_module.cluster_patterns(failures)
+    assert themes == fake_response["themes"]

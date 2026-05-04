@@ -1,6 +1,7 @@
 """Aggregate findings/<run_id>/*.json into a markdown report."""
 from __future__ import annotations
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -58,6 +59,56 @@ def _heuristic_vs_judge(findings: list[dict]) -> dict[str, list[str]]:
         "judge_only_fail": only_judge_failed,
         "heuristic_only_fail": only_heuristic_failed,
     }
+
+
+CLUSTER_SYSTEM = """You are analyzing failures from a coach AI test suite.
+You will be shown a list of failures, each with prompt_id, category, and judge violations.
+
+Cluster these into 1-6 named themes. For each theme, return:
+- name: short label (≤60 chars)
+- count: number of failures in this theme
+- prompts: list of prompt_ids
+- fix: one-sentence recommended fix
+
+Respond with JSON only:
+{ "themes": [{"name": "...", "count": N, "prompts": [...], "fix": "..."}] }
+"""
+
+
+def _call_clustering_llm(failures: list[dict]) -> list[dict]:
+    if not failures:
+        return []
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    user_payload = json.dumps([
+        {
+            "prompt_id": f["prompt_id"],
+            "category": f["category"],
+            "violations": (f.get("judge") or {}).get("violations", []),
+        }
+        for f in failures
+    ], indent=2)
+    resp = client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=1500,
+        system=CLUSTER_SYSTEM,
+        messages=[{"role": "user", "content": user_payload}],
+    )
+    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    text = text.strip()
+    if text.startswith("```"):
+        import re as _re
+        text = _re.sub(r"^```(?:json)?\s*", "", text)
+        text = _re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    return list(data.get("themes") or [])
+
+
+def cluster_patterns(failures: list[dict]) -> list[dict]:
+    return _call_clustering_llm(failures)
 
 
 def build_report(run_id: str) -> Path:
@@ -145,6 +196,28 @@ def build_report(run_id: str) -> Path:
             lines.append("")
 
     lines += ["", f"*Findings dir:* `tests/coach_audit/findings/{run_id}/`"]
+
+    failed_findings = [
+        f for f in findings
+        if not (f.get("heuristic", {}).get("passed")
+                and (f.get("judge") or {}).get("passed", False))
+    ]
+    if failed_findings and os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("AUDIT_CLUSTER", "1") != "0":
+        try:
+            themes = cluster_patterns(failed_findings)
+            if themes:
+                lines += ["## Top failure patterns (clustered)", ""]
+                for t in themes:
+                    lines.append(f"### {t.get('name','(unnamed)')} ({t.get('count', 0)} occurrences)")
+                    prompts = t.get("prompts") or []
+                    if prompts:
+                        lines.append(f"- Affected prompts: {', '.join(prompts)}")
+                    fix = t.get("fix")
+                    if fix:
+                        lines.append(f"- Recommended fix: {fix}")
+                    lines.append("")
+        except Exception as e:
+            lines += [f"_Pattern clustering failed: {e}_", ""]
 
     out_path.write_text("\n".join(lines))
     return out_path
