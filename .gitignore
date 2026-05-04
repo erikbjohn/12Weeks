@@ -9,3 +9,5 @@ build/
 .DS_Store
 instance/
 local.db
+tests/coach_audit/findings/
+tests/coach_audit/reports/
