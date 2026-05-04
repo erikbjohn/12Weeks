@@ -328,10 +328,15 @@ def derive_meal_type(day_dict, weekday):
     rtype = (run.get("type") or "").lower()
     is_rest = bool((day_dict or {}).get("isRest"))
     lift_name = ((day_dict or {}).get("liftName") or "").strip().lower()
-    has_lift = bool(lift_name and lift_name not in ("rest", "rest day", ""))
+    # "Rest (Long Fasted Run)" reads as has_lift=True under a strict-equality
+    # check; broaden to any liftName containing 'rest' so the long-fasted-run
+    # day stays fast_day instead of getting reclassified as long_run.
+    has_lift = bool(lift_name and "rest" not in lift_name)
 
-    if is_rest and not has_lift:
-        # Defer to weekday default — Sunday is fast_day in the rotation.
+    if is_rest:
+        # No lifting day — defer to the weekday rotation default. Sunday is
+        # fast_day even when paired with a fasted long run (the fast IS the
+        # point — carb-loading like a non-fasted long_run day defeats it).
         return DAY_MEAL_TYPES.get(weekday, "rest")
     if rtype == "z2_long":
         return "long_run"
