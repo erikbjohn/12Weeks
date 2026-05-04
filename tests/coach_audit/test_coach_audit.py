@@ -38,29 +38,36 @@ def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
 )
 @pytest.mark.parametrize(
     "case",
-    [p for p in ALL_PROMPTS if p.id == "cross_day_001"],
+    [p for p in ALL_PROMPTS if p.category not in ("smoke",)],
     ids=lambda c: c.id,
 )
-def test_real_coach_with_judge(case, phase_2_mid_program, app_ctx, run_id):
+def test_audit_case(case, fixture_by_name, app_ctx, run_id, audit_mode):
+    if case.requires_real_data and audit_mode != "full":
+        pytest.skip("requires --audit-mode=full")
+
+    user = fixture_by_name(case.user_fixture)
     app, _ = app_ctx
-    invoke = make_coach_invoker(app, phase_2_mid_program)
-    judge = make_judge_invoker(app, phase_2_mid_program)
+    invoke = make_coach_invoker(app, user)
+    judge = make_judge_invoker(app, user)
     finding = run_prompt(
         case=case,
-        user_id=phase_2_mid_program.id,
+        user_id=user.id,
         invoke_coach=invoke,
         invoke_judge=judge,
         run_id=run_id,
     )
     assert finding.heuristic.passed, (
-        f"heuristic: missing={finding.heuristic.missing_expected} "
+        f"[{case.id}] heuristic: "
+        f"missing={finding.heuristic.missing_expected} "
         f"must_not={finding.heuristic.matched_must_not} "
-        f"banned={finding.heuristic.matched_banned}"
+        f"banned={finding.heuristic.matched_banned}\n"
+        f"--- response ---\n{finding.coach_response}"
     )
     assert finding.judge.passed, (
-        f"judge: violations={finding.judge.violations}\n"
+        f"[{case.id}] judge: violations={finding.judge.violations}\n"
         f"scores={finding.judge.scores}\n"
-        f"evidence={finding.judge.evidence}"
+        f"evidence={finding.judge.evidence}\n"
+        f"--- response ---\n{finding.coach_response}"
     )
 
 

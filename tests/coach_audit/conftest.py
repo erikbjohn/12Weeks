@@ -55,3 +55,12 @@ def phase_3_cut(app_ctx):
 def no_gym_bw(app_ctx):
     from tests.coach_audit.users import make_no_gym_bw
     return make_no_gym_bw()
+
+
+@pytest.fixture
+def fixture_by_name(request):
+    """Look up a fixture by its string name. Used to map PromptCase.user_fixture
+    → the actual user object."""
+    def _resolve(name):
+        return request.getfixturevalue(name)
+    return _resolve
