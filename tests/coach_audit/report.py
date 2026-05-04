@@ -19,13 +19,22 @@ def _load_findings(run_id: str) -> list[dict]:
     return [json.loads(p.read_text()) for p in sorted(d.glob("*.json"))]
 
 
+def _finding_passed(f: dict) -> bool:
+    """A finding passes if heuristic passed AND (judge passed OR no judge ran).
+
+    Smoke / heuristic-only tests have judge=None — in that case heuristic is
+    the only signal. Don't count "no judge ran" as a failure."""
+    h_pass = bool(f.get("heuristic", {}).get("passed"))
+    judge = f.get("judge")
+    if judge is None:
+        return h_pass
+    return h_pass and bool(judge.get("passed"))
+
+
 def _by_category(findings: list[dict]) -> dict[str, dict]:
     out: dict[str, dict] = defaultdict(lambda: {"pass": 0, "fail": 0, "fails": []})
     for f in findings:
-        h_pass = f.get("heuristic", {}).get("passed", False)
-        j = f.get("judge") or {}
-        j_pass = j.get("passed", False) if j else h_pass
-        passed = h_pass and j_pass
+        passed = _finding_passed(f)
         bucket = out[f["category"]]
         bucket["pass" if passed else "fail"] += 1
         if not passed:
@@ -46,11 +55,15 @@ def _dimension_avgs(findings: list[dict]) -> dict[str, float]:
 
 
 def _heuristic_vs_judge(findings: list[dict]) -> dict[str, list[str]]:
+    """Findings where the two evaluators disagree. Skip findings with no
+    judge (e.g. smoke tests) — there's nothing to compare."""
     only_judge_failed = []
     only_heuristic_failed = []
     for f in findings:
-        h = f.get("heuristic", {}).get("passed", False)
-        j = (f.get("judge") or {}).get("passed", False)
+        if f.get("judge") is None:
+            continue
+        h = bool(f.get("heuristic", {}).get("passed"))
+        j = bool(f["judge"].get("passed"))
         if h and not j:
             only_judge_failed.append(f["prompt_id"])
         elif j and not h:
@@ -117,11 +130,7 @@ def build_report(run_id: str) -> Path:
     out_path = REPORTS_ROOT / f"{run_id}.md"
 
     total = len(findings)
-    passed = sum(
-        1 for f in findings
-        if f.get("heuristic", {}).get("passed")
-        and (f.get("judge") or {}).get("passed", False)
-    )
+    passed = sum(1 for f in findings if _finding_passed(f))
     fail = total - passed
 
     cats = _by_category(findings)
@@ -176,32 +185,27 @@ def build_report(run_id: str) -> Path:
     if fail:
         lines += ["## Failures by prompt", ""]
         for f in findings:
-            h = f.get("heuristic", {}).get("passed", False)
-            j = (f.get("judge") or {}).get("passed", False)
-            if h and j:
+            if _finding_passed(f):
                 continue
+            h_pass = bool(f.get("heuristic", {}).get("passed"))
+            judge = f.get("judge")
             lines.append(f"### {f['prompt_id']} — {f['category']}")
             lines.append(f"**Prompt:** {f['user_message']}")
             lines.append(f"**Response (truncated):** {f['coach_response'][:400]}")
-            if not h:
+            if not h_pass:
                 hh = f["heuristic"]
                 lines.append(
                     f"**Heuristic:** missing={hh['missing_expected']} "
                     f"must_not={hh['matched_must_not']} banned={hh['matched_banned']}"
                 )
-            if f.get("judge") and not j:
-                jj = f["judge"]
-                lines.append(f"**Judge violations:** {jj['violations']}")
-                lines.append(f"**Judge scores:** {jj['scores']}")
+            if judge and not judge.get("passed"):
+                lines.append(f"**Judge violations:** {judge['violations']}")
+                lines.append(f"**Judge scores:** {judge['scores']}")
             lines.append("")
 
     lines += ["", f"*Findings dir:* `tests/coach_audit/findings/{run_id}/`"]
 
-    failed_findings = [
-        f for f in findings
-        if not (f.get("heuristic", {}).get("passed")
-                and (f.get("judge") or {}).get("passed", False))
-    ]
+    failed_findings = [f for f in findings if not _finding_passed(f)]
     if failed_findings and os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("AUDIT_CLUSTER", "1") != "0":
         try:
             themes = cluster_patterns(failed_findings)

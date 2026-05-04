@@ -50,23 +50,37 @@ def run_prompt(
 def make_judge_invoker(app, user):
     """Return a judge function bound to (app, user). The judge gets the
     user's archetype description PLUS the actual prescribed full-week
-    program block (same content the coach sees via athlete_data injection),
-    so it doesn't over-flag accessories the coarse archetype description
-    didn't enumerate."""
+    program block (so it doesn't over-flag accessories the coarse archetype
+    didn't enumerate) PLUS the last ~50 SetLog rows (so it doesn't flag
+    the coach citing real seeded numbers as 'hallucinated')."""
     from .judge import judge_response
     from .users import ARCHETYPE_DESCRIPTIONS
     from coach_assembler import _format_full_week_program
     from flask_login import login_user
-    from models import AppState
+    from models import AppState, SetLog
 
     uid = user.id
-    # Build the ground-truth block once at construction. Need a request
-    # context for current_user-aware code paths inside _format_full_week_program.
     with app.test_request_context():
         login_user(user, force=True)
         state = AppState.query.filter_by(user_id=uid).first()
         week = state.current_week if state else 1
         program_block = _format_full_week_program(week)
+        recent_sets = (
+            SetLog.query
+            .filter(SetLog.user_id == uid, SetLog.done.is_(True))
+            .order_by(SetLog.logged_date.desc(), SetLog.set_number.asc())
+            .limit(50).all()
+        )
+        if recent_sets:
+            history_lines = ["RECENT LOGGED SETS (cite from this — these are real, not hallucinated):"]
+            for s in recent_sets:
+                history_lines.append(
+                    f"  {s.logged_date} wk{s.week} day{s.day_idx} "
+                    f"{s.exercise_name}: set {s.set_number} {s.weight}lb x {s.reps}"
+                )
+            history_block = "\n".join(history_lines)
+        else:
+            history_block = "RECENT LOGGED SETS: none on file."
 
     def invoke(case, response):
         archetype_desc = ARCHETYPE_DESCRIPTIONS.get(case.user_fixture, "")
@@ -74,7 +88,8 @@ def make_judge_invoker(app, user):
             f"{archetype_desc}\n\n"
             "ACTUAL PRESCRIBED PROGRAM (cite from this — anything matching "
             "this is NOT a hallucination):\n\n"
-            f"{program_block}"
+            f"{program_block}\n\n"
+            f"{history_block}"
         )
         return judge_response(case, response, ground_truth)
     return invoke
