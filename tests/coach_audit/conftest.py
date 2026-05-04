@@ -22,3 +22,18 @@ def run_id() -> str:
 @pytest.fixture(scope="session")
 def audit_mode(request) -> str:
     return request.config.getoption("--audit-mode")
+
+
+@pytest.fixture(scope="function")
+def app_ctx():
+    from app import app, db
+    with app.app_context():
+        db.create_all()
+        yield app, db
+        db.session.rollback()
+
+
+@pytest.fixture(scope="function")
+def phase_2_mid_program(app_ctx):
+    from tests.coach_audit.users import make_phase_2_mid_program
+    return make_phase_2_mid_program()

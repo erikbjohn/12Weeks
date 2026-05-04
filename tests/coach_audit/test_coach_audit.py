@@ -19,3 +19,13 @@ def test_smoke(case, run_id):
         f"must_not={finding.heuristic.matched_must_not} "
         f"banned={finding.heuristic.matched_banned}"
     )
+
+
+def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
+    """Fixture should create a user with at least 3 weeks of SetLog rows."""
+    from models import SetLog
+    user = phase_2_mid_program
+    rows = SetLog.query.filter_by(user_id=user.id, done=True).all()
+    assert len(rows) >= 30, f"expected ≥30 SetLog rows, got {len(rows)}"
+    weeks = {r.week for r in rows}
+    assert weeks >= {3, 4, 5}, f"expected weeks 3-5 in history, got {weeks}"
