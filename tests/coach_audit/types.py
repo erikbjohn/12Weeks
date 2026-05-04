@@ -1,7 +1,6 @@
 """Dataclasses shared across the audit harness."""
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from typing import Optional
 
 
 @dataclass
@@ -15,6 +14,9 @@ class PromptCase:
     must_not: list[str] = field(default_factory=list)
     focus_dimensions: list[str] = field(default_factory=list)
     requires_real_data: bool = False
+    # Subtract from BANNED_PHRASES for this prompt only — used when a case
+    # legitimately needs the coach to quote a banned phrase back.
+    banned_phrase_overrides: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -40,9 +42,9 @@ class Finding:
     user_message: str
     coach_response: str
     heuristic: HeuristicResult
-    judge: Optional[JudgeResult]
+    judge: JudgeResult | None
     timestamp_iso: str
     fixture: str
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return asdict(self)

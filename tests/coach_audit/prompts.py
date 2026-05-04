@@ -1,4 +1,5 @@
 """Prompt corpus. Add cases freely — harness loops over `ALL_PROMPTS`."""
+from __future__ import annotations
 from .types import PromptCase
 
 ALL_PROMPTS: list[PromptCase] = [

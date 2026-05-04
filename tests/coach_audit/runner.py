@@ -24,6 +24,10 @@ def run_prompt(
     invoke_judge=None,               # callable(case, response) -> JudgeResult | None
     run_id: str,
 ) -> Finding:
+    # `user_id` is bound by callers; the runner doesn't need it directly because
+    # `invoke_coach` is already a closure over the seeded user. Recorded here
+    # for traceability — future tasks may include it in the persisted Finding.
+    _ = user_id
     response = invoke_coach(case.user_message)
     heuristic = check_heuristics(response, case)
     judge = invoke_judge(case, response) if invoke_judge else None
