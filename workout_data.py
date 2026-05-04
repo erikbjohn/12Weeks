@@ -340,13 +340,19 @@ def derive_meal_type(day_dict, weekday):
         return DAY_MEAL_TYPES.get(weekday, "rest")
     if rtype == "z2_long":
         return "long_run"
+    # Heavy lift only when the liftName names it explicitly. Phase 2 marks
+    # the two real strength sessions as 'Lower POWER' and 'HEAVY Lower';
+    # everything else (volume, hypertrophy, accessory, full-body lighter)
+    # is moderate. Reserving heavy_lift for true max-strength days keeps
+    # the calorie/carb bump where it actually matters.
+    is_heavy = any(kw in lift_name for kw in ("power", "heavy", "max"))
     if rtype in ("hiit", "vo2", "threshold"):
-        # Intervals: short high-intensity. Need fuel, NOT endurance carb-load.
-        return "heavy_lift" if has_lift else "moderate"
+        # Intervals: short high-intensity. Fuel, but not endurance carb-load.
+        return "heavy_lift" if is_heavy else "moderate"
     if rtype == "z2":
-        return "heavy_lift" if has_lift else "moderate"
+        return "heavy_lift" if is_heavy else "moderate"
     if has_lift:
-        return "heavy_lift"
+        return "heavy_lift" if is_heavy else "moderate"
     return DAY_MEAL_TYPES.get(weekday, "moderate")
 
 
