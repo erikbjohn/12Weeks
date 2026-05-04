@@ -369,13 +369,16 @@ ALL_PROMPTS: list[PromptCase] = (
 )
 
 
-# Module-import-time sanity check — catches typos in user_fixture strings
-# at collection time instead of test runtime. Code-quality reviewer flagged
-# this as a Task 7 follow-up from Task 6.
-for _p in ALL_PROMPTS:
-    if _p.user_fixture not in _KNOWN_FIXTURES:
-        raise ValueError(
-            f"PromptCase {_p.id!r} references unknown fixture {_p.user_fixture!r}; "
-            f"valid: {sorted(_KNOWN_FIXTURES)}"
-        )
-del _p
+def _validate_corpus() -> None:
+    """Module-import-time sanity check — catches typos in user_fixture
+    strings at collection time instead of test runtime. Code-quality
+    reviewer flagged this as a Task 7 follow-up from Task 6."""
+    for p in ALL_PROMPTS:
+        if p.user_fixture not in _KNOWN_FIXTURES:
+            raise ValueError(
+                f"PromptCase {p.id!r} references unknown fixture "
+                f"{p.user_fixture!r}; valid: {sorted(_KNOWN_FIXTURES)}"
+            )
+
+
+_validate_corpus()
