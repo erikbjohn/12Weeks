@@ -213,13 +213,40 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     ).order_by(SetLog.logged_date.desc(), SetLog.set_number.asc()).limit(20).all()
 
     if not last_sets:
-        # No history — return defaults based on phase
+        # No history — ask the lifting agent (LLM) for a sensible starting
+        # weight based on the athlete's other lifts + body weight + scheme.
+        # Falls back to None on any failure (network, key missing, parse error).
         rep_range = {1: 10, 2: 8, 3: 5}
+        configured_reps = _get_configured_reps(exercise_name, week, day_idx, exercise_order)
+        configured_sets_first = _get_configured_sets(exercise_name, week, day_idx, exercise_order)
+        target_reps = configured_reps or rep_range.get(phase, 10)
+        target_sets = configured_sets_first or (4 if phase <= 2 else 3)
+        scheme = f"{target_sets}x{_get_configured_reps_str(exercise_name, week, day_idx, exercise_order) or target_reps}"
+
+        try:
+            from lifting_agent import prescribe_starting_weight
+            agent = prescribe_starting_weight(
+                user_id=user_id,
+                exercise_name=exercise_name,
+                prescribed_scheme=scheme,
+            )
+        except Exception:
+            agent = None
+
+        if agent and agent.get("weight_lbs"):
+            return {
+                "target_weight": _round_weight(agent["weight_lbs"]),
+                "target_reps": target_reps,
+                "target_sets": target_sets,
+                "adjustment_reason": f"Lifting agent: {agent.get('reasoning', '')}",
+                "progression_indicator": "establish",
+            }
+
         return {
             "target_weight": None,
-            "target_reps": rep_range.get(phase, 10),
-            "target_sets": 4 if phase <= 2 else 3,
-            "adjustment_reason": "First session — establish baseline",
+            "target_reps": target_reps,
+            "target_sets": target_sets,
+            "adjustment_reason": "First session — establish baseline (agent unavailable)",
             "progression_indicator": "hold",
         }
 
