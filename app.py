@@ -3222,6 +3222,21 @@ def api_generate_weekly_program():
     if existing:
         return jsonify({"message": "Coach-modified prescriptions exist", "week": target_week})
 
+    # Don't regenerate prescriptions for past weeks. Once the athlete has
+    # logged any completed sets for a week, the prescription view becomes a
+    # historical record of what they actually trained — regenerating would
+    # silently rewrite history with the current template, which is what
+    # blew away Erik's Week 5 Phase 1 plan when the program rebuild moved
+    # the phase boundary.
+    has_history = SetLog.query.filter_by(
+        user_id=current_user.id, week=target_week, done=True,
+    ).first()
+    if has_history:
+        return jsonify({
+            "message": "Past week — already trained, won't overwrite history",
+            "week": target_week,
+        })
+
     # Get the phase template as baseline — use BW templates for no-gym users
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
     has_gym = pa.has_gym if pa else True
