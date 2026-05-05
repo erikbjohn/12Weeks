@@ -97,6 +97,55 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    {
+        "name": "consult_nutritionist",
+        "description": (
+            "Consult the Nutritionist specialist. Use when the question "
+            "involves macros, fasting, refeeds, glycogen, deficit math, "
+            "electrolytes, supplement timing, or interpreting body weight "
+            "trends. Brief should be 1-3 sentences naming the question + "
+            "any cross-cutting context (e.g., 'athlete is week 6 of 12-wk "
+            "cut, 207→185 target')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "string", "description": "Focused question + context"},
+            },
+            "required": ["brief"],
+        },
+    },
+    {
+        "name": "consult_strength",
+        "description": (
+            "Consult the Strength Coach specialist. Use for lift "
+            "programming, RPE-based autoregulation, swap logic, weight "
+            "selection, deload calls, progression-in-deficit decisions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "string"},
+            },
+            "required": ["brief"],
+        },
+    },
+    {
+        "name": "consult_running",
+        "description": (
+            "Consult the Running Coach specialist. Use for run "
+            "prescription, pace zones, fasted-run feasibility, "
+            "long-run pacing, recovery-based intensity adjustments, "
+            "ultra-specific concerns (50k preparation)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "string"},
+            },
+            "required": ["brief"],
+        },
+    },
 ]
 
 
@@ -316,12 +365,30 @@ def _tool_get_today_status(user_id: int) -> str:
     }, default=str)
 
 
+def _tool_consult_nutritionist(user_id: int, brief: str) -> str:
+    from coach_specialists.nutritionist import consult
+    return consult(brief=brief, user_id=user_id)
+
+
+def _tool_consult_strength(user_id: int, brief: str) -> str:
+    from coach_specialists.strength import consult
+    return consult(brief=brief, user_id=user_id)
+
+
+def _tool_consult_running(user_id: int, brief: str) -> str:
+    from coach_specialists.running import consult
+    return consult(brief=brief, user_id=user_id)
+
+
 _DISPATCH = {
     "get_workout": _tool_get_workout,
     "get_recent_sets": _tool_get_recent_sets,
     "get_e1rm": _tool_get_e1rm,
     "get_body_state": _tool_get_body_state,
     "get_today_status": _tool_get_today_status,
+    "consult_nutritionist": _tool_consult_nutritionist,
+    "consult_strength": _tool_consult_strength,
+    "consult_running": _tool_consult_running,
 }
 
 
