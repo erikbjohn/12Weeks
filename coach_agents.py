@@ -112,6 +112,10 @@ AGENTS = {
             "base", "goal", "cut_status", "bodyweight",
             "meals_today", "weekly_meals", "food_safety",
             "fasting", "today_status",
+            # Without workout_today + week_schedule the nutritionist
+            # can't see what TYPE of day it is (rest/lift/run), and
+            # was inferring rest from log absence.
+            "workout_today", "week_schedule",
         ],
     },
     "strength_coach": {
@@ -130,6 +134,9 @@ AGENTS = {
         "requires": [
             "base", "goal", "fasting", "today_status",
             "workout_today", "runs", "garmin",
+            # Need the full week so 'tomorrow' / 'Sunday' questions
+            # can resolve without inferring from log absence.
+            "week_schedule",
         ],
     },
 }

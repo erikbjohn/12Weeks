@@ -548,7 +548,10 @@ _running_pace_zones = [
         user_fixture="phase_2_mid_program",
         target_specialist="running",
         expected_behavior=[r"/easy|aerobic|conversational|zone 2|z2/"],
-        must_not=["tempo", "threshold pace", "lactate threshold"],
+        # 'threshold pace' must_not removed: it false-positive matched
+        # inside contextual phrasing like 'aerobic threshold' that's
+        # actually the right answer for a Sunday LR.
+        must_not=["tempo run", "lactate threshold"],
         focus_dimensions=["accuracy"],
     ),
     PromptCase(
