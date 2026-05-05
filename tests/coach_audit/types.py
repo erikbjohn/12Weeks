@@ -17,6 +17,10 @@ class PromptCase:
     # Subtract from BANNED_PHRASES for this prompt only — used when a case
     # legitimately needs the coach to quote a banned phrase back.
     banned_phrase_overrides: list[str] = field(default_factory=list)
+    # Multi-agent: when set, the audit invokes that specialist DIRECTLY
+    # (bypassing Doctor) so the prompt tests the specialist in isolation.
+    # Values: "nutritionist" | "strength" | "running" | "doctor" | None.
+    target_specialist: str | None = None
 
 
 @dataclass

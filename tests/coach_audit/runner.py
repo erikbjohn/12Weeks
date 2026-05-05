@@ -121,3 +121,32 @@ def make_coach_invoker(app, user, agent_name: str = "conversation"):
                 agent_name=agent_name,
             )
     return invoke
+
+
+def make_specialist_invoker(specialist_name: str, app, user):
+    """Return a callable(user_message: str) -> str that calls the specialist
+    DIRECTLY (bypassing the Doctor). Used by the audit to test specialists
+    in isolation.
+
+    specialist_name: 'nutritionist' | 'strength' | 'running'
+    """
+    from flask_login import login_user
+
+    SPEC_MOD = {
+        "nutritionist": "coach_specialists.nutritionist",
+        "strength":     "coach_specialists.strength",
+        "running":      "coach_specialists.running",
+    }
+    if specialist_name not in SPEC_MOD:
+        raise ValueError(f"Unknown specialist: {specialist_name}")
+
+    import importlib
+    mod = importlib.import_module(SPEC_MOD[specialist_name])
+    uid = user.id
+
+    def invoke(user_message: str) -> str:
+        with app.test_request_context():
+            login_user(user, force=True)
+            # The audit's user_message becomes the Doctor's brief here.
+            return mod.consult(brief=user_message, user_id=uid)
+    return invoke
