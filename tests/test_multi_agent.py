@@ -102,3 +102,61 @@ def test_doctor_three_consults_dispatch_in_parallel():
     assert "str_start" in call_log
     assert "run_start" in call_log
     assert "Skip the PR" in result
+
+
+def test_coach_chat_routes_to_multiagent_when_flag_enabled(monkeypatch):
+    """coach_chat() should detect MULTIAGENT_ENABLED + chat-style agent
+    and route to coach_chat_multiagent instead of the single-prompt loop."""
+    from coach_with_tools import coach_chat
+
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "1")
+
+    with patch("coach_multi_agent.coach_chat_multiagent",
+               return_value="multi-agent reply") as mc:
+        result = coach_chat(
+            user_id=1,
+            system_prompt="<athlete_data>...</athlete_data>",
+            messages=[{"role": "user", "content": "test"}],
+            agent_name="conversation",  # multi-agent trigger
+        )
+
+    mc.assert_called_once()
+    assert result == "multi-agent reply"
+
+
+def test_coach_chat_uses_single_prompt_when_flag_disabled(monkeypatch):
+    """Without the flag, conversation still uses the existing single-prompt path."""
+    from coach_with_tools import coach_chat
+
+    monkeypatch.delenv("MULTIAGENT_ENABLED", raising=False)
+
+    with patch("coach_with_tools._run_loop", return_value="single-prompt reply") as mc:
+        with patch("coach_multi_agent.coach_chat_multiagent") as mma:
+            result = coach_chat(
+                user_id=1,
+                system_prompt="...",
+                messages=[{"role": "user", "content": "hi"}],
+                agent_name="conversation",
+            )
+
+    assert result == "single-prompt reply"
+    mma.assert_not_called()
+
+
+def test_coach_chat_uses_single_prompt_for_non_chat_modes(monkeypatch):
+    """morning_checkin should NEVER go multi-agent even with the flag on."""
+    from coach_with_tools import coach_chat
+
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "1")
+
+    with patch("coach_with_tools._run_loop", return_value="single") as mc:
+        with patch("coach_multi_agent.coach_chat_multiagent") as mma:
+            result = coach_chat(
+                user_id=1,
+                system_prompt="...",
+                messages=[{"role": "user", "content": "good morning"}],
+                agent_name="morning_checkin",  # NOT a chat-style mode
+            )
+
+    assert result == "single"
+    mma.assert_not_called()

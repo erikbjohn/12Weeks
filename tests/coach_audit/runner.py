@@ -118,5 +118,6 @@ def make_coach_invoker(app, user, agent_name: str = "conversation"):
                 user_id=uid,
                 system_prompt=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
+                agent_name=agent_name,
             )
     return invoke

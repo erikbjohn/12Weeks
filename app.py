@@ -5731,6 +5731,7 @@ def api_chat():
         system_prompt=system_prompt,
         messages=messages,
         max_tokens=agent_config["max_tokens"],
+        agent_name=_route_info["agent_name"],
     )
 
     # Save assistant message

@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 MAX_TOOL_TURNS = 6
 DEFAULT_MAX_TOKENS = 2000
 
+# Agents whose persona is "Doctor + 3 specialists" rather than a single
+# monolithic prompt. When MULTIAGENT_ENABLED=1, coach_chat routes these
+# through coach_multi_agent.coach_chat_multiagent. Other agent_names stay
+# on the single-prompt _run_loop path regardless of the flag.
+MULTIAGENT_TRIGGERS = {"conversation", "weekly_planning", "chat_opened", "weekly_review"}
+
 
 def _client(timeout: float = 60.0):
     import anthropic
@@ -119,8 +125,26 @@ def coach_chat(
     messages: list[dict],
     model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    agent_name: str = "conversation",
 ) -> str:
-    """Non-streaming entry. Returns final assistant text."""
+    """Non-streaming entry. Returns final assistant text.
+
+    When MULTIAGENT_ENABLED=1 AND agent_name is a chat-style trigger,
+    routes through coach_multi_agent. Otherwise uses the existing
+    single-prompt tool-loop.
+    """
+    if (
+        os.environ.get("MULTIAGENT_ENABLED") == "1"
+        and agent_name in MULTIAGENT_TRIGGERS
+    ):
+        from coach_multi_agent import coach_chat_multiagent
+        return coach_chat_multiagent(
+            user_id=user_id,
+            athlete_data=system_prompt,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
     return _run_loop(
         user_id=user_id,
         system_prompt=system_prompt,
