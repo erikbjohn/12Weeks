@@ -80,7 +80,10 @@ Replace the single-coach architecture (for chat-style triggers) with a **Doctor 
 5. **Doctor synthesizes** — applies goal-aware priority on conflict, generates single-voice reply. Specialist returns sit in the conversation history as `tool_result` blocks; available for on-demand surfacing.
 6. **Athlete sees** the synthesis. If they ask "what did each say?" Doctor surfaces the underlying returns from the prior turn.
 
-**LLM operations per message:** 1 Doctor parse + 0-3 parallel specialist calls + 1 Doctor synthesis = **2-5 LLM calls** depending on how many specialists Doctor invokes. Average is closer to 3.
+**LLM operations per message** (using Anthropic's tool-use loop):
+- If Doctor's first turn emits text (no consults needed): **1 LLM call total** (Doctor's text IS the response).
+- If Doctor's first turn emits `tool_use` blocks: parallel specialist calls run, then Doctor's second turn (synthesis) emits text. So **2 Doctor turns + N specialist calls** = 2 + N LLM calls (where N = 1-3).
+- Range: 1-5 LLM calls per message. Average expected ~3 (~1.5 consults invoked on average).
 
 **Latency budget:** 3-7 seconds wall-clock. UI shows static "Consulting specialists..." indicator during the parse + parallel-consult phase, then streams the synthesis.
 
@@ -450,8 +453,9 @@ PromptCase(
 ```
 
 ### 4. Audit categories grow
-From 12 to 16 categories:
+Existing audit corpus has 12 audit categories (plus a `smoke` smoke-test category). Multi-agent adds 4 new categories:
 - New: `nutrition_macros`, `nutrition_fasting`, `running_pace_zones`, `doctor_synthesis`
+Total after extension: 16 audit categories + smoke.
 
 ### 5. Cost gate
 - 30 per-specialist prompts × ~$0.02 = $0.60 (single Sonnet call each)
