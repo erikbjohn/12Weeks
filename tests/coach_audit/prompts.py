@@ -512,7 +512,9 @@ _running_pace_zones = [
         user_fixture="phase_2_mid_program",
         target_specialist="running",
         expected_behavior=[r"/zone 2|z2|aerobic/"],
-        must_not=["zone 4", "zone 5", "threshold"],
+        # 'threshold' bare word false-positives on "lactate threshold"
+        # mentioned in legitimate context. Tighten to phrases.
+        must_not=["zone 4", "zone 5", "tempo pace"],
         focus_dimensions=["accuracy"],
     ),
     PromptCase(
