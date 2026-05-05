@@ -38,7 +38,9 @@ def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
 )
 @pytest.mark.parametrize(
     "case",
-    [p for p in ALL_PROMPTS if p.category not in ("smoke",)],
+    [p for p in ALL_PROMPTS
+     if p.category not in ("smoke",)
+     and p.target_specialist is None],
     ids=lambda c: c.id,
 )
 def test_audit_case(case, fixture_by_name, app_ctx, run_id, audit_mode):
@@ -99,6 +101,74 @@ def test_no_gym_bw_lacks_barbell(no_gym_bw):
     eq = UserEquipment.query.filter_by(user_id=no_gym_bw.id).first()
     assert "barbell" not in (eq.available_equipment or [])
     assert "kettlebells" in (eq.available_equipment or [])
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="needs ANTHROPIC_API_KEY",
+)
+@pytest.mark.parametrize(
+    "case",
+    [p for p in ALL_PROMPTS
+     if p.target_specialist in ("nutritionist", "strength", "running")],
+    ids=lambda c: c.id,
+)
+def test_specialist_targeted(case, fixture_by_name, app_ctx, run_id):
+    """Per-specialist audit: bypass the Doctor; hit the specialist directly."""
+    user = fixture_by_name(case.user_fixture)
+    app, _ = app_ctx
+    from tests.coach_audit.runner import make_specialist_invoker
+    invoke = make_specialist_invoker(case.target_specialist, app, user)
+    judge = make_judge_invoker(app, user)
+    finding = run_prompt(
+        case=case,
+        user_id=user.id,
+        invoke_coach=invoke,
+        invoke_judge=judge,
+        run_id=run_id,
+    )
+    assert finding.heuristic.passed, (
+        f"[{case.id}] heuristic: missing={finding.heuristic.missing_expected} "
+        f"must_not={finding.heuristic.matched_must_not} "
+        f"banned={finding.heuristic.matched_banned}\n--- response ---\n{finding.coach_response}"
+    )
+    assert finding.judge.passed, (
+        f"[{case.id}] judge: violations={finding.judge.violations}\n"
+        f"scores={finding.judge.scores}\n--- response ---\n{finding.coach_response}"
+    )
+
+
+@pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="needs ANTHROPIC_API_KEY",
+)
+@pytest.mark.parametrize(
+    "case",
+    [p for p in ALL_PROMPTS if p.target_specialist == "doctor"],
+    ids=lambda c: c.id,
+)
+def test_doctor_synthesis(case, fixture_by_name, app_ctx, run_id, monkeypatch):
+    """Full-flow audit: athlete message → Doctor → 0-3 consults → synthesis."""
+    monkeypatch.setenv("MULTIAGENT_ENABLED", "1")
+    user = fixture_by_name(case.user_fixture)
+    app, _ = app_ctx
+    invoke = make_coach_invoker(app, user)  # uses coach_chat which now routes
+    judge = make_judge_invoker(app, user)
+    finding = run_prompt(
+        case=case,
+        user_id=user.id,
+        invoke_coach=invoke,
+        invoke_judge=judge,
+        run_id=run_id,
+    )
+    assert finding.heuristic.passed, (
+        f"[{case.id}] heuristic: {finding.heuristic.matched_must_not}\n"
+        f"--- response ---\n{finding.coach_response}"
+    )
+    assert finding.judge.passed, (
+        f"[{case.id}] judge: {finding.judge.violations}\n"
+        f"--- response ---\n{finding.coach_response}"
+    )
 
 
 @pytest.mark.real_data
