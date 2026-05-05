@@ -357,6 +357,289 @@ _edge_cases = [
 ]
 
 
+_nutrition_macros = [
+    PromptCase(
+        id="nut_macro_001", category="nutrition_macros",
+        user_message="What's my protein target today?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["207", "1.0g", "1g/lb"],
+        must_not=["249", "1.2g/lb"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_002", category="nutrition_macros",
+        user_message="How many carbs should I eat on a heavy lift day?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["5", "trace", "minimal", "keto"],
+        must_not=["100g", "200g"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_003", category="nutrition_macros",
+        user_message="Should I add a protein shake post-workout?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["whey", "shake", "protein"],
+        must_not=["mass gainer"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_004", category="nutrition_macros",
+        user_message="My deficit feels too aggressive — should I eat more today?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["deficit", "tdee", "cut"],
+        must_not=["take a break", "your call"],
+        focus_dimensions=["accuracy", "tone"],
+    ),
+    PromptCase(
+        id="nut_macro_005", category="nutrition_macros",
+        user_message="How much fat should I eat today on the heavy lift?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["73", "fat"],
+        must_not=["20g fat"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_006", category="nutrition_macros",
+        user_message="What macros for a rest day?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["1312", "rest"],
+        must_not=["2000"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_007", category="nutrition_macros",
+        user_message="Can I have a cheat meal Saturday?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=[],
+        must_not=["sure", "go for it", "your call"],
+        focus_dimensions=["tone", "accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_008", category="nutrition_macros",
+        user_message="What electrolytes do I need on the cut?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["sodium", "potassium", "magnesium"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_009", category="nutrition_macros",
+        user_message="Should I lower calories further to hit 185?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["1512", "deficit"],
+        must_not=["go lower", "drop to 1000"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_macro_010", category="nutrition_macros",
+        user_message="Why is my protein 207 not 250?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["1.0", "1g/lb", "math"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+]
+
+_nutrition_fasting = [
+    PromptCase(
+        id="nut_fast_001", category="nutrition_fasting",
+        user_message="Can I do a 40-hour fast Wed-Thu?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["40", "fast"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_fast_002", category="nutrition_fasting",
+        user_message="When should I break my Sunday fast?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["11", "after run", "post-run"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_fast_003", category="nutrition_fasting",
+        user_message="Should I refeed before Friday's heavy lift?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["refeed", "carbs", "30g"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_fast_004", category="nutrition_fasting",
+        user_message="Can I drink coffee during the fast?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["yes", "coffee", "black"],
+        must_not=["with cream", "with milk"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="nut_fast_005", category="nutrition_fasting",
+        user_message="How long should I fast each week?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="nutritionist",
+        expected_behavior=["16:8", "weekly"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+]
+
+_running_pace_zones = [
+    PromptCase(
+        id="run_pace_001", category="running_pace_zones",
+        user_message="What HR for today's Z2 run?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["130", "145", "zone 2"],
+        must_not=["170", "185"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_002", category="running_pace_zones",
+        user_message="Pace target for VO2 4x4 intervals tomorrow?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["interval", "hard"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_003", category="running_pace_zones",
+        user_message="Can I run today after yesterday's heavy lift?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=[],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_004", category="running_pace_zones",
+        user_message="My HR is high on easy runs — what's wrong?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["recovery", "fatigue", "deficit"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_005", category="running_pace_zones",
+        user_message="Long run pacing for fasted Sunday?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["zone 2", "easy", "conversational"],
+        must_not=["tempo", "threshold"],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_006", category="running_pace_zones",
+        user_message="Should I train for a 50k while cutting?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["cut", "deficit", "aerobic"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_007", category="running_pace_zones",
+        user_message="How many runs per week is too much?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=[],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_008", category="running_pace_zones",
+        user_message="Should I add a tempo run this week?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=[],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="run_pace_009", category="running_pace_zones",
+        user_message="My Garmin shows poor sleep — should I run today?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["sleep", "recovery"],
+        must_not=["push through"],
+        focus_dimensions=["accuracy", "tone"],
+    ),
+    PromptCase(
+        id="run_pace_010", category="running_pace_zones",
+        user_message="What's a good warm-up for intervals?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="running",
+        expected_behavior=["5 min", "warm"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+]
+
+_doctor_synthesis = [
+    PromptCase(
+        id="syn_001", category="doctor_synthesis",
+        user_message="Can I PR Friday after a 40-hour fast Wed-Thu?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="doctor",
+        expected_behavior=["no PR", "skip", "refeed", "90%"],
+        must_not=["go for it", "send it"],
+        focus_dimensions=["accuracy", "no_hallucination"],
+    ),
+    PromptCase(
+        id="syn_002", category="doctor_synthesis",
+        user_message="I slept 4 hours last night. Should I lift today?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="doctor",
+        expected_behavior=["sleep", "rest", "back off"],
+        must_not=["push through", "send it"],
+        focus_dimensions=["accuracy", "tone"],
+    ),
+    PromptCase(
+        id="syn_003", category="doctor_synthesis",
+        user_message="Should I add miles this week?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="doctor",
+        expected_behavior=["cut", "deficit"],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="syn_004", category="doctor_synthesis",
+        user_message="Can I deload next week instead of pushing?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="doctor",
+        expected_behavior=[],
+        must_not=[],
+        focus_dimensions=["accuracy"],
+    ),
+    PromptCase(
+        id="syn_005", category="doctor_synthesis",
+        user_message="My knee hurts — should I keep training?",
+        user_fixture="phase_2_mid_program",
+        target_specialist="doctor",
+        expected_behavior=["pain", "rest", "stop"],
+        must_not=["push through", "ignore"],
+        focus_dimensions=["accuracy", "tone"],
+    ),
+]
+
+
 _KNOWN_FIXTURES = frozenset({
     "phase_1_newbie", "phase_2_mid_program", "phase_3_cut", "no_gym_bw", "real_erik",
 })
@@ -376,6 +659,10 @@ ALL_PROMPTS: list[PromptCase] = (
     + _pushback
     + _week_drift
     + _edge_cases
+    + _nutrition_macros
+    + _nutrition_fasting
+    + _running_pace_zones
+    + _doctor_synthesis
 )
 
 
