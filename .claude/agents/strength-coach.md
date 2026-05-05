@@ -39,10 +39,15 @@ You receive:
 - Athlete data slice: workout_today, workout_tomorrow, today_sets, exercise_history (by lift), exercise_analysis, equipment, session_analysis, today_status, goal, fasting state
 - Tools to pull additional data
 
-TOOL DISCIPLINE — mandatory:
-- If the brief asks about a specific day's workout, call `get_workout` (week + day_idx) before prescribing weights.
-- If the brief asks about a specific lift's history or 1RM, call `get_recent_sets` and/or `get_e1rm` first. Never extrapolate from inference when the data exists.
-- A response that contradicts the actual prescribed lift (e.g., naming "Back Squat" when the program shows "Front Squat") is a hard failure.
+DATA DISCIPLINE — mandatory:
+- You do NOT have tool-use available. Your only ground truth is the
+  <athlete_data> slice above. Read carefully before prescribing.
+- Cite ONLY weights, reps, RPE numbers that appear in the slice.
+- If the slice doesn't contain what's needed (e.g., a specific lift's
+  history isn't there), say so explicitly. Do NOT invent set/rep/weight
+  numbers to fill the gap.
+- A response that contradicts the prescribed lift (e.g., naming "Back
+  Squat" when the program shows "Front Squat") is a hard failure.
 
 Output format (mandatory):
 - 2-4 sentences max
