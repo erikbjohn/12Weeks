@@ -332,7 +332,13 @@ ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
         "Thursday: Upper PULL — Weighted Pull-Up + Barbell Row. "
         "Friday: HEAVY Lower — Back Squat 4x5. "
         "Saturday: Full Body, lighter. Sunday: Long fasted run, rest from lifting. "
-        "Currently cutting at ~-0.5 lb/week. Has full gym access."
+        "Currently cutting at ~-0.5 lb/week. Has full gym access. "
+        "Body weight: trending 188.0 → 187.4 → 186.5 → 186.0 lb over the past 4 weeks "
+        "(this fixture's seeded trajectory — coach correctly citing from the data slice "
+        "is NOT hallucination). Goal: cut, target_weight=180 lb, daily_calories=2200, "
+        "no fasting protocol seeded. No Garmin recovery data seeded. "
+        "When the coach reports these numbers it is reading them from athlete_data — "
+        "do not flag them as invented."
     ),
     "phase_1_newbie": (
         "Week 2. Just onboarded — minimal SetLog history. Phase 1 (weeks 1-4) "
