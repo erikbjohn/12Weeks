@@ -39,3 +39,15 @@ def test_loader_raises_on_missing_file(tmp_path, monkeypatch):
     monkeypatch.setattr("coach_specialists.loader.AGENTS_DIR", tmp_path / "agents")
     with pytest.raises(FileNotFoundError):
         load_agent_md("does-not-exist")
+
+
+def test_all_four_persona_files_load():
+    """Smoke test — all 4 specialist persona files exist and parse."""
+    from coach_specialists.loader import load_agent_md
+    for name in ("doctor", "nutritionist", "strength-coach", "running-coach"):
+        cfg = load_agent_md(name)
+        assert cfg["name"]
+        assert cfg["model"]
+        assert cfg["system_prompt"]
+        # Doctor has consult tools; specialists have domain tools
+        assert isinstance(cfg["tools"], list) and len(cfg["tools"]) >= 1
