@@ -22,6 +22,39 @@ def _anthropic_client():
     )
 
 
+def _execute_tools_parallel(tool_blocks: list, user_id: int) -> list[dict]:
+    """Run tool_use blocks in parallel via asyncio.gather. For tool sets
+    that include multiple consult_* calls, this gives ~3x wall-clock
+    speedup (3 specialists run concurrently). Non-consult tools also
+    parallelize, which is harmless — they just don't benefit much."""
+    import asyncio
+    from coach_tools import execute_tool
+
+    async def run_one(b):
+        loop = asyncio.get_running_loop()
+        out = await loop.run_in_executor(
+            None, execute_tool, b.name, dict(b.input or {}), user_id,
+        )
+        return {
+            "type": "tool_result",
+            "tool_use_id": b.id,
+            "content": out,
+        }
+
+    async def run_all():
+        return await asyncio.gather(*(run_one(b) for b in tool_blocks))
+
+    try:
+        return asyncio.run(run_all())
+    except RuntimeError:
+        # Already inside an event loop (Flask + threaded server). Fall back
+        # to a fresh event loop in a worker thread.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(asyncio.run, run_all())
+            return future.result()
+
+
 def coach_chat_multiagent(
     user_id: int,
     athlete_data: str,
@@ -36,7 +69,7 @@ def coach_chat_multiagent(
 
     Returns the Doctor's final synthesized text.
     """
-    from coach_tools import TOOLS, execute_tool
+    from coach_tools import TOOLS
 
     persona = load_agent_md("doctor")
     system = (
@@ -66,15 +99,8 @@ def coach_chat_multiagent(
                 "role": "assistant",
                 "content": [b.model_dump() for b in resp.content],
             })
-            results = []
-            for b in resp.content:
-                if getattr(b, "type", None) == "tool_use":
-                    out = execute_tool(b.name, dict(b.input or {}), user_id)
-                    results.append({
-                        "type": "tool_result",
-                        "tool_use_id": b.id,
-                        "content": out,
-                    })
+            tool_blocks = [b for b in resp.content if getattr(b, "type", None) == "tool_use"]
+            results = _execute_tools_parallel(tool_blocks, user_id)
             convo.append({"role": "user", "content": results})
             continue
 

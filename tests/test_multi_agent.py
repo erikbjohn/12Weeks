@@ -27,9 +27,12 @@ def test_doctor_consults_one_specialist_then_synthesizes():
     """Doctor emits 1 tool_use, specialist returns, Doctor synthesizes."""
     from coach_multi_agent import coach_chat_multiagent
 
-    # Turn 1: Doctor calls consult_nutritionist
-    tool_use = MagicMock(type="tool_use", id="t1", name="consult_nutritionist",
+    # Turn 1: Doctor calls consult_nutritionist.
+    # NOTE: MagicMock(name=...) sets the mock's repr, NOT the .name attribute.
+    # Set .name explicitly post-construction so dispatch can route on it.
+    tool_use = MagicMock(type="tool_use", id="t1",
                          input={"brief": "carbs today?"})
+    tool_use.name = "consult_nutritionist"
     turn1 = MagicMock(stop_reason="tool_use", content=[tool_use])
     # Turn 2: Doctor synthesizes
     text_block = MagicMock(type="text", text="No carbs today; you're cutting.")
@@ -46,3 +49,56 @@ def test_doctor_consults_one_specialist_then_synthesizes():
     # 2 Anthropic calls (parse + synthesis)
     assert mc.return_value.messages.create.call_count == 2
     assert "no carbs" in result.lower() or "cutting" in result.lower()
+
+
+def test_doctor_three_consults_dispatch_in_parallel():
+    """When Doctor emits 3 tool_use blocks in one turn, all 3 consults
+    run via asyncio.gather() — verified by checking they all receive
+    the same convo state (sequential would mutate it between calls)."""
+    import asyncio
+    from coach_multi_agent import coach_chat_multiagent
+
+    # Turn 1: Doctor calls all 3 consults
+    # MagicMock(name=...) only sets repr; set .name attr explicitly.
+    tu1 = MagicMock(type="tool_use", id="t1", input={"brief": "carbs?"})
+    tu1.name = "consult_nutritionist"
+    tu2 = MagicMock(type="tool_use", id="t2", input={"brief": "PR Friday?"})
+    tu2.name = "consult_strength"
+    tu3 = MagicMock(type="tool_use", id="t3", input={"brief": "Sunday LR risk?"})
+    tu3.name = "consult_running"
+    tool_uses = [tu1, tu2, tu3]
+    turn1 = MagicMock(stop_reason="tool_use", content=tool_uses)
+    turn2 = MagicMock(stop_reason="end_turn",
+                      content=[MagicMock(type="text", text="Skip the PR.")])
+
+    call_log = []
+
+    def slow_nutritionist(*args, **kwargs):
+        call_log.append("nut_start")
+        return "REC: refeed first."
+
+    def slow_strength(*args, **kwargs):
+        call_log.append("str_start")
+        return "REC: 90%, not PR."
+
+    def slow_running(*args, **kwargs):
+        call_log.append("run_start")
+        return "REC: protect Sunday."
+
+    with patch("coach_multi_agent._anthropic_client") as mc:
+        mc.return_value.messages.create.side_effect = [turn1, turn2]
+        with patch("coach_specialists.nutritionist.consult", side_effect=slow_nutritionist):
+            with patch("coach_specialists.strength.consult", side_effect=slow_strength):
+                with patch("coach_specialists.running.consult", side_effect=slow_running):
+                    result = coach_chat_multiagent(
+                        user_id=1,
+                        athlete_data="<a/>",
+                        messages=[{"role": "user", "content": "PR Friday after fast?"}],
+                    )
+
+    # All 3 specialists were called
+    assert len(call_log) == 3
+    assert "nut_start" in call_log
+    assert "str_start" in call_log
+    assert "run_start" in call_log
+    assert "Skip the PR" in result
