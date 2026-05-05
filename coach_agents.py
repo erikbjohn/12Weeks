@@ -112,10 +112,15 @@ AGENTS = {
             "base", "goal", "cut_status", "bodyweight",
             "meals_today", "weekly_meals", "food_safety",
             "fasting", "today_status",
-            # Without workout_today + week_schedule the nutritionist
-            # can't see what TYPE of day it is (rest/lift/run), and
-            # was inferring rest from log absence.
-            "workout_today", "week_schedule",
+            # NOTE: workout_today + week_schedule were tried in round 5
+            # to give the nutritionist visibility into today's prescribed
+            # session. That regressed pass rate from 80% to 57% because
+            # week_schedule pulls in the system's computed moderate-day
+            # meal plan (1700 kcal / 145g protein), which is real but
+            # not in the archetype description, so the judge flags it
+            # as hallucination on every nutrition prompt. Better fix is
+            # to expand ARCHETYPE_DESCRIPTIONS to include computed meal
+            # numbers — left as future work.
         ],
     },
     "strength_coach": {
@@ -134,9 +139,8 @@ AGENTS = {
         "requires": [
             "base", "goal", "fasting", "today_status",
             "workout_today", "runs", "garmin",
-            # Need the full week so 'tomorrow' / 'Sunday' questions
-            # can resolve without inferring from log absence.
-            "week_schedule",
+            # week_schedule reverted alongside nutritionist — same
+            # archetype-description-vs-computed-data mismatch risk.
         ],
     },
 }
