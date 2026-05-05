@@ -105,4 +105,31 @@ AGENTS = {
         "temperature": 0.3,
         "requires": ["base", "chat_history"],
     },
+    "nutritionist": {
+        "max_tokens": 600,
+        "temperature": 0.4,
+        "requires": [
+            "base", "goal", "cut_status", "bodyweight",
+            "meals_today", "weekly_meals", "food_safety",
+            "fasting", "today_status",
+        ],
+    },
+    "strength_coach": {
+        "max_tokens": 600,
+        "temperature": 0.4,
+        "requires": [
+            "base", "goal", "fasting", "today_status",
+            "workout_today", "workout_tomorrow", "today_sets",
+            "exercise_history", "exercise_analysis", "equipment",
+            "session_analysis",
+        ],
+    },
+    "running_coach": {
+        "max_tokens": 600,
+        "temperature": 0.4,
+        "requires": [
+            "base", "goal", "fasting", "today_status",
+            "workout_today", "runs", "garmin",
+        ],
+    },
 }
