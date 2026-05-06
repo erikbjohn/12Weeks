@@ -551,14 +551,23 @@ def _build_today_status():
       - run_prescribed (from WeeklyRunPlan) / run_logged
       - actual numbers from today's RunLog if present
     """
-    from models import SetLog, RunLog, WeeklyPrescription, WeeklyRunPlan
+    from models import SetLog, RunLog, WeeklyRunPlan
     today = _user_today()
     today_idx = today.weekday()
     week = _current_week()
 
-    workout_prescribed = WeeklyPrescription.query.filter_by(
-        user_id=current_user.id, week=week, day_idx=today_idx,
-    ).first() is not None
+    # Use the program resolver (template + per-user prescription overlay)
+    # so users on the default template still register a prescribed workout.
+    # Previous behaviour only checked WeeklyPrescription rows, so a fixture
+    # or a real user on the default template was reported as REST DAY for
+    # every weekday — wrong, and it propagated into multi-agent specialist
+    # responses that faithfully cited the bad signal.
+    resolved = _resolve_workout_for_day(week, today_idx)
+    workout_prescribed = bool(
+        resolved
+        and not resolved.get("isRest")
+        and (resolved.get("exercises") or resolved.get("liftName"))
+    )
 
     workout_logged_any = SetLog.query.filter(
         SetLog.user_id == current_user.id,
@@ -574,14 +583,30 @@ def _build_today_status():
         user_id=current_user.id, log_date=today,
     ).order_by(RunLog.id.desc()).first()
 
+    # Same fallback as workout_prescribed: when no per-user WeeklyRunPlan
+    # row exists, fall back to the template's run for the day.
+    if run_plan and run_plan.run_type:
+        run_type = run_plan.run_type
+        run_label = run_plan.label
+        run_duration = run_plan.duration
+    elif resolved and resolved.get("run"):
+        tr = resolved["run"]
+        run_type = tr.get("type")
+        run_label = tr.get("label")
+        run_duration = tr.get("duration")
+    else:
+        run_type = None
+        run_label = None
+        run_duration = None
+
     return {"today_status": {
         "date": today.isoformat(),
         "weekday": today.strftime("%A"),
         "workout_prescribed": workout_prescribed,
         "workout_logged": workout_logged_any,
-        "run_prescribed": run_plan.run_type if run_plan else None,
-        "run_label": run_plan.label if run_plan else None,
-        "run_duration": run_plan.duration if run_plan else None,
+        "run_prescribed": run_type,
+        "run_label": run_label,
+        "run_duration": run_duration,
         "run_logged": run_today_log is not None,
         "run_distance_today": run_today_log.distance_miles if run_today_log else None,
         "run_duration_today": run_today_log.duration_min if run_today_log else None,
