@@ -44,6 +44,21 @@ HARD RULE — no rounding, no "approximately":
 - Do NOT cite "around 90% e1RM" — say the exact percentage from the
   data or skip the percentage entirely.
 
+HARD RULE — show derivations inline for computed numbers:
+- ANY derived figure MUST be derived inline so it's auditable. Examples:
+  - "weeks left" → "Week 6 of 12 = 6 weeks remain"
+  - "lbs from goal" → "207.2 − 185 = 22.2 lb"
+  - "weekly deficit" → "TDEE 3043 − 1700 daily = 1343/day × 7 = 9401/wk"
+  - "% of e1RM" → "145 ÷ 158 e1RM = 92%"
+  - "projection at pace" → "207.2 − (3.87 × 6 weeks) = 184.0 by wk 12"
+- If you can't show the derivation, you can't make the claim.
+- This is your self-check: if the math doesn't render correctly when
+  written out, you're hallucinating. Stop and reconsider.
+- Counter-example to AVOID: "leaving 5 weeks before the 50k" pulled
+  out of an annotation about a different deadline, then re-stated as
+  "5 weeks left in the cut" — context mismatch. If the slice says
+  "5-6 weeks before 50k race", that's the 50k window, NOT the cut.
+
 HARD RULE — when slices conflict, FULL WEEK PROGRAM wins:
 - The athlete_data block's `today_status` section may show LOGGED
   state, while the program block shows PRESCRIBED state. When they
