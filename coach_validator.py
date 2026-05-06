@@ -159,3 +159,131 @@ def _strip_outer_tag(s: str, tag: str) -> str:
     if s.endswith(close_tag):
         s = s[:-len(close_tag)]
     return s
+
+
+# === Cite-validation for the multi-agent claims architecture (Step 3) ===
+#
+# A response is a JSON object like:
+#     {
+#       "lead": {"text": "...", "cites": ["claim_id_1", "claim_id_2"]},
+#       "reasoning": [{"text": "...", "cites": [...]}],
+#       "caveats": [],
+#     }
+#
+# Validation checks:
+#   1. Every claim_id cited exists in the claims table
+#   2. Every numeric in prose is either:
+#      (a) the value of a cited claim (string-match), OR
+#      (b) the result of inline arithmetic where the inputs are cited claims
+
+from dataclasses import dataclass as _cite_dataclass
+
+
+@_cite_dataclass
+class CiteViolation:
+    """A specific cite-validation failure with enough detail to feed back
+    to the model in a retry prompt."""
+    kind: str        # "unknown_claim_id" | "value_mismatch" | "uncited_number"
+    message: str
+
+
+def _iter_text_blocks(response: dict):
+    """Yield (text, cites) pairs from response sections that may contain
+    prose with citations: lead, each reasoning entry, each caveat."""
+    lead = response.get("lead") or {}
+    if isinstance(lead, dict) and lead.get("text"):
+        yield lead.get("text", ""), list(lead.get("cites") or [])
+    for r in response.get("reasoning") or []:
+        if isinstance(r, dict):
+            yield r.get("text", ""), list(r.get("cites") or [])
+    for c in response.get("caveats") or []:
+        if isinstance(c, dict):
+            yield c.get("text", ""), list(c.get("cites") or [])
+        elif isinstance(c, str):
+            yield c, []
+
+
+def validate_cited_response(response: dict, claims: list) -> list:
+    """Return list of CiteViolation (empty list = clean)."""
+    from coach_multi_agent import (
+        _NUMBER_RE,
+        _DERIVATION_RE,
+        _normalize_number,
+        _TRIVIAL_NUMBERS,
+    )
+
+    violations: list = []
+    by_id = {c.claim_id: c for c in claims}
+
+    for text, cites in _iter_text_blocks(response):
+        # 1. unknown claim_id
+        for cid in cites:
+            if cid not in by_id:
+                violations.append(CiteViolation(
+                    kind="unknown_claim_id",
+                    message=f"Cited unknown claim_id: {cid!r}. Not in claims table.",
+                ))
+
+        # 2. numbers in prose
+        cited_values = {_normalize_number(str(by_id[c].value)) for c in cites if c in by_id}
+        # Inline-derivation results acceptable when inputs are cited.
+        derived_results: set = set()
+        for m in _DERIVATION_RE.finditer(text):
+            a, b, c = (_normalize_number(g) for g in m.groups())
+            if a in cited_values and b in cited_values:
+                derived_results.add(c)
+
+        for raw in _NUMBER_RE.findall(text):
+            n = _normalize_number(raw)
+            if n in _TRIVIAL_NUMBERS:
+                continue
+            if n in cited_values:
+                continue
+            if n in derived_results:
+                continue
+            if cites:
+                # Cites are present but the number doesn't match any cited
+                # claim's value — this is a mismatch, not a simple uncited
+                # number. The model picked the wrong claim_id for the
+                # number it wrote.
+                cited_pairs = ", ".join(f"{c}={by_id[c].value!r}" for c in cites if c in by_id)
+                violations.append(CiteViolation(
+                    kind="value_mismatch",
+                    message=(
+                        f"Number {n!r} in prose does not match any cited "
+                        f"claim's value (cites: {cited_pairs}). Either "
+                        f"replace the cite with one whose value is {n}, "
+                        f"or remove the number."
+                    ),
+                ))
+            else:
+                violations.append(CiteViolation(
+                    kind="uncited_number",
+                    message=(
+                        f"Number {n!r} in prose is not cited and not derived "
+                        f"from cited inputs. Either add a cite or remove the number."
+                    ),
+                ))
+
+        # 3. value-match: at least one cited claim's value should appear
+        # in the prose if the cite is numeric.
+        for cid in cites:
+            if cid not in by_id:
+                continue
+            value_str = _normalize_number(str(by_id[cid].value))
+            try:
+                float(value_str)
+            except ValueError:
+                continue
+            response_nums = {_normalize_number(m) for m in _NUMBER_RE.findall(text)}
+            if value_str not in response_nums and value_str not in derived_results:
+                violations.append(CiteViolation(
+                    kind="value_mismatch",
+                    message=(
+                        f"Cited claim {cid} has value {value_str!r} but it "
+                        f"does not appear in the prose. Either remove the cite "
+                        f"or include the value."
+                    ),
+                ))
+
+    return violations
