@@ -1308,6 +1308,21 @@ def _format_athlete_data(ctx, requires):
 
     parts = []
 
+    # Claims block — typed facts the model must cite by claim_id.
+    # See coach_claims.build_claims for the schema. Empty when no
+    # builders apply (graceful degradation; the rest of the slice
+    # still renders).
+    try:
+        from coach_claims import build_claims, format_claims_block
+        claims_text = format_claims_block(build_claims(
+            user_id=current_user.id,
+            scope=("body_weight", "goal", "today_status", "week_program"),
+        ))
+        if claims_text:
+            parts.append(claims_text)
+    except Exception:
+        pass  # graceful degradation — slice still renders without claims
+
     # Always: date/time/week/phase
     parts.append(_format_today(ctx))
     phase = ctx.get("phase", {})

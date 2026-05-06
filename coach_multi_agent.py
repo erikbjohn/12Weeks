@@ -153,6 +153,31 @@ def _execute_tools_parallel(tool_blocks: list, user_id: int) -> list[dict]:
             return future.result()
 
 
+def _render_json_response(parsed: dict) -> str:
+    """Render the structured JSON response back to user-visible prose.
+    Preserves the Lombardi/Saban voice baked into the lead text; just
+    flattens the structure to natural paragraphs.
+    """
+    parts = []
+    lead = parsed.get("lead") or {}
+    if isinstance(lead, dict) and lead.get("text"):
+        parts.append(lead["text"].strip())
+    for r in parsed.get("reasoning") or []:
+        if isinstance(r, dict) and r.get("text"):
+            parts.append(r["text"].strip())
+    caveats = parsed.get("caveats") or []
+    if caveats:
+        for c in caveats:
+            if isinstance(c, dict) and c.get("text"):
+                parts.append(f"Caveat: {c['text'].strip()}")
+            elif isinstance(c, str):
+                parts.append(f"Caveat: {c.strip()}")
+    fu = parsed.get("follow_up_question") or ""
+    if fu and isinstance(fu, str) and fu.strip():
+        parts.append(fu.strip())
+    return "\n\n".join(parts)
+
+
 def _is_error_payload(content: str) -> tuple[bool, str]:
     """Return (is_error, error_message) by detecting the {"error": ...}
     shape that coach_tools.execute_tool emits on exception.
@@ -333,8 +358,57 @@ def coach_chat_multiagent(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
 
+        # === Step 3: cite-validation on JSON output ===
+        # Try to parse as JSON; if so, run cite-validation against the
+        # claims table. If parse fails, fall through to the numeric
+        # fact-check fallback (older response shape; both validators
+        # stay during migration).
+        cite_violations = []
+        rendered_text = text
+        parsed = None
+        try:
+            import json as _json
+            parsed = _json.loads(text)
+            if isinstance(parsed, dict) and ("lead" in parsed or "reasoning" in parsed):
+                from coach_claims import build_claims
+                from coach_validator import validate_cited_response
+                try:
+                    claims = build_claims(
+                        user_id=user_id,
+                        scope=("body_weight", "goal", "today_status", "week_program"),
+                    )
+                except Exception:
+                    claims = []
+                cite_violations = validate_cited_response(parsed, claims)
+                if not cite_violations:
+                    rendered_text = _render_json_response(parsed)
+            else:
+                parsed = None  # not the structured shape; skip cite-check
+        except Exception:
+            parsed = None
+
+        if cite_violations and fact_check_retries_used < MAX_FACT_CHECK_RETRIES and turn < MAX_TOOL_TURNS - 1:
+            convo.append({
+                "role": "assistant",
+                "content": [b.model_dump() for b in resp.content],
+            })
+            convo.append({
+                "role": "user",
+                "content": (
+                    "CITE-VALIDATION FAILED. The following violations:\n"
+                    + "\n".join(f"  - [{v.kind}] {v.message}" for v in cite_violations)
+                    + "\n\nFix the response by:\n"
+                    "  - Adding cites for any uncited numbers\n"
+                    "  - Removing cites that don't exist in the claims table\n"
+                    "  - Showing inline arithmetic where the result is derived\n\n"
+                    "Re-emit the full JSON response with corrections."
+                ),
+            })
+            fact_check_retries_used += 1
+            continue
+
         fact_check_source = system + "\n" + "\n".join(tool_results_collected)
-        unverified = _verify_response_numbers(text, fact_check_source)
+        unverified = _verify_response_numbers(rendered_text, fact_check_source)
 
         if unverified and fact_check_retries_used < MAX_FACT_CHECK_RETRIES and turn < MAX_TOOL_TURNS - 1:
             # Append the failed response and ask the Doctor to fix it.
@@ -360,6 +434,6 @@ def coach_chat_multiagent(
             fact_check_retries_used += 1
             continue
 
-        return text
+        return rendered_text
 
     return "(multi-agent: hit max tool-call iterations)"
