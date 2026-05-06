@@ -1362,9 +1362,15 @@ def _format_athlete_data(ctx, requires):
             dur = ts.get("run_duration_today")
             hr = ts.get("run_avg_hr_today")
             bits = []
-            if d: bits.append(f"{d} mi")
-            if dur: bits.append(f"{dur} min")
-            if hr: bits.append(f"avg HR {hr}")
+            if d: bits.append(f"{d}mi")
+            if dur:
+                bits.append(f"{dur}min")
+                if d:
+                    bits.append(f"pace:{round(dur / d, 2)}min/mi")
+            else:
+                bits.append("[NO DURATION LOGGED — pace not computable]")
+            if hr:
+                bits.append(f"avg_hr_full_session:{hr}")
             ts_lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
         elif ts.get("run_prescribed"):
             ts_lines.append(

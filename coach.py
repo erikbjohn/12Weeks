@@ -83,18 +83,66 @@ def _format_today_sets(sets):
 
 
 def _format_runs(runs):
+    """Format run history with explicit pace-availability partitioning.
+
+    Key semantics surfaced by the format:
+    - runs WITH duration_min → pace IS computable; emitted with pace_min_per_mi
+    - runs WITHOUT duration_min → pace is NOT computable; emitted in a
+      separate block with explicit "no duration logged" annotation
+    - avg_hr renamed to avg_hr_full_session so the model can't conflate it
+      with working-interval HR (the field is whole-run mean — includes
+      warm-up, rest intervals, cool-down)
+    """
     if not runs:
         return ""
-    lines = ["RUN HISTORY (recent):"]
-    for r in runs[:7]:
-        parts = []
-        if r.get('distance_miles'):
-            parts.append(f"{r['distance_miles']}mi")
-        if r.get('avg_hr'):
-            parts.append(f"HR:{r['avg_hr']}")
-        if r.get('elevation_ft'):
-            parts.append(f"elev:{r['elevation_ft']}ft")
-        lines.append(f"  {r.get('date','?')}: {' '.join(parts) or 'logged'}")
+
+    pace_ok, pace_blocked = [], []
+    for r in runs[:10]:
+        if r.get('duration_min'):
+            pace_ok.append(r)
+        else:
+            pace_blocked.append(r)
+
+    lines = []
+
+    if pace_ok:
+        lines.append("<runs_with_duration>  # pace IS computable from these rows")
+        for r in pace_ok:
+            d = r.get('distance_miles')
+            dur = r['duration_min']
+            parts = []
+            if d:
+                parts.append(f"{d}mi")
+                pace = round(dur / d, 2)
+                parts.append(f"pace:{pace}min/mi")
+            parts.append(f"{dur}min")
+            if r.get('avg_hr'):
+                parts.append(f"avg_hr_full_session:{r['avg_hr']}")
+            if r.get('elevation_ft'):
+                parts.append(f"elev:{r['elevation_ft']}ft")
+            lines.append(f"  {r.get('date','?')}: {' '.join(parts)}")
+        lines.append("</runs_with_duration>")
+
+    if pace_blocked:
+        lines.append("<runs_without_duration>  # PACE NOT COMPUTABLE — duration_min is null on these rows")
+        for r in pace_blocked:
+            parts = []
+            if r.get('distance_miles'):
+                parts.append(f"distance_only:{r['distance_miles']}mi")
+            if r.get('avg_hr'):
+                parts.append(f"avg_hr_full_session:{r['avg_hr']}")
+            if r.get('elevation_ft'):
+                parts.append(f"elev:{r['elevation_ft']}ft")
+            lines.append(f"  {r.get('date','?')}: {' '.join(parts) or 'logged'} [no duration logged]")
+        lines.append("</runs_without_duration>")
+        lines.append(
+            "RULE: For runs in <runs_without_duration>, pace cannot be "
+            "computed. Do NOT cite pace, infer pace, or compare distance "
+            "vs prescribed time. avg_hr_full_session is the whole-run mean "
+            "(includes warm-up, rest intervals, cool-down) — NOT working "
+            "interval HR. Do not claim interval execution from this number."
+        )
+
     return '\n'.join(lines)
 
 

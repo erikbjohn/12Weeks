@@ -153,6 +153,66 @@ def _execute_tools_parallel(tool_blocks: list, user_id: int) -> list[dict]:
             return future.result()
 
 
+def _is_error_payload(content: str) -> tuple[bool, str]:
+    """Return (is_error, error_message) by detecting the {"error": ...}
+    shape that coach_tools.execute_tool emits on exception.
+
+    Detects both the json.dumps result and any reasonable error string —
+    we only consume what we recognize, conservatively.
+    """
+    if not isinstance(content, str):
+        return False, ""
+    s = content.strip()
+    if not (s.startswith("{") and s.endswith("}")):
+        return False, ""
+    import json as _json
+    try:
+        parsed = _json.loads(s)
+    except Exception:
+        return False, ""
+    if isinstance(parsed, dict) and "error" in parsed and len(parsed) <= 2:
+        return True, str(parsed.get("error", ""))
+    return False, ""
+
+
+def _reroute_tool_failures(results: list[dict], tool_blocks: list) -> list[dict]:
+    """Replace {"error": ...} tool_results with system directives that tell
+    the Doctor what to do without leaking the failure to the athlete.
+
+    Returns a new list (same length, same tool_use_id mapping) — Anthropic
+    requires a tool_result for every tool_use block, so we don't drop any.
+    """
+    block_by_id = {getattr(b, "id", None): b for b in tool_blocks}
+    rewritten = []
+    for r in results:
+        is_err, err_msg = _is_error_payload(r.get("content", ""))
+        if not is_err:
+            rewritten.append(r)
+            continue
+        tu_id = r.get("tool_use_id")
+        tool_name = getattr(block_by_id.get(tu_id), "name", "<unknown>")
+        directive = (
+            f"INTERNAL TOOL FAILURE — DO NOT SURFACE TO THE ATHLETE.\n"
+            f"Tool: {tool_name}\n"
+            f"Error: {err_msg}\n\n"
+            f"Your options (pick the best one for this turn):\n"
+            f"  1. Retry the same tool with the same or refined input.\n"
+            f"  2. Consult a different specialist if the question allows.\n"
+            f"  3. Answer from the athlete_data block alone, without "
+            f"mentioning that any tool failed.\n\n"
+            f"Do NOT write 'Nutritionist couldn't pull data' / 'tool was "
+            f"overloaded' / 'consult failed' / similar plumbing leak in "
+            f"your final response. The athlete sees only the answer; "
+            f"failures are an internal concern."
+        )
+        rewritten.append({
+            "type": "tool_result",
+            "tool_use_id": tu_id,
+            "content": directive,
+        })
+    return rewritten
+
+
 def coach_chat_multiagent(
     user_id: int,
     athlete_data: str,
@@ -202,6 +262,14 @@ def coach_chat_multiagent(
             })
             tool_blocks = [b for b in resp.content if getattr(b, "type", None) == "tool_use"]
             results = _execute_tools_parallel(tool_blocks, user_id)
+
+            # Detect and reroute tool failures so the Doctor doesn't surface
+            # internal plumbing (e.g. "Nutritionist couldn't pull data") to
+            # the athlete. The execute_tool wrapper returns JSON like
+            # {"error": "..."} on exception — convert that into a system
+            # directive the Doctor will read but won't echo verbatim.
+            results = _reroute_tool_failures(results, tool_blocks)
+
             convo.append({"role": "user", "content": results})
             for r in results:
                 content = r.get("content")

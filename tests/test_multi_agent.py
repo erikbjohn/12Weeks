@@ -104,6 +104,58 @@ def test_doctor_three_consults_dispatch_in_parallel():
     assert "Skip the PR" in result
 
 
+def test_is_error_payload_detects_execute_tool_error_blob():
+    from coach_multi_agent import _is_error_payload
+    is_err, msg = _is_error_payload('{"error": "AnthropicError: 529 Overloaded"}')
+    assert is_err is True
+    assert "529" in msg
+
+
+def test_is_error_payload_passes_real_tool_results():
+    from coach_multi_agent import _is_error_payload
+    real_result = '{"week": 6, "exercises": [{"name": "Front Squat", "sets": "4x3"}]}'
+    is_err, _ = _is_error_payload(real_result)
+    assert is_err is False
+
+
+def test_is_error_payload_handles_non_json():
+    from coach_multi_agent import _is_error_payload
+    is_err, _ = _is_error_payload("Recommendation: refeed 30g.")
+    assert is_err is False
+
+
+def test_reroute_tool_failures_replaces_error_with_directive():
+    from coach_multi_agent import _reroute_tool_failures
+    block = MagicMock(id="t1")
+    block.name = "consult_nutritionist"
+    results = [{
+        "type": "tool_result",
+        "tool_use_id": "t1",
+        "content": '{"error": "AnthropicError: 529 Overloaded"}',
+    }]
+    out = _reroute_tool_failures(results, [block])
+    assert len(out) == 1
+    assert out[0]["tool_use_id"] == "t1"
+    assert "INTERNAL TOOL FAILURE" in out[0]["content"]
+    assert "DO NOT SURFACE" in out[0]["content"]
+    assert "consult_nutritionist" in out[0]["content"]
+    # Original error message should be visible to the model for context
+    assert "529" in out[0]["content"]
+
+
+def test_reroute_tool_failures_passes_through_real_results():
+    from coach_multi_agent import _reroute_tool_failures
+    block = MagicMock(id="t1")
+    block.name = "get_workout"
+    real = {
+        "type": "tool_result",
+        "tool_use_id": "t1",
+        "content": '{"week": 6, "exercises": []}',
+    }
+    out = _reroute_tool_failures([real], [block])
+    assert out[0] == real  # unchanged
+
+
 def test_coach_chat_routes_to_multiagent_when_flag_enabled(monkeypatch):
     """coach_chat() should detect MULTIAGENT_ENABLED + chat-style agent
     and route to coach_chat_multiagent instead of the single-prompt loop."""
