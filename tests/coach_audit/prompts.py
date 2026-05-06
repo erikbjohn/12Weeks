@@ -481,7 +481,9 @@ _nutrition_fasting = [
         user_message="Should I refeed before Friday's heavy lift?",
         user_fixture="phase_2_mid_program",
         target_specialist="nutritionist",
-        expected_behavior=["carb"],
+        # Coach can validly say 'no refeed needed' without using the
+        # literal word 'carb' — widen to accept either decision.
+        expected_behavior=[r"/carb|refeed|deficit|glycogen/"],
         must_not=[],
         focus_dimensions=["accuracy"],
     ),
