@@ -8,10 +8,71 @@ single-prompt path in coach_with_tools.py.
 """
 from __future__ import annotations
 import os
+import re
 from coach_specialists.loader import load_agent_md
 
 MAX_TOOL_TURNS = 6
 DEFAULT_MAX_TOKENS = 2000
+
+# Numbers we never bother flagging — too common to be meaningful claims.
+_TRIVIAL_NUMBERS = {"0", "1", "2", "3"}
+
+# Match decimal numbers (with optional comma thousands-separators).
+_NUMBER_RE = re.compile(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b|\b\d+(?:\.\d+)?\b")
+
+# Match inline arithmetic derivations: "X op Y = Z" where op is - + * / × ÷
+_DERIVATION_RE = re.compile(
+    r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*"
+    r"[-+*/×÷]\s*"
+    r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*"
+    r"=\s*"
+    r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+)
+
+
+def _normalize_number(s: str) -> str:
+    """1,700 → 1700; 207.20 → 207.2; 207. → 207."""
+    s = s.replace(",", "").strip()
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
+def _extract_numbers(text: str) -> set[str]:
+    return {_normalize_number(m) for m in _NUMBER_RE.findall(text)}
+
+
+def _verify_response_numbers(response: str, source: str) -> list[str]:
+    """Return list of numbers in response that don't appear in source.
+
+    A number is verified if:
+      (a) it appears in source text directly (with comma/decimal normalization), OR
+      (b) it's the result of an inline derivation (X op Y = Z) where X and Y
+          are both in source — encourages the 'show your math' pattern.
+
+    Trivial numbers (0/1/2/3) are skipped — too common to be meaningful claims.
+    """
+    src_nums = _extract_numbers(source)
+    response_nums = _extract_numbers(response)
+
+    # Inline derivations the response itself shows. If the inputs are in
+    # source and the response shows the math, accept the result.
+    derived_results: set[str] = set()
+    for m in _DERIVATION_RE.finditer(response):
+        a, b, c = (_normalize_number(g) for g in m.groups())
+        if a in src_nums and b in src_nums:
+            derived_results.add(c)
+
+    unverified = []
+    for n in response_nums:
+        if n in _TRIVIAL_NUMBERS:
+            continue
+        if n in src_nums:
+            continue
+        if n in derived_results:
+            continue
+        unverified.append(n)
+    return unverified
 
 
 def _anthropic_client():
@@ -121,6 +182,9 @@ def coach_chat_multiagent(
 
     client = _anthropic_client()
     convo = list(messages)
+    tool_results_collected: list[str] = []  # for fact-check source
+    fact_check_retries_used = 0
+    MAX_FACT_CHECK_RETRIES = 1  # one shot at fixing unverified numbers
 
     for turn in range(MAX_TOOL_TURNS):
         resp = client.messages.create(
@@ -138,11 +202,44 @@ def coach_chat_multiagent(
             tool_blocks = [b for b in resp.content if getattr(b, "type", None) == "tool_use"]
             results = _execute_tools_parallel(tool_blocks, user_id)
             convo.append({"role": "user", "content": results})
+            for r in results:
+                content = r.get("content")
+                if isinstance(content, str):
+                    tool_results_collected.append(content)
             continue
 
-        # end_turn — extract text
-        return "\n".join(
+        # end_turn — extract text, then fact-check before returning.
+        text = "\n".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
+
+        fact_check_source = system + "\n" + "\n".join(tool_results_collected)
+        unverified = _verify_response_numbers(text, fact_check_source)
+
+        if unverified and fact_check_retries_used < MAX_FACT_CHECK_RETRIES and turn < MAX_TOOL_TURNS - 1:
+            # Append the failed response and ask the Doctor to fix it.
+            convo.append({
+                "role": "assistant",
+                "content": [b.model_dump() for b in resp.content],
+            })
+            convo.append({
+                "role": "user",
+                "content": (
+                    "FACT-CHECK FAILED. The following numbers in your response "
+                    "do not appear in the athlete_data, any tool result, or as "
+                    "an inline derivation:\n"
+                    f"  {', '.join(sorted(unverified))}\n\n"
+                    "Either:\n"
+                    "  (a) Remove these numbers and rewrite without them, or\n"
+                    "  (b) Show the derivation inline (e.g., '207.2 - 185 = 22.2', "
+                    "'TDEE 3043 - 1700 = 1343/day').\n\n"
+                    "Re-issue your full response with this fix. Do not apologize "
+                    "for the prior version — just emit the corrected one."
+                ),
+            })
+            fact_check_retries_used += 1
+            continue
+
+        return text
 
     return "(multi-agent: hit max tool-call iterations)"
