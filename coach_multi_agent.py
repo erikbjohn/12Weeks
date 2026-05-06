@@ -407,6 +407,13 @@ def coach_chat_multiagent(
             fact_check_retries_used += 1
             continue
 
+        # Retries exhausted on cite-validation: render whatever we have
+        # rather than leaking raw JSON to the user. Better to ship a
+        # less-verified prose response than {"lead": {"text": ...}}
+        # syntax visible to the athlete.
+        if cite_violations and parsed:
+            rendered_text = _render_json_response(parsed)
+
         fact_check_source = system + "\n" + "\n".join(tool_results_collected)
         unverified = _verify_response_numbers(rendered_text, fact_check_source)
 
