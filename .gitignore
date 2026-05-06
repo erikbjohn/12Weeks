@@ -11,3 +11,4 @@ instance/
 local.db
 tests/coach_audit/findings/
 tests/coach_audit/reports/
+node_modules/
