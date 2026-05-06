@@ -10291,9 +10291,16 @@ async function renderDetail() {
       }
       if (!lastWt) lastWt = null; // Don't show original exercise's last weight — different movement
     }
-    // Priority: prescription target_weight ALWAYS wins over history
-    if (ex.target_weight) {
-      suggestion = { weight: ex.target_weight, reason: 'engine' };
+    // Priority: prescription target_weight ALWAYS wins over history.
+    // != null catches both undefined and the explicit-zero (bodyweight)
+    // case — the previous truthy check skipped target_weight=0 because
+    // 0 is falsy in JS, leaving the keyword-fallback estimator's bogus
+    // value (e.g. 35 for "Hanging Leg Raise" → 25% of bench) in place.
+    if (ex.target_weight != null) {
+      suggestion = {
+        weight: ex.target_weight === 0 ? null : ex.target_weight,
+        reason: ex.target_weight === 0 ? 'bodyweight' : 'engine',
+      };
     }
     const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
@@ -11219,9 +11226,11 @@ async function enterExerciseFocus(exIdx) {
     suggestion = getWeightForExercise(ex.name, currentWeek);
     if (!_focusLastWeight) _focusLastWeight = getLastWeight(ex.name);
   }
-  // Priority: prescription target_weight ALWAYS wins over history
-  if (ex.target_weight) {
-    _focusWeightVal = roundWeight(ex.target_weight, displayName);
+  // Priority: prescription target_weight ALWAYS wins over history.
+  // != null catches the explicit-zero (bodyweight) case which the
+  // previous truthy check missed (0 is falsy in JS).
+  if (ex.target_weight != null) {
+    _focusWeightVal = ex.target_weight === 0 ? '' : roundWeight(ex.target_weight, displayName);
   } else {
     _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
   }
