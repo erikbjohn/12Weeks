@@ -26,14 +26,50 @@ def _execute_tools_parallel(tool_blocks: list, user_id: int) -> list[dict]:
     """Run tool_use blocks in parallel via asyncio.gather. For tool sets
     that include multiple consult_* calls, this gives ~3x wall-clock
     speedup (3 specialists run concurrently). Non-consult tools also
-    parallelize, which is harmless — they just don't benefit much."""
+    parallelize, which is harmless — they just don't benefit much.
+
+    Worker threads need the Flask app context AND a logged-in user
+    (specialists build their athlete_data slices via current_user). We
+    capture both from the calling thread and re-enter them inside each
+    executor task — without this, every consult tool fails silently
+    with `Working outside of application context` and the Doctor
+    synthesizes from its own slice alone.
+    """
     import asyncio
     from coach_tools import execute_tool
+
+    # Snapshot the calling thread's Flask app + user so worker threads
+    # can re-enter them. Specialists build their athlete_data slices via
+    # current_user, so without this every consult fails silently with
+    # `Working outside of application context`.
+    #
+    # Defensive: in unit tests this helper runs without a Flask context.
+    # When that happens we skip the wrapping and call execute_tool
+    # directly — tests mock out the downstream calls anyway.
+    flask_app = None
+    user_obj = None
+    try:
+        from flask import current_app
+        flask_app = current_app._get_current_object()
+        from models import User
+        user_obj = User.query.get(user_id)
+    except Exception:
+        pass
+
+    def _execute_with_context(name, tool_input, uid):
+        if flask_app is None:
+            return execute_tool(name, tool_input, uid)
+        from flask_login import login_user
+        with flask_app.app_context():
+            with flask_app.test_request_context():
+                if user_obj is not None:
+                    login_user(user_obj, force=True)
+                return execute_tool(name, tool_input, uid)
 
     async def run_one(b):
         loop = asyncio.get_running_loop()
         out = await loop.run_in_executor(
-            None, execute_tool, b.name, dict(b.input or {}), user_id,
+            None, _execute_with_context, b.name, dict(b.input or {}), user_id,
         )
         return {
             "type": "tool_result",
