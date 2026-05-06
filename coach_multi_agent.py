@@ -80,6 +80,7 @@ def _anthropic_client():
     return anthropic.Anthropic(
         api_key=os.environ["ANTHROPIC_API_KEY"],
         timeout=60.0,
+        max_retries=5,
     )
 
 

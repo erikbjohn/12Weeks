@@ -9,7 +9,10 @@ _PERSONA = load_agent_md("running-coach")
 
 def _anthropic_client():
     import anthropic
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    return anthropic.Anthropic(
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        max_retries=5,
+    )
 
 
 def _build_athlete_slice(user_id: int) -> str:

@@ -9,7 +9,13 @@ _PERSONA = load_agent_md("nutritionist")
 
 def _anthropic_client():
     import anthropic
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    # max_retries=5 (vs SDK default 2) so a single 529 'overloaded' from
+    # Anthropic during a Doctor-initiated consult doesn't surface as
+    # "Nutritionist couldn't pull data" to the athlete.
+    return anthropic.Anthropic(
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        max_retries=5,
+    )
 
 
 def _build_athlete_slice(user_id: int) -> str:
