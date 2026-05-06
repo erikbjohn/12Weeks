@@ -153,6 +153,69 @@ def _execute_tools_parallel(tool_blocks: list, user_id: int) -> list[dict]:
             return future.result()
 
 
+def _spawn_audit(user_message: str, response_text: str, parsed: dict,
+                 claims: list, user_id: int) -> None:
+    """Fire-and-forget async audit. If any claim fails or posture is
+    defensive, log a warning so it surfaces in server logs / monitoring.
+
+    Future: post a follow-up correction to chat. For now, log only —
+    measurable signal for triage. The async pattern means this never
+    blocks the user-visible response.
+    """
+    import threading
+    import logging
+    log = logging.getLogger(__name__)
+
+    def _run():
+        try:
+            from coach_auditor import audit_response_async
+            cited_pairs = []
+            by_id = {c.claim_id: c for c in claims}
+
+            def collect(section):
+                if isinstance(section, dict) and section.get("text"):
+                    cites = section.get("cites") or []
+                    rows = [
+                        f"{cid}: pred={by_id[cid].predicate} value={by_id[cid].value!r} source={by_id[cid].source}"
+                        for cid in cites if cid in by_id
+                    ]
+                    if rows:
+                        cited_pairs.append((section["text"], rows))
+
+            collect(parsed.get("lead"))
+            for r in parsed.get("reasoning") or []:
+                collect(r)
+
+            if not cited_pairs:
+                # Nothing to audit; only run posture
+                from coach_auditor import audit_posture
+                posture_result = audit_posture(user_message, response_text)
+                if not posture_result.ok:
+                    log.warning(
+                        "audit_response: posture_failure=%r response=%r",
+                        posture_result.reason,
+                        response_text[:200],
+                    )
+                return
+
+            claim_results, posture_result = audit_response_async(
+                user_message, response_text, cited_pairs,
+            )
+            failures = [r for r in claim_results if not r.supported]
+            if failures or not posture_result.ok:
+                log.warning(
+                    "audit_response: claim_failures=%s posture=%s response=%r",
+                    [f.reason for f in failures],
+                    posture_result.reason if not posture_result.ok else "ok",
+                    response_text[:200],
+                )
+        except Exception as e:
+            log.warning("audit_response background failed: %s", e, exc_info=True)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
 def _render_json_response(parsed: dict) -> str:
     """Render the structured JSON response back to user-visible prose.
     Preserves the Lombardi/Saban voice baked into the lead text; just
@@ -366,6 +429,7 @@ def coach_chat_multiagent(
         cite_violations = []
         rendered_text = text
         parsed = None
+        claims = []  # initialized for the audit hook below
         try:
             import json as _json
             parsed = _json.loads(text)
@@ -440,6 +504,21 @@ def coach_chat_multiagent(
             })
             fact_check_retries_used += 1
             continue
+
+        # Step 4: spawn async auditor for residual class-A misattribution
+        # + class-H posture failures. Fire-and-forget — does not block
+        # the user-visible response. Failures get logged for triage.
+        if cite_violations == [] and parsed:
+            try:
+                _spawn_audit(
+                    user_message=last_user_msg,
+                    response_text=rendered_text,
+                    parsed=parsed,
+                    claims=claims,
+                    user_id=user_id,
+                )
+            except Exception:
+                pass  # never let audit kickoff break the response
 
         return rendered_text
 

@@ -225,6 +225,34 @@ def test_json_output_with_valid_cites_passes_through_to_user():
     assert mc.return_value.messages.create.call_count == 1
 
 
+def test_audit_runs_async_when_response_is_clean():
+    """When the response passes cite-validation, the async auditor
+    should be spawned (fire-and-forget). Test asserts the helper is
+    invoked; we don't block on it."""
+    from coach_multi_agent import coach_chat_multiagent
+    json_response = (
+        '{"lead": {"text": "207.2 lb today.", "cites": ["body.weight.current"]},'
+        '"reasoning": [], "caveats": [], "follow_up_question": ""}'
+    )
+    text_block = MagicMock(type="text", text=json_response)
+    fake_response = MagicMock(stop_reason="end_turn", content=[text_block])
+    fake_claim = MagicMock(claim_id="body.weight.current", value=207.2,
+                           predicate="athlete.current_weight_lb",
+                           source="BodyWeight#1", derivation=None)
+
+    with patch("coach_multi_agent._anthropic_client") as mc:
+        mc.return_value.messages.create.return_value = fake_response
+        with patch("coach_claims.build_claims", return_value=[fake_claim]):
+            with patch("coach_multi_agent._spawn_audit") as ms:
+                result = coach_chat_multiagent(
+                    user_id=1,
+                    athlete_data="<athlete_data/>",
+                    messages=[{"role": "user", "content": "What's my weight?"}],
+                )
+    ms.assert_called_once()
+    assert "207.2" in result
+
+
 def test_classifier_pre_executes_tools_before_first_model_turn():
     """When the message contains a day keyword, get_today_status should be
     invoked BEFORE the Doctor's first turn — its result should appear as
