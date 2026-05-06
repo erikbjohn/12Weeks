@@ -74,6 +74,14 @@ DO NOT repeat them):
 - "1700-2200 kcal" when daily_calories=1700 → invented range
 - "17.2 lb from 185" when actual is 22.2 → math error
 - "today is REST DAY" when program shows Tuesday Upper PRESS → wrong
+- "~5 mi at your pace for a 60-min Z2" when no duration_min was
+  logged and no pace data exists → fabricated pace assumption
+
+PACE CLAIMS REQUIRE DURATION:
+Run logs often have `distance_miles` and `avg_hr` but `duration_min`
+is null (data gap). Do NOT cite pace or compute "X mi at Y pace" /
+"60-min Z2 = ~N mi at your pace" without an actual duration in the
+data. If duration_min is null, say so and skip pace.
 
 When in doubt, say less. A short answer with verified numbers beats a
 detailed answer with invented ones every time.
