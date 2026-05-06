@@ -52,6 +52,41 @@ def _fetch_training_goal(user_id: int):
     return TrainingGoal.query.filter_by(user_id=user_id).first()
 
 
+def _fetch_today_status(user_id: int) -> dict | None:
+    """Returns the same dict shape build_filtered_context produces for
+    'today_status'. Indirection for testability."""
+    from coach_assembler import build_filtered_context
+    ctx = build_filtered_context("conversation")
+    return ctx.get("today_status")
+
+
+def _fetch_week_program(user_id: int) -> tuple[int, list[dict]] | None:
+    """Returns (current_week, list of per-day dicts with day_idx, weekday,
+    lift_name, run_type, run_label, run_duration)."""
+    from coach_assembler import _resolve_workout_for_day, _current_week
+    from models import WeeklyRunPlan
+    week = _current_week()
+    days = []
+    weekday_short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for d in range(7):
+        wt = _resolve_workout_for_day(week, d) or {}
+        run_plan = WeeklyRunPlan.query.filter_by(
+            user_id=user_id, week=week, day_idx=d,
+        ).first()
+        run_type = run_plan.run_type if run_plan else (wt.get("run") or {}).get("type")
+        run_label = run_plan.label if run_plan else (wt.get("run") or {}).get("label")
+        run_duration = run_plan.duration if run_plan else (wt.get("run") or {}).get("duration")
+        days.append({
+            "day_idx": d,
+            "weekday": weekday_short[d],
+            "lift_name": wt.get("liftName"),
+            "run_type": run_type,
+            "run_label": run_label,
+            "run_duration": run_duration,
+        })
+    return week, days
+
+
 def build_claims(user_id: int, scope: tuple[str, ...] = ()) -> list[Claim]:
     """Build the claims table for this user. `scope` filters which
     sections to include; empty = all.
@@ -103,6 +138,92 @@ def build_claims(user_id: int, scope: tuple[str, ...] = ()) -> list[Claim]:
             source="derived",
             derivation=f"{bw.weight_lbs} - {goal.target_weight} = {delta}",
         ))
+
+    if want("today_status"):
+        ts = _fetch_today_status(user_id)
+        if ts:
+            out.append(Claim(
+                claim_id="today.weekday",
+                predicate="today.weekday_name",
+                value=str(ts["weekday"]),
+                source="today_status",
+            ))
+            out.append(Claim(
+                claim_id="today.date",
+                predicate="today.iso_date",
+                value=str(ts.get("date", "")),
+                source="today_status",
+            ))
+            if ts.get("workout_prescribed"):
+                if "workout_lift_name" in ts:
+                    out.append(Claim(
+                        claim_id="today.workout.lift_name",
+                        predicate="today.workout.lift_name",
+                        value=str(ts["workout_lift_name"]),
+                        source="today_status",
+                    ))
+            else:
+                out.append(Claim(
+                    claim_id="today.workout.is_rest",
+                    predicate="today.workout.is_rest_day",
+                    value=True,
+                    source="today_status",
+                ))
+            if ts.get("run_prescribed"):
+                out.append(Claim(
+                    claim_id="today.run.type",
+                    predicate="today.run.type",
+                    value=str(ts["run_prescribed"]),
+                    source="today_status",
+                ))
+                if ts.get("run_label"):
+                    out.append(Claim(
+                        claim_id="today.run.label",
+                        predicate="today.run.label",
+                        value=str(ts["run_label"]),
+                        source="today_status",
+                    ))
+                if ts.get("run_duration"):
+                    out.append(Claim(
+                        claim_id="today.run.duration",
+                        predicate="today.run.duration",
+                        value=str(ts["run_duration"]),
+                        source="today_status",
+                    ))
+
+    if want("week_program"):
+        result = _fetch_week_program(user_id)
+        if result:
+            week, days = result
+            day_short = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            for day in days:
+                short = day_short[day["day_idx"]]
+                if day.get("lift_name"):
+                    out.append(Claim(
+                        claim_id=f"week{week}.{short}.lift.name",
+                        predicate=f"program.week{week}.{short}.lift_name",
+                        value=str(day["lift_name"]),
+                        source=f"WeeklyDaySchedule(week={week},day_idx={day['day_idx']})",
+                    ))
+                if day.get("run_type"):
+                    out.append(Claim(
+                        claim_id=f"week{week}.{short}.run.type",
+                        predicate=f"program.week{week}.{short}.run_type",
+                        value=str(day["run_type"]),
+                        source=f"WeeklyRunPlan(week={week},day_idx={day['day_idx']})",
+                    ))
+                    out.append(Claim(
+                        claim_id=f"week{week}.{short}.run.label",
+                        predicate=f"program.week{week}.{short}.run_label",
+                        value=str(day["run_label"] or ""),
+                        source=f"WeeklyRunPlan(week={week},day_idx={day['day_idx']})",
+                    ))
+                    out.append(Claim(
+                        claim_id=f"week{week}.{short}.run.duration",
+                        predicate=f"program.week{week}.{short}.run_duration",
+                        value=str(day["run_duration"] or ""),
+                        source=f"WeeklyRunPlan(week={week},day_idx={day['day_idx']})",
+                    ))
 
     return out
 
