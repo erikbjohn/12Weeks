@@ -46,9 +46,61 @@ describe('getSuggestedWeight — keyword-fallback estimator', () => {
 
   it("Pallof Press would also estimate from bench (press → 50%)", () => {
     // Documents the same class of bug — the estimator doesn't know
-    // which exercises are bodyweight. Override semantics in the render
-    // layer are what protect us.
+    // which exercises are bodyweight. resolveDisplayWeight in the
+    // render layer is what protects us.
     const out = window.getSuggestedWeight('Pallof Press', 7);
     expect(out.weight).toBe(70); // 140 * 0.5 = 70
+  });
+});
+
+
+describe('resolveDisplayWeight — the actual fix', () => {
+  beforeAll(() => {
+    loadAppJs();
+  });
+
+  it("target_weight=0 means bodyweight → empty string (suppresses estimator)", () => {
+    const ex = { name: 'Hanging Leg Raise', target_weight: 0 };
+    const suggestion = { weight: 35, reason: 'estimated' }; // bogus 35
+    expect(window.resolveDisplayWeight(ex, suggestion)).toBe('');
+  });
+
+  it("target_weight=null falls through to suggestion", () => {
+    const ex = { name: 'Cable Lateral Raise', target_weight: null };
+    const suggestion = { weight: 15, reason: 'engine' };
+    expect(window.resolveDisplayWeight(ex, suggestion)).toBe(15);
+  });
+
+  it("target_weight=undefined falls through to suggestion", () => {
+    const ex = { name: 'Cable Lateral Raise' };
+    const suggestion = { weight: 15, reason: 'engine' };
+    expect(window.resolveDisplayWeight(ex, suggestion)).toBe(15);
+  });
+
+  it("target_weight as positive number wins over suggestion", () => {
+    const ex = { name: 'Barbell Bench Press', target_weight: 140 };
+    const suggestion = { weight: 100, reason: 'estimated' };
+    expect(window.resolveDisplayWeight(ex, suggestion)).toBe(140);
+  });
+
+  it("returns empty when neither target_weight nor suggestion has a value", () => {
+    const ex = {};
+    const suggestion = { weight: null };
+    expect(window.resolveDisplayWeight(ex, suggestion)).toBe('');
+  });
+
+  it("with displayName, applies roundWeight to non-zero prescriptions", () => {
+    const ex = { name: 'Barbell Back Squat', target_weight: 142.5 };
+    const suggestion = null;
+    // roundWeight rounds barbell weights; the exact rounded value
+    // depends on implementation but should be a multiple of 5.
+    const out = window.resolveDisplayWeight(ex, suggestion, 'Barbell Back Squat');
+    expect(typeof out).toBe('number');
+    expect(out % 5).toBe(0); // some multiple of 5
+  });
+
+  it("with displayName, target_weight=0 still returns empty (no rounding)", () => {
+    const ex = { name: 'Plank', target_weight: 0 };
+    expect(window.resolveDisplayWeight(ex, null, 'Plank')).toBe('');
   });
 });

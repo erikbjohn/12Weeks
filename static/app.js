@@ -1873,6 +1873,31 @@ const WEIGHT_ESTIMATES = {
   "Step-Up": () => 20,
 };
 
+/**
+ * Resolve the value to display in a set's weight input.
+ *
+ * Priority:
+ *   1. ex.target_weight if explicitly set (handles 0 = bodyweight as
+ *      "empty input, athlete fills if adding load")
+ *   2. suggestion.weight from history/estimator
+ *   3. empty string
+ *
+ * Returns a number, or '' for an empty input. Pass `displayName` (optional)
+ * to round the prescription weight to a sensible plate increment via
+ * roundWeight() — useful for the focused-set view; the inline session view
+ * displays raw numbers without rounding.
+ *
+ * Pure function — direct unit-testable. See tests/js/weight_prefill.test.mjs.
+ */
+function resolveDisplayWeight(ex, suggestion, displayName) {
+  if (ex && ex.target_weight != null) {
+    if (ex.target_weight === 0) return ''; // bodyweight; leave input empty
+    return displayName ? roundWeight(ex.target_weight, displayName) : ex.target_weight;
+  }
+  if (suggestion && suggestion.weight != null) return suggestion.weight;
+  return '';
+}
+
 function getSuggestedWeight(exName, currentWeekNum) {
   const data = getExerciseData(exName);
   if (!data) {
@@ -10291,18 +10316,17 @@ async function renderDetail() {
       }
       if (!lastWt) lastWt = null; // Don't show original exercise's last weight — different movement
     }
-    // Priority: prescription target_weight ALWAYS wins over history.
-    // != null catches both undefined and the explicit-zero (bodyweight)
-    // case — the previous truthy check skipped target_weight=0 because
-    // 0 is falsy in JS, leaving the keyword-fallback estimator's bogus
-    // value (e.g. 35 for "Hanging Leg Raise" → 25% of bench) in place.
+    // Resolve the value to put in the weight input. Centralizes the
+    // target_weight=0-is-bodyweight rule so the falsy-check bug can't
+    // regress. See resolveDisplayWeight + tests/js/weight_prefill.test.mjs.
+    const weightVal = resolveDisplayWeight(ex, suggestion);
+    // Keep `suggestion.reason` accurate for the badge in the row label.
     if (ex.target_weight != null) {
       suggestion = {
-        weight: ex.target_weight === 0 ? null : ex.target_weight,
+        weight: weightVal === '' ? null : weightVal,
         reason: ex.target_weight === 0 ? 'bodyweight' : 'engine',
       };
     }
-    const weightVal = suggestion.weight != null ? suggestion.weight : '';
 
     // RPE removed — progression driven by actual data
 
@@ -11226,14 +11250,10 @@ async function enterExerciseFocus(exIdx) {
     suggestion = getWeightForExercise(ex.name, currentWeek);
     if (!_focusLastWeight) _focusLastWeight = getLastWeight(ex.name);
   }
-  // Priority: prescription target_weight ALWAYS wins over history.
-  // != null catches the explicit-zero (bodyweight) case which the
-  // previous truthy check missed (0 is falsy in JS).
-  if (ex.target_weight != null) {
-    _focusWeightVal = ex.target_weight === 0 ? '' : roundWeight(ex.target_weight, displayName);
-  } else {
-    _focusWeightVal = suggestion.weight != null ? suggestion.weight : '';
-  }
+  // Centralized resolver — same target_weight=0-is-bodyweight semantics
+  // as the inline session view, plus roundWeight applied to non-zero
+  // prescriptions for the focused set's larger inputs.
+  _focusWeightVal = resolveDisplayWeight(ex, suggestion, displayName);
 
   // Fetch adaptive targets from training engine
   try {
