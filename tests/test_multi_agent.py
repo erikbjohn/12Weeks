@@ -195,6 +195,44 @@ def test_coach_chat_uses_single_prompt_when_flag_disabled(monkeypatch):
     mma.assert_not_called()
 
 
+def test_classifier_pre_executes_tools_before_first_model_turn():
+    """When the message contains a day keyword, get_today_status should be
+    invoked BEFORE the Doctor's first turn — its result should appear as
+    a tool_result block in the conversation by the time the model is called."""
+    from coach_multi_agent import coach_chat_multiagent
+
+    text_block = MagicMock(type="text", text="Today's done.")
+    fake_response = MagicMock(stop_reason="end_turn", content=[text_block])
+
+    captured_messages = []
+
+    def capture_messages(*args, **kwargs):
+        captured_messages.append(list(kwargs.get("messages") or []))
+        return fake_response
+
+    with patch("coach_multi_agent._anthropic_client") as mc:
+        mc.return_value.messages.create.side_effect = capture_messages
+        with patch("coach_tools.execute_tool", return_value='{"date":"2026-05-06","weekday":"Wed"}') as mt:
+            coach_chat_multiagent(
+                user_id=1,
+                athlete_data="<athlete_data/>",
+                messages=[{"role": "user", "content": "What's on my plate today?"}],
+            )
+
+    # execute_tool should have been called for get_today_status BEFORE
+    # the model was invoked.
+    tool_calls = [c for c in mt.call_args_list if c.args and c.args[0] == "get_today_status"]
+    assert len(tool_calls) >= 1
+    # The first message-create call should already have a tool_result for it.
+    first_call_messages = captured_messages[0]
+    has_pre_tool_result = any(
+        isinstance(m.get("content"), list)
+        and any(b.get("type") == "tool_result" for b in m["content"] if isinstance(b, dict))
+        for m in first_call_messages
+    )
+    assert has_pre_tool_result, "Pre-executed tool result should be in conversation before model's first turn"
+
+
 def test_coach_chat_uses_single_prompt_for_non_chat_modes(monkeypatch):
     """morning_checkin should NEVER go multi-agent even with the flag on."""
     from coach_with_tools import coach_chat

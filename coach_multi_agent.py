@@ -247,6 +247,57 @@ def coach_chat_multiagent(
     fact_check_retries_used = 0
     MAX_FACT_CHECK_RETRIES = 1  # one shot at fixing unverified numbers
 
+    # === STEP 2: Pre-execute classified tools BEFORE the model's first turn ===
+    # Closes hallucination class B (schedule miss / scope errors): when the
+    # athlete's message references a day, lift, or body metric, force-call
+    # the relevant tool so the model never has to "decide" to look it up
+    # and never has the chance to summarize without reading the data.
+    from coach_router_classifier import classify_required_tools
+    last_user_msg = ""
+    for m in reversed(convo):
+        if m.get("role") == "user":
+            content = m.get("content")
+            if isinstance(content, str):
+                last_user_msg = content
+            break
+
+    forced = classify_required_tools(last_user_msg, agent_name="conversation")
+    # Filter to tools the Doctor persona actually has access to.
+    forced = [f for f in forced if f.tool_name in doctor_tool_names]
+    if forced:
+        from coach_tools import execute_tool
+        # Build synthetic assistant + user pair: assistant emits tool_use
+        # blocks, user emits tool_result blocks. This mirrors the natural
+        # tool_use loop shape so the model sees pre-executed calls as if
+        # it had requested them.
+        synthetic_tool_uses = []
+        synthetic_tool_results = []
+        for i, f in enumerate(forced):
+            tu_id = f"forced_{i}"
+            synthetic_tool_uses.append({
+                "type": "tool_use",
+                "id": tu_id,
+                "name": f.tool_name,
+                "input": f.kwargs or {},
+            })
+            try:
+                result = execute_tool(f.tool_name, f.kwargs or {}, user_id)
+            except Exception as e:
+                result = f'{{"error": "pre-execute failed: {e}"}}'
+            tool_results_collected.append(result)
+            synthetic_tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tu_id,
+                "content": result,
+            })
+        # Apply the same error-rerouting from Step 1 to pre-executed results
+        synthetic_tool_results = _reroute_tool_failures(
+            synthetic_tool_results,
+            [type("F", (), {"id": tu["id"], "name": tu["name"]})() for tu in synthetic_tool_uses],
+        )
+        convo.append({"role": "assistant", "content": synthetic_tool_uses})
+        convo.append({"role": "user", "content": synthetic_tool_results})
+
     for turn in range(MAX_TOOL_TURNS):
         resp = client.messages.create(
             model=persona["model"],
