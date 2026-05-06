@@ -20,7 +20,6 @@ class ForcedCall:
     kwargs: dict = field(default_factory=dict)
 
 
-# Day-name patterns (Mon/Monday/etc.) — case-insensitive.
 _DAY_RE = re.compile(
     r"\b(today|tomorrow|yesterday|"
     r"mon(day)?|tue(s|sday)?|wed(nesday)?|thu(r|rs|rsday)?|"
@@ -28,17 +27,61 @@ _DAY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Map a free-text exercise reference to a canonical name for the tool's
+# exercise_name kwarg. Order matters (longer matches first when ambiguous).
+_EXERCISE_MAP = [
+    (re.compile(r"\bback\s*squat\b", re.I),     "Barbell Back Squat"),
+    (re.compile(r"\bfront\s*squat\b", re.I),    "Front Squat"),
+    (re.compile(r"\bbench\s*press\b", re.I),    "Barbell Bench Press"),
+    (re.compile(r"\bbench\b", re.I),            "Barbell Bench Press"),
+    (re.compile(r"\bsquat\b", re.I),            "Barbell Back Squat"),
+    (re.compile(r"\bdeadlift\b", re.I),         "Conventional Deadlift"),
+    (re.compile(r"\b(rdl|romanian\s*deadlift)\b", re.I), "Romanian Deadlift"),
+    (re.compile(r"\bbent.?over\s*row\b", re.I), "Barbell Bent-Over Row"),
+    (re.compile(r"\brow\b", re.I),              "Barbell Bent-Over Row"),
+    (re.compile(r"\bpull.?up\b", re.I),         "Weighted Pull-Up"),
+    (re.compile(r"\bhip\s*thrust\b", re.I),     "Hip Thrust"),
+    (re.compile(r"\bovh?p\b|\boverhead\s*press\b|\bohp\b", re.I), "Overhead Press"),
+]
+
+# Free-text body/cut keywords → trigger get_body_state.
+# Plural-tolerant via optional trailing s: calorie(s), macro(s), carb(s), etc.
+_BODY_RE = re.compile(
+    r"\b(weight|cut(ting)?|deficit|calories?|kcal|macros?|protein|carbs?|fat|"
+    r"body\s*comp|bodyfat|bf|tdee|projection|target|lose|gain|gaining|losing)\b",
+    re.IGNORECASE,
+)
+
 
 def classify_required_tools(message: str, agent_name: str) -> list[ForcedCall]:
     """Return tools to pre-execute before the model's first turn.
 
-    Conservative: only triggers on patterns we're confident about. Returns
-    an empty list when no patterns match — the model still has slice +
-    tool-use available, just no forced pre-execution.
+    Returns at most one ForcedCall per distinct tool name (dedup by
+    tool_name) — we don't pre-execute the same tool twice in one turn.
     """
     if not message:
         return []
+    seen_tools: set[str] = set()
     out: list[ForcedCall] = []
+
+    def add(call: ForcedCall) -> None:
+        if call.tool_name in seen_tools:
+            return
+        seen_tools.add(call.tool_name)
+        out.append(call)
+
     if _DAY_RE.search(message):
-        out.append(ForcedCall("get_today_status"))
+        add(ForcedCall("get_today_status"))
+
+    for ex_re, canonical in _EXERCISE_MAP:
+        if ex_re.search(message):
+            add(ForcedCall("get_recent_sets",
+                           kwargs={"exercise_name": canonical, "limit": 8}))
+            add(ForcedCall("get_e1rm",
+                           kwargs={"exercise_name": canonical}))
+            break  # one exercise per turn is plenty; first match wins
+
+    if _BODY_RE.search(message):
+        add(ForcedCall("get_body_state"))
+
     return out
