@@ -9,7 +9,7 @@ import time
 import uuid
 from datetime import date, timedelta, datetime, timezone
 from functools import wraps
-from flask import Flask, render_template, jsonify, request, session, Response, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, session, Response, redirect, url_for, flash, make_response
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer
@@ -2351,7 +2351,15 @@ def _send_invite_request_email(name, email):
 @app.route("/")
 @login_required
 def index():
-    return render_template("index.html")
+    # No-store on the HTML so mobile browsers always pick up the latest
+    # `<script src="/static/app.js?v=N">` reference. Without this,
+    # Safari caches index.html and keeps fetching the old `?v=` URL
+    # even after we bump the version.
+    response = make_response(render_template("index.html"))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route("/static/sw.js")
