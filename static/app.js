@@ -10356,16 +10356,28 @@ async function renderDetail() {
     const isHeight = ex.tracked_metric === 'height';
     const unit = isHeight ? 'in' : 'lb';
 
-    // Build per-set rows
+    // Build per-set rows.
+    //
+    // Bodyweight prescription rule: when ex.target_weight === 0, the
+    // prescription is explicitly bodyweight. Ignore historical
+    // setData.weight entirely (athlete may have logged 5 lb on a
+    // prior Nordic Hamstring Curl session but the current prescription
+    // is BW; that historical 5 should NOT prefill today's inputs).
+    // Empty inputs let them override if they're adding load this
+    // session. setData.done and setData.reps still apply — only
+    // setData.weight is suppressed.
+    const isBodyweightPrescription = ex.target_weight === 0;
     let setRowsHtml = '';
     let carryWeight = weightVal;
     for (let s = 0; s < setCount; s++) {
       const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
       const setData = _setCache && _setCache[setKey];
       const setDone = !!(setData && setData.done);
-      const setWeight = setData && setData.weight ? setData.weight : carryWeight;
+      const setWeight = isBodyweightPrescription
+        ? ''  // BW: empty regardless of cache
+        : (setData && setData.weight ? setData.weight : carryWeight);
       const setReps = setData && setData.reps ? setData.reps : '';
-      if (setData && setData.weight) carryWeight = setData.weight;
+      if (!isBodyweightPrescription && setData && setData.weight) carryWeight = setData.weight;
 
       if (isTimedEx) {
         // Timed exercise: multi-set → HIIT modal, single-set → inline hold timer.
@@ -10409,7 +10421,7 @@ async function renderDetail() {
         <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
         <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></span>
       </div>
-      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null ? ' · Last: ' + lastWt + ' ' + unit : ''}${(!isSwapped && ex.target_weight) ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
+      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null && !isBodyweightPrescription ? ' · Last: ' + lastWt + ' ' + unit : ''}${(!isSwapped && ex.target_weight) ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
       ${(!isSwapped && ex.note) ? `<div class="ex-note">${ex.note}</div>` : ''}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
