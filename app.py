@@ -2679,7 +2679,11 @@ def api_workouts():
                     "rest": rx.rest or "60s",
                     "note": rx.note or "",
                 }
-                if getattr(rx, 'target_weight', None):
+                # `is not None` (not truthy) so target_weight=0 — the
+                # explicit "bodyweight" sentinel — is preserved on the wire.
+                # Truthy check would strip 0 and the client's
+                # isBodyweightPrescription detection would fail.
+                if getattr(rx, 'target_weight', None) is not None:
                     ex_dict["target_weight"] = rx.target_weight
                 ex_info = EXERCISES.get(rx.exercise_name, {})
                 if ex_info.get("video"):
@@ -3159,7 +3163,9 @@ def api_set_log():
             user_id=current_user.id, week=week, day_idx=day_idx,
             exercise_name=exercise
         ).first()
-        prescribed_weight = rx.target_weight if rx and rx.target_weight else None
+        # `is not None` to preserve target_weight=0 (bodyweight prescription)
+        # rather than dropping it silently with a truthy check.
+        prescribed_weight = rx.target_weight if rx and rx.target_weight is not None else None
 
         # Also compute progression targets for storage (used by next week's planning)
         targets = compute_next_targets(current_user.id, exercise, week, day_idx)
