@@ -2348,6 +2348,47 @@ def _send_invite_request_email(name, email):
 
 # ─── PAGES ──────────────────────────────────────────────────────────────────
 
+
+# ─── Auto cache-busting for static assets ─────────────────────────────────
+# Computes a content hash of static files at first access and caches it
+# per-process. Templates use `{{ asset_url('app.js') }}` instead of a
+# hand-bumped `?v=N` query param — every deploy that changes the file
+# also changes the hash, so browsers automatically refetch.
+import hashlib as _asset_hashlib
+_asset_hash_cache: dict[str, str] = {}
+
+
+def _static_asset_hash(filename: str) -> str:
+    """First 12 chars of sha256 of static/<filename>'s bytes.
+
+    Cached per-process — Render's gunicorn workers have a stable file
+    contents for their lifetime, and a fresh deploy creates new
+    workers, so we never need to invalidate within a process.
+    """
+    if filename in _asset_hash_cache:
+        return _asset_hash_cache[filename]
+    try:
+        path = os.path.join(app.static_folder or "static", filename)
+        with open(path, "rb") as f:
+            h = _asset_hashlib.sha256(f.read()).hexdigest()[:12]
+        _asset_hash_cache[filename] = h
+        return h
+    except Exception:
+        # Fallback: empty hash means the URL has no ?v= — browsers
+        # will use whatever cached copy they have. Better than 500.
+        return ""
+
+
+@app.context_processor
+def _inject_asset_url():
+    """Templates can call {{ asset_url('app.js') }} → /static/app.js?v=<hash>."""
+    def asset_url(filename: str) -> str:
+        h = _static_asset_hash(filename)
+        suffix = f"?v={h}" if h else ""
+        return f"/static/{filename}{suffix}"
+    return {"asset_url": asset_url}
+
+
 @app.route("/")
 @login_required
 def index():
