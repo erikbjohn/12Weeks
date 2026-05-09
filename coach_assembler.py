@@ -403,11 +403,14 @@ def _build_today_sets():
     # Filter by SCHEDULED day (week + day_idx), not logged_date.
     # User might log Thursday's workout on Sunday — logged_date is Sunday
     # but day_idx is 3 (Thursday). We only want TODAY's scheduled sets.
+    # Don't filter on done=True — /log_set creates rows with done=False unless
+    # the client explicitly marks them done, so requiring done=True hides sets
+    # the athlete actually entered. The done flag is preserved in each row's
+    # output below so the coach can still distinguish completed from in-progress.
     rows = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
-        SetLog.done == True  # noqa: E712
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
     for s in rows:
@@ -569,11 +572,16 @@ def _build_today_status():
         and (resolved.get("exercises") or resolved.get("liftName"))
     )
 
+    # Count ANY SetLog row for today — not just done=True. The /log_set endpoint
+    # creates rows with done=False unless the client explicitly passes done=true,
+    # so requiring done=True caused today_status to report PENDING for lifts the
+    # athlete had logged (numbers entered, sets visible). The coach then recited
+    # the prescription as "still owed" while the actual sets sat in the DB.
+    # Any row = at least an attempt = enough signal to not say "lift owed".
     workout_logged_any = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
-        SetLog.done == True,  # noqa: E712
     ).first() is not None
 
     run_plan = WeeklyRunPlan.query.filter_by(
@@ -830,10 +838,11 @@ def _build_completed_days():
     for dc in DayCompletion.query.filter_by(user_id=current_user.id, week=week).all():
         if dc.done and dc.day_idx not in completed:
             completed.append(dc.day_idx)
-    # SetLog by date range
+    # SetLog by date range. Don't filter on done=True — log_set creates rows
+    # with done=False by default, so requiring done=True undercounts completed
+    # days. Any SetLog row in the week = the athlete trained that day.
     week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.done == True,  # noqa: E712
         SetLog.logged_date >= week_monday
     ).all()
     for s in week_sets:
@@ -1214,6 +1223,12 @@ Rules:
 <protocol name="run_complete">
 The athlete JUST FINISHED a run. The run is DONE. Do NOT prescribe a future run.
 
+STRICT SCOPE — the run, and ONLY the run.
+- Do NOT mention the lift, the lift prescription, "still owed", "remaining", "to do", or any other workout/task.
+- The trigger is RUN_COMPLETE. The subject is the run. Nothing else.
+- If the lift isn't logged yet, that is NOT your problem in this turn. The lift-complete trigger or the athlete's next message will surface it. Stay silent on it here.
+- If the athlete wants to talk about the lift, they will bring it up. Wait. Do not preempt.
+
 The trigger message contains the ACTUAL results: distance, avg HR, elevation.
 Your job: ANALYZE the completed run vs the prescription.
 
@@ -1222,10 +1237,10 @@ Rules:
 - Compare to today's prescribed run (distance, duration, HR zone) from <athlete_data>.
 - If they hit the prescription: one flat sentence. "4.6 miles at HR 129. Prescription was 45 min zone 2. Done."
 - If they were short or over: state the delta factually. No lecture.
-- Ask ONE question about how it felt (legs, breathing, energy).
+- Ask ONE question about how the RUN felt (legs, breathing, energy) — not about the lift.
 - Do NOT say "get the run done" or "run for X minutes today" — IT IS ALREADY DONE.
 - Do NOT reference historical run distances. Only the run from the trigger message.
-- 2-3 sentences max.
+- 2-3 sentences max. If you wrote a sentence about the lift, DELETE IT before sending.
 </protocol>""",
 
     "freeform": """\
