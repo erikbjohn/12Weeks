@@ -3325,26 +3325,48 @@ def api_generate_weekly_program():
     data = request.get_json() or {}
     target_week = data.get("week", _current_week() + 1)
 
-    # Don't overwrite coach-modified prescriptions
-    existing = WeeklyPrescription.query.filter_by(
+    # Don't overwrite coach-modified prescriptions or past-week training
+    # history — BUT still return the existing program so the planning UI can
+    # render the day cards. Previously these guards returned only a
+    # "message" stub with no `program` field, leaving _planDayBlocks empty
+    # in the client and the HTML cards never appeared. Read the existing
+    # rows and serialize them.
+    existing_coach = WeeklyPrescription.query.filter_by(
         user_id=current_user.id, week=target_week, source='coach'
     ).first()
-    if existing:
-        return jsonify({"message": "Coach-modified prescriptions exist", "week": target_week})
-
-    # Don't regenerate prescriptions for past weeks. Once the athlete has
-    # logged any completed sets for a week, the prescription view becomes a
-    # historical record of what they actually trained — regenerating would
-    # silently rewrite history with the current template, which is what
-    # blew away Erik's Week 5 Phase 1 plan when the program rebuild moved
-    # the phase boundary.
     has_history = SetLog.query.filter_by(
         user_id=current_user.id, week=target_week, done=True,
     ).first()
-    if has_history:
+    if existing_coach or has_history:
+        rows = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=target_week,
+        ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
+        program = [{
+            "day": r.day_idx,
+            "exercise": r.exercise_name,
+            "sets": r.sets,
+            "reps": r.reps,
+            "target_weight": r.target_weight,
+            "reason": r.adjustment_reason,
+            "rest": r.rest,
+            "note": r.note,
+        } for r in rows]
+        # Pull run plan rows too so the day cards include the run line
+        runs = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=target_week,
+        ).order_by(WeeklyRunPlan.day_idx).all()
+        run_summary = [{
+            "day": r.day_idx,
+            "type": r.run_type,
+            "label": r.label,
+            "duration": r.duration,
+        } for r in runs]
         return jsonify({
-            "message": "Past week — already trained, won't overwrite history",
+            "message": "Existing prescriptions returned (not regenerated)",
             "week": target_week,
+            "program": program,
+            "run_summary": run_summary,
+            "regenerated": False,
         })
 
     # Get the phase template as baseline — use BW templates for no-gym users
