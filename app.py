@@ -775,6 +775,28 @@ def _parse_coach_markers(text, user_id, week):
             p_weight = float(m.group(7)) if m.group(7) else None
             from workout_data import resolve_name
             p_exercise = resolve_name(p_exercise)
+
+            # GUARD: never let the coach write a prescription weight that's
+            # below 95% of the user's recent top set unless this is an
+            # explicit deload week. The coach has historically hallucinated
+            # low weights into the wave (e.g. bench at 100 when the user has
+            # done 135), then blamed "the engine" for the regression in chat.
+            # This guard refuses the write at the data layer so the wave can
+            # never drop below proven capacity outside a deload.
+            if p_weight is not None and p_weight > 0 and p_week not in (4, 8):
+                top = db.session.query(db.func.max(SetLog.weight)).filter(
+                    SetLog.user_id == user_id,
+                    SetLog.exercise_name == p_exercise,
+                    SetLog.weight > 0,
+                ).scalar()
+                if top is not None and p_weight < top * 0.95:
+                    import logging
+                    logging.warning(
+                        "PRESCRIPTION guard: rejected coach write %s wk %s @ %s lb "
+                        "(below 95%% of recent top set %s lb)",
+                        p_exercise, p_week, p_weight, top,
+                    )
+                    continue
             # Upsert
             existing = WeeklyPrescription.query.filter_by(
                 user_id=user_id, week=p_week, day_idx=p_day, exercise_name=p_exercise
