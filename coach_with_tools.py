@@ -28,7 +28,12 @@ DEFAULT_MAX_TOKENS = 2000
 # monolithic prompt. When MULTIAGENT_ENABLED=1, coach_chat routes these
 # through coach_multi_agent.coach_chat_multiagent. Other agent_names stay
 # on the single-prompt _run_loop path regardless of the flag.
-MULTIAGENT_TRIGGERS = {"conversation", "weekly_planning", "chat_opened", "weekly_review"}
+# Multi-agent (Doctor + specialists) is the analytical/synthesis path —
+# Doctor persona requires JSON-with-cites output for cite validation. That
+# format is wrong for conversational flows (weekly_planning, weekly_review,
+# chat_opened) where the protocol specifies prose/markdown. Keep those on
+# the simple tool-loop path so their protocol's format wins.
+MULTIAGENT_TRIGGERS = {"conversation"}
 
 
 def _client(timeout: float = 60.0):

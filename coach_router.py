@@ -75,6 +75,34 @@ def route_trigger(message, context=None):
     # 3. Map trigger to agent
     agent_name = _TRIGGER_MAP.get(trigger or "", "conversation")
 
+    # 4. Sticky planning: if the user is mid-flow in weekly_planning (last
+    # coach message ended with "[SHOW_NEXT_DAY]", "show Tuesday", "show
+    # Monday", "anything else for", or "Confirm and I'll show"), keep
+    # routing to weekly_planning even when the user's reply has no tag.
+    # Without this, "yes" or "looks good" falls to the conversation agent
+    # and loses the protocol's per-exercise WHY format.
+    if agent_name == "conversation" and not trigger:
+        try:
+            from models import ChatMessage
+            from flask_login import current_user
+            if getattr(current_user, "is_authenticated", False):
+                last_asst = (
+                    ChatMessage.query
+                    .filter_by(user_id=current_user.id, role="assistant")
+                    .order_by(ChatMessage.id.desc())
+                    .first()
+                )
+                if last_asst and last_asst.content:
+                    c = last_asst.content
+                    if (
+                        "[SHOW_NEXT_DAY]" in c
+                        or re.search(r"show (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|the next day|next day)", c, re.IGNORECASE)
+                        or re.search(r"(?:Anything else for|Anything to swap or adjust|Confirm and I'?ll show|Ready to see (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))", c, re.IGNORECASE)
+                    ):
+                        agent_name = "weekly_planning"
+        except Exception:
+            pass
+
     return {
         "agent_name": agent_name,
         "trigger": trigger,
