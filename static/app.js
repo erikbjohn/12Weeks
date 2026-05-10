@@ -229,11 +229,13 @@ function isBodyweightExercise(name, note) {
 // No model call — pure mapping. Drives the per-row italic blurb under each
 // exercise on the weekly-planning day card.
 var _ROLE_PATTERNS = [
-  { re: /barbell back squat|front squat|deadlift|bench press|overhead press/i, role: 'main_compound' },
+  // Order matters: more specific patterns FIRST. "Romanian Deadlift" must
+  // match posterior_chain before the broader "deadlift" hits main_compound.
+  { re: /romanian deadlift|stiff.leg|good morning|hip thrust|glute bridge/i, role: 'posterior_chain' },
+  { re: /barbell back squat|front squat|conventional deadlift|bench press|overhead press/i, role: 'main_compound' },
   { re: /power clean|hang clean|snatch|clean and jerk/i, role: 'oly' },
   { re: /box jump|broad jump|depth jump/i, role: 'plyo' },
   { re: /bulgarian|split squat|lunge|step.up|pistol/i, role: 'unilateral_leg' },
-  { re: /romanian deadlift|stiff.leg|good morning|hip thrust|glute bridge/i, role: 'posterior_chain' },
   { re: /pull.up|chin.up|lat pulldown|row(?!ing)/i, role: 'pull' },
   { re: /face pull|rear delt|reverse fly|band pull.apart/i, role: 'rear_delt' },
   { re: /lateral raise|side raise/i, role: 'lateral_delt' },
