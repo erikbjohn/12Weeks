@@ -190,15 +190,24 @@ def coach_chat_stream(
                 "role": "assistant",
                 "content": [b.model_dump() for b in blocks],
             })
+            tool_use_blocks = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             tool_results = []
-            for b in blocks:
-                if getattr(b, "type", None) == "tool_use":
-                    result_str = execute_tool(b.name, dict(b.input or {}), user_id)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": b.id,
-                        "content": result_str,
-                    })
+            for b in tool_use_blocks:
+                result_str = execute_tool(b.name, dict(b.input or {}), user_id)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": b.id,
+                    "content": result_str,
+                })
+            # Reroute any tool failures to a system directive so the model
+            # doesn't surface raw plumbing errors ("RuntimeError: Working
+            # outside of application context") to the athlete. Same defense
+            # as the multi-agent path uses via _reroute_tool_failures.
+            try:
+                from coach_multi_agent import _reroute_tool_failures
+                tool_results = _reroute_tool_failures(tool_results, tool_use_blocks)
+            except Exception:
+                pass  # If reroute helper unavailable, fall back to raw results
             convo.append({"role": "user", "content": tool_results})
             continue
         break  # end_turn

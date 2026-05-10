@@ -5912,6 +5912,7 @@ def api_chat_stream():
     db.session.commit()
 
     _current_user_id = current_user.id
+    _current_user_obj = current_user._get_current_object()
     _mode = mode
 
     # Route trigger and build context
@@ -5937,26 +5938,34 @@ def api_chat_stream():
 
     def generate():
         full_text = ""
+        # SSE generators run AFTER the original request context closes —
+        # tools that touch current_user / db.session would otherwise raise
+        # `RuntimeError: Working outside of application context`. Re-enter
+        # both the app context and a request context with the user logged
+        # in so coach_chat_stream's tool loop has live Flask state.
+        from flask_login import login_user
         try:
-            from coach_assembler import assemble_prompt
-            from coach import _build_messages
-            from coach_agents import AGENTS
-            from coach_with_tools import coach_chat_stream
-            system_prompt = assemble_prompt(_route_info["agent_name"], context)
-            messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
-            _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
+            with _app.app_context(), _app.test_request_context():
+                login_user(_current_user_obj, force=True)
+                from coach_assembler import assemble_prompt
+                from coach import _build_messages
+                from coach_agents import AGENTS
+                from coach_with_tools import coach_chat_stream
+                system_prompt = assemble_prompt(_route_info["agent_name"], context)
+                messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
+                _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-            # Tool-using coach: server-side tool loop, then chunked stream of
-            # the final reply. User sees a 2-5s pause (tool calls), then text.
-            for chunk in coach_chat_stream(
-                user_id=_current_user_id,
-                system_prompt=system_prompt,
-                messages=messages,
-                max_tokens=_agent_config["max_tokens"],
-            ):
-                full_text += chunk + " "
-                safe_text = (chunk + " ").replace('\n', '\\n')
-                yield f"data: {safe_text}\n\n"
+                # Tool-using coach: server-side tool loop, then chunked stream of
+                # the final reply. User sees a 2-5s pause (tool calls), then text.
+                for chunk in coach_chat_stream(
+                    user_id=_current_user_id,
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    max_tokens=_agent_config["max_tokens"],
+                ):
+                    full_text += chunk + " "
+                    safe_text = (chunk + " ").replace('\n', '\\n')
+                    yield f"data: {safe_text}\n\n"
 
             yield f"data: [DONE]\n\n"
             full_text = full_text.rstrip()
