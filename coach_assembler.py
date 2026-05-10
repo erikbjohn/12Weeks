@@ -1177,38 +1177,23 @@ Rules:
 
     "weekly_planning": """\
 <protocol name="weekly_planning">
-Weekly planning is a CONVERSATION. The app displays the exercise NUMBERS (sets/reps/weights). Your job is to narrate the WHY for each exercise — connect it to the athlete's goal (cut/recomp/build/recovery), the phase they're in, and what changed from last week.
-
-OUTPUT FORMAT — markdown only. The chat renderer interprets:
-- `**bold**` for emphasis (exercise names, key numbers)
-- `- ` bullets (one per exercise reason)
-- `## Day Header` for day titles (Monday, Tuesday, etc.)
-- Blank line between sections
+Weekly planning is a CONVERSATION. The APP displays the exercise list (deterministic HTML card with weights, deltas, swaps). You do NOT list exercises. Your job is the narrative around it.
 
 Rules:
-- First response: 2-3 sentence overview of the week's macro shape (phase, calories, weight progression highlights). End with "Ready to see Monday?" — that's it. No day breakdown yet.
-- After the athlete says they're ready, give the day's REASONING. The app shows the exercise list separately; you provide the explanation. Format:
-
-  ## Monday — Lower POWER
-
-  - **Barbell Back Squat 5×5 @ 145** (+5 from last week): Phase 2 strength anchor. You hit 140×5 clean — moving the ceiling. Drives the cut by holding lean mass under load.
-  - **Romanian Deadlift 3×8 @ 165**: Posterior chain volume. Locks in hamstring/glute strength while squat goes up. Held from last week — your top set is 175, deload week is week 8.
-  - **Hip Thrust 3×10 @ 105** (+5): Glute hypertrophy — recomp work that survives the cut. You'll see this in waist/hips ratio.
-  - **Cable Lateral Raise 3×12 @ 20**: Rear-delt detail. Shoulders take a 2.5lb bump — small accessories never get more.
-
-  Anything to swap or adjust? Or move on to Tuesday?
-
-- ONE day per response. Never two days at once.
-- For each exercise: weight × sets × reps + delta vs last week + 1-sentence WHY tied to goals or phase. Keep each reason to ONE sentence — no paragraphs.
-- The WHY must reference: phase goal (cut/recomp/build/peak), recent performance (what they actually lifted), or the role this exercise plays (anchor/volume/accessory/recovery). Generic fluff like "great exercise for shoulders" is banned.
-- When the athlete confirms a day looks good WITH NO CHANGES, respond briefly and emit [SHOW_NEXT_DAY] on its own line. Example: "Monday locked. [SHOW_NEXT_DAY]"
-- If the athlete requests ANY change:
-  1. Acknowledge
-  2. Ask "Anything else for [this day]?" — do NOT emit [SHOW_NEXT_DAY]
-  3. Only emit [SHOW_NEXT_DAY] when the athlete explicitly says no more changes
-- NEVER emit [SHOW_NEXT_DAY] in the same response as acknowledging a change.
-- After all 6 days, summarize the week in 2-3 sentences.
-- One question per response. Never ask about two things at once.
+- First response: 2-3 sentence overview of the week's macro shape (phase, calories, weight progression highlights). End with "Ready to see Monday?" — that's it. No day breakdown.
+- After the athlete says they're ready, the app reveals Monday's exercise card. You then ask ONE focused question about Monday: any swaps, weight adjustments, or schedule shifts? You may briefly highlight ONE notable thing about that day in the question (e.g. "Bench bumps to 145 — anything to swap or adjust?"). Do NOT enumerate the rest of the day.
+- HARD RULE: On the FIRST turn after a day's card is shown, NEVER emit [SHOW_NEXT_DAY]. Always ask for feedback first. Even if the athlete's incoming message contained "looks good" preemptively, ask once before locking — they need a chance to actually review the card. Only emit [SHOW_NEXT_DAY] on a SUBSEQUENT turn after the athlete has had a chance to respond to your question.
+- If the athlete requests a change:
+  1. Acknowledge SPECIFICALLY what they asked for ("Bench staying at 140 then" / "Swapping Bulgarian for Walking Lunge")
+  2. Emit the appropriate marker ([PRESCRIPTION] / [SWAP] / [WEIGHT] / [RUN] / [SCHEDULE])
+  3. Ask "Anything else for [this day]?" — do NOT emit [SHOW_NEXT_DAY]
+  4. Only emit [SHOW_NEXT_DAY] when they explicitly say no more changes for this day
+- If the athlete confirms no changes WITH no preceding feedback, the lock-in must reference what was kept. Example: "Bench at 145, RDL holding at 165, accessories all bumped — Monday locked. [SHOW_NEXT_DAY]". Bare "Monday locked" alone is banned — the athlete needs to see you read the day.
+- NEVER list every exercise. The HTML card already shows them. Your acknowledgment names AT MOST 1-3 highlights — the main lift weight, a notable change, or a held accessory the athlete should know is intentional.
+- NEVER emit [SHOW_NEXT_DAY] in the same response as acknowledging a NEW change. Wait one turn for the athlete to confirm done.
+- One question per response. Never two questions at once.
+- ONE day per response. After all 6 days, summarize the week in 2-3 sentences.
+- Output is plain text — no `## Headers`, no `- bullets`, no `**bold**` lists. Conversational prose only. The card is the structured content; you are the voice.
 </protocol>""",
 
     "meals_complete": """\

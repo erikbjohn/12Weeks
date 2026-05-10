@@ -896,8 +896,6 @@ function renderCoachMarkdown(text) {
   }
 
   // Insert line breaks between exercises using BOUNDARY DETECTION.
-  // Find every ": NxN" pattern, look BACKWARD for a boundary word (lb, reps, HOLD, UP,
-  // sentence end, etc.), and break THERE. This never touches exercise names.
   var _colonPat = /:\s*\d+\s*[x×]\s*\d+/g;
   var _cm;
   var _breaks = [];
@@ -906,19 +904,16 @@ function renderCoachMarkdown(text) {
     var _lbStart = Math.max(0, _cpos - 50);
     var _lookback = clean.substring(_lbStart, _cpos);
     var _best = -1;
-    // Boundary words: end of previous exercise entry
     var _bp = /(?:lb|reps|hold|UP|HOLD|DOWN|sets|minutes|min)\s/gi;
     var _bm;
     while ((_bm = _bp.exec(_lookback)) !== null) {
       _best = _lbStart + _bm.index + _bm[0].length - 1;
     }
-    // Sentence endings
     var _sp = /[.?!]\s/g;
     while ((_bm = _sp.exec(_lookback)) !== null) {
       var _spos = _lbStart + _bm.index + _bm[0].length - 1;
       if (_spos > _best) _best = _spos;
     }
-    // Closing parens and markdown markers (day headers end with )* or )**)
     var _pp = /[)]\s|[*]+\s/g;
     while ((_bm = _pp.exec(_lookback)) !== null) {
       var _ppos = _lbStart + _bm.index + _bm[0].length - 1;
@@ -932,25 +927,12 @@ function renderCoachMarkdown(text) {
     clean = clean.substring(0, _breaks[_bi]) + '\n' + clean.substring(_breaks[_bi] + 1);
   }
 
-  // Fix orphaned day names: model sometimes puts \n before "Monday?" in "Ready to see\nMonday?"
   clean = clean.replace(/\n+((?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[?.!])/gi, ' $1');
-
-  // Break before day headers ONLY when they start a section (followed by — or - or : or **)
   clean = clean.replace(/([^\n])\s*(?=\*{0,2}(?:MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[\-—:\*])/g, '$1\n\n');
-
-  // Clean up orphaned bullets: a lone "-" or "*" on its own line
   clean = clean.replace(/\n[-*]\s*\n/g, '\n');
-
-  // Break before run entries
   clean = clean.replace(/([^\n])\s+(?=(?:Zone \d|HIIT run|Run:|Min mile|Tempo run|Easy run|Long run))/g, '$1\n');
-
-  // Break before follow-up questions
   clean = clean.replace(/([^\n])\s+(?=(?:Any swaps|Any questions|Questions on|Move to|Ready for|Want to))/g, '$1\n\n');
-
-  // Break before "Anything you want" / "Any injuries" / "Schedule conflicts" questions
   clean = clean.replace(/\.\s+(?=(?:Anything|Any injuries|Schedule conflicts|Any schedule))/g, '.\n\n');
-
-  // Break before deficit/weight target lines
   clean = clean.replace(/\.\s+(?=(?:You need|Your target|After dropping|Deficit))/g, '.\n\n');
 
   // Escape HTML
