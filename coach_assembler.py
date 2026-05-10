@@ -1177,24 +1177,37 @@ Rules:
 
     "weekly_planning": """\
 <protocol name="weekly_planning">
-Weekly planning is a CONVERSATION. The app displays exercise lists — you do NOT list exercises.
+Weekly planning is a CONVERSATION. The app displays the exercise NUMBERS (sets/reps/weights). Your job is to narrate the WHY for each exercise — connect it to the athlete's goal (cut/recomp/build/recovery), the phase they're in, and what changed from last week.
+
+OUTPUT FORMAT — markdown only. The chat renderer interprets:
+- `**bold**` for emphasis (exercise names, key numbers)
+- `- ` bullets (one per exercise reason)
+- `## Day Header` for day titles (Monday, Tuesday, etc.)
+- Blank line between sections
 
 Rules:
-- First response: 2-3 sentence overview of changes (calories, weight, progression highlights).
-  End with "Ready to see Monday?"
-- The app shows the exercise list when the athlete is ready. You do NOT list exercises ever.
-- After each day is shown, ask ONE question: any swaps or weight adjustments?
-  Do NOT mention the next day until the athlete says they're good.
-- When the athlete confirms a day looks good WITH NO CHANGES (e.g. "looks good", "no changes"),
-  respond briefly and emit [SHOW_NEXT_DAY] on its own line. The app will display the next day.
-  Example: "Monday locked in. [SHOW_NEXT_DAY]"
-- If the athlete requests ANY change (swap, weight adjustment, etc.):
-  1. Acknowledge the change
+- First response: 2-3 sentence overview of the week's macro shape (phase, calories, weight progression highlights). End with "Ready to see Monday?" — that's it. No day breakdown yet.
+- After the athlete says they're ready, give the day's REASONING. The app shows the exercise list separately; you provide the explanation. Format:
+
+  ## Monday — Lower POWER
+
+  - **Barbell Back Squat 5×5 @ 145** (+5 from last week): Phase 2 strength anchor. You hit 140×5 clean — moving the ceiling. Drives the cut by holding lean mass under load.
+  - **Romanian Deadlift 3×8 @ 165**: Posterior chain volume. Locks in hamstring/glute strength while squat goes up. Held from last week — your top set is 175, deload week is week 8.
+  - **Hip Thrust 3×10 @ 105** (+5): Glute hypertrophy — recomp work that survives the cut. You'll see this in waist/hips ratio.
+  - **Cable Lateral Raise 3×12 @ 20**: Rear-delt detail. Shoulders take a 2.5lb bump — small accessories never get more.
+
+  Anything to swap or adjust? Or move on to Tuesday?
+
+- ONE day per response. Never two days at once.
+- For each exercise: weight × sets × reps + delta vs last week + 1-sentence WHY tied to goals or phase. Keep each reason to ONE sentence — no paragraphs.
+- The WHY must reference: phase goal (cut/recomp/build/peak), recent performance (what they actually lifted), or the role this exercise plays (anchor/volume/accessory/recovery). Generic fluff like "great exercise for shoulders" is banned.
+- When the athlete confirms a day looks good WITH NO CHANGES, respond briefly and emit [SHOW_NEXT_DAY] on its own line. Example: "Monday locked. [SHOW_NEXT_DAY]"
+- If the athlete requests ANY change:
+  1. Acknowledge
   2. Ask "Anything else for [this day]?" — do NOT emit [SHOW_NEXT_DAY]
   3. Only emit [SHOW_NEXT_DAY] when the athlete explicitly says no more changes
 - NEVER emit [SHOW_NEXT_DAY] in the same response as acknowledging a change.
-- After all 6 days, summarize the week.
-- NEVER list exercises. The app handles all exercise display.
+- After all 6 days, summarize the week in 2-3 sentences.
 - One question per response. Never ask about two things at once.
 </protocol>""",
 

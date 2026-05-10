@@ -6392,7 +6392,11 @@ function renderChatMessages(containerId) {
     const isUser = m.role === 'user';
     const bubbleCls = isUser ? 'chat-bubble user' : 'chat-bubble coach';
     const tsCls = isUser ? 'chat-timestamp ts-user' : 'chat-timestamp ts-coach';
-    html += `<div class="${bubbleCls}">${escapeHtml(m.text || m.content || '')}</div>`;
+    const rawText = m.text || m.content || '';
+    // Coach messages get markdown rendering (bold, headers, line breaks);
+    // user messages get raw-escape since they're verbatim.
+    const body = isUser ? escapeHtml(rawText) : renderCoachMarkdown(rawText);
+    html += `<div class="${bubbleCls}">${body}</div>`;
     if (m.time) {
       const timeStr = formatChatTime(m.time);
       html += `<div class="${tsCls}">${timeStr}</div>`;
@@ -6545,7 +6549,9 @@ function renderInlineChat() {
     const isUser = m.role === 'user';
     const bubbleCls = isUser ? 'chat-bubble user' : 'chat-bubble coach';
     const tsCls = isUser ? 'chat-timestamp ts-user' : 'chat-timestamp ts-coach';
-    chatMessagesHtml += `<div class="${bubbleCls}">${escapeHtml(m.text || m.content || '')}</div>`;
+    const rawText = m.text || m.content || '';
+    const body = isUser ? escapeHtml(rawText) : renderCoachMarkdown(rawText);
+    chatMessagesHtml += `<div class="${bubbleCls}">${body}</div>`;
     if (m.time) {
       chatMessagesHtml += `<div class="${tsCls}">${formatChatTime(m.time)}</div>`;
     }
