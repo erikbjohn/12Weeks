@@ -8764,6 +8764,63 @@ def api_admin_dashboard_data():
     return jsonify({"users": result, "count": len(result)})
 
 
+@app.route("/api/admin/debug/fire-coach", methods=["POST"])
+@admin_required
+def api_admin_debug_fire_coach():
+    """Run a coach trigger as the specified user. Saves request + response
+    to chat_message. Admin-only. Used to test review flows without going
+    through the localStorage-gated UI path."""
+    from flask_login import login_user
+    from coach_router import route_trigger
+    from coach_assembler import build_filtered_context, assemble_prompt
+    from coach import _build_messages
+    from coach_with_tools import coach_chat
+    from coach_agents import AGENTS
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip()
+    trigger = (data.get("trigger") or "").strip()
+    if not email or not trigger:
+        return jsonify({"error": "email and trigger required"}), 400
+    user_obj = User.query.filter_by(email=email).first()
+    if not user_obj:
+        return jsonify({"error": f"user {email} not found"}), 404
+    with app.test_request_context():
+        login_user(user_obj, force=True)
+        log_date = _user_today()
+        # Save user message
+        user_msg = ChatMessage(
+            role="user", content=trigger, log_date=log_date,
+            user_id=user_obj.id, message_type="chat",
+        )
+        db.session.add(user_msg)
+        db.session.commit()
+        # Route + build context + run coach
+        route_info = route_trigger(trigger)
+        context = build_filtered_context(route_info["agent_name"])
+        system_prompt = assemble_prompt(route_info["agent_name"], context)
+        messages = _build_messages(
+            trigger, context.get("chat_history", []),
+            user_timezone=context.get("user_timezone"),
+        )
+        agent_config = AGENTS.get(route_info["agent_name"], AGENTS["conversation"])
+        response = coach_chat(
+            user_id=user_obj.id, system_prompt=system_prompt,
+            messages=messages, max_tokens=agent_config["max_tokens"],
+            agent_name=route_info["agent_name"],
+        )
+        # Save assistant response
+        asst = ChatMessage(
+            role="assistant", content=response, log_date=log_date,
+            user_id=user_obj.id, message_type="chat",
+        )
+        db.session.add(asst)
+        db.session.commit()
+        return jsonify({
+            "ok": True, "agent": route_info["agent_name"],
+            "response": response,
+        })
+
+
 @app.route("/api/admin/debug/exec", methods=["POST"])
 @admin_required
 def api_admin_debug_exec():
