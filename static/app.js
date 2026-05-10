@@ -224,6 +224,184 @@ function isBodyweightExercise(name, note) {
   return false;
 }
 
+// ── PER-EXERCISE WHY (planning HTML cards) ──
+// Deterministic 1-sentence rationale tied to exercise role + delta + phase.
+// No model call — pure mapping. Drives the per-row italic blurb under each
+// exercise on the weekly-planning day card.
+var _ROLE_PATTERNS = [
+  { re: /barbell back squat|front squat|deadlift|bench press|overhead press/i, role: 'main_compound' },
+  { re: /power clean|hang clean|snatch|clean and jerk/i, role: 'oly' },
+  { re: /box jump|broad jump|depth jump/i, role: 'plyo' },
+  { re: /bulgarian|split squat|lunge|step.up|pistol/i, role: 'unilateral_leg' },
+  { re: /romanian deadlift|stiff.leg|good morning|hip thrust|glute bridge/i, role: 'posterior_chain' },
+  { re: /pull.up|chin.up|lat pulldown|row(?!ing)/i, role: 'pull' },
+  { re: /face pull|rear delt|reverse fly|band pull.apart/i, role: 'rear_delt' },
+  { re: /lateral raise|side raise/i, role: 'lateral_delt' },
+  { re: /curl(?!.up)|preacher|hammer curl/i, role: 'biceps' },
+  { re: /pushdown|tricep|skullcrush|dip(?!s)/i, role: 'triceps' },
+  { re: /chest fly|cable fly|pec deck|chest cross/i, role: 'chest_iso' },
+  { re: /leg curl|hamstring curl/i, role: 'hamstring_iso' },
+  { re: /leg extension|quad extension/i, role: 'quad_iso' },
+  { re: /calf raise|calf press/i, role: 'calf' },
+  { re: /pallof|anti.rotat|woodchop|farmers/i, role: 'anti_rotation' },
+  { re: /plank|hollow|dead bug|hanging leg|ab wheel|crunch|sit.up|bird dog/i, role: 'core' },
+  { re: /run|sprint|tempo|interval/i, role: 'run' },
+];
+
+function _exerciseRole(name) {
+  if (!name) return 'accessory';
+  for (var i = 0; i < _ROLE_PATTERNS.length; i++) {
+    if (_ROLE_PATTERNS[i].re.test(name)) return _ROLE_PATTERNS[i].role;
+  }
+  return 'accessory';
+}
+
+function _isDeloadWeek(week) { return week === 4 || week === 8; }
+
+function exerciseWhy(name, ex, prev, week) {
+  var role = _exerciseRole(name);
+  var deload = _isDeloadWeek(week);
+  // Determine delta direction
+  var delta = 'hold';
+  if (deload) {
+    delta = 'deload';
+  } else if (prev && prev.weight && ex.target_weight) {
+    var dw = ex.target_weight - prev.weight;
+    var dr = (parseInt(ex.reps) || 0) - (parseInt(prev.reps) || 0);
+    if (dw > 0) delta = 'up_weight';
+    else if (dw < 0) delta = 'down_weight';
+    else if (dr > 0) delta = 'up_reps';
+    else if (dr < 0) delta = 'down_reps';
+  } else if (ex.target_weight && (!prev || !prev.weight)) {
+    delta = 'establish';
+  }
+
+  // Role × delta → reason. Default: short generic accessory line.
+  var WHY = {
+    main_compound: {
+      up_weight: 'Strength anchor — moving the ceiling holds lean mass under the cut.',
+      hold: 'Top-set holds while accessories progress around it. Pattern lock.',
+      up_reps: 'Volume bump on the same load — earns the next weight jump.',
+      down_weight: 'Pulled back vs last week — recovery or technique reset.',
+      deload: 'Deload — 70-85% of working weight to clear fatigue before next phase.',
+      establish: 'Setting the working weight. Confirm RPE 7 before bumping.',
+    },
+    oly: {
+      up_weight: 'Power output bump — speed off the floor matters more than load here.',
+      hold: 'Technique-priority — refining bar path before adding weight.',
+      deload: 'Lighter speed work — keep the pattern crisp, drop intensity.',
+      establish: 'Build the position first. Speed > load until the catch is clean.',
+    },
+    plyo: {
+      up_weight: 'CNS primer — explosive opener for the heavy lower work that follows.',
+      up_reps: 'CNS primer — more contacts, same intent: snap off the ground.',
+      hold: 'CNS primer for the heavy lower session.',
+      deload: 'Reduced volume — keep the spring without the fatigue.',
+      establish: 'CNS primer. Quality over quantity — every rep should be max-intent.',
+    },
+    unilateral_leg: {
+      up_weight: 'Single-leg strength — defends hips and corrects asymmetries while the cut runs.',
+      hold: 'Unilateral pattern lock — preserves single-leg strength while bilateral lifts progress.',
+      up_reps: 'More volume per side — durability work before the load comes back up.',
+      deload: 'Deload — drop load, keep the pattern.',
+      establish: 'Single-leg baseline. Match left and right within 1 rep.',
+    },
+    posterior_chain: {
+      up_weight: 'Posterior chain volume — protects the squat and locks in hamstring/glute strength.',
+      hold: 'Hinge pattern lock at RPE 7 — recomp anchor as waist tightens and hips hold.',
+      up_reps: 'Hinge volume up — building the engine for the next strength block.',
+      deload: 'Deload — preserve the pattern, drop the load.',
+      establish: 'Hinge baseline. Hips back, neutral spine, RPE 7.',
+    },
+    pull: {
+      up_weight: 'Pulling strength — back size + posture, supports every press.',
+      hold: 'Pull volume held — back doesn\'t need a bump every week.',
+      up_reps: 'More reps — earning the next weight bump on pulls.',
+      deload: 'Deload — back recovers, set up for the next progression.',
+      establish: 'Set the working pull weight. Lats first, biceps last.',
+    },
+    rear_delt: {
+      up_weight: 'Rear-delt detail — keeps shoulders healthy under heavy press volume.',
+      hold: 'Posture work — keeps the rear delts firing while bigger lifts progress.',
+      up_reps: 'More volume on rear delts — small accessory, big posture impact.',
+      deload: 'Deload — light maintenance for rear delts.',
+      establish: 'Rear delts and external rotators — set a sustainable weight.',
+    },
+    lateral_delt: {
+      up_weight: 'Shoulder cap volume — small accessories never get more than 2.5 lb at a time.',
+      hold: 'Lateral raise hold — accessory progression is slow by design.',
+      up_reps: 'More reps — earning the next 2.5 lb bump.',
+      deload: 'Deload — light shoulder maintenance.',
+      establish: 'Lateral raise baseline. Light, controlled, no swing.',
+    },
+    biceps: {
+      up_weight: 'Biceps volume — supports pulls and adds arm size during recomp.',
+      hold: 'Biceps hold — small accessory, slow progression.',
+      up_reps: 'More volume — building before the next weight bump.',
+      deload: 'Deload — light arm maintenance.',
+      establish: 'Biceps baseline. Strict form > load.',
+    },
+    triceps: {
+      up_weight: 'Triceps volume — drives pressing strength and arm size.',
+      hold: 'Triceps hold — accessory progression is slow.',
+      up_reps: 'More volume — earning the next jump.',
+      deload: 'Deload — light maintenance.',
+      establish: 'Triceps baseline. Lock out clean, no momentum.',
+    },
+    chest_iso: {
+      up_weight: 'Chest detail volume — supports bench progression and adds upper-body size.',
+      hold: 'Chest fly hold — main pressing carries the week.',
+      up_reps: 'More volume — pec hypertrophy stimulus.',
+      deload: 'Deload — light chest maintenance.',
+      establish: 'Chest fly baseline. Stretch the pec, no shoulder roll.',
+    },
+    hamstring_iso: {
+      up_weight: 'Hamstring isolation — knee health and posterior chain detail.',
+      hold: 'Hamstring hold — accessory.',
+      up_reps: 'More volume — hamstring durability.',
+      deload: 'Deload — light maintenance.',
+      establish: 'Hamstring baseline. Slow eccentric.',
+    },
+    quad_iso: {
+      up_weight: 'Quad isolation — knee health and quad detail.',
+      hold: 'Quad iso hold — main lower work carries the load.',
+      up_reps: 'More volume — quad hypertrophy.',
+      deload: 'Deload — light maintenance.',
+      establish: 'Quad baseline. Squeeze at the top.',
+    },
+    calf: {
+      up_weight: 'Calf volume — small driver, big aesthetic and ankle health payoff.',
+      hold: 'Calf hold.',
+      up_reps: 'More volume — calf hypertrophy.',
+      deload: 'Deload — light.',
+      establish: 'Calf baseline.',
+    },
+    anti_rotation: {
+      up_weight: 'Anti-rotation core — protects the spine under loaded carries and unilateral work.',
+      hold: 'Core anti-rotation hold — protects every other lift.',
+      up_reps: 'More volume — building deep-core endurance.',
+      deload: 'Deload — light core.',
+      establish: 'Anti-rotation baseline. Brace, don\'t crunch.',
+    },
+    core: {
+      hold: 'Core volume — keeps the trunk strong under everything else.',
+      up_reps: 'More volume — building core endurance.',
+      deload: 'Deload — light core work.',
+      establish: 'Core baseline. Quality contractions.',
+      up_weight: 'Loaded core — supports heavy compound work.',
+    },
+    accessory: {
+      up_weight: 'Accessory bump — small driver of overall progression.',
+      hold: 'Accessory hold — main lifts carry the week.',
+      up_reps: 'More volume — building before the next weight jump.',
+      deload: 'Deload — light maintenance.',
+      establish: 'Accessory baseline.',
+    },
+  };
+  var byRole = WHY[role] || WHY.accessory;
+  return byRole[delta] || byRole.hold || '';
+}
+
 // ── STATS PANEL: CLIENT-SIDE FORMULAS ──
 
 /**
@@ -9263,7 +9441,12 @@ async function launchWeeklyPlanning(weekOverride) {
             var _displayExName = _planSwaps[_swapKey] || _ex.exercise;
             _exIdxInDay++;
 
-            _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _displayExName + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + (_displayExName !== _ex.exercise ? ' <span style="color:var(--muted)">(swapped)</span>' : '') + _changeHtml + '</div>';
+            // Per-exercise WHY: deterministic, goal-tied. Generated client-side
+            // from exercise name + delta direction so each row tells the athlete
+            // why the engine made the call (not just "+5 lb").
+            var _why = exerciseWhy(_displayExName, _ex, _prev, nextWeek);
+            var _whyHtml = _why ? '<div style="padding:0 0 4px 12px;font-size:12px;color:var(--muted);line-height:1.4;font-style:italic">' + _why + '</div>' : '';
+            _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _displayExName + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + (_displayExName !== _ex.exercise ? ' <span style="color:var(--muted)">(swapped)</span>' : '') + _changeHtml + '</div>' + _whyHtml;
         }
         if (_curDay >= 0) { _dayHtmlBlocks[_curDay] = _dayHtml; }
     }
