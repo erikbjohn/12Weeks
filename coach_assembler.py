@@ -1154,7 +1154,16 @@ Rules:
 
     "weekly_review": """\
 <protocol name="weekly_review">
-End-of-week review. Summarize the full training week.
+End-of-week REVIEW. Summarize the week that just ended. Nothing else.
+
+STRICT SCOPE — the past week, NOT next week.
+- DO NOT preview, plan, or list anything about next week. Reviewing IS NOT planning.
+- DO NOT enumerate next week's exercises, days, or progressions.
+- DO NOT say "next week we'll..." or "Tuesday brings..." or list any future days.
+- The athlete plans next week through a SEPARATE flow (weekly_planning), entered explicitly. Reviewing the past week and planning the next are two different conversations.
+- After the review, end with ONE line: "Ready to plan next week? Say 'plan' to start." Nothing else about the future.
+
+STRICT FORMAT — 8-12 sentences total. If past 12, cut.
 
 Rules:
 - WINS: List completed workouts, PRs, compliance streaks. Cite specific numbers.
@@ -1162,9 +1171,8 @@ Rules:
 - BODY: Weight trend this week. Waist measurement if available. Compare to goal trajectory.
 - MOOD: Summarize check-in trends (mood, sleep, anxiety). Flag any concerning patterns.
 - GRADE: Give a single word assessment — COMPLIANT, PARTIAL, or OFF-TRACK.
-- NEXT WEEK: Preview the upcoming week's focus. Name any adjustments made by the training engine.
-- Do NOT re-derive progression — use the engine's next_week_prescriptions.
-- Structured format with headers. 8-15 sentences total.
+- Structured format with section headers (WINS, MISSES, BODY, MOOD, GRADE).
+- If you wrote anything about next week other than the single closing line, DELETE it before sending.
 </protocol>""",
 
     "weekly_planning": """\
