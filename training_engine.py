@@ -375,7 +375,12 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     if prior_logged_name and prior_logged_name != exercise_name:
         scale = _equipment_swap_factor(prior_logged_name, exercise_name)
         if scale != 1.0 and scale > 0:
-            scaled = _round_weight(last_weight / scale)
+            # MULTIPLY by scale, not divide. scale_for_swap returns the
+            # ratio of "current equipment weight" to "prior equipment weight"
+            # (e.g. barbell→DB = 0.7: DBs handle 70% of bar weight per hand).
+            # Previous code divided, producing 135/0.7 = 195 lb DB bench
+            # equivalents from a 135 lb barbell — physically impossible.
+            scaled = _round_weight(last_weight * scale)
             configured_reps_at_swap = _get_configured_reps(
                 exercise_name, week, day_idx, exercise_order,
             )
@@ -389,7 +394,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
                 "adjustment_reason": (
                     f"Equipment swap: last logged as {prior_logged_name} "
                     f"@ {last_weight} lb. Scaled to {scaled} lb for "
-                    f"{exercise_name} (factor {round(1/scale, 2)}x). "
+                    f"{exercise_name} (factor {round(scale, 2)}x). "
                     f"Confirm at RPE before bumping."
                 ),
                 "progression_indicator": "establish",
