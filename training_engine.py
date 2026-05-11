@@ -314,8 +314,14 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     if _is_peak_week(week):
         last_date = last_sets[0].logged_date
         session_sets = [s for s in last_sets if s.logged_date == last_date]
-        last_weight = session_sets[0].weight if session_sets else 0
-        last_reps = session_sets[0].reps if session_sets else 0
+        # Use the TOP set of the last session, not the first set. The first
+        # set is often a warmup (e.g. ramp 130 → 140 → 145 → 145); reading
+        # session_sets[0] in that case gives 130 as "last_weight" and the
+        # engine then prescribes BELOW the athlete's proven top.
+        last_weight = max((s.weight for s in session_sets), default=0) if session_sets else 0
+        # Reps from the top-set row (the heaviest sustained load)
+        _top_row = max(session_sets, key=lambda s: s.weight, default=None) if session_sets else None
+        last_reps = _top_row.reps if _top_row else 0
         last_set_count = len(session_sets)
         configured_reps = _get_configured_reps(
             exercise_name, week, day_idx, exercise_order,
@@ -344,8 +350,14 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     # Get the most recent session's data
     last_date = last_sets[0].logged_date
     session_sets = [s for s in last_sets if s.logged_date == last_date]
-    last_weight = session_sets[0].weight if session_sets else 0
-    last_reps = session_sets[0].reps if session_sets else 0
+    # TOP SET of the last session (not the first). The first set is often
+    # a warmup ramp (130 → 140 → 145 → 145); reading session_sets[0] in
+    # that case underestimates last_weight and the engine prescribes BELOW
+    # the athlete's proven ceiling. The whole regression-cascade Erik hit
+    # starts here. Anchor on what they actually proved they could lift.
+    last_weight = max((s.weight for s in session_sets), default=0) if session_sets else 0
+    _top_row = max(session_sets, key=lambda s: s.weight, default=None) if session_sets else None
+    last_reps = _top_row.reps if _top_row else 0
     last_set_count = len(session_sets)
 
     # ─── EQUIPMENT-SWAP RESCALE ───
@@ -398,7 +410,11 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     # but the user was prescribed 110 and lifted 110, it was wrongly flagged as "decreased".
     # Now we compare against what they actually lifted in the prior session.
     prev_session_sets = [s for s in last_sets if s.logged_date != last_date]
-    prev_weight = prev_session_sets[0].weight if prev_session_sets else None
+    # Top set of the PREVIOUS session (the one before last). Same reasoning
+    # as last_weight above — first set is often a warmup.
+    prev_weight = (
+        max(s.weight for s in prev_session_sets) if prev_session_sets else None
+    )
     user_increased = prev_weight is not None and last_weight > prev_weight * 1.02
     user_decreased = prev_weight is not None and last_weight < prev_weight * 0.95
     sets_skipped = sum(1 for s in session_sets if getattr(s, 'set_skipped', False))
