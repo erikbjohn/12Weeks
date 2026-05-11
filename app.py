@@ -3502,6 +3502,50 @@ def api_generate_weekly_program():
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
 
+    # ─── STRENGTH-COACH PRESCRIBED WEIGHTS ───
+    # Build the template program once, hand it to the strength coach to
+    # set the weights. Engine becomes fallback only when the coach fails.
+    # This is the architectural shift Erik asked for: the agents he's paying
+    # for write the prescription, not deterministic engine rules.
+    _coach_pre_program = []
+    for _di in range(7):
+        for _ord, _ex in enumerate(auto_swap_workout(
+            [{"name": resolve_name(e["exercise"]),
+              "sets": e.get("sets"),
+              "reps": e.get("reps"),
+              "rest": e.get("rest", "60s"),
+              "note": e.get("note", "")} for e in template.get(_di, [])],
+            user_equipment,
+        )):
+            _coach_pre_program.append({
+                "day": _di, "exercise_order": _ord,
+                "exercise": _ex["name"],
+                "sets": _ex.get("sets") or 3,
+                "reps": _ex.get("reps") or "10",
+            })
+    _coach_weights = {}
+    try:
+        from coach_planning_prescribe import generate_week_prescriptions
+        _goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+        _bw = (BodyWeight.query.filter_by(user_id=current_user.id)
+               .order_by(BodyWeight.log_date.desc()).first())
+        _coach_weights = generate_week_prescriptions(
+            user_id=current_user.id,
+            week=target_week,
+            template_program=_coach_pre_program,
+            user_context={
+                "phase": phase,
+                "deload": target_week in (4, 8),
+                "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
+                "current_weight": _bw.weight_lbs if _bw else None,
+                "target_weight": _goal.target_weight if _goal else None,
+                "weeks_remaining": max(0, 12 - target_week + 1),
+            },
+        )
+    except Exception as _e:
+        import logging
+        logging.warning("strength-coach prescription failed, falling back to engine: %s", _e)
+
     for day_idx in range(7):
         raw_exercises = template.get(day_idx, [])
         # Convert template format to name-based format for auto_swap
@@ -3514,14 +3558,21 @@ def api_generate_weekly_program():
             base_rest = ex_sw.get('rest', '60s')
             base_note = ex_sw.get('note', '')
 
-            # Run training engine for this exercise
+            # Coach-prescribed weight first; engine as fallback.
+            coach_weight = _coach_weights.get((day_idx, exercise_name, order))
             try:
                 targets = compute_next_targets(
                     current_user.id, exercise_name, target_week, day_idx,
                     exercise_order=order,
                 )
-                if targets.get('target_weight'):
-                    # Engine has a recommendation
+                if coach_weight is not None and coach_weight > 0:
+                    adjusted_reps = str(targets.get('target_reps', base_reps)) if targets else base_reps
+                    adjusted_sets = (targets.get('target_sets') if targets else None) or base_sets
+                    weight = coach_weight
+                    reason = "Coach-prescribed"
+                    note = base_note
+                    source = 'coach'
+                elif targets.get('target_weight'):
                     adjusted_reps = str(targets.get('target_reps', base_reps))
                     adjusted_sets = targets.get('target_sets', base_sets)
                     reason = targets.get('adjustment_reason', '')
@@ -3539,9 +3590,9 @@ def api_generate_weekly_program():
                 adjusted_reps = base_reps
                 adjusted_sets = base_sets
                 note = base_note
-                weight = None
-                reason = None
-                source = 'template'
+                weight = coach_weight if (coach_weight is not None and coach_weight > 0) else None
+                reason = "Coach-prescribed" if weight else None
+                source = 'coach' if weight else 'template'
 
             # ENGINE-LEVEL REGRESSION GUARD: never write target_weight below
             # the user's top set in the last 4 weeks unless this is an
