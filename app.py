@@ -3416,6 +3416,7 @@ def api_generate_weekly_program():
     """Generate personalized weekly program using training engine + deficit plan."""
     data = request.get_json() or {}
     target_week = data.get("week", _current_week() + 1)
+    force_regen = bool(data.get("force_regen"))
 
     # Don't overwrite coach-modified prescriptions or past-week training
     # history — BUT still return the existing program so the planning UI can
@@ -3423,12 +3424,28 @@ def api_generate_weekly_program():
     # "message" stub with no `program` field, leaving _planDayBlocks empty
     # in the client and the HTML cards never appeared. Read the existing
     # rows and serialize them.
-    existing_coach = WeeklyPrescription.query.filter_by(
-        user_id=current_user.id, week=target_week, source='coach'
-    ).first()
-    has_history = SetLog.query.filter_by(
-        user_id=current_user.id, week=target_week, done=True,
-    ).first()
+    #
+    # force_regen=true skips the guard. Deletes the existing coach-source
+    # rows for this week and runs the full coach pipeline (strength,
+    # running, nutrition) fresh. Use when the user explicitly asks to
+    # re-plan with the agents.
+    if force_regen:
+        WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=target_week,
+        ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))).delete()
+        WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=target_week,
+        ).filter(WeeklyRunPlan.source.in_(('coach', 'engine'))).delete()
+        db.session.commit()
+        existing_coach = None
+        has_history = None
+    else:
+        existing_coach = WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=target_week, source='coach'
+        ).first()
+        has_history = SetLog.query.filter_by(
+            user_id=current_user.id, week=target_week, done=True,
+        ).first()
     if existing_coach or has_history:
         rows = WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=target_week,
