@@ -3318,6 +3318,87 @@ def api_prescription_seed():
     return jsonify({"seeded": count, "week": week})
 
 
+def _enrich_program_with_whys(user_id, target_week, program, run_summary):
+    """Generate per-exercise WHY blurbs via strength-coach agent, persist into
+    WeeklyPrescription.adjustment_reason, and overwrite program[i]['reason']
+    so the client renders them directly. Best-effort: on failure the existing
+    reasons stay in place (and the client falls back to the deterministic
+    exerciseWhy mapping).
+
+    Skips exercises that already have a non-engine-default reason — the
+    coach-generated WHY only fills in once. Re-run /api/weekly-program/generate
+    to refresh after structural changes.
+    """
+    from coach_planning_why import generate_week_whys
+    # Build user_context
+    try:
+        goal = TrainingGoal.query.filter_by(user_id=user_id).first()
+        bw = (BodyWeight.query.filter_by(user_id=user_id)
+              .order_by(BodyWeight.log_date.desc()).first())
+        from workout_data import get_phase
+        phase = get_phase(target_week)
+        user_context = {
+            "phase": phase,
+            "deload": target_week in (4, 8),
+            "goal_type": goal.goal_type if goal and goal.goal_type else "recomp",
+            "current_weight": bw.weight_lbs if bw else None,
+            "target_weight": goal.target_weight if goal else None,
+            "weeks_remaining": max(0, 12 - target_week + 1),
+        }
+    except Exception:
+        user_context = {"phase": "?", "deload": False, "goal_type": "recomp"}
+
+    # Enrich each program entry with prev_weight and is_bw before sending
+    def _last_session_weight(exercise_name):
+        s = (SetLog.query.filter_by(
+                user_id=user_id, exercise_name=exercise_name,
+            ).filter(SetLog.weight > 0)
+            .order_by(SetLog.logged_date.desc(), SetLog.set_number.desc())
+            .first())
+        return s.weight if s else None
+
+    from workout_data import EXERCISES, resolve_name
+    enriched = []
+    for ex in program:
+        info = EXERCISES.get(resolve_name(ex.get("exercise", ""))) or {}
+        enriched.append({
+            **ex,
+            "tracked_metric": ex.get("tracked_metric") or info.get("tracked_metric"),
+            "muscle_group": ex.get("muscle_group") or info.get("muscle_group"),
+            "category": ex.get("category") or info.get("category"),
+            "prev_weight": _last_session_weight(ex.get("exercise", "")),
+            "is_bw": info.get("category") == "bodyweight" or info.get("tracked_metric") == "bodyweight",
+        })
+
+    whys = generate_week_whys(
+        user_id=user_id, week=target_week,
+        program=enriched, user_context=user_context,
+        run_summary=run_summary,
+    )
+    if not whys:
+        return  # LLM failed; leave existing reasons alone
+
+    # Persist into WeeklyPrescription.adjustment_reason and write back to program
+    for ex in program:
+        key = (ex.get("day"), ex.get("exercise"))
+        why = whys.get(key)
+        if not why:
+            continue
+        ex["why"] = why
+        # Also update the DB row so subsequent fetches return it
+        try:
+            WeeklyPrescription.query.filter_by(
+                user_id=user_id, week=target_week,
+                day_idx=ex.get("day"), exercise_name=ex.get("exercise"),
+            ).update({"adjustment_reason": why})
+        except Exception:
+            pass
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 @app.route("/api/weekly-program/generate", methods=["POST"])
 @login_required
 def api_generate_weekly_program():
@@ -3372,6 +3453,9 @@ def api_generate_weekly_program():
             "label": r.label,
             "duration": r.duration,
         } for r in runs]
+        _enrich_program_with_whys(
+            current_user.id, target_week, program, run_summary,
+        )
         return jsonify({
             "message": "Existing prescriptions returned (not regenerated)",
             "week": target_week,
@@ -3854,6 +3938,10 @@ def api_generate_weekly_program():
         }
     except Exception:
         calorie_change = None
+
+    _enrich_program_with_whys(
+        current_user.id, target_week, program_summary, run_summary,
+    )
 
     return jsonify({
         "week": target_week,

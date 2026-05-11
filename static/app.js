@@ -9464,10 +9464,14 @@ async function launchWeeklyPlanning(weekOverride) {
             var _displayExName = _planSwaps[_swapKey] || _ex.exercise;
             _exIdxInDay++;
 
-            // Per-exercise WHY: deterministic, goal-tied. Generated client-side
-            // from exercise name + delta direction so each row tells the athlete
-            // why the engine made the call (not just "+5 lb").
-            var _why = exerciseWhy(_displayExName, _ex, _prev, nextWeek);
+            // Per-exercise WHY: prefer the strength-coach agent's reason
+            // (server-side, peer-aware, generated at planning time). Falls
+            // back to the deterministic client-side mapping only when the
+            // server didn't return one. The deterministic fallback exists
+            // because it can't see peer state and will lie when the whole
+            // day is holding ("anchor while accessories progress" — when
+            // nothing's progressing).
+            var _why = _ex.why || _ex.reason || exerciseWhy(_displayExName, _ex, _prev, nextWeek);
             var _whyHtml = _why ? '<div style="padding:0 0 4px 12px;font-size:12px;color:var(--muted);line-height:1.4;font-style:italic">' + _why + '</div>' : '';
             _dayHtml += '<div style="padding:2px 0;font-size:14px">- ' + _displayExName + ': ' + _ex.sets + '×' + _ex.reps + ' @ ' + _wt + (_displayExName !== _ex.exercise ? ' <span style="color:var(--muted)">(swapped)</span>' : '') + _changeHtml + '</div>' + _whyHtml;
         }
