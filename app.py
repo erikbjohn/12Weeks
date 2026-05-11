@@ -3792,6 +3792,45 @@ def api_generate_weekly_program():
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"
 
+        # ─── NUTRITIONIST PRESCRIBES PER-DAY MACROS ───
+        # Read the workout pattern + weight trend + recent meal plans, return
+        # per-day day_type + calories + macros. meal_generator then builds
+        # actual foods to fit. Engine fallback handles when LLM fails.
+        _nutri_day_overrides = {}
+        try:
+            from coach_planning_meals import generate_week_meals
+            _workout_pattern = {d: day_types[d] for d in range(7)}
+            _nutri_day_overrides = generate_week_meals(
+                user_id=current_user.id,
+                week=target_week,
+                workout_pattern=_workout_pattern,
+                user_context={
+                    "goal_type": goal.goal_type if goal else "cut",
+                    "current_weight": current_weight,
+                    "target_weight": goal.target_weight if goal else None,
+                    "weeks_remaining": max(0, 12 - target_week + 1),
+                    "tdee": base_calories,
+                    "fasting_protocol": fasting_protocol,
+                },
+            )
+            # Let the nutritionist override day_type when it has a strong reason
+            for _di, _v in _nutri_day_overrides.items():
+                if _v.get("day_type"):
+                    # Map agent's free-form day_type back to system day types
+                    _agent_type = _v["day_type"].lower()
+                    _mapped = (
+                        "heavy_lift" if "heavy" in _agent_type
+                        else "long_run" if "long" in _agent_type or "run" in _agent_type
+                        else "fast_day" if "fast" in _agent_type
+                        else "moderate" if "moderate" in _agent_type or "training" in _agent_type
+                        else "rest"
+                    )
+                    if 0 <= _di < 7:
+                        day_types[_di] = _mapped
+        except Exception as _e:
+            import logging
+            logging.warning("nutritionist failed, engine day_types kept: %s", _e)
+
         # Delete existing non-coach meal plans for this week
         WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=target_week
@@ -3872,12 +3911,60 @@ def api_generate_weekly_program():
             user_id=current_user.id, week=target_week
         ).filter(WeeklyRunPlan.source != 'coach').delete()
 
+        # ─── RUNNING COACH PRESCRIBES THE WEEK ───
+        # Hand the template runs to the running coach; engine is fallback.
+        _template_runs = []
+        for _di in range(7):
+            _tr = template_days[_di].get("run") if _di < len(template_days) else None
+            if _tr:
+                _template_runs.append({
+                    "day": _di,
+                    "type": _tr.get("type"),
+                    "label": _tr.get("label"),
+                    "duration": _tr.get("time") or _tr.get("duration"),
+                })
+        _coach_runs = {}
+        try:
+            from coach_planning_runs import generate_week_runs
+            _coach_runs = generate_week_runs(
+                user_id=current_user.id,
+                week=target_week,
+                template_runs=_template_runs,
+                user_context={
+                    "phase": phase,
+                    "deload": target_week in (4, 8),
+                    "goal_type": (TrainingGoal.query.filter_by(user_id=current_user.id).first().goal_type
+                                  if TrainingGoal.query.filter_by(user_id=current_user.id).first() else "recomp"),
+                    "current_weight": (BodyWeight.query.filter_by(user_id=current_user.id)
+                                       .order_by(BodyWeight.log_date.desc()).first().weight_lbs
+                                       if BodyWeight.query.filter_by(user_id=current_user.id).first() else None),
+                    "target_weight": (TrainingGoal.query.filter_by(user_id=current_user.id).first().target_weight
+                                      if TrainingGoal.query.filter_by(user_id=current_user.id).first() else None),
+                    "target_weekly_miles": 35,
+                },
+            )
+        except Exception as _e:
+            import logging
+            logging.warning("running-coach failed, engine fallback: %s", _e)
+
         for day_idx in range(7):
             template_run = template_days[day_idx].get("run") if day_idx < len(template_days) else None
             if not template_run:
                 continue
 
-            progressed = _generate_run_plan(current_user.id, target_week, day_idx, template_run)
+            # Prefer coach's run prescription; engine fallback
+            coach_run = _coach_runs.get(day_idx)
+            if coach_run:
+                progressed = {
+                    "type": coach_run["type"],
+                    "label": coach_run["label"],
+                    "time": coach_run["duration"],
+                    "detail": coach_run["detail"],
+                }
+                run_source = 'coach'
+            else:
+                progressed = _generate_run_plan(current_user.id, target_week, day_idx, template_run)
+                run_source = 'engine'
 
             db.session.add(WeeklyRunPlan(
                 user_id=current_user.id,
@@ -3887,7 +3974,7 @@ def api_generate_weekly_program():
                 label=progressed.get('label', 'Run'),
                 duration=progressed.get('time', '30 min'),
                 detail=progressed.get('detail', ''),
-                source='engine',
+                source=run_source,
             ))
 
             run_summary.append({
