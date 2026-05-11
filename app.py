@@ -3592,7 +3592,12 @@ def api_generate_weekly_program():
     _nutri_ctx["fasting_protocol"] = _goal.fasting_protocol if _goal else "16_8"
 
     _runs_ctx = dict(_common_ctx)
-    _runs_ctx["target_weekly_miles"] = 35
+    # Pull the user's target weekly miles from TrainingGoal if set, else
+    # default to 40 (Erik's training goal — was hardcoded to 35 before,
+    # which made the running coach under-prescribe by ~5 mi/week).
+    _runs_ctx["target_weekly_miles"] = (
+        getattr(_goal, 'target_weekly_miles', None) or 40
+    )
 
     # Fire in parallel
     import concurrent.futures as _cf
