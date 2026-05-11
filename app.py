@@ -3623,32 +3623,48 @@ def api_generate_weekly_program():
     from coach_planning_runs import generate_week_runs as _gen_runs
     from coach_planning_meals import generate_week_meals as _gen_meals
 
+    # Capture user_id + the Flask app so the worker threads can re-enter
+    # the app context (SQLAlchemy queries inside the agent's history-block
+    # builders fail with "Working outside of application context"
+    # otherwise — same bug class as the SSE coach generator).
+    _flask_app = app
+    _captured_user_id = current_user.id
+
     def _call_strength():
         try:
-            return _gen_strength(
-                user_id=current_user.id, week=target_week,
-                template_program=_coach_pre_program, user_context=_common_ctx,
-            )
-        except Exception:
+            with _flask_app.app_context():
+                return _gen_strength(
+                    user_id=_captured_user_id, week=target_week,
+                    template_program=_coach_pre_program, user_context=_common_ctx,
+                )
+        except Exception as _exc:
+            import logging
+            logging.warning("strength-coach call exception: %s", _exc, exc_info=True)
             return {}
 
     def _call_runs():
         try:
-            return _gen_runs(
-                user_id=current_user.id, week=target_week,
-                template_runs=_template_runs_for_coach, user_context=_runs_ctx,
-            )
-        except Exception:
+            with _flask_app.app_context():
+                return _gen_runs(
+                    user_id=_captured_user_id, week=target_week,
+                    template_runs=_template_runs_for_coach, user_context=_runs_ctx,
+                )
+        except Exception as _exc:
+            import logging
+            logging.warning("running-coach call exception: %s", _exc, exc_info=True)
             return {}
 
     def _call_meals():
         try:
-            return _gen_meals(
-                user_id=current_user.id, week=target_week,
-                workout_pattern=_workout_pattern_for_nutri,
-                user_context=_nutri_ctx,
-            )
-        except Exception:
+            with _flask_app.app_context():
+                return _gen_meals(
+                    user_id=_captured_user_id, week=target_week,
+                    workout_pattern=_workout_pattern_for_nutri,
+                    user_context=_nutri_ctx,
+                )
+        except Exception as _exc:
+            import logging
+            logging.warning("nutritionist call exception: %s", _exc, exc_info=True)
             return {}
 
     _coach_weights = {}
