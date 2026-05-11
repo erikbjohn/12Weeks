@@ -3341,16 +3341,27 @@ def api_generate_weekly_program():
         rows = WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=target_week,
         ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
-        program = [{
-            "day": r.day_idx,
-            "exercise": r.exercise_name,
-            "sets": r.sets,
-            "reps": r.reps,
-            "target_weight": r.target_weight,
-            "reason": r.adjustment_reason,
-            "rest": r.rest,
-            "note": r.note,
-        } for r in rows]
+        # Inject tracked_metric from the EXERCISES catalog so the planning
+        # UI can render "in" for height-tracked plyometrics (Box Jump) and
+        # the deterministic exerciseWhy() helper can give a plyo-appropriate
+        # reason instead of a weight-based one.
+        from workout_data import EXERCISES, resolve_name
+        program = []
+        for r in rows:
+            info = EXERCISES.get(resolve_name(r.exercise_name)) or {}
+            program.append({
+                "day": r.day_idx,
+                "exercise": r.exercise_name,
+                "sets": r.sets,
+                "reps": r.reps,
+                "target_weight": r.target_weight,
+                "reason": r.adjustment_reason,
+                "rest": r.rest,
+                "note": r.note,
+                "tracked_metric": info.get("tracked_metric"),
+                "muscle_group": info.get("muscle_group"),
+                "category": info.get("category"),
+            })
         # Pull run plan rows too so the day cards include the run line
         runs = WeeklyRunPlan.query.filter_by(
             user_id=current_user.id, week=target_week,
@@ -3453,6 +3464,7 @@ def api_generate_weekly_program():
                 adjustment_reason=reason,
             ))
 
+            _ex_info = EXERCISES.get(exercise_name) or {}
             program_summary.append({
                 "day": day_idx,
                 "exercise": exercise_name,
@@ -3460,6 +3472,9 @@ def api_generate_weekly_program():
                 "reps": adjusted_reps,
                 "target_weight": weight,
                 "reason": reason if source == 'engine' else None,
+                "tracked_metric": _ex_info.get("tracked_metric"),
+                "muscle_group": _ex_info.get("muscle_group"),
+                "category": _ex_info.get("category"),
             })
 
     db.session.commit()

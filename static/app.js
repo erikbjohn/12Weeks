@@ -9407,33 +9407,54 @@ async function launchWeeklyPlanning(weekOverride) {
             var _swapKeyPre = nextWeek + '_' + _ex.day + '_' + _exIdxInDay;
             var _displayNameForWt = _planSwaps[_swapKeyPre] || _ex.exercise;
             var _prevForWt = lastWeekActual[_displayNameForWt] || lastWeekActual[_ex.exercise];
+            // Unit handling: height-tracked plyometrics (Box Jump) use "in",
+            // bodyweight exercises show "BW", everything else is lb. Without
+            // this Box Jump prescriptions showed "25lb" — the value is box
+            // height in inches, not pounds on the bar.
+            var _isHeight = _ex.tracked_metric === 'height';
+            var _isBW = isBodyweightExercise(_displayNameForWt, _ex.note);
+            var _unit = _isHeight ? 'in' : 'lb';
             var _wt;
-            if (_ex.target_weight) {
-                _wt = _ex.target_weight + 'lb';
-            } else if (isBodyweightExercise(_displayNameForWt, _ex.note)) {
+            if (_isBW) {
                 _wt = 'BW';
+            } else if (_ex.target_weight) {
+                _wt = _ex.target_weight + _unit;
             } else if (_prevForWt && _prevForWt.weight) {
-                _wt = _prevForWt.weight + 'lb';
+                _wt = _prevForWt.weight + _unit;
             } else {
                 _wt = '—';
             }
             var _prev = lastWeekActual[_ex.exercise];
             var _changeHtml = '';
-            if (_prev && _prev.weight && _ex.target_weight) {
+            if (_isBW) {
+                // Bodyweight: no weight delta — just show rep change if any
+                if (_prev && _prev.reps) {
+                    var _bwPrevReps = parseInt(_prev.reps) || 0;
+                    var _bwNewReps = parseInt(_ex.reps) || 0;
+                    if (_bwNewReps > _bwPrevReps) {
+                        _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _bwPrevReps + '→' + _bwNewReps + ')</span>';
+                    } else if (_bwNewReps < _bwPrevReps) {
+                        _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _bwPrevReps + '→' + _bwNewReps + ')</span>';
+                    } else {
+                        _changeHtml = '<span style="color:var(--muted)"> — HOLD (BW × ' + _prev.reps + ')</span>';
+                    }
+                }
+            } else if (_prev && _prev.weight && _ex.target_weight) {
                 var _dw = _ex.target_weight - _prev.weight;
                 var _prevReps = parseInt(_prev.reps) || 0;
                 var _newReps = parseInt(_ex.reps) || 0;
                 var _dr = _newReps - _prevReps;
+                var _changeWord = _isHeight ? 'height' : 'weight';
                 if (_dw > 0) {
-                    _changeHtml = '<span style="color:#4ade80"> — weight UP ' + _dw + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#4ade80"> — ' + _changeWord + ' UP ' + _dw + _unit + '</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dw < 0) {
-                    _changeHtml = '<span style="color:#ef4444"> — weight DOWN ' + Math.abs(_dw) + 'lb</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#ef4444"> — ' + _changeWord + ' DOWN ' + Math.abs(_dw) + _unit + '</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dr > 0) {
-                    _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dr < 0) {
-                    _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else {
-                    _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + 'lb × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 }
             } else if (_ex.reason) {
                 _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';
