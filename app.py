@@ -3592,12 +3592,30 @@ def api_generate_weekly_program():
     _nutri_ctx["fasting_protocol"] = _goal.fasting_protocol if _goal else "16_8"
 
     _runs_ctx = dict(_common_ctx)
-    # Pull the user's target weekly miles from TrainingGoal if set, else
-    # default to 40 (Erik's training goal — was hardcoded to 35 before,
-    # which made the running coach under-prescribe by ~5 mi/week).
-    _runs_ctx["target_weekly_miles"] = (
-        getattr(_goal, 'target_weekly_miles', None) or 40
-    )
+    # Target weekly mileage RAMPS through the build, not held flat. 40 is
+    # the floor (Phase 2 base). For 12-week race-prep:
+    #   P1 (wk 1-4):  ramp 25 → 35
+    #   P2 (wk 5-8):  ramp 38 → 45, deload to 30 on wk 8
+    #   P3 (wk 9-12): peak 45 → 48, taper to 35 on wk 12
+    # Use TrainingGoal.target_weekly_miles when set as the wk-11 PEAK
+    # target; ramp around it. Erik's 40-floor complaint: 40 was being
+    # used as a flat target instead of a ramp anchor.
+    _peak_miles = float(getattr(_goal, 'target_weekly_miles', None) or 48)
+    _peak_miles = max(_peak_miles, 40)  # never under 40 for race prep
+    if target_week == 8 or target_week == 4:
+        _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.62)  # deload ~30
+    elif target_week == 12:
+        _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.73)  # taper ~35
+    elif target_week >= 11:
+        _runs_ctx["target_weekly_miles"] = round(_peak_miles)         # peak
+    elif target_week >= 9:
+        _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.94)  # ~45
+    elif target_week >= 5:
+        # P2: ramp 38 → 42 (Erik's window now)
+        _runs_ctx["target_weekly_miles"] = round(38 + (target_week - 5) * 2)
+    else:
+        # P1: ramp 25 → 35
+        _runs_ctx["target_weekly_miles"] = round(25 + (target_week - 1) * 3)
 
     # Fire in parallel
     import concurrent.futures as _cf
