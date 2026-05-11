@@ -3324,12 +3324,23 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary):
     so the client renders them directly. Best-effort: on failure the existing
     reasons stay in place (and the client falls back to the deterministic
     exerciseWhy mapping).
-
-    Skips exercises that already have a non-engine-default reason — the
-    coach-generated WHY only fills in once. Re-run /api/weekly-program/generate
-    to refresh after structural changes.
     """
     from coach_planning_why import generate_week_whys
+
+    # Skip the LLM call entirely when every row already has a long-form
+    # coach reason. The engine writes short adjustment_reason strings like
+    # "Strength phase — +5.0 lb"; the coach-agent ones are typically >40
+    # chars and contain context words. If every program row already has a
+    # reason >= 40 chars (likely agent-generated), just return what's stored.
+    if program and all(
+        ex.get("reason") and len(str(ex.get("reason"))) >= 40
+        for ex in program
+    ):
+        # Sync the program list with the stored reasons (already happens via
+        # SQL on the row read, but be explicit so the client sees it).
+        for ex in program:
+            ex["why"] = ex.get("reason")
+        return
     # Build user_context
     try:
         goal = TrainingGoal.query.filter_by(user_id=user_id).first()

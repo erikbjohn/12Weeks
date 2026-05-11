@@ -1061,6 +1061,7 @@ function stripCoachMarkers(text) {
     .replace(/\s{2,}/g, ' ').trim();
 }
 
+// cache-buster bump 2026-05-10/v2 — force phone re-fetch for planning WHYs
 function renderCoachMarkdown(text) {
   var clean = stripCoachMarkers(text);
   // Unescape literal \n sequences (from SSE transport)
