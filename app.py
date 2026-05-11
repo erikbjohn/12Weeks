@@ -63,6 +63,16 @@ db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
 db_url = db_url.replace("postgres://", "postgresql://")
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Long-running LLM calls during the planning endpoint (4 Sonnet calls,
+# 30-60s total) were causing the DB connection to die mid-request
+# ("SSL SYSCALL error: EOF detected"). pool_pre_ping checks each
+# connection before use and reconnects if dead; pool_recycle forces
+# reconnect after the connection has been open for N seconds, beating
+# Postgres' tcp_keepalives_idle.
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+}
 db.init_app(app)
 
 # Flask-Login
