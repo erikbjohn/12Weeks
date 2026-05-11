@@ -3543,6 +3543,33 @@ def api_generate_weekly_program():
                 reason = None
                 source = 'template'
 
+            # ENGINE-LEVEL REGRESSION GUARD: never write target_weight below
+            # the user's top set in the last 4 weeks unless this is an
+            # explicit deload week (4 or 8). The engine's first-set bias
+            # (last_weight = session_sets[0].weight) can prescribe below
+            # the user's proven top set when they ramp into heavy sets.
+            # Floor at the recent top so the wave never asks for less than
+            # what the athlete has already proven.
+            if (
+                weight is not None and weight > 0
+                and target_week not in (4, 8)
+            ):
+                _top = db.session.query(db.func.max(SetLog.weight)).filter(
+                    SetLog.user_id == current_user.id,
+                    SetLog.exercise_name == exercise_name,
+                    SetLog.weight > 0,
+                    SetLog.week >= max(1, target_week - 4),
+                ).scalar()
+                if _top is not None and weight < _top:
+                    import logging
+                    logging.warning(
+                        "Engine regression caught: %s wk %s would write %s lb, "
+                        "floored at recent top set %s lb",
+                        exercise_name, target_week, weight, _top,
+                    )
+                    weight = float(_top)
+                    reason = (reason or '') + f' [floored at top set {_top}]'
+
             db.session.add(WeeklyPrescription(
                 user_id=current_user.id,
                 week=target_week,
