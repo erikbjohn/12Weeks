@@ -3529,11 +3529,10 @@ def api_generate_weekly_program():
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
 
-    # ─── STRENGTH-COACH PRESCRIBED WEIGHTS ───
-    # Build the template program once, hand it to the strength coach to
-    # set the weights. Engine becomes fallback only when the coach fails.
-    # This is the architectural shift Erik asked for: the agents he's paying
-    # for write the prescription, not deterministic engine rules.
+    # ─── ALL THREE COACHES IN PARALLEL ───
+    # Strength, running, nutritionist run concurrently via ThreadPoolExecutor.
+    # Sequential they take ~45-60s combined and hit Render's request timeout.
+    # Parallel ~ max(15s) per call. Engine fallbacks if any agent fails.
     _coach_pre_program = []
     for _di in range(7):
         for _ord, _ex in enumerate(auto_swap_workout(
@@ -3550,28 +3549,107 @@ def api_generate_weekly_program():
                 "sets": _ex.get("sets") or 3,
                 "reps": _ex.get("reps") or "10",
             })
-    _coach_weights = {}
+
+    _goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
+    _bw = (BodyWeight.query.filter_by(user_id=current_user.id)
+           .order_by(BodyWeight.log_date.desc()).first())
+    _common_ctx = {
+        "phase": phase,
+        "deload": target_week in (4, 8),
+        "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
+        "current_weight": _bw.weight_lbs if _bw else None,
+        "target_weight": _goal.target_weight if _goal else None,
+        "weeks_remaining": max(0, 12 - target_week + 1),
+    }
+
+    # Build template_runs for the running coach NOW so we can fire all three
+    # in parallel before entering the per-day loop.
+    _template_runs_for_coach = []
     try:
-        from coach_planning_prescribe import generate_week_prescriptions
-        _goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-        _bw = (BodyWeight.query.filter_by(user_id=current_user.id)
-               .order_by(BodyWeight.log_date.desc()).first())
-        _coach_weights = generate_week_prescriptions(
-            user_id=current_user.id,
-            week=target_week,
-            template_program=_coach_pre_program,
-            user_context={
-                "phase": phase,
-                "deload": target_week in (4, 8),
-                "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
-                "current_weight": _bw.weight_lbs if _bw else None,
-                "target_weight": _goal.target_weight if _goal else None,
-                "weeks_remaining": max(0, 12 - target_week + 1),
-            },
-        )
-    except Exception as _e:
-        import logging
-        logging.warning("strength-coach prescription failed, falling back to engine: %s", _e)
+        from workout_data import get_workouts, get_workouts_for_user
+        _tdays = (get_workouts(target_week) if has_gym
+                  else get_workouts_for_user(target_week, has_gym=False))
+        for _di in range(7):
+            _tr = _tdays[_di].get("run") if _di < len(_tdays) else None
+            if _tr:
+                _template_runs_for_coach.append({
+                    "day": _di,
+                    "type": _tr.get("type"),
+                    "label": _tr.get("label"),
+                    "duration": _tr.get("time") or _tr.get("duration"),
+                })
+    except Exception:
+        pass
+
+    # Workout pattern for nutritionist (heavy_lift/long_run/rest/etc.)
+    _workout_pattern_for_nutri = {}
+    try:
+        _workout_pattern_for_nutri = {d: _get_day_meal_type(current_user.id, target_week, d) for d in range(7)}
+    except Exception:
+        pass
+    _nutri_ctx = dict(_common_ctx)
+    _nutri_ctx["tdee"] = None  # filled in if available later
+    _nutri_ctx["fasting_protocol"] = _goal.fasting_protocol if _goal else "16_8"
+
+    _runs_ctx = dict(_common_ctx)
+    _runs_ctx["target_weekly_miles"] = 35
+
+    # Fire in parallel
+    import concurrent.futures as _cf
+    from coach_planning_prescribe import generate_week_prescriptions as _gen_strength
+    from coach_planning_runs import generate_week_runs as _gen_runs
+    from coach_planning_meals import generate_week_meals as _gen_meals
+
+    def _call_strength():
+        try:
+            return _gen_strength(
+                user_id=current_user.id, week=target_week,
+                template_program=_coach_pre_program, user_context=_common_ctx,
+            )
+        except Exception:
+            return {}
+
+    def _call_runs():
+        try:
+            return _gen_runs(
+                user_id=current_user.id, week=target_week,
+                template_runs=_template_runs_for_coach, user_context=_runs_ctx,
+            )
+        except Exception:
+            return {}
+
+    def _call_meals():
+        try:
+            return _gen_meals(
+                user_id=current_user.id, week=target_week,
+                workout_pattern=_workout_pattern_for_nutri,
+                user_context=_nutri_ctx,
+            )
+        except Exception:
+            return {}
+
+    _coach_weights = {}
+    _coach_runs_parallel = {}
+    _nutri_day_overrides_parallel = {}
+    with _cf.ThreadPoolExecutor(max_workers=3) as _ex_pool:
+        _f_str = _ex_pool.submit(_call_strength)
+        _f_run = _ex_pool.submit(_call_runs)
+        _f_meal = _ex_pool.submit(_call_meals)
+        try:
+            _coach_weights = _f_str.result(timeout=60) or {}
+        except Exception as _e:
+            import logging
+            logging.warning("strength-coach failed: %s", _e)
+        try:
+            _coach_runs_parallel = _f_run.result(timeout=60) or {}
+        except Exception as _e:
+            import logging
+            logging.warning("running-coach failed: %s", _e)
+        try:
+            _nutri_day_overrides_parallel = _f_meal.result(timeout=60) or {}
+        except Exception as _e:
+            import logging
+            logging.warning("nutritionist failed: %s", _e)
 
     for day_idx in range(7):
         raw_exercises = template.get(day_idx, [])
@@ -3819,27 +3897,11 @@ def api_generate_weekly_program():
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"
 
-        # ─── NUTRITIONIST PRESCRIBES PER-DAY MACROS ───
-        # Read the workout pattern + weight trend + recent meal plans, return
-        # per-day day_type + calories + macros. meal_generator then builds
-        # actual foods to fit. Engine fallback handles when LLM fails.
-        _nutri_day_overrides = {}
+        # ─── NUTRITIONIST: USE PARALLEL RESULT ───
+        # Already fired upstream in the parallel ThreadPoolExecutor block.
+        # Reuse those results — no second LLM call here.
+        _nutri_day_overrides = _nutri_day_overrides_parallel or {}
         try:
-            from coach_planning_meals import generate_week_meals
-            _workout_pattern = {d: day_types[d] for d in range(7)}
-            _nutri_day_overrides = generate_week_meals(
-                user_id=current_user.id,
-                week=target_week,
-                workout_pattern=_workout_pattern,
-                user_context={
-                    "goal_type": goal.goal_type if goal else "cut",
-                    "current_weight": current_weight,
-                    "target_weight": goal.target_weight if goal else None,
-                    "weeks_remaining": max(0, 12 - target_week + 1),
-                    "tdee": base_calories,
-                    "fasting_protocol": fasting_protocol,
-                },
-            )
             # Let the nutritionist override day_type when it has a strong reason
             for _di, _v in _nutri_day_overrides.items():
                 if _v.get("day_type"):
@@ -3938,41 +4000,9 @@ def api_generate_weekly_program():
             user_id=current_user.id, week=target_week
         ).filter(WeeklyRunPlan.source != 'coach').delete()
 
-        # ─── RUNNING COACH PRESCRIBES THE WEEK ───
-        # Hand the template runs to the running coach; engine is fallback.
-        _template_runs = []
-        for _di in range(7):
-            _tr = template_days[_di].get("run") if _di < len(template_days) else None
-            if _tr:
-                _template_runs.append({
-                    "day": _di,
-                    "type": _tr.get("type"),
-                    "label": _tr.get("label"),
-                    "duration": _tr.get("time") or _tr.get("duration"),
-                })
-        _coach_runs = {}
-        try:
-            from coach_planning_runs import generate_week_runs
-            _coach_runs = generate_week_runs(
-                user_id=current_user.id,
-                week=target_week,
-                template_runs=_template_runs,
-                user_context={
-                    "phase": phase,
-                    "deload": target_week in (4, 8),
-                    "goal_type": (TrainingGoal.query.filter_by(user_id=current_user.id).first().goal_type
-                                  if TrainingGoal.query.filter_by(user_id=current_user.id).first() else "recomp"),
-                    "current_weight": (BodyWeight.query.filter_by(user_id=current_user.id)
-                                       .order_by(BodyWeight.log_date.desc()).first().weight_lbs
-                                       if BodyWeight.query.filter_by(user_id=current_user.id).first() else None),
-                    "target_weight": (TrainingGoal.query.filter_by(user_id=current_user.id).first().target_weight
-                                      if TrainingGoal.query.filter_by(user_id=current_user.id).first() else None),
-                    "target_weekly_miles": 35,
-                },
-            )
-        except Exception as _e:
-            import logging
-            logging.warning("running-coach failed, engine fallback: %s", _e)
+        # ─── RUNNING COACH: USE PARALLEL RESULT ───
+        # Already fired upstream in the ThreadPoolExecutor block. Reuse.
+        _coach_runs = _coach_runs_parallel or {}
 
         for day_idx in range(7):
             template_run = template_days[day_idx].get("run") if day_idx < len(template_days) else None
