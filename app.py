@@ -3702,8 +3702,10 @@ def api_generate_weekly_program():
             base_rest = ex_sw.get('rest', '60s')
             base_note = ex_sw.get('note', '')
 
-            # Coach-prescribed weight first; engine as fallback.
-            coach_weight = _coach_weights.get((day_idx, exercise_name, order))
+            # Coach-prescribed weight + WHY first; engine as fallback.
+            coach_entry = _coach_weights.get((day_idx, exercise_name, order)) or {}
+            coach_weight = coach_entry.get("weight") if isinstance(coach_entry, dict) else coach_entry
+            coach_why = coach_entry.get("why") if isinstance(coach_entry, dict) else None
             try:
                 targets = compute_next_targets(
                     current_user.id, exercise_name, target_week, day_idx,
@@ -3713,13 +3715,13 @@ def api_generate_weekly_program():
                     adjusted_reps = str(targets.get('target_reps', base_reps)) if targets else base_reps
                     adjusted_sets = (targets.get('target_sets') if targets else None) or base_sets
                     weight = coach_weight
-                    reason = "Coach-prescribed"
+                    reason = coach_why or "Coach-prescribed"
                     note = base_note
                     source = 'coach'
                 elif targets.get('target_weight'):
                     adjusted_reps = str(targets.get('target_reps', base_reps))
                     adjusted_sets = targets.get('target_sets', base_sets)
-                    reason = targets.get('adjustment_reason', '')
+                    reason = coach_why or targets.get('adjustment_reason', '')
                     weight = targets.get('target_weight')
                     note = base_note
                     source = 'engine'
@@ -3728,14 +3730,14 @@ def api_generate_weekly_program():
                     adjusted_sets = base_sets
                     note = base_note
                     weight = None
-                    reason = None
+                    reason = coach_why
                     source = 'template'
             except Exception:
                 adjusted_reps = base_reps
                 adjusted_sets = base_sets
                 note = base_note
                 weight = coach_weight if (coach_weight is not None and coach_weight > 0) else None
-                reason = "Coach-prescribed" if weight else None
+                reason = coach_why or ("Coach-prescribed" if weight else None)
                 source = 'coach' if weight else 'template'
 
             # ENGINE-LEVEL REGRESSION GUARD: never write target_weight below
@@ -4211,9 +4213,11 @@ def api_generate_weekly_program():
     except Exception:
         calorie_change = None
 
-    _enrich_program_with_whys(
-        current_user.id, target_week, program_summary, run_summary,
-    )
+    # Skip the separate WHY-enrichment Sonnet call in the regen path —
+    # the strength coach now writes weight+why together in a single call.
+    # Render's 30s edge timeout was being exceeded by the extra ~10s LLM
+    # round-trip. WHYs that didn't come from the coach can be backfilled
+    # later or render the deterministic fallback on the client.
 
     return jsonify({
         "week": target_week,

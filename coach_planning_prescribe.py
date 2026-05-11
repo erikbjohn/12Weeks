@@ -73,7 +73,7 @@ def generate_week_prescriptions(
     week: int,
     template_program: list[dict],
     user_context: dict,
-) -> dict[tuple[int, str, int], float]:
+) -> dict[tuple[int, str, int], dict]:
     """Generate per-exercise target_weight for a week via strength-coach.
 
     template_program: list of {day, exercise, sets, reps, exercise_order, rest}
@@ -116,30 +116,35 @@ def generate_week_prescriptions(
         "You are a strength coach prescribing weekly weights for a 12-week "
         "program. The session structure (sets, reps, exercise selection) is "
         "FIXED by the template. Your job is to pick the LOAD (target_weight) "
-        "for each exercise based on what the athlete has actually been lifting.\n\n"
+        "for each exercise AND write a 1-sentence WHY for each.\n\n"
         "ABSOLUTE RULES:\n"
         "1. NEVER prescribe below the athlete's TOP SET in the last 4 weeks "
-        "   unless this is an explicit deload week (week 4 or 8). The top set "
-        "   is the heaviest weight they actually lifted in their recent history. "
-        "   If they hit 145×5 last week, do not prescribe 140 this week. Period.\n"
+        "   unless this is an explicit deload week (week 4 or 8). If they hit "
+        "   145×5 last week, do not prescribe 140 this week. Period.\n"
         "2. Compound lifts (squat, deadlift, bench, press, row) progress +5 to "
         "   +10 lb/week in strength phases when reps are being hit clean.\n"
         "3. Accessory/isolation work (curls, raises, face pulls) progress +2.5 lb "
         "   per session when the athlete hits target reps.\n"
         "4. Bodyweight and plyometric (Box Jump, etc.): no weight prescription "
-        "   needed — return 0 for target_weight, or omit.\n"
+        "   needed — return 0 for target_weight.\n"
         "5. Deload weeks (4 and 8): 70-85% of prior week's working weight.\n"
         "6. Peak week (12): hold weights from week 11, do not bump.\n"
-        "7. For exercises with NO recent history: leave target_weight as null "
-        "   (the engine fallback or the user's first session will set it).\n\n"
+        "7. Equipment-aware: if template says 'DB Bench Press' but the athlete "
+        "   logs Barbell Bench Press, they prefer the barbell — keep barbell.\n\n"
+        "WHY rules: each WHY is ONE sentence (max 20 words) explaining the load "
+        "choice in CONTEXT of the day's other exercises. Read the WHOLE day "
+        "before writing each reason. If the day is mostly holding, say "
+        "'consolidation'. If only the main lift bumps, say it leads the day. "
+        "Reference goal (cut/recomp/build) where relevant. Generic fluff like "
+        "'great for shoulders' is banned. Regression outside deload = "
+        "'REGRESSION FLAG: ...'.\n\n"
         "Output: ONE JSON object mapping `<day>:<exercise_order>:<exercise_name>` "
-        "to the target weight (a number, or null). No prose, no commentary, JSON only.\n\n"
-        "Example output:\n"
+        "to {\"weight\": <num|null>, \"why\": \"<one sentence>\"}. JSON only.\n\n"
+        "Example:\n"
         '{\n'
-        '  "0:0:Barbell Back Squat": 150,\n'
-        '  "0:1:Romanian Deadlift": 140,\n'
-        '  "0:2:Box Jump": 0,\n'
-        '  "1:0:Barbell Bench Press": 145\n'
+        '  "0:0:Barbell Back Squat": {"weight": 150, "why": "Main lift leads Monday — +5 lb push under the cut as accessories hold."},\n'
+        '  "0:1:Romanian Deadlift": {"weight": 140, "why": "Hinge volume at RPE 7; protects hamstring mass during the deficit."},\n'
+        '  "0:2:Box Jump": {"weight": 0, "why": "CNS primer — explosive opener for heavy lower work."}\n'
         '}'
     )
 
@@ -176,7 +181,9 @@ def generate_week_prescriptions(
         log.warning("generate_week_prescriptions failed: %s", e)
         return {}
 
-    out: dict[tuple[int, str, int], float] = {}
+    # New schema: value is {"weight": <num>, "why": "<sentence>"}
+    # Legacy schema (fallback): value is just <num>
+    out: dict[tuple[int, str, int], dict] = {}
     for k, v in parsed.items():
         parts = k.split(":", 2)
         if len(parts) != 3:
@@ -187,13 +194,20 @@ def generate_week_prescriptions(
             ex_name = parts[2].strip()
         except ValueError:
             continue
-        if v is None:
-            continue
+        weight = None
+        why = None
+        if isinstance(v, dict):
+            weight = v.get("weight")
+            why = v.get("why") or None
+        elif v is not None:
+            weight = v
         try:
-            weight = float(v)
+            weight = float(weight) if weight is not None else None
         except (ValueError, TypeError):
+            weight = None
+        if weight is not None and weight < 0:
+            weight = None
+        if weight is None and not why:
             continue
-        if weight < 0:
-            continue
-        out[(day_idx, ex_name, order)] = weight
+        out[(day_idx, ex_name, order)] = {"weight": weight, "why": why}
     return out
