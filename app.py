@@ -2876,11 +2876,20 @@ def api_workouts():
                 # duration to what they logged. Their HIIT/intervals/etc. keep
                 # their name in history.
                 _tmpl = days[di].get("run") or {}
+                _bits = []
+                if rl.distance_miles: _bits.append(f"{rl.distance_miles} mi")
+                if rl.duration_min: _bits.append(f"{rl.duration_min} min")
+                if rl.avg_hr: _bits.append(f"avg HR {rl.avg_hr}")
+                if rl.elevation_ft: _bits.append(f"{rl.elevation_ft} ft")
                 days[di]["run"] = {
-                    "type": _tmpl.get("type", "z2"),
+                    # Keep the label of the session, but type 'logged' (no
+                    # interval/HIIT-timer button on a finished run) and show what
+                    # was ACTUALLY run — never the template interval structure,
+                    # which no longer matches the logged total.
+                    "type": "logged",
                     "label": _tmpl.get("label", "Run"),
                     "time": _t,
-                    "detail": (_tmpl.get("detail") or "Logged."),
+                    "detail": ("Logged: " + " · ".join(_bits)) if _bits else "Logged.",
                     "logged": True,
                 }
                 runplan_day_set.add(di)
@@ -3038,11 +3047,18 @@ def api_week(week):
             _t = (f"{rl.duration_min} min" if rl.duration_min
                   else f"{rl.distance_miles} mi")
             _tmpl = days[di].get("run") or {}
+            _bits = []
+            if rl.distance_miles: _bits.append(f"{rl.distance_miles} mi")
+            if rl.duration_min: _bits.append(f"{rl.duration_min} min")
+            if rl.avg_hr: _bits.append(f"avg HR {rl.avg_hr}")
+            if rl.elevation_ft: _bits.append(f"{rl.elevation_ft} ft")
             days[di]["run"] = {
-                "type": _tmpl.get("type", "z2"),
+                # type 'logged' (no HIIT-timer button on a finished run); show
+                # what was actually run, not the template interval structure.
+                "type": "logged",
                 "label": _tmpl.get("label", "Run"),
                 "time": _t,
-                "detail": (_tmpl.get("detail") or "Logged."),
+                "detail": ("Logged: " + " · ".join(_bits)) if _bits else "Logged.",
                 "logged": True,
             }
             runplan_day_set.add(di)
