@@ -4133,6 +4133,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                               f"(coach proposed {_proposed:g}; raised to your "
                               f"proven max).")
 
+            # Plate-round the load so it's achievable on a real bar (no +2 lb on
+            # a barbell — the smallest plate pair is 5 lb) AND so every surface
+            # shows the SAME number (kills the unplate-able 142.5-vs-140 split).
+            # Done once here, server-side, before saving.
+            if weight and weight > 0:
+                weight = float(round(weight / 5.0) * 5)
+
             db.session.add(WeeklyPrescription(
                 user_id=current_user.id,
                 week=target_week,
