@@ -4363,15 +4363,25 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             # Let the nutritionist override day_type when it has a strong reason
             for _di, _v in _nutri_day_overrides.items():
                 if _v.get("day_type"):
-                    # Map agent's free-form day_type back to system day types
+                    # Map agent's free-form day_type back to system day types.
+                    # carb_up/refeed are HIGH-carb (->long_run), recovery is
+                    # moderate; unknown defaults to moderate, never silently to
+                    # 'rest' (which cut carbs and inverted a carb-up directive).
                     _agent_type = _v["day_type"].lower()
                     _mapped = (
                         "heavy_lift" if "heavy" in _agent_type
-                        else "long_run" if "long" in _agent_type or "run" in _agent_type
+                        else "long_run" if any(k in _agent_type for k in ("long", "run", "carb", "refeed"))
                         else "fast_day" if "fast" in _agent_type
-                        else "moderate" if "moderate" in _agent_type or "training" in _agent_type
-                        else "rest"
+                        else "moderate" if any(k in _agent_type for k in ("moderate", "training", "recovery"))
+                        else "rest" if "rest" in _agent_type
+                        else "moderate"
                     )
+                    # fast day only for cut goals; bulk/recomp -> rest instead.
+                    if _mapped == "fast_day":
+                        _g = (TrainingGoal.query.filter_by(user_id=current_user.id)
+                              .order_by(TrainingGoal.id.desc()).first())
+                        if _g and _g.goal_type in ("bulk", "recomp"):
+                            _mapped = "rest"
                     if 0 <= _di < 7:
                         day_types[_di] = _mapped
         except Exception as _e:
@@ -9451,8 +9461,13 @@ def api_admin_generate_meals():
             # Check template (Sunday = fast_day)
             template_meal_type = day_data.get('mealType', '')
             if template_meal_type == 'fast_day':
-                day_meal_type = 'fast_day'
-                cal_day_type = 'rest'
+                # Fast day only for cut goals; bulk/recomp get rest instead.
+                if (goal.goal_type or 'cut') in ('bulk', 'recomp'):
+                    day_meal_type = 'rest'
+                    cal_day_type = 'rest'
+                else:
+                    day_meal_type = 'fast_day'
+                    cal_day_type = 'rest'
 
         # Force-zero macros when fast_day is active (override OR template). The
         # earlier flow computed day_macros from the lift/run-derived day type

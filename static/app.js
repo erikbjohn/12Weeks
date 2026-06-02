@@ -1393,7 +1393,10 @@ function renderMealInner(dayData) {
 
   // Fast day based on meal type (no toggle — it's the plan)
   const isSundayFast = dayData.mealType && dayData.mealType.toLowerCase().includes('fast');
-  const activePlan = isSundayFast ? ((window._mealPlansCache || {}).fast_day || plan) : plan;
+  // Prefer the SERVER's fast-day plan (real foods/calories — e.g. a protein-
+  // sparing 130-cal whey day); only fall back to the hardcoded water-only card
+  // if the server provided nothing. Don't discard the real plan.
+  const activePlan = plan || (isSundayFast ? (window._mealPlansCache || {}).fast_day : null);
 
   let totalEaten = { cal: 0, protein: 0, carbs: 0, fat: 0 };
   let mealsHtml = '';
