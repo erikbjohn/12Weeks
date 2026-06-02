@@ -1135,6 +1135,60 @@ def _derive_lift_name(exercise_names):
     return name
 
 
+def _reconcile_lift_name(current, exercise_names):
+    """Keep a curated day title when it matches the movements; replace it with a
+    muscle-derived title only when it names the WRONG region (a Lower title over
+    an all-upper list) OR omits the day's DOMINANT muscle while naming specific
+    others ("Shoulder/Arms" on a back-dominant day). Region/pattern labels
+    ("HEAVY Lower", "Full Body", "Pull + Lat") that match are trusted as-is."""
+    from collections import Counter
+    from workout_data import EXERCISES, resolve_name
+    derived = _derive_lift_name(exercise_names)
+    if not derived or not current:
+        return current
+    counts = Counter()
+    for nm in exercise_names or []:
+        g = (EXERCISES.get(nm) or EXERCISES.get(resolve_name(nm)) or {}).get("muscle_group")
+        if not g:
+            n = (nm or "").lower()
+            if any(k in n for k in ("squat", "lunge", "leg press", "step-up")):
+                g = "quads"
+            elif "deadlift" in n or "rdl" in n:
+                g = "posterior_chain"
+            elif "calf" in n:
+                g = "calves"
+        if g and g != "core":
+            counts[g] += 1
+    if not counts:
+        return current
+    UPPER = {"chest", "chest_triceps", "back", "traps", "shoulders", "rear_delts", "biceps", "triceps"}
+    LOWER = {"quads", "posterior_chain", "hamstrings", "glutes", "calves"}
+    nu = sum(c for g, c in counts.items() if g in UPPER)
+    nl = sum(c for g, c in counts.items() if g in LOWER)
+    region = "upper" if nu > nl else ("lower" if nl > nu else "full")
+    c = current.lower()
+    c_lower = any(k in c for k in ("lower", "squat", "quad", "glute", "hamstring", "deadlift", "rdl", "leg", "calf", "hip thrust", "posterior"))
+    c_upper = any(k in c for k in ("upper", "press", "bench", "push", "pull", "row", "shoulder", "chest", "back", "lat", "curl", "tricep", "bicep", "ohp", "delt", "arm"))
+    c_region = "lower" if (c_lower and not c_upper) else ("upper" if (c_upper and not c_lower) else None)
+    if c_region and region in ("upper", "lower") and c_region != region:
+        return derived  # outright region swap
+    if any(w in c for w in ("upper", "lower", "full", "push", "pull", "press")):
+        return current  # a region/pattern label that matches the region — trust it
+    dominant = counts.most_common(1)[0][0]
+    DOM_KW = {
+        "chest": ("chest",), "chest_triceps": ("chest", "tricep"),
+        "back": ("back", "lat"), "shoulders": ("shoulder", "delt"),
+        "rear_delts": ("shoulder", "delt", "rear"), "traps": ("trap", "shrug"),
+        "quads": ("quad", "squat", "leg"), "glutes": ("glute", "hip"),
+        "hamstrings": ("hamstring", "ham"), "calves": ("calf",),
+        "biceps": ("bicep", "arm", "curl"), "triceps": ("tricep", "arm"),
+    }
+    kws = DOM_KW.get(dominant, ())
+    if kws and not any(k in c for k in kws):
+        return derived  # title names specific muscles but omits the dominant one
+    return current
+
+
 def _day_has_training(user_id, week, day_idx):
     """True if the day has a prescribed run or lift. A fast day can still be a
     fasted-TRAINING day (the Sunday long fasted run, a fasted lift day) — so its
@@ -3167,13 +3221,8 @@ def api_week(week):
         for day_idx, exercises in rx_by_day.items():
             if day_idx < len(days):
                 days[day_idx]["exercises"] = exercises
-                # Title the day from what it ACTUALLY trains — the template label
-                # ("HEAVY Lower", "Shoulder/Arms") goes stale when the coach
-                # redesigns the movements (the liftName-vs-exercises class).
-                if not days[day_idx].get("isRest"):
-                    _dn = _derive_lift_name([e.get("name") for e in exercises])
-                    if _dn:
-                        days[day_idx]["liftName"] = _dn
+                # (Day-title reconciliation runs AFTER the schedule overlay below,
+                # which would otherwise overwrite a title set here.)
 
     for day in days:
         if "exercises" in day:
@@ -3257,6 +3306,15 @@ def api_week(week):
                         days[ds.day_idx]["exercises"] = []
     except Exception:
         pass
+
+    # FINAL day-title reconciliation — last word after template + schedule
+    # overlays (both carry labels that go stale when the coach redesigns the
+    # day). Replaces a title only when it names the wrong region or omits the
+    # day's dominant muscle; accurate curated labels are kept.
+    for _d in days:
+        if not _d.get("isRest") and _d.get("exercises"):
+            _d["liftName"] = _reconcile_lift_name(
+                _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
 
     # FAIL LOUD: strip leftover template content for unplanned domains (run +
     # lifts). Mirrors /api/workouts. Meals deferred to food-selection filter.
