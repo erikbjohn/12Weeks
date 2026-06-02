@@ -1048,7 +1048,7 @@ def _round_to_loadable(exercise_name: str, w):
     return float(int(float(w) / 5.0 + 0.5) * 5)
 
 
-def _honest_lift_reason(final, recent_top, really_new) -> str:
+def _honest_lift_reason(final, recent_top, really_new, is_barbell=False) -> str:
     """A number-correct reason built from facts — used to REPLACE a coach `why`
     that would contradict the prescribed number (the '+2.5 from 145 but shows
     150' / 'new movement but logged at 35' class)."""
@@ -1062,10 +1062,14 @@ def _honest_lift_reason(final, recent_top, really_new) -> str:
         return f"Up to {final:g} lb from your last {recent_top:g} lb."
     if final < recent_top:
         return f"Held at {final:g} lb."
-    return f"Holding {final:g} lb to consolidate (a smaller bump isn't loadable on the bar)."
+    # "isn't loadable on the bar" only makes sense for a BARBELL — never say it
+    # about a dumbbell/cable/machine (a Rear Delt Fly has no bar).
+    tail = " (a smaller bump isn't loadable on the bar)" if is_barbell else ""
+    return f"Holding {final:g} lb to consolidate{tail}."
 
 
-def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new) -> str:
+def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
+                           is_barbell=False) -> str:
     """If the coach's `why` would contradict the prescribed number — cites a
     weight that isn't the final load, implies a delta that doesn't add up, or
     claims a 'new/baseline' movement that actually has history — replace it with
@@ -1084,7 +1088,7 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new) -> s
     rounded_changed = (final is not None and proposed is not None
                        and abs(float(final) - float(proposed)) > 0.01)
     if num_contradiction or false_new or rounded_changed:
-        return _honest_lift_reason(final, recent_top, really_new)
+        return _honest_lift_reason(final, recent_top, really_new, is_barbell)
     return reason
 
 
@@ -4307,7 +4311,8 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 _recent_top = None
             _really_new = (_recent_top is None)
             reason = _reconcile_lift_reason(reason, weight, _proposed_weight,
-                                            _recent_top, _really_new)
+                                            _recent_top, _really_new,
+                                            _is_barbell_movement(exercise_name))
 
             db.session.add(WeeklyPrescription(
                 user_id=current_user.id,
@@ -9876,12 +9881,19 @@ def api_admin_heal_prescriptions():
                 SetLog.weight > 0, SetLog.week >= max(1, rx.week - 6)).scalar()
         proposed = w0
         neww = w0
+        is_bb = _is_barbell_movement(rx.exercise_name)
         if w0 and w0 > 0:
             neww = _round_to_loadable(rx.exercise_name, w0)
-            if rx.week not in (4, 8, 12) and recent_top is not None and neww < recent_top:
+            # Floor below the logged top ONLY for barbell lifts. Non-barbell
+            # isolations (e.g. a Rear Delt Fly the coach deliberately starts
+            # light as a new movement) must NOT be force-raised by the heal —
+            # the write loop's new-movement light-start rule owns those.
+            if (is_bb and rx.week not in (4, 8, 12)
+                    and recent_top is not None and neww < recent_top):
                 neww = float(recent_top)
         really_new = (recent_top is None)
-        newreason = _reconcile_lift_reason(reason0, neww, proposed, recent_top, really_new)
+        newreason = _reconcile_lift_reason(reason0, neww, proposed, recent_top,
+                                           really_new, is_bb)
         if (neww != w0) or (newreason != reason0):
             healed.append({"week": rx.week, "day": rx.day_idx, "ex": rx.exercise_name,
                            "weight": f"{w0}->{neww}", "reason_was": reason0[:60],
