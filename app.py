@@ -961,9 +961,22 @@ def _get_day_meal_type(user_id, week, day_idx):
             return wmp.day_type
     except Exception:
         pass
-    from workout_data import DAY_MEAL_TYPES
+    # Derive from the day's ACTUAL run + lift, not the stale weekday map — the
+    # map carb-loaded an interval Tuesday as a "Long Run Day" because it assumes
+    # Tue is always the long run. derive_meal_type reads the real run type.
+    from workout_data import (DAY_MEAL_TYPES, derive_meal_type,
+                              get_workouts, get_workouts_for_user)
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    meal_type = DAY_MEAL_TYPES.get(day_names[day_idx] if day_idx < 7 else "Mon", "moderate")
+    weekday = day_names[day_idx] if day_idx < 7 else "Mon"
+    try:
+        pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+        has_gym = pa.has_gym if pa else True
+        tdays = (get_workouts(week) if has_gym
+                 else get_workouts_for_user(week, has_gym=False))
+        day_dict = tdays[day_idx] if day_idx < len(tdays) else None
+        meal_type = derive_meal_type(day_dict, weekday)
+    except Exception:
+        meal_type = DAY_MEAL_TYPES.get(weekday, "moderate")
 
     # Fast days only make sense for cut goals.
     # Bulk/recomp users get a rest day instead.
@@ -3552,17 +3565,47 @@ def _runs_context_for_week(user_id, target_week):
 
 
 def _prev_run_durations(user_id, target_week):
-    """Prior week's PRESCRIBED run duration per day, for an honest plan-vs-plan
-    run delta. The run delta was comparing the new plan against the SAME week's
-    stale cache (workoutData[currentWeek]) -> the phantom 'was 38'. None when
-    there's no prior prescribed run for a day (then the card shows no baseline)."""
+    """Last week's run duration per day AS DISPLAYED — a stored WeeklyRunPlan if
+    one exists, ELSE the template run the card falls back to (an unplanned past
+    week like week 9 still shows a 30-min VO2 from the template). This mirrors
+    how the day card resolves the run, so the delta baseline matches what the
+    athlete actually saw last week — not the stale same-week cache ('was 38')
+    and not a DB-only lookup that misses the displayed template run."""
     if target_week <= 1:
         return {}
+    out = {}
+    # 1. Template/get_workouts baseline (what an unplanned week displays).
     try:
-        return {r.day_idx: r.duration for r in WeeklyRunPlan.query.filter_by(
-            user_id=user_id, week=target_week - 1).all()}
+        from workout_data import get_workouts, get_workouts_for_user
+        pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+        has_gym = pa.has_gym if pa else True
+        tdays = (get_workouts(target_week - 1) if has_gym
+                 else get_workouts_for_user(target_week - 1, has_gym=False))
+        for di in range(min(7, len(tdays))):
+            tr = tdays[di].get("run") if isinstance(tdays[di], dict) else None
+            if tr:
+                out[di] = tr.get("time") or tr.get("duration")
     except Exception:
-        return {}
+        pass
+    # 2. A stored prescription overrides the template for that day.
+    try:
+        for r in WeeklyRunPlan.query.filter_by(
+                user_id=user_id, week=target_week - 1).all():
+            out[r.day_idx] = r.duration
+    except Exception:
+        pass
+    # 3. A LOGGED run is what the card actually DISPLAYS for a past week (the
+    #    card overlays the logged duration onto the label), so it wins — this is
+    #    why week 9 shows 30 min (logged) even with a 35-min template.
+    try:
+        from models import RunLog
+        for rl in RunLog.query.filter_by(
+                user_id=user_id, week=target_week - 1).all():
+            if rl.duration_min:
+                out[rl.day_idx] = f"{rl.duration_min} min"
+    except Exception:
+        pass
+    return out
 
 
 def _fill_missing_week_runs(user_id, target_week):
