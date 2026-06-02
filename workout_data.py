@@ -1768,6 +1768,36 @@ def get_phase(week):
     return 3
 
 
+def _run_time_from_detail(detail):
+    """Sum a run's structure from its detail text so the headline time can't
+    contradict it (the "35 min" on a 38-min 4x4 VO2 bug). Returns minutes, or
+    None if there's no interval structure to sum (steady/tempo runs keep their
+    own headline). Handles 'N min warm-up/cool-down' + intervals 'Kx M:SS / M:SS'
+    (minutes) or 'Kx WW:RR' (seconds, e.g. 8x 30:90)."""
+    import re as _re
+    if not detail:
+        return None
+    d = str(detail).lower()
+    mA = _re.search(r'(\d+)\s*[x×]\s*(\d+):(\d{2})\b.*?/\s*(\d+):(\d{2})', d)
+    mB = _re.search(r'(\d+)\s*[x×]\s*(\d+):(\d+)\b', d)
+    if mA:
+        k = int(mA.group(1))
+        work = int(mA.group(2)) * 60 + int(mA.group(3))
+        rest = int(mA.group(4)) * 60 + int(mA.group(5))
+    elif mB:
+        k, work, rest = int(mB.group(1)), int(mB.group(2)), int(mB.group(3))
+    else:
+        return None  # no interval block — don't second-guess a steady/tempo time
+    total = k * (work + rest) / 60.0
+    for m in _re.finditer(
+            r'(\d+)\s*min[^,.;]*?(?:warm-?up|cool-?down)'
+            r'|(?:warm-?up|cool-?down)[^0-9,.;]{0,15}(\d+)\s*min', d):
+        n = m.group(1) or m.group(2)
+        if n:
+            total += int(n)
+    return int(round(total))
+
+
 def get_workouts(week):
     """Return list of 7 day dicts for the given week number (1-12)."""
     # Deload WEEKS on a 4-week cadence (4, 8, 12) — the recovery valve. wk12 is
@@ -1794,6 +1824,13 @@ def get_workouts(week):
             meal_type = derive_meal_type(d, d.get("day", "Mon"))
         d["mealType"] = meal_type
         d["mealPlan"] = get_meal_plan(meal_type)
+
+        # Keep the run's headline time consistent with its interval structure.
+        _r = d.get("run")
+        if _r and _r.get("detail"):
+            _t = _run_time_from_detail(_r["detail"])
+            if _t:
+                _r["time"] = f"{_t} min"
 
         warmup_type = DAY_WARMUP_TYPES.get(d["day"])
         if warmup_type and warmup_type in WARMUPS:
