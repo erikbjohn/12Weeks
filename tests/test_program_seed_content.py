@@ -131,8 +131,10 @@ class TestPhase2Content:
 class TestPhase3Content:
     """Spec §6: Phase 3 (wks 9-11) Cut Climax."""
 
-    def test_phase_3_friday_back_squat_3x3(self, app_ctx):
-        # Spec §6: Fri = Heavy Lower, 3×3 @ 87%, HOLD all 3 weeks.
+    def test_phase_3_friday_back_squat_4x3(self, app_ctx):
+        # Rebuilt 2026-06-01: Phase 3 is full strength volume, loads climb.
+        # Fri Heavy Lower = Back Squat 4×3 (heavy triples, +1 set vs the old
+        # deload-phase 3×3).
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
@@ -141,11 +143,11 @@ class TestPhase3Content:
         bs = next((e for e in fri["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
-        assert bs["sets"] == "3x3", (
-            f"Phase 3 Fri Back Squat = 3×3 (HOLD); got {bs['sets']}"
+        assert bs["sets"] == "4x3", (
+            f"Phase 3 Fri Back Squat = 4×3 (restored volume); got {bs['sets']}"
         )
 
-    def test_phase_3_monday_front_squat_3x3(self, app_ctx):
+    def test_phase_3_monday_front_squat_4x3(self, app_ctx):
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
@@ -154,18 +156,19 @@ class TestPhase3Content:
         fs = next((e for e in mon["exercises"]
                    if e["name"] == "Front Squat"), None)
         assert fs is not None
-        assert fs["sets"] == "3x3"
+        assert fs["sets"] == "4x3"
 
-    def test_phase_3_wednesday_no_ezbar_curl(self, app_ctx):
-        # Spec §6 Phase 3 Wed drops EZ-Bar Curl (volume cut on accessories).
+    def test_phase_3_wednesday_restores_ezbar_curl(self, app_ctx):
+        # Rebuilt 2026-06-01: the volume taper is gone — EZ-Bar Curl (and the
+        # other dropped accessories) are restored in Phase 3.
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=9)
         wed = days[2]
         names = [e["name"] for e in wed.get("exercises", [])]
-        assert "EZ-Bar Curl" not in names, (
-            f"Phase 3 Wed should drop EZ-Bar Curl per spec §6; got {names}"
+        assert "EZ-Bar Curl" in names, (
+            f"Phase 3 Wed should restore EZ-Bar Curl (no more volume taper); got {names}"
         )
 
 
@@ -196,8 +199,9 @@ class TestDeloadAndWeek12Content:
                     f"Deload should not have AMRAP: {ex}"
                 )
 
-    def test_week_12_back_squat_2x3(self, app_ctx):
-        # Spec §7: Fri wk12 Back Squat 2x3 (single working set, just to feel it).
+    def test_week_12_is_a_deload_week(self, app_ctx):
+        # Rebuilt 2026-06-01: wk12 is a DELOAD WEEK (4-week cadence: 4/8/12),
+        # not a taper-to-nothing. It mirrors the wk4/wk8 deload (Back Squat 3x5).
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
@@ -206,4 +210,6 @@ class TestDeloadAndWeek12Content:
         bs = next((e for e in fri["exercises"]
                    if "Back Squat" in e["name"]), None)
         assert bs is not None
-        assert bs["sets"] == "2x3"
+        assert bs["sets"] == "3x5", (
+            f"wk12 should be a deload week (Back Squat 3x5), not a taper; got {bs['sets']}"
+        )

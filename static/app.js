@@ -9167,7 +9167,6 @@ function renderTodayHero() {
     return;
   }
 
-  const runClass = 'run-' + d.run.type;
   const done = isDayDone(currentWeek, currentDay);
   const exCount = (d.exercises || []).length;
   const exDone = (d.exercises || []).filter((_, i) => isExDone(currentWeek, currentDay, i)).length;
@@ -9181,7 +9180,7 @@ function renderTodayHero() {
       <div class="th-progress-ring">${exDone}/${exCount}</div>
     </div>
     <div class="th-run">
-      <span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
+      ${runPillHtml(d)}
     </div>
   </div>`;
 }
@@ -9215,6 +9214,16 @@ function renderWeekTabs() {
   }).join('');
 }
 
+// Fail-loud run pill: the static template is never shown as the plan. When a
+// run has no real coach/engine plan (runStatus 'unplanned' or run missing),
+// render a loud marker instead of a fabricated duration.
+function runPillHtml(d) {
+  if (!d || !d.run || d.runStatus === 'unplanned') {
+    return '<span class="run-pill run-unplanned">&#9888; Run not planned</span>';
+  }
+  return '<span class="run-pill run-' + d.run.type + '">' + d.run.label + ' &middot; ' + d.run.time + '</span>';
+}
+
 function renderDayGrid() {
   const weekData = workoutData[String(currentWeek)];
   if (!weekData) return;
@@ -9225,7 +9234,6 @@ function renderDayGrid() {
   el.innerHTML = days.map((d, i) => {
     const isRest = d.isRest;
     const done = isDayDone(currentWeek, i);
-    const runClass = `run-${d.run.type}`;
 
     return `<div class="day-card${isRest?' rest':''}${done?' completed':''}${currentDay===i?' active':''}" onclick="setDay(${i})">
       <div class="day-card-left">
@@ -9234,7 +9242,7 @@ function renderDayGrid() {
       <div class="day-card-center">
         <div class="day-lift-label">${d.liftName}</div>
         <div class="day-run-label">
-          <span class="run-pill ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
+          ${runPillHtml(d)}
         </div>
       </div>
       <div class="day-card-right" onclick="toggleDay(${currentWeek},${i},event)">
@@ -9295,10 +9303,16 @@ async function launchWeeklyPlanning(weekOverride) {
     var programData = null;
     if (nextWeek <= 12) {
         try {
+            // Re-planning the current week: force a fresh coach regen of the
+            // REST of the week. The server preserves today + earlier days
+            // (rest_of_week), so a completed day is never overwritten.
+            var _body = isReplan
+                ? { week: nextWeek, force_regen: true, rest_of_week: true }
+                : { week: nextWeek };
             var progRes = await fetch('/api/weekly-program/generate', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ week: nextWeek }),
+                body: JSON.stringify(_body),
             });
             if (progRes.ok) programData = await progRes.json();
         } catch(e) {}
@@ -9897,9 +9911,18 @@ function buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClas
     var html = '';
     // On rest days (Sunday), skip warmup/exercises — just show the run
     if (!d.isRest) {
-        html += renderWarmupInner(d);
-        if (displayExercises.length > 0) {
-            html += bwToggleHtml + exRows;
+        // FAIL LOUD: lifts come from the coach, never the static template. If
+        // this training day has no prescription, say so and offer to plan.
+        if (d.liftStatus === 'unplanned' && (!displayExercises || displayExercises.length === 0)) {
+            html += '<div class="plan-missing">' +
+                '<div>&#9888; Your coach hasn’t planned these lifts yet.</div>' +
+                '<button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="launchWeeklyPlanning(currentWeek)">Plan this week</button>' +
+            '</div>';
+        } else {
+            html += renderWarmupInner(d);
+            if (displayExercises.length > 0) {
+                html += bwToggleHtml + exRows;
+            }
         }
     }
     html += buildRunSubsection(d, runClass);
@@ -10063,6 +10086,18 @@ function buildRunSubsection(d, runClass) {
                 '<div class="rdl">Type</div>' +
                 '<div class="rdt"><span class="run-pill ' + ovClass + '">' + ovLabel + ' &middot; ' + ovTime + '</span></div>' +
                 (ovDetail ? '<div class="rdd" style="margin-top:8px">' + ovDetail + '</div>' : '') +
+            '</div>' +
+        '</div>';
+    }
+
+    // FAIL LOUD: no static template run. If the coach hasn't planned this run,
+    // say so and offer to generate — never show a fabricated duration.
+    if (!d.run || d.runStatus === 'unplanned') {
+        return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
+            '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
+            '<div class="plan-missing">' +
+                '<div>&#9888; Your coach hasn’t planned this run yet.</div>' +
+                '<button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="launchWeeklyPlanning(currentWeek)">Plan this week</button>' +
             '</div>' +
         '</div>';
     }
@@ -10796,7 +10831,7 @@ async function renderDetail() {
       <div class="detail-title">Week ${currentWeek} &middot; ${d.day} &mdash; ${d.liftName}</div>
       <div class="detail-meta">
         ${!d.isRest || travelExercises ? `<span class="meta-chip" style="background:var(--lift-bg);border-color:var(--lift-border);color:var(--lift)">${isTraveling ? 'Travel' : 'Lift'} &middot; ${displayExercises.length} exercises</span>` : ''}
-        <span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>
+        ${(d.run && d.runStatus !== 'unplanned') ? `<span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>` : `<span class="meta-chip run-unplanned">&#9888; Run not planned</span>`}
       </div>
     </div>
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}

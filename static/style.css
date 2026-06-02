@@ -326,6 +326,24 @@ header .subtitle {
 .run-easy { background: var(--run-easy-bg); color: var(--run-easy); border: 1px solid var(--run-easy-border); }
 .run-min { background: var(--run-min-bg); color: var(--run-min); border: 1px solid var(--run-min-border); }
 
+/* Fail-loud: no static template plan exists for this domain. */
+.run-unplanned {
+  background: rgba(220, 60, 50, 0.12);
+  color: #ff6b5e;
+  border: 1px dashed #c0392b;
+  font-weight: 600;
+}
+.plan-missing {
+  border: 1px dashed #c0392b;
+  background: rgba(220, 60, 50, 0.08);
+  color: #ff6b5e;
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 14px;
+  font-family: 'DM Mono', monospace;
+  text-align: center;
+}
+
 .day-card-right {
   padding: 12px 15px;
   display: flex;

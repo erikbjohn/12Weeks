@@ -574,67 +574,34 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
             result["coach_alert"] = coach_alert
         return result
 
-    else:  # Phase 3 — Cut climax. HOLD weights by default.
+    else:  # Phase 3 — strength; loads CLIMB. Rebuilt 2026-06-01 (Erik): no
+           # deload-phase, no HOLD. Progress when reps were hit clean; hold
+           # (NEVER drop) only when reps were genuinely missed.
         configured_reps = _get_configured_reps(
             exercise_name, week, day_idx, exercise_order,
         )
-        configured_sets_for_phase3 = _get_configured_sets(
+        configured_sets = _get_configured_sets(
             exercise_name, week, day_idx, exercise_order,
         )
-        # Default behavior: HOLD weight, reps, sets (per spec §1, §6).
-        # The strength block of Phase 2 is the deposit; Phase 3 protects it.
-        # Phase 3 floor reps = 3 (3×3 / 4×3-5 templates); use as fallback when
-        # the workout template has no entry for this exercise (e.g. swap).
-        phase3_default_reps = 3
-        phase3_default_sets = 3
-        target_reps_threshold = configured_reps or phase3_default_reps
-        target_sets_threshold = (
-            configured_sets_for_phase3 or phase3_default_sets
-        )
-        held_reps = configured_reps or last_reps or phase3_default_reps
-        held_sets = (
-            configured_sets_for_phase3
-            or last_set_count
-            or phase3_default_sets
-        )
-        # Drop if user clearly missed top-set reps last session (proxy for
-        # RPE>8). Two signals indicate "missed":
-        #   (1) reps below the prescribed/floor count, OR
-        #   (2) sets cut short below prescribed/floor.
-        # Either is a strong RPE>8 indicator.
-        missed_reps = bool(
-            last_reps and last_reps < target_reps_threshold
-        )
-        missed_sets = bool(
-            last_set_count and last_set_count < target_sets_threshold
-        )
-        if missed_reps or missed_sets:
-            new_weight = _round_weight(last_weight * 0.95)
-            if missed_reps:
-                reason = (
-                    f"Phase 3 — missed reps last session "
-                    f"({last_reps}/{target_reps_threshold}), drop 5%"
-                )
-            else:
-                reason = (
-                    f"Phase 3 — cut session short "
-                    f"({last_set_count}/{target_sets_threshold} sets), "
-                    "drop 5%"
-                )
-            return {
-                "target_weight": new_weight,
-                "target_reps": held_reps,
-                "target_sets": held_sets,
-                "adjustment_reason": reason,
-                "progression_indicator": "hold",
-            }
-        # Default HOLD path.
+        held_reps = configured_reps or last_reps or 3
+        held_sets = configured_sets or last_set_count or 3
+        inc = _get_progression_increment(exercise_name, is_weak)
+        missed_reps = bool(last_reps and configured_reps and last_reps < configured_reps)
+        if missed_reps:
+            new_weight = _round_weight(last_weight)
+            reason = (f"Phase 3 — held at {last_weight:g} "
+                      f"(missed reps {last_reps}/{configured_reps})")
+            indicator = "hold"
+        else:
+            new_weight = _round_weight(last_weight + inc)
+            reason = f"Phase 3 strength — +{inc:g} lb, reps hit clean"
+            indicator = "increase"
         result = {
-            "target_weight": _round_weight(last_weight),
+            "target_weight": new_weight,
             "target_reps": held_reps,
             "target_sets": held_sets,
-            "adjustment_reason": "Phase 3 cut climax — HOLD",
-            "progression_indicator": "hold",
+            "adjustment_reason": reason,
+            "progression_indicator": indicator,
         }
         if coach_alert:
             result["coach_alert"] = coach_alert

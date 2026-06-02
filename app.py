@@ -2700,6 +2700,11 @@ def api_workouts():
             user_id=current_user.id, week=week
         ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
 
+        # Per-day "does a real plan exist?" sets — drive the fail-loud strip
+        # below so the static template never reaches the UI as the user's plan.
+        presc_day_set = {rx.day_idx for rx in prescriptions}
+        runplan_day_set = set()
+
         if prescriptions:
             rx_by_day = {}
             for rx in prescriptions:
@@ -2818,6 +2823,7 @@ def api_workouts():
         try:
             run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
             if run_plans:
+                runplan_day_set = {rp.day_idx for rp in run_plans}
                 for rp in run_plans:
                     if rp.day_idx < len(days):
                         days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
@@ -2846,6 +2852,18 @@ def api_workouts():
                             days[ds.day_idx]["exercises"] = []
         except Exception:
             pass
+
+        # FAIL LOUD: strip any leftover template content for domains with no
+        # real coach/engine plan so the static skeleton never reaches the UI as
+        # the user's plan. Meals deferred (food-selection filtering owns them).
+        from plan_overlay import finalize_day_plan
+        for _di, _day in enumerate(days):
+            finalize_day_plan(
+                _day,
+                has_prescriptions=(_di in presc_day_set),
+                has_runplan=(_di in runplan_day_set),
+                has_mealplan=True,
+            )
 
         days = _filter_meals_by_food_selections(days, user_food_ids)
         all_weeks[str(week)] = {
@@ -2893,6 +2911,9 @@ def api_week(week):
         user_id=current_user.id, week=week
     ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
 
+    presc_day_set = {rx.day_idx for rx in prescriptions}
+    runplan_day_set = set()
+
     if prescriptions:
         rx_by_day = {}
         for rx in prescriptions:
@@ -2935,6 +2956,7 @@ def api_week(week):
     try:
         run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
         if run_plans:
+            runplan_day_set = {rp.day_idx for rp in run_plans}
             for rp in run_plans:
                 if rp.day_idx < len(days):
                     days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
@@ -2963,6 +2985,17 @@ def api_week(week):
                         days[ds.day_idx]["exercises"] = []
     except Exception:
         pass
+
+    # FAIL LOUD: strip leftover template content for unplanned domains (run +
+    # lifts). Mirrors /api/workouts. Meals deferred to food-selection filter.
+    from plan_overlay import finalize_day_plan
+    for _di, _day in enumerate(days):
+        finalize_day_plan(
+            _day,
+            has_prescriptions=(_di in presc_day_set),
+            has_runplan=(_di in runplan_day_set),
+            has_mealplan=True,
+        )
 
     days = _filter_meals_by_food_selections(days, user_food_ids)
     return jsonify({
@@ -3360,7 +3393,7 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary):
         phase = get_phase(target_week)
         user_context = {
             "phase": phase,
-            "deload": target_week in (4, 8),
+            "deload": target_week in (4, 8, 12),
             "goal_type": goal.goal_type if goal and goal.goal_type else "recomp",
             "current_weight": bw.weight_lbs if bw else None,
             "target_weight": goal.target_weight if goal else None,
@@ -3420,6 +3453,87 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary):
         db.session.rollback()
 
 
+def _runs_context_for_week(user_id, target_week):
+    """Build the running-coach context (goal, phase, ramped weekly mileage)."""
+    goal = TrainingGoal.query.filter_by(user_id=user_id).first()
+    bw = (BodyWeight.query.filter_by(user_id=user_id)
+          .order_by(BodyWeight.log_date.desc()).first())
+    ctx = {
+        "phase": get_phase(target_week),
+        "deload": target_week in (4, 8, 12),
+        "goal_type": goal.goal_type if goal and goal.goal_type else "recomp",
+        "current_weight": bw.weight_lbs if bw else None,
+        "target_weight": goal.target_weight if goal else None,
+        "weeks_remaining": max(0, 12 - target_week + 1),
+    }
+    peak = max(float(getattr(goal, 'target_weekly_miles', None) or 48), 40)
+    if target_week in (4, 8):
+        ctx["target_weekly_miles"] = round(peak * 0.62)
+    elif target_week == 12:
+        ctx["target_weekly_miles"] = round(peak * 0.73)
+    elif target_week >= 11:
+        ctx["target_weekly_miles"] = round(peak)
+    elif target_week >= 9:
+        ctx["target_weekly_miles"] = round(peak * 0.94)
+    elif target_week >= 5:
+        ctx["target_weekly_miles"] = round(38 + (target_week - 5) * 2)
+    else:
+        ctx["target_weekly_miles"] = round(25 + (target_week - 1) * 3)
+    return ctx
+
+
+def _fill_missing_week_runs(user_id, target_week):
+    """COACH-OR-NOTHING run generation for a week that has no run-plan rows.
+    Touches only the run domain — never existing lift prescriptions. Returns
+    (run_summary, failures). Days the running coach skips are reported, not
+    backfilled with the engine or template.
+    """
+    from coach_planning_runs import generate_week_runs
+    from workout_data import get_workouts, get_workouts_for_user
+    pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+    has_gym = pa.has_gym if pa else True
+    tdays = (get_workouts(target_week) if has_gym
+             else get_workouts_for_user(target_week, has_gym=False))
+    template_runs = []
+    for di in range(7):
+        tr = tdays[di].get("run") if di < len(tdays) else None
+        if tr:
+            template_runs.append({
+                "day": di, "type": tr.get("type"), "label": tr.get("label"),
+                "duration": tr.get("time") or tr.get("duration"),
+            })
+    if not template_runs:
+        return [], []
+    try:
+        coach_runs = generate_week_runs(
+            user_id=user_id, week=target_week,
+            template_runs=template_runs,
+            user_context=_runs_context_for_week(user_id, target_week),
+        ) or {}
+    except Exception:
+        coach_runs = {}
+
+    run_summary, failures = [], []
+    for di in range(7):
+        if not (tdays[di].get("run") if di < len(tdays) else None):
+            continue
+        cr = coach_runs.get(di)
+        if not cr:
+            failures.append({"domain": "run", "day": di})
+            continue
+        db.session.add(WeeklyRunPlan(
+            user_id=user_id, week=target_week, day_idx=di,
+            run_type=cr["type"], label=cr["label"], duration=cr["duration"],
+            detail=cr.get("detail", ""), source='coach',
+        ))
+        run_summary.append({
+            "day": di, "type": cr["type"], "label": cr["label"],
+            "duration": cr["duration"],
+        })
+    db.session.commit()
+    return run_summary, failures
+
+
 @app.route("/api/weekly-program/generate", methods=["POST"])
 @login_required
 def api_generate_weekly_program():
@@ -3427,6 +3541,33 @@ def api_generate_weekly_program():
     data = request.get_json() or {}
     target_week = data.get("week", _current_week() + 1)
     force_regen = bool(data.get("force_regen"))
+    # Rest-of-week replan: `preserve_through_day` keeps TODAY and every earlier
+    # day fully intact (prescriptions, runs, meals, logged work) and regenerates
+    # only day_idx > preserve_through. Sending it implies a regen of those
+    # future days. Validate to 0-6.
+    preserve_through = data.get("preserve_through_day")
+    try:
+        preserve_through = int(preserve_through) if preserve_through is not None else None
+    except (TypeError, ValueError):
+        preserve_through = None
+    # Convenience: `rest_of_week` lets the client say "replan the rest of this
+    # week, leave today + earlier alone" without trusting the client's clock —
+    # the server derives today's weekday, but only for the actual current week.
+    if data.get("rest_of_week") and preserve_through is None:
+        try:
+            if target_week == _current_week():
+                preserve_through = _user_today().weekday()
+        except Exception:
+            preserve_through = None
+    if preserve_through is not None:
+        preserve_through = max(-1, min(6, preserve_through))
+        force_regen = True
+
+    def _future_only(q, model):
+        """Restrict a query to regenerated days when preserving today+earlier."""
+        if preserve_through is not None:
+            return q.filter(model.day_idx > preserve_through)
+        return q
 
     # Don't overwrite coach-modified prescriptions or past-week training
     # history — BUT still return the existing program so the planning UI can
@@ -3440,12 +3581,14 @@ def api_generate_weekly_program():
     # running, nutrition) fresh. Use when the user explicitly asks to
     # re-plan with the agents.
     if force_regen:
-        WeeklyPrescription.query.filter_by(
+        _future_only(WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=target_week,
-        ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))).delete()
-        WeeklyRunPlan.query.filter_by(
+        ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
+            WeeklyPrescription).delete(synchronize_session=False)
+        _future_only(WeeklyRunPlan.query.filter_by(
             user_id=current_user.id, week=target_week,
-        ).filter(WeeklyRunPlan.source.in_(('coach', 'engine'))).delete()
+        ).filter(WeeklyRunPlan.source.in_(('coach', 'engine'))),
+            WeeklyRunPlan).delete(synchronize_session=False)
         db.session.commit()
         existing_coach = None
         has_history = None
@@ -3485,12 +3628,22 @@ def api_generate_weekly_program():
         runs = WeeklyRunPlan.query.filter_by(
             user_id=current_user.id, week=target_week,
         ).order_by(WeeklyRunPlan.day_idx).all()
-        run_summary = [{
-            "day": r.day_idx,
-            "type": r.run_type,
-            "label": r.label,
-            "duration": r.duration,
-        } for r in runs]
+        # FAIL-LOUD GAP FILL: keeping logged lift history must NOT leave runs
+        # unplanned. If this week has lift history/coach rows but no run plan
+        # (the exact bug behind the leak), generate the runs now via the
+        # running coach — coach-or-nothing, without touching the lift rows.
+        run_failures = []
+        if not runs:
+            run_summary, run_failures = _fill_missing_week_runs(
+                current_user.id, target_week,
+            )
+        else:
+            run_summary = [{
+                "day": r.day_idx,
+                "type": r.run_type,
+                "label": r.label,
+                "duration": r.duration,
+            } for r in runs]
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
         )
@@ -3499,6 +3652,7 @@ def api_generate_weekly_program():
             "week": target_week,
             "program": program,
             "run_summary": run_summary,
+            "coach_failures": run_failures,
             "regenerated": False,
         })
 
@@ -3515,14 +3669,18 @@ def api_generate_weekly_program():
         template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
 
     # Delete any existing template-sourced prescriptions for this week
-    WeeklyPrescription.query.filter_by(
+    # (future days only when preserving today+earlier).
+    _future_only(WeeklyPrescription.query.filter_by(
         user_id=current_user.id, week=target_week, source='template'
-    ).delete()
-    WeeklyPrescription.query.filter_by(
+    ), WeeklyPrescription).delete(synchronize_session=False)
+    _future_only(WeeklyPrescription.query.filter_by(
         user_id=current_user.id, week=target_week, source='engine'
-    ).delete()
+    ), WeeklyPrescription).delete(synchronize_session=False)
 
     program_summary = []
+    # FAIL LOUD: domains the coach did not prescribe. No engine/template
+    # fallback is written — these are surfaced so the UI can show "not planned".
+    coach_failures = []
 
     # Auto-swap exercises the user doesn't have equipment for
     from equipment_swaps import auto_swap_workout
@@ -3555,7 +3713,7 @@ def api_generate_weekly_program():
            .order_by(BodyWeight.log_date.desc()).first())
     _common_ctx = {
         "phase": phase,
-        "deload": target_week in (4, 8),
+        "deload": target_week in (4, 8, 12),
         "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
         "current_weight": _bw.weight_lbs if _bw else None,
         "target_weight": _goal.target_weight if _goal else None,
@@ -3619,7 +3777,7 @@ def api_generate_weekly_program():
 
     # Fire in parallel
     import concurrent.futures as _cf
-    from coach_planning_prescribe import generate_week_prescriptions as _gen_strength
+    from coach_planning_program import generate_week_program as _gen_program
     from coach_planning_runs import generate_week_runs as _gen_runs
     from coach_planning_meals import generate_week_meals as _gen_meals
 
@@ -3630,16 +3788,27 @@ def api_generate_weekly_program():
     _flask_app = app
     _captured_user_id = current_user.id
 
-    def _call_strength():
+    # Option B: the strength coach DESIGNS the whole week (exercise selection,
+    # sets, reps, AND loads) from history + equipment + injuries — NO template.
+    # Volume target is the sawtooth (deload weeks ~55%); rails (ceiling, rest
+    # day, injury, new-movement light-start) are enforced in code inside the
+    # coach module.
+    _program_ctx = dict(_common_ctx)
+    _program_ctx["target_weekly_sets"] = (
+        round(81 * 0.55) if target_week in (4, 8, 12) else 81)
+    _program_ctx["train_days"] = 6
+
+    def _call_program():
         try:
             with _flask_app.app_context():
-                return _gen_strength(
+                _prog, _notes = _gen_program(
                     user_id=_captured_user_id, week=target_week,
-                    template_program=_coach_pre_program, user_context=_common_ctx,
+                    user_context=_program_ctx,
                 )
+                return _prog
         except Exception as _exc:
             import logging
-            logging.warning("strength-coach call exception: %s", _exc, exc_info=True)
+            logging.warning("program-coach call exception: %s", _exc, exc_info=True)
             return {}
 
     def _call_runs():
@@ -3667,18 +3836,18 @@ def api_generate_weekly_program():
             logging.warning("nutritionist call exception: %s", _exc, exc_info=True)
             return {}
 
-    _coach_weights = {}
+    _coach_program = {}
     _coach_runs_parallel = {}
     _nutri_day_overrides_parallel = {}
     with _cf.ThreadPoolExecutor(max_workers=3) as _ex_pool:
-        _f_str = _ex_pool.submit(_call_strength)
+        _f_str = _ex_pool.submit(_call_program)
         _f_run = _ex_pool.submit(_call_runs)
         _f_meal = _ex_pool.submit(_call_meals)
         try:
-            _coach_weights = _f_str.result(timeout=60) or {}
+            _coach_program = _f_str.result(timeout=90) or {}
         except Exception as _e:
             import logging
-            logging.warning("strength-coach failed: %s", _e)
+            logging.warning("program-coach failed: %s", _e)
         try:
             _coach_runs_parallel = _f_run.result(timeout=60) or {}
         except Exception as _e:
@@ -3691,66 +3860,29 @@ def api_generate_weekly_program():
             logging.warning("nutritionist failed: %s", _e)
 
     for day_idx in range(7):
-        raw_exercises = template.get(day_idx, [])
-        # Convert template format to name-based format for auto_swap
-        named_exercises = [{"name": resolve_name(e["exercise"]), "sets": e.get("sets"), "reps": e.get("reps"), "rest": e.get("rest", "60s"), "note": e.get("note", "")} for e in raw_exercises]
-        swapped_exercises = auto_swap_workout(named_exercises, user_equipment)
-        for order, ex_sw in enumerate(swapped_exercises):
-            exercise_name = ex_sw["name"]
-            base_sets = ex_sw.get('sets') or 3
-            base_reps = ex_sw.get('reps') or '10'
-            base_rest = ex_sw.get('rest', '60s')
-            base_note = ex_sw.get('note', '')
+        if preserve_through is not None and day_idx <= preserve_through:
+            continue  # leave today + earlier days untouched
+        items = _coach_program.get(day_idx) or []
+        if not items:
+            # FAIL LOUD: the program coach designed nothing for this day (and
+            # there is NO template fallback). Surface it; UI shows "not planned".
+            coach_failures.append({"domain": "lift", "day": day_idx})
+            continue
+        for order, _it in enumerate(items):
+            exercise_name = _it["exercise"]
+            adjusted_sets = _it.get("sets") or 3
+            adjusted_reps = str(_it.get("reps") or "8")
+            weight = _it.get("weight")
+            reason = _it.get("why") or "Coach-designed"
+            base_rest = "90s"
+            note = ""
+            source = 'coach'
 
-            # Coach-prescribed weight + WHY first; engine as fallback.
-            coach_entry = _coach_weights.get((day_idx, exercise_name, order)) or {}
-            coach_weight = coach_entry.get("weight") if isinstance(coach_entry, dict) else coach_entry
-            coach_why = coach_entry.get("why") if isinstance(coach_entry, dict) else None
-            try:
-                targets = compute_next_targets(
-                    current_user.id, exercise_name, target_week, day_idx,
-                    exercise_order=order,
-                )
-                if coach_weight is not None and coach_weight > 0:
-                    adjusted_reps = str(targets.get('target_reps', base_reps)) if targets else base_reps
-                    adjusted_sets = (targets.get('target_sets') if targets else None) or base_sets
-                    weight = coach_weight
-                    reason = coach_why or "Coach-prescribed"
-                    note = base_note
-                    source = 'coach'
-                elif targets.get('target_weight'):
-                    adjusted_reps = str(targets.get('target_reps', base_reps))
-                    adjusted_sets = targets.get('target_sets', base_sets)
-                    reason = coach_why or targets.get('adjustment_reason', '')
-                    weight = targets.get('target_weight')
-                    note = base_note
-                    source = 'engine'
-                else:
-                    adjusted_reps = base_reps
-                    adjusted_sets = base_sets
-                    note = base_note
-                    weight = None
-                    reason = coach_why
-                    source = 'template'
-            except Exception:
-                adjusted_reps = base_reps
-                adjusted_sets = base_sets
-                note = base_note
-                weight = coach_weight if (coach_weight is not None and coach_weight > 0) else None
-                reason = coach_why or ("Coach-prescribed" if weight else None)
-                source = 'coach' if weight else 'template'
-
-            # ENGINE-LEVEL REGRESSION GUARD: never write target_weight below
-            # the user's top set in the last 4 weeks unless this is an
-            # explicit deload week (4 or 8). The engine's first-set bias
-            # (last_weight = session_sets[0].weight) can prescribe below
-            # the user's proven top set when they ramp into heavy sets.
-            # Floor at the recent top so the wave never asks for less than
-            # what the athlete has already proven.
-            if (
-                weight is not None and weight > 0
-                and target_week not in (4, 8)
-            ):
+            # REGRESSION GUARD: never below the athlete's recent top set (except
+            # deload). Skip brand-new movements — their light start is the point.
+            if (weight is not None and weight > 0
+                    and not _it.get("new")
+                    and target_week not in (4, 8, 12)):
                 _top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == current_user.id,
                     SetLog.exercise_name == exercise_name,
@@ -3758,12 +3890,6 @@ def api_generate_weekly_program():
                     SetLog.week >= max(1, target_week - 4),
                 ).scalar()
                 if _top is not None and weight < _top:
-                    import logging
-                    logging.warning(
-                        "Engine regression caught: %s wk %s would write %s lb, "
-                        "floored at recent top set %s lb",
-                        exercise_name, target_week, weight, _top,
-                    )
                     weight = float(_top)
                     reason = (reason or '') + f' [floored at top set {_top}]'
 
@@ -3779,7 +3905,7 @@ def api_generate_weekly_program():
                 note=note,
                 source=source,
                 target_weight=weight,
-                progression_indicator=targets.get('progression_indicator', 'hold') if source == 'engine' else None,
+                progression_indicator=None,
                 adjustment_reason=reason,
             ))
 
@@ -3790,7 +3916,8 @@ def api_generate_weekly_program():
                 "sets": adjusted_sets,
                 "reps": adjusted_reps,
                 "target_weight": weight,
-                "reason": reason if source == 'engine' else None,
+                "reason": reason,
+                "new": bool(_it.get("new")),
                 "tracked_metric": _ex_info.get("tracked_metric"),
                 "muscle_group": _ex_info.get("muscle_group"),
                 "category": _ex_info.get("category"),
@@ -3961,12 +4088,16 @@ def api_generate_weekly_program():
             import logging
             logging.warning("nutritionist failed, engine day_types kept: %s", _e)
 
-        # Delete existing non-coach meal plans for this week
-        WeeklyMealPlan.query.filter_by(
+        # Delete existing non-coach meal plans for this week (future days only
+        # when preserving today+earlier).
+        _future_only(WeeklyMealPlan.query.filter_by(
             user_id=current_user.id, week=target_week
-        ).filter(WeeklyMealPlan.source != 'coach').delete()
+        ).filter(WeeklyMealPlan.source != 'coach'),
+            WeeklyMealPlan).delete(synchronize_session=False)
 
         for day_idx in range(7):
+            if preserve_through is not None and day_idx <= preserve_through:
+                continue  # leave today + earlier days untouched
             day_type = day_types[day_idx]
 
             if day_type == 'fast_day':
@@ -4036,33 +4167,38 @@ def api_generate_weekly_program():
         from workout_data import get_workouts as _get_template_workouts
         template_days = _get_template_workouts(target_week)
 
-        # Delete existing engine-sourced run plans for this week
-        WeeklyRunPlan.query.filter_by(
+        # Delete existing engine-sourced run plans for this week (future days
+        # only when preserving today+earlier).
+        _future_only(WeeklyRunPlan.query.filter_by(
             user_id=current_user.id, week=target_week
-        ).filter(WeeklyRunPlan.source != 'coach').delete()
+        ).filter(WeeklyRunPlan.source != 'coach'),
+            WeeklyRunPlan).delete(synchronize_session=False)
 
         # ─── RUNNING COACH: USE PARALLEL RESULT ───
         # Already fired upstream in the ThreadPoolExecutor block. Reuse.
         _coach_runs = _coach_runs_parallel or {}
 
         for day_idx in range(7):
+            if preserve_through is not None and day_idx <= preserve_through:
+                continue  # leave today + earlier days untouched
             template_run = template_days[day_idx].get("run") if day_idx < len(template_days) else None
             if not template_run:
                 continue
 
-            # Prefer coach's run prescription; engine fallback
+            # COACH-OR-NOTHING: the running coach is the only source. No engine
+            # fallback (that fallback + the static template are what leaked the
+            # "60-90 min" range). If the coach didn't prescribe this day's run,
+            # write nothing and record the gap.
             coach_run = _coach_runs.get(day_idx)
-            if coach_run:
-                progressed = {
-                    "type": coach_run["type"],
-                    "label": coach_run["label"],
-                    "time": coach_run["duration"],
-                    "detail": coach_run["detail"],
-                }
-                run_source = 'coach'
-            else:
-                progressed = _generate_run_plan(current_user.id, target_week, day_idx, template_run)
-                run_source = 'engine'
+            if not coach_run:
+                coach_failures.append({"domain": "run", "day": day_idx})
+                continue
+            progressed = {
+                "type": coach_run["type"],
+                "label": coach_run["label"],
+                "time": coach_run["duration"],
+                "detail": coach_run["detail"],
+            }
 
             db.session.add(WeeklyRunPlan(
                 user_id=current_user.id,
@@ -4072,7 +4208,7 @@ def api_generate_weekly_program():
                 label=progressed.get('label', 'Run'),
                 duration=progressed.get('time', '30 min'),
                 detail=progressed.get('detail', ''),
-                source=run_source,
+                source='coach',
             ))
 
             run_summary.append({
@@ -4106,15 +4242,19 @@ def api_generate_weekly_program():
                         break
             soreness_data = {"area": area, "level": latest_checkin.soreness}
 
-        # Delete existing engine-sourced warmups for this week
-        WeeklyWarmup.query.filter_by(
+        # Delete existing engine-sourced warmups for this week (future days
+        # only when preserving today+earlier).
+        _future_only(WeeklyWarmup.query.filter_by(
             user_id=current_user.id, week=target_week
-        ).filter(WeeklyWarmup.source != 'coach').delete()
+        ).filter(WeeklyWarmup.source != 'coach'),
+            WeeklyWarmup).delete(synchronize_session=False)
 
         if not template_days:
             template_days = _get_template_workouts(target_week)
 
         for day_idx in range(7):
+            if preserve_through is not None and day_idx <= preserve_through:
+                continue  # leave today + earlier days untouched
             day_data = template_days[day_idx] if day_idx < len(template_days) else {}
             day_exercises = day_data.get("exercises", [])
 
@@ -4150,15 +4290,19 @@ def api_generate_weekly_program():
     # --- DAY SCHEDULE SEEDING ---
     schedule_summary = []
     try:
-        # Delete existing engine-sourced schedules for this week
-        WeeklyDaySchedule.query.filter_by(
+        # Delete existing engine-sourced schedules for this week (future days
+        # only when preserving today+earlier).
+        _future_only(WeeklyDaySchedule.query.filter_by(
             user_id=current_user.id, week=target_week
-        ).filter(WeeklyDaySchedule.source != 'coach').delete()
+        ).filter(WeeklyDaySchedule.source != 'coach'),
+            WeeklyDaySchedule).delete(synchronize_session=False)
 
         if not template_days:
             template_days = _get_template_workouts(target_week)
 
         for day_idx in range(7):
+            if preserve_through is not None and day_idx <= preserve_through:
+                continue  # leave today + earlier days untouched
             day_data = template_days[day_idx] if day_idx < len(template_days) else {}
             lift_name = day_data.get("liftName", "Rest")
             is_rest = "rest" in lift_name.lower() and not day_data.get("exercises")
@@ -4229,6 +4373,7 @@ def api_generate_weekly_program():
         "meal_summary": meal_summary,
         "run_summary": run_summary,
         "schedule_summary": schedule_summary,
+        "coach_failures": coach_failures,
     })
 
 

@@ -90,9 +90,9 @@ class TestPhase2WeightProgression:
 
 
 class TestPhase3Hold:
-    def test_phase_3_holds_weight_by_default(self, app_ctx, user_with_history):
-        # Phase 3 wk 10, Back Squat at 200 lb. Last session at RPE 8 (clean
-        # but hard). Spec §1: Phase 3 holds. NO bump.
+    def test_phase_3_progresses_when_reps_hit_clean(self, app_ctx, user_with_history):
+        # Rebuilt 2026-06-01: Phase 3 loads CLIMB (no hold/taper). Back Squat
+        # 200x3 with prescribed 3 reps = clean -> bump (+10 lb compound lower).
         app, _db = app_ctx
         from training_engine import compute_next_targets
         u = user_with_history(
@@ -103,25 +103,17 @@ class TestPhase3Hold:
             t = compute_next_targets(
                 u.id, "Back Squat", week=10, day_idx=4, exercise_order=0,
             )
-        # Note: target_weight could be slightly higher only if engine
-        # detects RPE-6 confirmed twice. Default behavior = hold = 200.
-        assert t["target_weight"] == 200, (
-            f"Phase 3 must default-hold; got bump to {t['target_weight']}"
+        assert t["target_weight"] > 200, (
+            f"Phase 3 must progress when reps are clean; got {t['target_weight']}"
         )
-        assert t["progression_indicator"] == "hold", (
-            f"Phase 3 default must indicate hold; got "
-            f"{t['progression_indicator']}"
-        )
+        assert t["progression_indicator"] == "increase"
 
-    def test_phase_3_drops_when_top_set_rpe_high(
+    def test_phase_3_holds_never_drops_when_reps_missed(
         self, app_ctx, user_with_history
     ):
-        # Phase 3 wk 10, Back Squat 200 lb, user logged a SHORT session
-        # (missed reps — proxy for RPE >8). Engine should drop 5%.
+        # Missed reps (2 of prescribed 3) -> HOLD, never a drop (no regression).
         app, _db = app_ctx
         from training_engine import compute_next_targets
-        # Simulate "missed top set" via short session: last_reps=2 of
-        # prescribed 3. last_set_count low.
         u = user_with_history(
             "Back Squat", week=10, day_idx=4,
             last_weight=200, last_reps=2, set_count=2,
@@ -130,11 +122,10 @@ class TestPhase3Hold:
             t = compute_next_targets(
                 u.id, "Back Squat", week=10, day_idx=4, exercise_order=0,
             )
-        # 5% drop from 200 = 190
-        assert t["target_weight"] <= 195, (
-            f"Phase 3 should drop weight when last session missed reps; "
-            f"got {t['target_weight']}"
+        assert t["target_weight"] == 200, (
+            f"Phase 3 must hold (not drop) on missed reps; got {t['target_weight']}"
         )
+        assert t["progression_indicator"] == "hold"
 
 
 class TestWeek12Hold:
