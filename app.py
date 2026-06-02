@@ -4599,12 +4599,18 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                         cal_day_type,
                         current_weight,
                     )
+                    # Runs are written to the DB AFTER this meal loop (below), so
+                    # _day_has_training's DB query would miss a run-only day like
+                    # Sunday. Use the in-memory coach output, which is already
+                    # computed: a day has training if it has lifts OR a run.
+                    _has_tr = bool((_coach_program or {}).get(day_idx)) or \
+                        bool((_coach_runs_parallel or {}).get(day_idx))
                     meal_plan = generate_meal_plan(
                         selected_foods=user_foods,
                         day_type='fast_day',
                         targets=day_macros,
                         fasting_protocol=fasting_protocol,
-                        has_training=_day_has_training(current_user.id, target_week, day_idx),
+                        has_training=_has_tr,
                     )
                 else:
                     meal_plan = MEAL_PLANS.get('fast_day', {})  # fallback only if no selections
