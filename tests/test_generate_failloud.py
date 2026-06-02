@@ -202,6 +202,11 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
         r0 = WeeklyRunPlan.query.filter_by(user_id=uid, week=WEEK, day_idx=0).all()
         assert r0 and all(r.duration == "OLD" for r in r0), "today's run must be preserved"
         d1 = WeeklyPrescription.query.filter_by(user_id=uid, week=WEEK, day_idx=1).all()
-        assert d1 and all(r.target_weight == 220.0 for r in d1), "tomorrow's lifts must be regenerated"
+        # Regenerated (not the old 999) AND rounded to a loadable weight — a
+        # barbell at 220 is not buildable (ends in 0); it becomes 225 (45+10k).
+        from app import _round_to_loadable
+        assert d1 and all(r.target_weight != 999.0 for r in d1), "tomorrow's lifts must be regenerated"
+        assert all(r.target_weight == _round_to_loadable(r.exercise_name, 220.0) for r in d1), \
+            "regenerated lifts must be rounded to a loadable weight"
         r1 = WeeklyRunPlan.query.filter_by(user_id=uid, week=WEEK, day_idx=1).all()
         assert r1 and all(r.duration == "44 min" for r in r1), "tomorrow's run must be regenerated"

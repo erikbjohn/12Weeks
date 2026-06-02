@@ -1019,6 +1019,75 @@ def _get_day_meal_type(user_id, week, day_idx):
     return meal_type
 
 
+# Barbell movements load a 45-lb Olympic bar. With no 2.5-lb micro-plates (the
+# smallest plate is 5 lb → a 10-lb pair jump), every achievable barbell total is
+# 45 + 10k, i.e. it ALWAYS ENDS IN 5 (45, 55, 65, … 145, 155). A barbell bench is
+# never 150. Dumbbells and machine stacks move in 5-lb steps.
+_BARBELL_RE = re.compile(
+    r"barbell|bench press|back squat|front squat|deadlift|overhead press|\bohp\b|"
+    r"bent[- ]?over row|hip thrust|romanian deadlift|\brdl\b", re.I)
+_DB_RE = re.compile(r"\bdb\b|dumbbell", re.I)
+
+
+def _is_barbell_movement(name: str) -> bool:
+    nm = name or ""
+    if _DB_RE.search(nm):  # "DB Overhead Press", "Incline DB Press" are NOT barbell
+        return False
+    return bool(_BARBELL_RE.search(nm))
+
+
+def _round_to_loadable(exercise_name: str, w):
+    """Round a prescribed load to one the athlete can actually build on the bar.
+    Barbell → 45 + 10k (ends in 5), floored at the empty 45-lb bar. Everything
+    else → nearest 5 lb. Ties round UP (progression-friendly)."""
+    if not w or w <= 0:
+        return w
+    if _is_barbell_movement(exercise_name):
+        k = int((float(w) - 45.0) / 10.0 + 0.5)  # round half up
+        return float(max(45, 45 + 10 * k))
+    return float(int(float(w) / 5.0 + 0.5) * 5)
+
+
+def _honest_lift_reason(final, recent_top, really_new) -> str:
+    """A number-correct reason built from facts — used to REPLACE a coach `why`
+    that would contradict the prescribed number (the '+2.5 from 145 but shows
+    150' / 'new movement but logged at 35' class)."""
+    if not final or final <= 0:
+        return "Bodyweight — no added load."
+    if really_new or recent_top is None:
+        if really_new:
+            return f"New movement — starting light at {final:g} lb to groove the pattern."
+        return f"Set at {final:g} lb."
+    if final > recent_top:
+        return f"Up to {final:g} lb from your last {recent_top:g} lb."
+    if final < recent_top:
+        return f"Held at {final:g} lb."
+    return f"Holding {final:g} lb to consolidate (a smaller bump isn't loadable on the bar)."
+
+
+def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new) -> str:
+    """If the coach's `why` would contradict the prescribed number — cites a
+    weight that isn't the final load, implies a delta that doesn't add up, or
+    claims a 'new/baseline' movement that actually has history — replace it with
+    an honest, fact-built reason. Otherwise keep the coach's reasoning."""
+    reason = (reason or "").strip()
+    asserts_load = bool(re.search(r"(?:to|->|→|\+|holding at|hold at|\bat)\s*\$?\d", reason, re.I)) or "from" in reason.lower()
+    nums = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)\s*lb", reason)]
+    num_contradiction = (final is not None and asserts_load
+                         and any(abs(n - final) > 0.01 for n in nums))
+    m = re.search(r"\+\s*(\d+(?:\.\d+)?)\s*lb\s*from\s*(?:last week'?s?\s*)?(\d+(?:\.\d+)?)", reason, re.I)
+    if m and final is not None and abs((float(m.group(1)) + float(m.group(2))) - final) > 0.01:
+        num_contradiction = True
+    claims_new = bool(re.search(r"new movement|deliberately light|establish\w*\s+\w*\s*baseline|"
+                                r"first (?:time|exposure)|introduc(?:e|ing|ed)", reason, re.I))
+    false_new = claims_new and not really_new
+    rounded_changed = (final is not None and proposed is not None
+                       and abs(float(final) - float(proposed)) > 0.01)
+    if num_contradiction or false_new or rounded_changed:
+        return _honest_lift_reason(final, recent_top, really_new)
+    return reason
+
+
 def _generate_run_plan(user_id, week, day_idx, template_run):
     """Progress run based on week number. Returns dict with type/label/time/detail."""
     base_type = template_run.get('type', 'z2')
@@ -4200,12 +4269,30 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                               f"(coach proposed {_proposed:g}; raised to your "
                               f"proven max).")
 
-            # Plate-round the load so it's achievable on a real bar (no +2 lb on
-            # a barbell — the smallest plate pair is 5 lb) AND so every surface
-            # shows the SAME number (kills the unplate-able 142.5-vs-140 split).
-            # Done once here, server-side, before saving.
+            # Plate-round to an ACHIEVABLE load: barbell = 45 + 10k (ends in 5 —
+            # a bench is never 150), everything else nearest 5. Done once here,
+            # server-side, so every surface shows the same loadable number.
+            _proposed_weight = weight
             if weight and weight > 0:
-                weight = float(round(weight / 5.0) * 5)
+                weight = _round_to_loadable(exercise_name, weight)
+
+            # HONESTY: the coach wrote `reason` against ITS proposed number and
+            # its own "new movement" guess. If the load changed when we made it
+            # loadable, or the movement actually has history, the why can now
+            # contradict the displayed number (the "+2.5 from 145 but shows 150"
+            # / "new movement but you've logged it" class). Reconcile from facts.
+            try:
+                _recent_top = db.session.query(db.func.max(SetLog.weight)).filter(
+                    SetLog.user_id == current_user.id,
+                    SetLog.exercise_name == exercise_name,
+                    SetLog.weight > 0,
+                    SetLog.week >= max(1, target_week - 6),
+                ).scalar()
+            except Exception:
+                _recent_top = None
+            _really_new = (_recent_top is None)
+            reason = _reconcile_lift_reason(reason, weight, _proposed_weight,
+                                            _recent_top, _really_new)
 
             db.session.add(WeeklyPrescription(
                 user_id=current_user.id,
