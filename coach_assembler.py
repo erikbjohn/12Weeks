@@ -763,8 +763,28 @@ def _get_day_meal_type_local(user_id, week, day_idx):
             return wmp.day_type
     except Exception:
         pass
-    from workout_data import DAY_MEAL_TYPES
-    return DAY_MEAL_TYPES.get(DAY_NAMES[day_idx] if day_idx < 7 else "Mon", "moderate")
+    # Derive from the day's ACTUAL run+lift (mirrors app._get_day_meal_type) so
+    # the coach narrates the SAME day type the meal card shows — the stale
+    # DAY_MEAL_TYPES weekday map made them disagree.
+    from workout_data import (DAY_MEAL_TYPES, derive_meal_type,
+                              get_workouts, get_workouts_for_user)
+    weekday = DAY_NAMES[day_idx] if day_idx < 7 else "Mon"
+    try:
+        from models import PhysicalAssessment, TrainingGoal
+        pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
+        has_gym = pa.has_gym if pa else True
+        tdays = (get_workouts(week) if has_gym
+                 else get_workouts_for_user(week, has_gym=False))
+        day_dict = tdays[day_idx] if day_idx < len(tdays) else None
+        mt = derive_meal_type(day_dict, weekday)
+        if mt == "fast_day":
+            goal = (TrainingGoal.query.filter_by(user_id=user_id)
+                    .order_by(TrainingGoal.id.desc()).first())
+            if goal and goal.goal_type in ("bulk", "recomp"):
+                return "rest"
+        return mt
+    except Exception:
+        return DAY_MEAL_TYPES.get(weekday, "moderate")
 
 
 @section_builder("food_safety")

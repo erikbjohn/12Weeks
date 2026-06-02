@@ -7895,7 +7895,12 @@ function _pdHeroCard(startWeight, currentWeight, targetWeight, projections) {
   projections = projections || {};
   var delta = currentWeight - startWeight;
   var deltaStr = (delta <= 0 ? '' : '+') + delta.toFixed(1) + ' lb';
-  var deltaClass = delta <= 0 ? 'pd-green' : 'pd-red';
+  // Color by progress TOWARD target, not by sign: a bulk user gaining toward a
+  // higher target is on-plan (green), as is a cut user losing toward a lower one.
+  var _toward = (targetWeight != null && targetWeight !== startWeight)
+      ? ((targetWeight - startWeight) >= 0 ? delta >= 0 : delta <= 0)
+      : (delta <= 0);
+  var deltaClass = _toward ? 'pd-green' : 'pd-red';
 
   var pct = 0;
   if (targetWeight && startWeight !== targetWeight) {
@@ -8229,7 +8234,11 @@ function _pdLiftProgression(lifts) {
     var lift = liftEntries[li];
     var latestVal = lift.data[lift.data.length - 1].e1rm;
     var firstVal = lift.data[0].e1rm;
-    var isPR = latestVal >= lift.maxE1rm;
+    // PR only when the latest STRICTLY beats every prior week — not a tie/plateau
+    // (maxE1rm includes the latest point, so >= flagged ties as PRs).
+    var _priorVals = lift.data.slice(0, -1).map(function(v){ return v.e1rm; });
+    var _priorMax = _priorVals.length ? Math.max.apply(null, _priorVals) : -Infinity;
+    var isPR = latestVal > _priorMax;
     var delta = latestVal - firstVal;
     var deltaStr = delta > 0 ? '+' + delta : delta === 0 ? '' : '' + delta;
     var deltaColor = delta > 0 ? '#4ade80' : delta < 0 ? '#ef4444' : 'var(--muted)';

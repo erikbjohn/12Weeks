@@ -410,6 +410,13 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
     fat_cal_adjust = carb_cal_delta / 9
     adj_fat = max(20, round(adj_fat - fat_cal_adjust))
 
+    # Don't promise "higher carbs for endurance/training fuel" when the cut's
+    # keto-floor base keeps carbs low even after the multiplier (5g * 2.0 = 10g
+    # is NOT a carb-up). Make the note match the actual number.
+    if day_type in ("long_run", "heavy_lift") and adj_carbs < 40:
+        note = (f"Slightly more than a rest day (~{adj_carbs}g carbs), but you're "
+                f"in a cut so carbs stay low — fuel mostly from the day before.")
+
     meals = []
 
     # ── Pre-workout meal ──────────────────────────────────────────────────────
