@@ -1082,8 +1082,9 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
 
 @app.route("/api/debug/health")
 def debug_health():
-    """Quick health check — returns status of key tables."""
-    results = {}
+    """Quick health check — returns status of key tables + deployed commit."""
+    import os as _os
+    results = {"commit": (_os.environ.get("RENDER_GIT_COMMIT") or "local")[:12]}
     try:
         from sqlalchemy import text as _t
         for tbl in ['user', 'psych_intake', 'physical_assessment', 'training_goal', 'app_state', 'weekly_prescription', 'exercise_log']:
