@@ -179,7 +179,7 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
         prog = {}
         for di in range(7):
             items = [{"exercise": resolve_name(ex["name"]), "sets": 3, "reps": "5",
-                      "weight": 222, "rest": "90s", "why": "fresh", "new": False}
+                      "weight": 220, "rest": "90s", "why": "fresh", "new": False}
                      for ex in (get_workouts(k["week"])[di].get("exercises", []) or [])]
             if items:
                 prog[di] = items
@@ -202,6 +202,6 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
         r0 = WeeklyRunPlan.query.filter_by(user_id=uid, week=WEEK, day_idx=0).all()
         assert r0 and all(r.duration == "OLD" for r in r0), "today's run must be preserved"
         d1 = WeeklyPrescription.query.filter_by(user_id=uid, week=WEEK, day_idx=1).all()
-        assert d1 and all(r.target_weight == 222.0 for r in d1), "tomorrow's lifts must be regenerated"
+        assert d1 and all(r.target_weight == 220.0 for r in d1), "tomorrow's lifts must be regenerated"
         r1 = WeeklyRunPlan.query.filter_by(user_id=uid, week=WEEK, day_idx=1).all()
         assert r1 and all(r.duration == "44 min" for r in r1), "tomorrow's run must be regenerated"
