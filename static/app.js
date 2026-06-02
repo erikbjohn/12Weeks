@@ -8551,7 +8551,10 @@ function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight,
   var anchorDayOff = null;
   var anchorWt = null;
   if (weightSeries && weightSeries.length > 1) {
-    var firstDate = new Date(weightSeries[0].date + 'T00:00:00');
+    // Anchor on PROGRAM START (not the first weigh-in) so weigh-ins line up
+    // with the W1/W4/W8/W12 x-axis and the projection's absolute weeks.
+    var firstDate = startDate ? new Date(startDate + 'T00:00:00')
+                              : new Date(weightSeries[0].date + 'T00:00:00');
     var pts = [];
     for (var i = 0; i < weightSeries.length; i++) {
       var dt = new Date(weightSeries[i].date + 'T00:00:00');
@@ -8591,8 +8594,9 @@ function _spRenderProjChart(weightSeries, projection, targetWeight, startWeight,
     }
     for (var j = 0; j < projection.length; j++) {
       var pw = projection[j];
-      var localWk = pw.week || (j + 1);
-      var dayOff2 = anchorDayOff + localWk * 7;
+      // Position by ABSOLUTE program week (days from program start), aligned to
+      // the same x-axis as the weigh-ins and the W1..W12 ticks.
+      var dayOff2 = pw.week ? (pw.week - 1) * 7 : (anchorDayOff + (j + 1) * 7);
       if (dayOff2 > 84) dayOff2 = 84;
       projPts.push(xScale(dayOff2).toFixed(1) + ',' + yScale(pw.projected).toFixed(1));
     }
