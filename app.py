@@ -2973,9 +2973,12 @@ def api_workouts():
                 if day_idx < len(days):
                     days[day_idx]["exercises"] = exercises
                     if not days[day_idx].get("isRest"):
-                        _dn = _derive_lift_name([e.get("name") for e in exercises])
-                        if _dn:
-                            days[day_idx]["liftName"] = _dn
+                        # Same reconciliation as /api/workouts/<week> so the two
+                        # endpoints never disagree on a day's title (keep an
+                        # accurate curated label, fix a wrong-region/omitted one).
+                        days[day_idx]["liftName"] = _reconcile_lift_name(
+                            days[day_idx].get("liftName"),
+                            [e.get("name") for e in exercises])
 
         for day in days:
             if "exercises" in day:
