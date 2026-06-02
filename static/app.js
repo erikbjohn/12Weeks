@@ -2166,7 +2166,18 @@ function getWeightForExercise(exName, weekNum) {
 function getLastWeight(exName) {
   const data = getExerciseData(exName);
   if (!data || !data.history || data.history.length === 0) return null;
-  return data.history[data.history.length - 1].weight;
+  // Most recent entry from a session BEFORE the one being viewed — never today's
+  // just-logged set (same week+day) or a later week, which made "Last:" show the
+  // value the athlete is entering right now.
+  for (let i = data.history.length - 1; i >= 0; i--) {
+    const h = data.history[i];
+    const hw = (h.week != null ? h.week : 0);
+    const hd = (h.day != null ? h.day : 0);
+    if (hw < currentWeek || (hw === currentWeek && hd < currentDay)) {
+      return h.weight;
+    }
+  }
+  return null;
 }
 
 function getWeightTrend(exName) {
