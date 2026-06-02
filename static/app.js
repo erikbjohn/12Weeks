@@ -11555,6 +11555,9 @@ async function enterExerciseFocus(exIdx) {
   _focusTargetReps = setsMatch ? setsMatch[2] : ex.sets;
   _focusRestSec = parseRestSeconds(ex.rest);
   _focusExName = displayName;
+  // Height-tracked plyo (Box Jump) is INCHES, not lb — the focus view hardcoded
+  // 'lb', contradicting the detail card's 'in'.
+  window._focusUnit = (ex.tracked_metric === 'height') ? 'in' : 'lb';
   _focusExIdx = exIdx;
   // Compute the real exercise index (without warmups) for cache/DB keys
   if (_workoutActive && _workoutExercises) {
@@ -11672,11 +11675,11 @@ function renderExerciseFocus() {
         <div class="focus-ex-name">${escapeHtml(_focusExName)}</div>
         <div class="focus-set-counter">Set ${_focusSetIdx + 1} of ${_focusSetCount}</div>
         ${_focusInfoBar}
-        <div style="font-family:'DM Mono',monospace;font-size:18px;color:var(--accent);text-align:center;margin:8px 0">${_focusWeightVal || '?'} lb &times; ${_focusTargetReps} reps</div>
-        ${_focusLastWeight && _focusLastWeight != _focusWeightVal ? `<div class="focus-last-perf">Last: ${_focusLastWeight} lb</div>` : ''}
+        <div style="font-family:'DM Mono',monospace;font-size:18px;color:var(--accent);text-align:center;margin:8px 0">${_focusWeightVal || '?'} ${window._focusUnit || 'lb'} &times; ${_focusTargetReps} reps</div>
+        ${_focusLastWeight && _focusLastWeight != _focusWeightVal ? `<div class="focus-last-perf">Last: ${_focusLastWeight} ${window._focusUnit || 'lb'}</div>` : ''}
         ${window._focusReason ? `<div class="focus-reason"><span class="focus-indicator focus-${window._focusIndicator || 'hold'}">${{'up':'↑','hold':'—','deload':'○','weak':'⚑','down':'↓'}[window._focusIndicator] || '—'}</span> ${escapeHtml(window._focusReason)}</div>` : ''}
         <div class="focus-input-group">
-          <input class="focus-input" type="number" inputmode="decimal" id="focus-wt" value="${wt}" placeholder="lb" autofocus>
+          <input class="focus-input" type="number" inputmode="decimal" id="focus-wt" value="${wt}" placeholder="${window._focusUnit || 'lb'}" autofocus>
           <span class="focus-input-label">lb</span>
         </div>
         <div class="focus-x">&times;</div>

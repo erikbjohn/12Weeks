@@ -2986,6 +2986,10 @@ def api_week(week):
             ex_info = EXERCISES.get(rx.exercise_name, {})
             if ex_info.get("video"):
                 ex_dict["video"] = ex_info["video"]
+            # Inject tracked_metric so height-tracked plyos (Box Jump) render
+            # "in" not "lb" here too (the bulk endpoint already does this).
+            if ex_info.get("tracked_metric"):
+                ex_dict["tracked_metric"] = ex_info["tracked_metric"]
             rx_by_day[rx.day_idx].append(ex_dict)
 
         for day_idx, exercises in rx_by_day.items():
