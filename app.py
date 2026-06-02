@@ -3139,6 +3139,16 @@ def api_workouts():
         except Exception:
             pass
 
+        # FINAL day-title reconciliation — AFTER the schedule overlay (which
+        # carries a stale label) so the title shown on the dashboard/detail
+        # matches the day's actual movements. Mirrors api_week; without it the
+        # two endpoints disagree (api_workouts kept "Shoulder/Arms" on a back
+        # day while /api/workouts/<week> already showed "Back & Biceps").
+        for _d in days:
+            if not _d.get("isRest") and _d.get("exercises"):
+                _d["liftName"] = _reconcile_lift_name(
+                    _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
+
         # FAIL LOUD: strip any leftover template content for domains with no
         # real coach/engine plan so the static skeleton never reaches the UI as
         # the user's plan. Meals deferred (food-selection filtering owns them).
