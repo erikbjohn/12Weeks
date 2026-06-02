@@ -2842,8 +2842,18 @@ def api_workouts():
                     continue
                 _t = (f"{rl.duration_min} min" if rl.duration_min
                       else f"{rl.distance_miles} mi")
-                days[di]["run"] = {"type": "z2", "label": "Run (logged)",
-                                   "time": _t, "detail": "Logged run."}
+                # Preserve the workout TYPE the athlete actually followed (from
+                # the template that was displayed at the time); just relabel the
+                # duration to what they logged. Their HIIT/intervals/etc. keep
+                # their name in history.
+                _tmpl = days[di].get("run") or {}
+                days[di]["run"] = {
+                    "type": _tmpl.get("type", "z2"),
+                    "label": _tmpl.get("label", "Run"),
+                    "time": _t,
+                    "detail": (_tmpl.get("detail") or "Logged."),
+                    "logged": True,
+                }
                 runplan_day_set.add(di)
         except Exception:
             pass
@@ -2993,8 +3003,14 @@ def api_week(week):
                 continue
             _t = (f"{rl.duration_min} min" if rl.duration_min
                   else f"{rl.distance_miles} mi")
-            days[di]["run"] = {"type": "z2", "label": "Run (logged)",
-                               "time": _t, "detail": "Logged run."}
+            _tmpl = days[di].get("run") or {}
+            days[di]["run"] = {
+                "type": _tmpl.get("type", "z2"),
+                "label": _tmpl.get("label", "Run"),
+                "time": _t,
+                "detail": (_tmpl.get("detail") or "Logged."),
+                "logged": True,
+            }
             runplan_day_set.add(di)
     except Exception:
         pass
