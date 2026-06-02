@@ -46,7 +46,7 @@ def _build_run_history_block(user_id: int, current_week: int,
         bits = [str(r.log_date)]
         if r.distance_miles: bits.append(f"{r.distance_miles}mi")
         if getattr(r, 'duration_min', None): bits.append(f"{r.duration_min}min")
-        if r.avg_hr: bits.append(f"HR={r.avg_hr}")
+        if r.avg_hr: bits.append(f"wholeRunAvgHR={r.avg_hr}")
         if getattr(r, 'run_type', None): bits.append(r.run_type)
         if getattr(r, 'elevation_ft', None): bits.append(f"{r.elevation_ft}ft")
         lines.append("  " + " | ".join(bits))
@@ -89,6 +89,40 @@ def _parse_run_magnitude(s):
     if m:
         return (float(m.group(1)), "min")
     return (None, None)
+
+
+def _segments_total_min(segments) -> int:
+    """Sum the coach's OWN run segments into honest total minutes. Each segment
+    is {kind, minutes, reps?}; total = sum(minutes × reps). The coach chooses
+    every value — code only adds them, so the headline duration can never
+    contradict the structure the coach described (the '38 min' for a 34-min
+    session bug)."""
+    total = 0.0
+    for s in segments or []:
+        try:
+            mins = float(s.get("minutes") or 0)
+            reps = int(s.get("reps") or 1)
+            total += mins * max(1, reps)
+        except (TypeError, ValueError):
+            continue
+    return int(round(total))
+
+
+def _segments_to_detail(segments) -> str:
+    """Human-readable structure built from the coach's own segments, so the
+    detail always matches the computed duration."""
+    parts = []
+    for s in segments or []:
+        kind = (s.get("kind") or "segment").lower()
+        mins = s.get("minutes")
+        reps = s.get("reps")
+        hr = s.get("hr")
+        note = s.get("note")
+        seg = (f"{reps}×{mins} min {kind}" if reps and int(reps) > 1
+               else f"{mins} min {kind}")
+        extra = " ".join(x for x in [f"@ HR {hr}" if hr else "", note or ""] if x).strip()
+        parts.append(seg + (f" ({extra})" if extra else ""))
+    return "; ".join(parts)
 
 
 def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
@@ -166,52 +200,62 @@ def generate_week_runs(
     target_wt = user_context.get("target_weight")
 
     system = (
-        "You are a running coach prescribing the weekly run plan. The phase "
-        "template defines the TYPE and SHAPE (Z2, VO2, tempo, long run, etc.); "
-        "you pick duration/distance/HR target per day based on the athlete's "
-        "actual recent runs.\n\n"
-        "ABSOLUTE RULES:\n"
-        "0. COMMIT TO A SINGLE NUMBER. Every duration is exactly one value — "
-        "   \"75 min\", never a range like \"60-90 min\" or \"45-60 min\". A "
-        "   range is a hard fail; decide the number. Same for distance: one "
-        "   value, e.g. \"9 mi\".\n"
-        "0b. PRESCRIBE EVERY DAY in the template run structure below. Omitting "
-        "   a day leaves the athlete with no run for it — a hard fail.\n"
-        "1. NEVER prescribe a run below LAST WEEK'S PRESCRIBED run for the same "
-        "   day/type (see 'LAST WEEK'S PRESCRIBED RUNS' below) — MATCH OR EXCEED "
-        "   it — unless this is a deload week (4/8/12) or an explicit taper. A "
-        "   regression vs last week's plan is a HARD FAIL. Do NOT use the logged "
-        "   runs to justify a drop: a logged run may be shorter than prescribed, "
-        "   but the PRESCRIPTION is the floor. Last week's 40-min VO2 → this week "
-        "   is 40+ min, never 38.\n"
-        "2. HIT THE TARGET WEEKLY MILES. The target is a FLOOR, not a ceiling. "
-        "   Sum up your prescribed durations × ~9 min/mi pace; if the total "
-        "   is below the target, INCREASE durations until it's at or above. "
-        "   Undershooting the target is a hard fail. Show the math in your "
-        "   reasoning even if you don't output it.\n"
-        "3. Z2 runs should hold HR ≤ Z2 ceiling (typically 130-140 for the "
-        "   athlete). State the HR ceiling in the detail.\n"
-        "4. VO2 intervals: name reps × duration (e.g. 4×4 min at threshold). "
-        "   At MOST one VO2 day per week — don't double up.\n"
-        "5. Long run: distance > all other runs in the week. For build phase "
-        "   targeting 40+ mi/wk, pick ONE long-run duration around 90-120 min "
-        "   (commit to a single number, e.g. 100 min; shorter only on deload).\n"
-        "6. Deload weeks: ~70% of prior week's volume per run.\n"
-        "7. Build phase: progress long run by 0.5-1 mi/week if streak is clean.\n"
-        "8. Strict Z2 days: HR ceiling explicit (e.g. 'HR ≤ 132').\n"
-        "9. SATURDAY MUST HAVE A RUN if the athlete trains 6 days. Don't skip it.\n\n"
-        "Output: JSON mapping `<day_idx>` to "
-        '{"type": "<z2|vo2|tempo|long|streak|hill>", '
-        '"label": "<short label>", "duration": "<X min or X mi>", '
-        '"detail": "<HR target + notes>"}. No prose. JSON only.\n\n'
+        "You are a running coach designing the athlete's weekly run plan from "
+        "their actual history and how they're performing. You decide EVERYTHING "
+        "— interval count, work duration, recovery, warm-up, cool-down, "
+        "intensity, and week-over-week progression. Nothing is fixed; you own "
+        "the plan AND a real reason for every choice.\n\n"
+        "HOW YOU OUTPUT A RUN — as SEGMENTS, never a guessed total:\n"
+        "Describe each run as an ordered list of segments. Each segment is "
+        '{"kind": "warmup|work|recovery|cooldown|steady", "minutes": <number>, '
+        '"reps": <number, default 1>, "hr": "<target/ceiling, optional>", '
+        '"note": "<optional>"}. The total duration is the SUM of (minutes × '
+        "reps) — the SYSTEM computes it, so it always matches what you actually "
+        "prescribed. Do NOT output a separate total number; just get the "
+        "segments right. (warmup 10 + work 3min×4 + recovery 3min×3 + cooldown 6 "
+        "= a real 37-min VO2 session — the parts and the total can never "
+        "disagree.)\n\n"
+        "DATA YOU HAVE — and ONLY this; never reference anything else:\n"
+        "  date · distance (mi) · total duration (min) · elevation (ft) · notes\n"
+        "  WHOLE-RUN AVERAGE HR: a single mean over the ENTIRE run including "
+        "  warm-up, recoveries, and cool-down. It does NOT tell you interval "
+        "  intensity, per-rep HR, or HR recovery.\n"
+        "HARD ANTI-HALLUCINATION RULE: every reason must cite ONLY the data "
+        "above. You may NOT claim or imply HR recovery, per-interval or per-rep "
+        "HR, splits, work-interval HR zones, lactate, or 'how they executed the "
+        "intervals' — THAT DATA DOES NOT EXIST. Inventing a metric to justify a "
+        "choice is a hard fail. A whole-run average tells you overall effort and "
+        "nothing finer; say only what it actually supports.\n\n"
+        "PROGRAMMING RULES:\n"
+        "1. Give a `reason` for EVERY run, and explicitly justify any change vs "
+        "   LAST WEEK'S PRESCRIPTION (shown below) from the real data. A change "
+        "   with no data-grounded reason is a hard fail.\n"
+        "2. Do NOT regress below last week's same-type run (shorter total, fewer "
+        "   reps, less work) unless it is a deload week (4/8/12) or you state an "
+        "   explicit, data-grounded taper. A short LOGGED run does NOT justify "
+        "   cutting the PRESCRIPTION.\n"
+        "3. Hit the target weekly miles (a FLOOR): sum durations × ~9 min/mi; if "
+        "   under target, add volume.\n"
+        "4. At most ONE VO2 day per week. Saturday must have a run if they train "
+        "   6 days. The long run is the week's longest.\n"
+        "5. Single values only — never a range.\n\n"
+        "Output JSON only: map `<day_idx>` to "
+        '{"type": "<z2|vo2|tempo|long|streak|hill>", "label": "<short label>", '
+        '"segments": [ ... ], "reason": "<data-grounded why, incl. any change>"}.\n'
         "Example:\n"
         '{\n'
-        '  "1": {"type": "vo2", "label": "VO2 4×4", "duration": "35 min", '
-        '"detail": "4×4 min at HR 165-175, 3 min jog recovery"},\n'
-        '  "3": {"type": "z2", "label": "Z2 base", "duration": "60 min", '
-        '"detail": "HR ≤ 132. Easy pace."},\n'
-        '  "6": {"type": "long", "label": "Long fasted", "duration": "90 min", '
-        '"detail": "~9 mi @ HR ≤ 140. Fasted state."}\n'
+        '  "1": {"type":"vo2","label":"VO2 4×3","segments":['
+        '{"kind":"warmup","minutes":10},'
+        '{"kind":"work","minutes":3,"reps":4,"hr":"165-175"},'
+        '{"kind":"recovery","minutes":3,"reps":3},'
+        '{"kind":"cooldown","minutes":6}],'
+        '"reason":"Held 4×3 work from last week; added 2 min of warm-up. Last '
+        'week\'s whole-run avg HR was 148, i.e. easy overall, so total volume is '
+        'safe to nudge up — kept the work/recovery the same since I can\'t see '
+        'interval HR."},\n'
+        '  "3": {"type":"z2","label":"Z2 base","segments":['
+        '{"kind":"steady","minutes":60,"hr":"≤132"}],'
+        '"reason":"Matches last week\'s 60-min Z2; aerobic base held."}\n'
         '}'
     )
 
@@ -258,11 +302,24 @@ def generate_week_runs(
             continue
         if not isinstance(v, dict):
             continue
+        segments = v.get("segments")
+        if isinstance(segments, list) and segments:
+            # Duration is the SUM of the coach's own segments — never an invented
+            # headline number that contradicts the structure.
+            duration = f"{_segments_total_min(segments)} min"
+            detail = _segments_to_detail(segments)
+        else:
+            # Back-compat if the coach gives a freeform duration/detail.
+            duration = v.get("duration") or v.get("time") or "30 min"
+            detail = v.get("detail") or ""
+        reason = (v.get("reason") or "").strip()
+        if reason:
+            detail = f"{detail} — {reason}" if detail else reason
         out[day_idx] = {
             "type": v.get("type") or "z2",
             "label": v.get("label") or "Run",
-            "duration": v.get("duration") or v.get("time") or "30 min",
-            "detail": v.get("detail") or "",
+            "duration": duration,
+            "detail": detail,
         }
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.

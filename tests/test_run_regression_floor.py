@@ -5,6 +5,32 @@ adherence is unreliable, so _apply_run_regression_floor enforces it in code.
 import pytest
 
 
+def test_segments_total_is_the_honest_sum():
+    """The headline duration is the sum of the coach's own segments — it can
+    never be the invented '38 min' for a 34-min session again."""
+    from coach_planning_runs import _segments_total_min
+    segs = [
+        {"kind": "warmup", "minutes": 10},
+        {"kind": "work", "minutes": 3, "reps": 4},      # 12
+        {"kind": "recovery", "minutes": 3, "reps": 3},  # 9
+        {"kind": "cooldown", "minutes": 6},
+    ]
+    assert _segments_total_min(segs) == 10 + 12 + 9 + 6 == 37
+    assert _segments_total_min([{"kind": "steady", "minutes": 60}]) == 60
+    assert _segments_total_min([]) == 0
+
+
+def test_segments_detail_matches_structure():
+    from coach_planning_runs import _segments_to_detail
+    d = _segments_to_detail([
+        {"kind": "work", "minutes": 3, "reps": 4, "hr": "165-175"},
+        {"kind": "cooldown", "minutes": 6},
+    ])
+    assert "4×3 min work" in d
+    assert "165-175" in d
+    assert "6 min cooldown" in d
+
+
 def test_parse_run_magnitude():
     from coach_planning_runs import _parse_run_magnitude
     assert _parse_run_magnitude("38 min") == (38.0, "min")
