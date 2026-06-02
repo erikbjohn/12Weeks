@@ -3668,6 +3668,15 @@ def _fill_missing_week_runs(user_id, target_week):
 # by (user_id, week), and the client polls /generate-status.
 _GEN_JOBS = {}
 _GEN_JOBS_LOCK = threading.Lock()
+# (user_id, week) -> latest human-readable progress line shown on the loading page
+_GEN_PROGRESS = {}
+
+
+def _gen_progress(user_id, week, msg):
+    try:
+        _GEN_PROGRESS[(user_id, week)] = msg
+    except Exception:
+        pass
 
 
 @app.route("/api/weekly-program/generate-status")
@@ -3689,7 +3698,8 @@ def api_weekly_program_generate_status():
         return jsonify(out)
     if job["status"] == "error":
         return jsonify({"status": "error", "error": job.get("error", "generation failed")})
-    return jsonify({"status": "running"})
+    return jsonify({"status": "running",
+                    "progress": _GEN_PROGRESS.get((current_user.id, week))})
 
 
 @app.route("/api/weekly-program/generate", methods=["POST"])
@@ -4064,6 +4074,9 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     _coach_program = {}
     _coach_runs_parallel = {}
     _nutri_day_overrides_parallel = {}
+    _gen_progress(current_user.id, target_week,
+                  "Consulting your strength, running & nutrition coaches — "
+                  "designing the week from your history and last week's plan…")
     with _cf.ThreadPoolExecutor(max_workers=3) as _ex_pool:
         _f_str = _ex_pool.submit(_call_program)
         _f_run = _ex_pool.submit(_call_runs)
@@ -4083,6 +4096,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         except Exception as _e:
             import logging
             logging.warning("nutritionist failed: %s", _e)
+
+    _n_lifts = sum(len(v or []) for v in _coach_program.values())
+    _n_days = len([d for d in _coach_program if _coach_program.get(d)])
+    _gen_progress(current_user.id, target_week,
+                  f"Strength coach designed {_n_lifts} lifts across {_n_days} days; "
+                  f"runs and meals set — plate-rounding loads and saving your week…")
 
     for day_idx in range(7):
         if preserve_through is not None and day_idx <= preserve_through:

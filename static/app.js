@@ -9350,6 +9350,13 @@ async function launchWeeklyPlanning(weekOverride) {
                             var _stj = await _st.json();
                             if (_stj.status === 'done') { programData = _stj; break; }
                             if (_stj.status === 'error') { programData = null; break; }
+                            // Show what the coaches are actually doing on the load page.
+                            if (_stj.status === 'running' && _stj.progress) {
+                                container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)">'
+                                    + '<div class="chat-typing"><span></span><span></span><span></span></div>'
+                                    + '<div style="margin-top:10px;font-size:13px;line-height:1.5;max-width:340px;margin-left:auto;margin-right:auto">'
+                                    + escapeHtml(_stj.progress) + '</div></div>';
+                            }
                         } catch(e) {}
                     }
                 } else {
