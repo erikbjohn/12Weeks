@@ -6137,7 +6137,25 @@ def api_stats_wellness():
 def api_travel_workout():
     """Get bodyweight workout for a given day."""
     day = request.args.get("day", "Mon")
-    workout_type = TRAVEL_DAY_MAP.get(day, "full")
+    # Derive the body part from the REAL lift that day (not the weekday map,
+    # which returned the wrong body part Tue/Wed/Thu).
+    _days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    workout_type = None
+    try:
+        from workout_data import get_workouts, get_workouts_for_user, _warmup_type_for_day
+        di = _days.index(day) if day in _days else 0
+        pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
+        has_gym = pa.has_gym if pa else True
+        tdays = (get_workouts(_current_week()) if has_gym
+                 else get_workouts_for_user(_current_week(), has_gym=False))
+        dd = tdays[di] if di < len(tdays) else None
+        if dd is not None:
+            workout_type = "rest" if (dd.get("isRest") or not dd.get("exercises")) \
+                else _warmup_type_for_day(dd)
+    except Exception:
+        workout_type = None
+    if not workout_type:
+        workout_type = TRAVEL_DAY_MAP.get(day, "full")
     if workout_type is None or workout_type not in TRAVEL_WORKOUTS:
         return jsonify(None)
     return jsonify(TRAVEL_WORKOUTS[workout_type])

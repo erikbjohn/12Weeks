@@ -1798,6 +1798,32 @@ def _run_time_from_detail(detail):
     return int(round(total))
 
 
+_LOWER_MG = {"quads", "glutes", "hamstrings", "calves", "posterior_chain", "power"}
+_UPPER_MG = {"back", "biceps", "chest", "chest_triceps", "shoulders",
+             "triceps", "rear_delts", "traps"}
+
+
+def _warmup_type_for_day(day_dict):
+    """Pick the warmup (upper/lower/full) from the day's ACTUAL exercises, not
+    the weekday — DAY_WARMUP_TYPES keyed off weekday and mismatched the real
+    lift on 5 of 6 days (e.g. an upper-press Tuesday got a lower warmup)."""
+    exs = (day_dict or {}).get("exercises") or []
+    nl = nu = 0
+    for e in exs:
+        mg = (EXERCISES.get(resolve_name(e.get("name", ""))) or {}).get("muscle_group") or ""
+        if mg in _LOWER_MG:
+            nl += 1
+        elif mg in _UPPER_MG:
+            nu += 1
+    if nl and nu:
+        return "full"
+    if nl:
+        return "lower"
+    if nu:
+        return "upper"
+    return None
+
+
 def get_workouts(week):
     """Return list of 7 day dicts for the given week number (1-12)."""
     # Deload WEEKS on a 4-week cadence (4, 8, 12) — the recovery valve. wk12 is
@@ -1832,7 +1858,7 @@ def get_workouts(week):
             if _t:
                 _r["time"] = f"{_t} min"
 
-        warmup_type = DAY_WARMUP_TYPES.get(d["day"])
+        warmup_type = _warmup_type_for_day(d) or DAY_WARMUP_TYPES.get(d["day"])
         if warmup_type and warmup_type in WARMUPS:
             d["warmup"] = WARMUPS[warmup_type]
         else:
@@ -1911,7 +1937,7 @@ def get_workouts_for_user(week, has_gym=True):
         d["mealType"] = meal_type
         d["mealPlan"] = get_meal_plan(meal_type)
 
-        warmup_type = DAY_WARMUP_TYPES.get(day_name)
+        warmup_type = _warmup_type_for_day(d) or DAY_WARMUP_TYPES.get(day_name)
         if warmup_type and warmup_type in WARMUPS:
             d["warmup"] = WARMUPS[warmup_type]
         else:
