@@ -183,6 +183,10 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                     f"Capped {it['exercise']} jump {w:g}->{capped:g} lb "
                     f"(recent top {prev_top:g}; progress is incremental).")
                 it["weight"] = capped
+                # Keep the why consistent with the capped load — don't leave it
+                # narrating the un-capped number (the "@70 but why says 65" class).
+                it["why"] = (f"{capped:g} lb — incremental step up from your recent "
+                             f"top {prev_top:g} (held back from a {w:g} lb jump).")
 
     # 3. volume ceiling — trim non-lead (accessory) sets first
     def _total():

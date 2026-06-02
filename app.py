@@ -4123,8 +4123,15 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                     SetLog.week >= max(1, target_week - 4),
                 ).scalar()
                 if _top is not None and weight < _top:
+                    # REPLACE the coach's reason — it names the lighter number it
+                    # proposed and would contradict the floored weight (the "why
+                    # 70 if it says progressing to 65?" bug). Never append a note
+                    # that disagrees with the prescription.
+                    _proposed = weight
                     weight = float(_top)
-                    reason = (reason or '') + f' [floored at top set {_top}]'
+                    reason = (f"Held at your top set of {_top:g} lb — no regression "
+                              f"(coach proposed {_proposed:g}; raised to your "
+                              f"proven max).")
 
             db.session.add(WeeklyPrescription(
                 user_id=current_user.id,

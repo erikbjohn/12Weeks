@@ -338,7 +338,7 @@ def derive_meal_type(day_dict, weekday):
         # fast_day even when paired with a fasted long run (the fast IS the
         # point — carb-loading like a non-fasted long_run day defeats it).
         return DAY_MEAL_TYPES.get(weekday, "rest")
-    if rtype == "z2_long":
+    if rtype in ("z2_long", "long"):  # running coach emits "long", template "z2_long"
         return "long_run"
     # Heavy lift only when the liftName names it explicitly. Phase 2 marks
     # the two real strength sessions as 'Lower POWER' and 'HEAVY Lower';
@@ -346,10 +346,10 @@ def derive_meal_type(day_dict, weekday):
     # is moderate. Reserving heavy_lift for true max-strength days keeps
     # the calorie/carb bump where it actually matters.
     is_heavy = any(kw in lift_name for kw in ("power", "heavy", "max"))
-    if rtype in ("hiit", "vo2", "threshold"):
-        # Intervals: short high-intensity. Fuel, but not endurance carb-load.
+    if rtype in ("hiit", "vo2", "threshold", "tempo", "hill"):
+        # Intervals/quality: short high-intensity. Fuel, but not endurance carbs.
         return "heavy_lift" if is_heavy else "moderate"
-    if rtype == "z2":
+    if rtype in ("z2", "streak"):
         return "heavy_lift" if is_heavy else "moderate"
     if has_lift:
         return "heavy_lift" if is_heavy else "moderate"
@@ -517,15 +517,17 @@ PHASES = {
     },
     3: {
         "label": "Phase 3 - Wks 9-12",
-        "focus": "Peak leanness + power retention",
-        "lifting": "3-4x3-5 heavy, 3x15 pump",
+        # Live program (2026-06-01): heavier strength while leaning out, FULL
+        # volume, loads CLIMB — NOT a peak/power-retention deload-phase taper.
+        "focus": "Heavier strength, leaner — full volume, loads climbing",
+        "lifting": "heavy 3-6 reps, full accessory volume (trending up)",
         "deficit": "300-400 kcal (tighten up)",
         "protein": "1g/lb bodyweight",
         "lift_days_per_week": 6,
         "weekly_structure": (
-            "Mon Lower Power (box jumps + 4x3 squat), Tue Upper Power (cleans + heavy press/pull), "
-            "Wed Full-Body Peak, Thu Lower Heavy, Fri Upper Heavy, Sat Full-Body Power, "
-            "Sun streak mile only. Same 6-day frequency as Phase 1/2; the shift is explosive work and peaking loads."
+            "Coach-designed each week: heavy compounds (3-6 reps) lead every day, "
+            "full accessory volume that trends UP, ~6 lifting days. Loads climb "
+            "week over week — this is NOT a taper or a peak/hold phase."
         ),
     },
 }
