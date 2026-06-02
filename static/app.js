@@ -11584,13 +11584,22 @@ async function enterExerciseFocus(exIdx) {
       const targetRes = await fetch('/api/targets/' + encodeURIComponent(displayName));
       if (targetRes.ok) {
           const targets = await targetRes.json();
-          if (targets.target_weight && !ex.target_weight) {
-              _focusWeightVal = roundWeight(targets.target_weight, displayName);
+          if (!ex.target_weight) {
+              // Coach set NO weight — fall back to the engine's full suggestion.
+              if (targets.target_weight) {
+                  _focusWeightVal = roundWeight(targets.target_weight, displayName);
+              }
+              window._focusTargetReps = targets.target_reps || _focusTargetReps;
+              _focusTargetReps = window._focusTargetReps;  // sync local variable
+              window._focusReason = targets.adjustment_reason || '';
+              window._focusIndicator = targets.progression_indicator || 'hold';
+          } else {
+              // Coach set the weight — keep the coach's reps/why/arrow too, so the
+              // explanation and indicator describe the number actually shown (not
+              // the engine's value for a different weight).
+              window._focusReason = ex.why || ex.adjustment_reason || ex.reason || '';
+              window._focusIndicator = '';  // no fabricated arrow over a coach load
           }
-          window._focusTargetReps = targets.target_reps || _focusTargetReps;
-          _focusTargetReps = window._focusTargetReps;  // sync local variable
-          window._focusReason = targets.adjustment_reason || '';
-          window._focusIndicator = targets.progression_indicator || 'hold';
       }
   } catch(e) {}
 
