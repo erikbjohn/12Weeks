@@ -1,65 +1,41 @@
-"""The weekly-planning walkthrough must go ONE day at a time and never lock the
-week on the first 'yes'. assemble_prompt injects a computed progress directive
-(_weekly_planning_progress) that tells the model exactly which day to show and
-forbids early lock. These tests pin the deterministic counting.
+"""The weekly-planning walkthrough goes ONE day at a time and must never lock
+the whole week on the first 'yes'.
+
+Two mechanisms enforce this:
+  1. The actual day-by-day ADVANCE is driven deterministically on the CLIENT
+     (sendInlineCoachMsg auto-advances on the athlete's confirmation, regardless
+     of whether the model emits [SHOW_NEXT_DAY]).
+  2. The server injects a STATIC anti-lock guard, _weekly_planning_progress(),
+     into the weekly_planning prompt.
+
+An earlier version of the guard counted days and hardcoded 'Monday' as the next
+day — which made the coach announce the WRONG day when the walkthrough started
+on a later weekday. The guard must therefore name NO specific weekday; the app
+owns day order.
 """
-import pytest
+from coach_assembler import _weekly_planning_progress
 
 
-@pytest.fixture(scope="module")
-def ctx():
-    from app import app, db
-    from models import User
-    with app.app_context():
-        db.create_all()
-        u = User.query.filter_by(email="wpp@test.com").first()
-        if not u:
-            u = User(email="wpp@test.com", name="WPP", role="user", email_verified=True)
-            db.session.add(u); db.session.commit()
-        uid = u.id
-    return app, uid
+def test_injects_planning_progress_block():
+    d = _weekly_planning_progress()
+    assert "<planning_progress>" in d and "</planning_progress>" in d
 
 
-def _run(app, uid, messages):
-    from app import db
-    from models import ChatMessage
-    from flask_login import login_user
-    from coach_assembler import _weekly_planning_progress
-    with app.app_context():
-        ChatMessage.query.filter_by(user_id=uid).delete()
-        for c in messages:
-            db.session.add(ChatMessage(user_id=uid, role="assistant", content=c))
-        db.session.commit()
-        u = db.session.get(__import__("models").User, uid)
-        with app.test_request_context():
-            login_user(u)
-            return _weekly_planning_progress()
+def test_forbids_locking_the_whole_week():
+    low = _weekly_planning_progress().lower()
+    assert "never" in low
+    assert "lock" in low
+    assert "whole week" in low
 
 
-def test_first_yes_shows_monday_never_locks(ctx):
-    app, uid = ctx
-    d = _run(app, uid, ["Week 10 overview. Ready to see Monday?"])
-    assert "Monday" in d
-    # the whole point: on the first 'yes' it must forbid locking the whole week
-    assert "NEVER lock or summarize the whole week" in d
-    assert "week locked" in d  # appears inside a "Do NOT say 'week locked'" instruction
-    # must NOT instruct to summarize/lock yet
-    assert "give a 2-3 sentence week summary and" not in d
+def test_requires_show_next_day_to_advance():
+    assert "[SHOW_NEXT_DAY]" in _weekly_planning_progress()
 
 
-def test_after_monday_shown_advances_to_tuesday(ctx):
-    app, uid = ctx
-    d = _run(app, uid, [
-        "Week 10 overview. Ready to see Monday?",
-        "[SHOW_NEXT_DAY]\nMonday — Front Squat. Anything to swap?",
-    ])
-    assert "Tuesday" in d
-
-
-def test_after_all_six_shown_allows_lock(ctx):
-    app, uid = ctx
-    msgs = ["Week 10 overview. Ready to see Monday?"]
-    for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]:
-        msgs.append(f"[SHOW_NEXT_DAY]\n{day} — stuff. Anything else?")
-    d = _run(app, uid, msgs)
-    assert "summary and" in d.lower() and "lock it" in d.lower()
+def test_names_no_specific_weekday():
+    # the bug was hardcoding 'Monday'; the app owns day order, so the guard must
+    # not name any weekday.
+    d = _weekly_planning_progress()
+    for day in ("Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday"):
+        assert day not in d, f"guard must not hardcode a weekday; found {day!r}"

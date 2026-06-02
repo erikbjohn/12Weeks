@@ -3587,6 +3587,36 @@ def _fill_missing_week_runs(user_id, target_week):
     return run_summary, failures
 
 
+# In-process job store for async weekly-program generation. The force_regen
+# path runs 30-90s of LLM work; doing it inside the request 502'd at the edge
+# timeout before anything was written. We run it in a background thread, keyed
+# by (user_id, week), and the client polls /generate-status.
+_GEN_JOBS = {}
+_GEN_JOBS_LOCK = threading.Lock()
+
+
+@app.route("/api/weekly-program/generate-status")
+@login_required
+def api_weekly_program_generate_status():
+    """Poll target for an async force_regen generation. Returns the same payload
+    the synchronous endpoint used to return, plus a `status` field."""
+    try:
+        week = int(request.args.get("week"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "none"}), 400
+    with _GEN_JOBS_LOCK:
+        job = _GEN_JOBS.get((current_user.id, week))
+    if not job:
+        return jsonify({"status": "none"})
+    if job["status"] == "done":
+        out = dict(job.get("result") or {})
+        out["status"] = "done"
+        return jsonify(out)
+    if job["status"] == "error":
+        return jsonify({"status": "error", "error": job.get("error", "generation failed")})
+    return jsonify({"status": "running"})
+
+
 @app.route("/api/weekly-program/generate", methods=["POST"])
 @login_required
 def api_generate_weekly_program():
@@ -3616,6 +3646,59 @@ def api_generate_weekly_program():
         preserve_through = max(-1, min(6, preserve_through))
         force_regen = True
 
+    # The non-regen path is fast (it only reads existing rows) — run it inline.
+    # The force_regen path does 30-90s of LLM work; running THAT synchronously
+    # made the request outlive the edge/proxy timeout (~25s) and return 502
+    # before writing anything (the bug that left weeks empty). Run it in a
+    # background thread and let the client poll /generate-status for the result.
+    # Fast path: if this call will only READ existing rows (no force_regen and
+    # the week already has a coach program or logged history), run inline — it's
+    # a quick DB read. Otherwise the coaches WILL run (30-90s); do that in a
+    # background thread so the request returns immediately and never 502s on the
+    # edge timeout.
+    _fast_read = (not force_regen) and bool(
+        WeeklyPrescription.query.filter_by(
+            user_id=current_user.id, week=target_week, source='coach').first()
+        or SetLog.query.filter_by(
+            user_id=current_user.id, week=target_week, done=True).first()
+    )
+    if _fast_read:
+        return jsonify(_weekly_generation_impl(target_week, force_regen, preserve_through, data))
+
+    _uid = current_user.id
+    _key = (_uid, target_week)
+    with _GEN_JOBS_LOCK:
+        _job = _GEN_JOBS.get(_key)
+        if _job and _job.get("status") == "running":
+            return jsonify({"status": "started", "week": target_week})
+        _GEN_JOBS[_key] = {"status": "running"}
+
+    def _bg_generate():
+        from flask_login import login_user
+        from models import User as _User
+        try:
+            with app.app_context(), app.test_request_context():
+                _u = db.session.get(_User, _uid)
+                if _u:
+                    login_user(_u)
+                _res = _weekly_generation_impl(target_week, force_regen, preserve_through, data)
+            with _GEN_JOBS_LOCK:
+                _GEN_JOBS[_key] = {"status": "done", "result": _res}
+        except Exception as _e:
+            import logging, traceback
+            logging.error("weekly generation failed: %s\n%s", _e, traceback.format_exc())
+            with _GEN_JOBS_LOCK:
+                _GEN_JOBS[_key] = {"status": "error", "error": str(_e)}
+
+    threading.Thread(target=_bg_generate, daemon=True).start()
+    return jsonify({"status": "started", "week": target_week})
+
+
+def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
+    """Heavy weekly-program generation: exercise + run + meal coaches, then DB
+    writes. Runs in the request thread (non-regen) OR a background thread with a
+    login context (force_regen). Uses current_user; never touches `request`.
+    """
     def _future_only(q, model):
         """Restrict a query to regenerated days when preserving today+earlier."""
         if preserve_through is not None:
@@ -3700,14 +3783,14 @@ def api_generate_weekly_program():
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
         )
-        return jsonify({
+        return {
             "message": "Existing prescriptions returned (not regenerated)",
             "week": target_week,
             "program": program,
             "run_summary": run_summary,
             "coach_failures": run_failures,
             "regenerated": False,
-        })
+        }
 
     # Get the phase template as baseline — use BW templates for no-gym users
     pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
@@ -4416,7 +4499,7 @@ def api_generate_weekly_program():
     # round-trip. WHYs that didn't come from the coach can be backfilled
     # later or render the deterministic fallback on the client.
 
-    return jsonify({
+    return {
         "week": target_week,
         "phase": phase,
         "exercises_generated": len(program_summary),
@@ -4427,7 +4510,7 @@ def api_generate_weekly_program():
         "run_summary": run_summary,
         "schedule_summary": schedule_summary,
         "coach_failures": coach_failures,
-    })
+    }
 
 
 @app.route("/api/sets/<int:week>/<int:day_idx>")

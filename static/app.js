@@ -9320,7 +9320,26 @@ async function launchWeeklyPlanning(weekOverride) {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(_body),
             });
-            if (progRes.ok) programData = await progRes.json();
+            if (progRes.ok) {
+                var _pd = await progRes.json();
+                if (_pd && _pd.status === 'started') {
+                    // Heavy coach generation runs server-side in the background
+                    // (so the request can't 502 on the ~25s edge timeout). Poll
+                    // for the result — it normally lands in 30-60s.
+                    for (var _att = 0; _att < 60; _att++) {
+                        await new Promise(function(r){ setTimeout(r, 3000); });
+                        try {
+                            var _st = await fetch('/api/weekly-program/generate-status?week=' + nextWeek);
+                            if (!_st.ok) continue;
+                            var _stj = await _st.json();
+                            if (_stj.status === 'done') { programData = _stj; break; }
+                            if (_stj.status === 'error') { programData = null; break; }
+                        } catch(e) {}
+                    }
+                } else {
+                    programData = _pd;
+                }
+            }
         } catch(e) {}
     }
 
@@ -9708,23 +9727,28 @@ async function sendInlineCoachMsg() {
     if (!text) return;
     input.value = '';
     var displayText = text;
-    // If in a planning session, tell the coach which day we're on
-    if (window._planCurrentDay) {
-        // Detect if the user is requesting a change — block auto-advance until confirmed
-        var _isChange = /swap|change|switch|replace|adjust|modify|push|increase|decrease|lower|raise|drop|bump|move|different/i.test(displayText);
-        if (_isChange) {
-            window._planChangesPending = true;
+    // --- Weekly-planning walkthrough: the APP drives the day-by-day reveal ---
+    // The advance must NOT depend on the LLM emitting [SHOW_NEXT_DAY] (it often
+    // fails to, and instead tries to "lock the week"). We detect the athlete's
+    // confirmation here and advance deterministically below. Confirmation is
+    // detected in BOTH states: at the overview ("Ready to see Tuesday?" -> "yes")
+    // and on a day card ("anything to swap?" -> "no / looks good").
+    var _planning = !!window._planDayBlocks;
+    var _isChange = false, _isReady = false, _isDone = false;
+    if (_planning) {
+        var _dl = displayText.toLowerCase().trim();
+        _isChange = /swap|change|switch|replace|adjust|modify|push|increase|decrease|lower|raise|drop|bump|move|different/i.test(displayText);
+        _isReady = /^(y(es|ep|eah|up)?|ready|ok(ay)?|sure|go|next|show( me)?|continue|proceed|let'?s? go|sounds good|looks good|perfect|great|do it)\b/.test(_dl);
+        _isDone = /^(no|nope|that'?s? (it|all|good)|nothing|all good|good|done|looks good|we'?re? good|nah|i'?m good)\b/.test(_dl);
+        if (window._planCurrentDay) {
+            if (_isChange) window._planChangesPending = true;
+            if (_isDone && window._planChangesPending) window._planChangesPending = false;
+            text = '[Context: discussing ' + window._planCurrentDay + '. Exercise list shown by app.' +
+                (window._planChangesPending ? ' CHANGES WERE JUST MADE — ask if anything else before advancing. Do NOT emit SHOW_NEXT_DAY yet.' : '') +
+                '] ' + text;
+        } else if (window._planDayIdx === 0) {
+            text = '[Context: weekly planning overview was just shown. Exercise lists are shown by the app when you say SHOW_NEXT_DAY.] ' + text;
         }
-        // Detect if user is confirming no more changes after a change was made
-        var _isDone = /^(no|nope|that'?s? (it|all|good)|nothing|all good|good|done|looks good|we'?re? good|nah|i'?m good)/i.test(displayText.toLowerCase().trim());
-        if (_isDone && window._planChangesPending) {
-            window._planChangesPending = false;
-        }
-        text = '[Context: discussing ' + window._planCurrentDay + '. Exercise list shown by app.' +
-            (window._planChangesPending ? ' CHANGES WERE JUST MADE — ask if anything else before advancing. Do NOT emit SHOW_NEXT_DAY yet.' : '') +
-            '] ' + text;
-    } else if (window._planDayBlocks && window._planDayIdx === 0) {
-        text = '[Context: weekly planning overview was just shown. Exercise lists are shown by the app when you say SHOW_NEXT_DAY.] ' + text;
     }
 
     var messagesEl = document.getElementById('coach-inline-messages');
@@ -9786,13 +9810,23 @@ async function sendInlineCoachMsg() {
             _chatHistory.push({ role: 'user', content: text, date: todayStr() });
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
         }
-        // If coach emitted [SHOW_NEXT_DAY], show ONLY the text before the marker
-        // (brief confirmation like "Monday locked in.") then auto-show the HTML plan
-        if (fullText.includes('[SHOW_NEXT_DAY]') && window._planDayBlocks && !window._planChangesPending) {
-            var _beforeMarker = fullText.split('[SHOW_NEXT_DAY]')[0].trim();
-            var _sentences = _beforeMarker.split(/[.!]\s/);
-            var _brief = _sentences.slice(0, 2).join('. ').trim();
-            if (_brief && !_brief.endsWith('.')) _brief += '.';
+        // Advance the day-by-day walkthrough. The APP drives this — it does NOT
+        // depend on the model emitting [SHOW_NEXT_DAY]. If the athlete confirmed
+        // (e.g. "yes" to "Ready to see Tuesday?") and days remain with no pending
+        // changes, advance even when the model wrongly tried to lock the week.
+        var _hasMarker = fullText.includes('[SHOW_NEXT_DAY]');
+        var _daysRemain = window._planDayBlocks && ((window._planDayIdx || 0) < ((window._planDayOrder || []).length));
+        var _confirmAdvance = _daysRemain && !window._planChangesPending && !_isChange && (_isReady || _isDone);
+        if ((_hasMarker || _confirmAdvance) && window._planDayBlocks && !window._planChangesPending) {
+            var _brief = '';
+            if (_hasMarker) {
+                var _beforeMarker = fullText.split('[SHOW_NEXT_DAY]')[0].trim();
+                var _sentences = _beforeMarker.split(/[.!]\s/);
+                _brief = _sentences.slice(0, 2).join('. ').trim();
+                if (_brief && !_brief.endsWith('.')) _brief += '.';
+            }
+            // Deterministic path (no marker): drop the model's text — it may have
+            // tried to lock the week off-protocol. The day card + follow-up speak.
             if (_brief && _brief.length > 3) {
                 typingBubble.innerHTML = renderCoachMarkdown(_brief);
             } else {

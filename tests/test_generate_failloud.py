@@ -5,6 +5,27 @@ it writes no row for that domain and surfaces the failure.
 import pytest
 
 
+def _generate_and_wait(client, payload, timeout=30):
+    """POST /generate and resolve the async job. force_regen / fresh-week
+    generation now runs in a background thread and returns {status:'started'};
+    the client polls /generate-status. Returns (http_status, final_body)."""
+    import time
+    resp = client.post("/api/weekly-program/generate", json=payload)
+    if resp.status_code != 200:
+        return resp.status_code, resp.get_json()
+    body = resp.get_json() or {}
+    if body.get("status") != "started":
+        return resp.status_code, body  # synchronous fast-read path
+    week = payload.get("week")
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        j = client.get(f"/api/weekly-program/generate-status?week={week}").get_json() or {}
+        if j.get("status") in ("done", "error"):
+            return 200, j
+        time.sleep(0.2)
+    return 200, {"status": "timeout"}
+
+
 @pytest.fixture(scope="module")
 def ctx():
     from app import app, db
@@ -37,9 +58,8 @@ def test_coach_failure_writes_no_engine_or_template_rows(ctx, monkeypatch):
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals",
                         lambda **k: {})
 
-    resp = client.post("/api/weekly-program/generate",
-                       json={"week": 6, "force_regen": True})
-    assert resp.status_code == 200, resp.data[:300]
+    status, body = _generate_and_wait(client, {"week": 6, "force_regen": True})
+    assert status == 200, body
 
     from models import WeeklyPrescription, WeeklyRunPlan
     with app.app_context():
@@ -52,7 +72,6 @@ def test_coach_failure_writes_no_engine_or_template_rows(ctx, monkeypatch):
             f"engine run-plan rows leaked on coach failure: {[r.source for r in runs]}"
 
     # The failure must be surfaced, not swallowed.
-    body = resp.get_json()
     assert body.get("coach_failures"), "coach failure must be reported in response"
 
 
@@ -81,9 +100,8 @@ def test_coach_success_writes_coach_rows(ctx, monkeypatch):
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs", fake_runs)
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **k: {})
 
-    resp = client.post("/api/weekly-program/generate",
-                       json={"week": 6, "force_regen": True})
-    assert resp.status_code == 200, resp.data[:300]
+    status, body = _generate_and_wait(client, {"week": 6, "force_regen": True})
+    assert status == 200, body
 
     from models import WeeklyRunPlan
     with app.app_context():
@@ -174,9 +192,9 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
                                      for di in range(7)})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **k: {})
 
-    resp = client.post("/api/weekly-program/generate",
-                       json={"week": WEEK, "force_regen": True, "preserve_through_day": 0})
-    assert resp.status_code == 200, resp.data[:300]
+    status, body = _generate_and_wait(
+        client, {"week": WEEK, "force_regen": True, "preserve_through_day": 0})
+    assert status == 200, body
 
     with app.app_context():
         d0 = WeeklyPrescription.query.filter_by(user_id=uid, week=WEEK, day_idx=0).all()
