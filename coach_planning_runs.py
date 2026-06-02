@@ -110,18 +110,37 @@ def _segments_total_min(segments) -> int:
 
 def _segments_to_detail(segments) -> str:
     """Human-readable structure built from the coach's own segments, so the
-    detail always matches the computed duration."""
+    detail always matches the computed duration. A work segment is PAIRED with
+    the recovery that follows it and read as intervals ("5×3 min hard / 2 min
+    easy"), not two separate blocks ("5×3 min work; 5×2 min recovery") which
+    read as 'do all the work, then all the recovery'."""
+    segs = list(segments or [])
     parts = []
-    for s in segments or []:
+    i = 0
+    while i < len(segs):
+        s = segs[i] or {}
         kind = (s.get("kind") or "segment").lower()
         mins = s.get("minutes")
         reps = s.get("reps")
         hr = s.get("hr")
         note = s.get("note")
-        seg = (f"{reps}×{mins} min {kind}" if reps and int(reps) > 1
-               else f"{mins} min {kind}")
-        extra = " ".join(x for x in [f"@ HR {hr}" if hr else "", note or ""] if x).strip()
-        parts.append(seg + (f" ({extra})" if extra else ""))
+        hr_txt = f" @ HR {hr}" if hr else ""
+        if kind == "work":
+            n = reps if reps and int(reps) > 1 else 1
+            seg = f"{n}×{mins} min hard{hr_txt}"
+            nxt = segs[i + 1] if i + 1 < len(segs) else None
+            if nxt and (nxt.get("kind") or "").lower() == "recovery":
+                seg += f" / {nxt.get('minutes')} min easy"
+                i += 1  # consume the recovery — it's described in this interval
+            if note:
+                seg += f" ({note})"
+            parts.append(seg)
+        else:
+            seg = (f"{reps}×{mins} min {kind}" if reps and int(reps) > 1
+                   else f"{mins} min {kind}")
+            extra = " ".join(x for x in [hr_txt.strip(), note or ""] if x).strip()
+            parts.append(seg + (f" ({extra})" if extra else ""))
+        i += 1
     return "; ".join(parts)
 
 

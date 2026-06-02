@@ -24,9 +24,12 @@ def test_segments_detail_matches_structure():
     from coach_planning_runs import _segments_to_detail
     d = _segments_to_detail([
         {"kind": "work", "minutes": 3, "reps": 4, "hr": "165-175"},
+        {"kind": "recovery", "minutes": 2, "reps": 4},
         {"kind": "cooldown", "minutes": 6},
     ])
-    assert "4×3 min work" in d
+    # work+recovery pair into one interval phrase, not two separate blocks
+    assert "4×3 min hard" in d
+    assert "/ 2 min easy" in d
     assert "165-175" in d
     assert "6 min cooldown" in d
 
