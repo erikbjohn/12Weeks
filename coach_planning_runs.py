@@ -54,25 +54,90 @@ def _build_run_history_block(user_id: int, current_week: int,
 
 
 def _prev_prescription_block(user_id: int, week: int) -> str:
-    """Last week's PRESCRIBED runs (not logged) so the coach anchors on the
-    plan it set and never proposes a regression against it. The run coach was
-    blind to this — it only saw RunLog — which is how a 40-min run drifted to
-    38."""
+    """Last week's runs so the coach anchors on what came before and never
+    proposes a regression. Prefers the stored PRESCRIPTION; if that week was
+    template-driven and never persisted (early weeks, or a gap like a missing
+    week 9), falls back to the phase TEMPLATE for that week. The coach must
+    ALWAYS have a concrete prior anchor — an empty block is what made it
+    confabulate 'no prior prescription, so this is the baseline week' for an
+    athlete 10 weeks into the program."""
     if week <= 1:
-        return "(no prior week)"
+        return ("(week 1 — no prior week to compare; anchor on the template and "
+                "recent run log, which still exist)")
+    prev = week - 1
     try:
         from models import WeeklyRunPlan
         rows = WeeklyRunPlan.query.filter_by(
-            user_id=user_id, week=week - 1).order_by(WeeklyRunPlan.day_idx).all()
+            user_id=user_id, week=prev).order_by(WeeklyRunPlan.day_idx).all()
     except Exception:
-        return "(unavailable)"
-    if not rows:
-        return "(no runs prescribed last week)"
-    lines = []
-    for r in rows:
-        dn = _DAY_NAMES[r.day_idx] if 0 <= r.day_idx < 7 else "?"
-        lines.append(f"  day={r.day_idx} ({dn}): {r.run_type} — {r.duration} — {r.label}")
-    return "\n".join(lines)
+        rows = []
+    if rows:
+        lines = []
+        for r in rows:
+            dn = _DAY_NAMES[r.day_idx] if 0 <= r.day_idx < 7 else "?"
+            lines.append(f"  day={r.day_idx} ({dn}): {r.run_type} — {r.duration} — {r.label}")
+        return "\n".join(lines)
+    # No stored prescription for last week — use the template for that week so
+    # the coach still has a real anchor instead of "nothing".
+    try:
+        from workout_data import get_workouts
+        tdays = get_workouts(prev)
+        lines = []
+        for di, day in enumerate(tdays or []):
+            run = (day or {}).get("run") or {}
+            if run.get("type"):
+                dn = _DAY_NAMES[di] if 0 <= di < 7 else "?"
+                lines.append(
+                    f"  day={di} ({dn}): {run.get('type')} — "
+                    f"{run.get('time') or run.get('duration') or '?'} — "
+                    f"{run.get('label') or 'Run'}  [from template; not separately stored]")
+        if lines:
+            return ("(last week was template-driven — not separately stored; "
+                    "the template for week %d was:)\n" % prev) + "\n".join(lines)
+    except Exception:
+        pass
+    return ("(no stored prescription for last week, but this is week %d of the "
+            "program — NOT a baseline/first week; anchor on the template and "
+            "recent run log)" % week)
+
+
+_BASELINE_CONFAB_RE = None
+
+
+def _strip_baseline_confabulation(out: dict, week: int) -> dict:
+    """Neutralize any 'this is the baseline/first/intro week' or 'no prior
+    prescription/history' claim in a run's user-visible detail when the athlete
+    is past week 1. These are confabulations (the athlete is mid-program) and
+    the prompt rule against them is not 100% reliable. We remove the offending
+    sentence rather than rewrite it, so we never invent a replacement reason.
+    """
+    if week <= 1:
+        return out
+    import re
+    global _BASELINE_CONFAB_RE
+    if _BASELINE_CONFAB_RE is None:
+        # Match a whole sentence/clause that asserts baseline/first-week / no-history.
+        _BASELINE_CONFAB_RE = re.compile(
+            r"(?:^|(?<=[.;—\-]))\s*[^.;]*?\b("
+            r"baseline week|baseline session|first week|starting week|intro(?:ductory)? week|"
+            r"no (?:prior|previous) (?:prescription|history|data|runs?|week)|"
+            r"starting from scratch|no history (?:to|exists)|"
+            r"treat(?:ed|ing)? (?:this )?as (?:the )?baseline"
+            r")\b[^.;]*[.;]?",
+            re.IGNORECASE,
+        )
+    for di, v in out.items():
+        detail = (v or {}).get("detail") or ""
+        if not detail:
+            continue
+        cleaned = _BASELINE_CONFAB_RE.sub("", detail)
+        # Tidy leftover separators/whitespace from the excision.
+        cleaned = re.sub(r"\s*—\s*—\s*", " — ", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" —-;.").strip()
+        if cleaned != detail:
+            v["detail"] = cleaned
+            log.warning("stripped baseline-confabulation from run detail (week %d, day %d)", week, di)
+    return out
 
 
 def _parse_run_magnitude(s):
@@ -245,6 +310,12 @@ def generate_week_runs(
         "intervals' — THAT DATA DOES NOT EXIST. Inventing a metric to justify a "
         "choice is a hard fail. A whole-run average tells you overall effort and "
         "nothing finer; say only what it actually supports.\n\n"
+        "NO 'BASELINE WEEK' CONFABULATION: the athlete is mid-program (the exact "
+        "week is given below). You may NEVER call this a 'baseline', 'first', "
+        "'intro', or 'starting' week, never say 'no prior prescription/history', "
+        "and never imply you're starting from scratch. If last week wasn't stored "
+        "as a separate prescription, a template and a run log still exist — anchor "
+        "on those. Treating a mid-program week as a fresh start is a hard fail.\n\n"
         "PROGRAMMING RULES:\n"
         "1. Give a `reason` for EVERY run, and explicitly justify any change vs "
         "   LAST WEEK'S PRESCRIPTION (shown below) from the real data. A change "
@@ -343,4 +414,7 @@ def generate_week_runs(
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
     out = _apply_run_regression_floor(out, user_id, week)
+    # Hard backstop: never let a "baseline / first / no prior history" claim
+    # reach an athlete who is mid-program. Prompt adherence is unreliable.
+    out = _strip_baseline_confabulation(out, week)
     return out

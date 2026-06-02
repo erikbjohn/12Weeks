@@ -34,6 +34,33 @@ def test_segments_detail_matches_structure():
     assert "6 min cooldown" in d
 
 
+def test_strips_baseline_confabulation_midprogram():
+    """An athlete 10 weeks in must never see a run reason claiming this is a
+    baseline/first week or that no prior history exists — even if the LLM emits
+    it. The legitimate part of the detail is preserved; the confabulation is cut.
+    """
+    from coach_planning_runs import _strip_baseline_confabulation
+    out = _strip_baseline_confabulation({
+        1: {"type": "vo2", "label": "VO2", "duration": "42 min",
+            "detail": "10 min warmup; 5×3 min hard / 2 min easy; 7 min cooldown — "
+                      "Template calls for VO2 4×3 at 35 min. No prior prescription "
+                      "exists, so this is the baseline week."},
+    }, week=10)
+    d = out[1]["detail"]
+    assert "baseline" not in d.lower()
+    assert "no prior prescription" not in d.lower()
+    assert "5×3 min hard" in d                 # real structure kept
+    assert "Template calls for VO2 4×3" in d   # real reasoning kept
+
+
+def test_baseline_language_allowed_in_week_one():
+    """Week 1 legitimately IS the first week — don't scrub it there."""
+    from coach_planning_runs import _strip_baseline_confabulation
+    out = _strip_baseline_confabulation(
+        {0: {"detail": "Easy first week to set a baseline."}}, week=1)
+    assert "baseline" in out[0]["detail"].lower()
+
+
 def test_parse_run_magnitude():
     from coach_planning_runs import _parse_run_magnitude
     assert _parse_run_magnitude("38 min") == (38.0, "min")
