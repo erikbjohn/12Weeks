@@ -3551,6 +3551,20 @@ def _runs_context_for_week(user_id, target_week):
     return ctx
 
 
+def _prev_run_durations(user_id, target_week):
+    """Prior week's PRESCRIBED run duration per day, for an honest plan-vs-plan
+    run delta. The run delta was comparing the new plan against the SAME week's
+    stale cache (workoutData[currentWeek]) -> the phantom 'was 38'. None when
+    there's no prior prescribed run for a day (then the card shows no baseline)."""
+    if target_week <= 1:
+        return {}
+    try:
+        return {r.day_idx: r.duration for r in WeeklyRunPlan.query.filter_by(
+            user_id=user_id, week=target_week - 1).all()}
+    except Exception:
+        return {}
+
+
 def _fill_missing_week_runs(user_id, target_week):
     """COACH-OR-NOTHING run generation for a week that has no run-plan rows.
     Touches only the run domain — never existing lift prescriptions. Returns
@@ -3583,6 +3597,7 @@ def _fill_missing_week_runs(user_id, target_week):
         coach_runs = {}
 
     run_summary, failures = [], []
+    _prev_runs = _prev_run_durations(user_id, target_week)
     for di in range(7):
         if not (tdays[di].get("run") if di < len(tdays) else None):
             continue
@@ -3598,6 +3613,7 @@ def _fill_missing_week_runs(user_id, target_week):
         run_summary.append({
             "day": di, "type": cr["type"], "label": cr["label"],
             "duration": cr["duration"],
+            "prev_duration": _prev_runs.get(di),
         })
     db.session.commit()
     return run_summary, failures
@@ -3798,11 +3814,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 current_user.id, target_week,
             )
         else:
+            _prev_runs = _prev_run_durations(current_user.id, target_week)
             run_summary = [{
                 "day": r.day_idx,
                 "type": r.run_type,
                 "label": r.label,
                 "duration": r.duration,
+                "prev_duration": _prev_runs.get(r.day_idx),
             } for r in runs]
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
@@ -4339,6 +4357,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
 
     # --- RUN PLAN GENERATION ---
     run_summary = []
+    _prev_run_dur = _prev_run_durations(current_user.id, target_week)
     try:
         from workout_data import get_workouts as _get_template_workouts
         template_days = _get_template_workouts(target_week)
@@ -4392,6 +4411,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 "type": progressed.get('type'),
                 "label": progressed.get('label'),
                 "duration": progressed.get('time'),
+                "prev_duration": _prev_run_dur.get(day_idx),
             })
 
         db.session.commit()

@@ -9552,17 +9552,18 @@ async function launchWeeklyPlanning(weekOverride) {
                 var _runLabel = _run.label || _run.type || '?';
                 var _runTime = _run.time || _run.duration || '?';
                 var _runChange = '';
-                var _prevRun = _lastWeekRuns[_run.day];
-                if (_prevRun) {
-                    var _prevMin = parseInt(_prevRun.time) || 0;
+                // Plan-vs-plan: compare to LAST WEEK'S PRESCRIBED run duration
+                // (served as prev_duration), NOT the stale same-week cache that
+                // produced the phantom "was 38". No prior plan -> no baseline.
+                var _prevDur = _run.prev_duration;
+                if (_prevDur) {
+                    var _prevMin = parseInt(_prevDur) || 0;
                     var _newMin = parseInt(_runTime) || 0;
                     if (_prevMin > 0 && _newMin > 0 && _newMin !== _prevMin) {
                         var _runDelta = _newMin - _prevMin;
                         _runChange = _runDelta > 0
-                            ? ' <span style="color:#4ade80">UP ' + _runDelta + ' min</span> <span style="color:var(--muted)">(was ' + _prevRun.time + ')</span>'
-                            : ' <span style="color:#ef4444">DOWN ' + Math.abs(_runDelta) + ' min</span> <span style="color:var(--muted)">(was ' + _prevRun.time + ')</span>';
-                    } else if (_prevRun.label !== _runLabel) {
-                        _runChange = ' <span style="color:var(--muted)">(was ' + _prevRun.label + ' ' + _prevRun.time + ')</span>';
+                            ? ' <span style="color:#4ade80">UP ' + _runDelta + ' min</span> <span style="color:var(--muted)">(last plan ' + _prevDur + ')</span>'
+                            : ' <span style="color:#ef4444">DOWN ' + Math.abs(_runDelta) + ' min</span> <span style="color:var(--muted)">(last plan ' + _prevDur + ')</span>';
                     }
                 }
                 _dayHtmlBlocks[_run.day] += '<div style="padding:2px 0;font-size:14px;color:var(--accent)">Run: ' + _runLabel + ', ' + _runTime + _runChange + '</div>';
