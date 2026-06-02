@@ -1531,7 +1531,10 @@ function getProgressionIncrement(exName) {
 }
 
 function isDeloadWeek(week) {
-  return week === 4 || week === 8 || week === 12;
+  // Weeks 4 & 8 only — week 12 is a PEAK in the engine (training_engine
+  // _is_peak_week==12), not a deload. Labeling 12 "Deload/60%" contradicted the
+  // full-weight prescription the engine/coach actually generate.
+  return week === 4 || week === 8;
 }
 
 // ─── WEIGHT DATA HELPERS (cache-based) ─────────────────────────────────────
@@ -2106,7 +2109,10 @@ function getSuggestedWeight(exName, currentWeekNum) {
   const history = data.history || [];
 
   if (isDeloadWeek(currentWeekNum)) {
-    return { weight: Math.round(currentWt * 0.6), reason: 'Deload week \u2014 60% weight, focus on form & recovery' };
+    // Only a fallback when the coach/engine set no weight. Use 85% to match the
+    // engine's deload (training_engine _round_weight(last*0.85)) \u2014 the old 60%
+    // contradicted the engine's actual deload prescription on the same screen.
+    return { weight: Math.round(currentWt * 0.85), reason: 'Deload week \u2014 ~85% weight, recovery focus' };
   }
 
   if (history.length > 0) {
@@ -9512,9 +9518,10 @@ async function launchWeeklyPlanning(weekOverride) {
                 } else {
                     _changeHtml = '<span style="color:var(--muted)"> — HOLD (last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 }
-            } else if (_ex.reason) {
-                _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';
             }
+            // NOTE: do NOT put _ex.reason in _changeHtml here — it is rendered
+            // once below as _whyHtml. Having both double-printed the why (the
+            // "why is this repeating itself?" bug). _changeHtml is delta-only.
             // Apply swap overlay — check if this exercise was swapped
             var _swapKey = nextWeek + '_' + _ex.day + '_' + _exIdxInDay;
             var _displayExName = _planSwaps[_swapKey] || _ex.exercise;
