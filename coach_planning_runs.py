@@ -173,6 +173,28 @@ def _segments_total_min(segments) -> int:
     return int(round(total))
 
 
+def _strip_total_math(reason):
+    """Drop any sentence in a run reason that restates the duration or shows
+    arithmetic (a 'Total = 12 + … = 47 min', a 'min total (10+20+6+8)', or a
+    weekly-mileage sum). The headline duration and the structure already display
+    every number; the coach restating its own math only creates a value that can
+    contradict the computed headline (it does, after recovery normalization)."""
+    if not reason:
+        return reason
+    import re
+    bad = re.compile(
+        r"\bTotals?\s*[:=]"          # "Total ="
+        r"|\bmin(?:ute)?s?\s+total\b"  # "44 min total"
+        r"|\d+\s*\+\s*\d+"            # any explicit sum "10 + 20"
+        r"|≈"                          # weekly mileage estimate "≈ 37.9 mi"
+        r"|min\s*/\s*\d",            # "341 min / 9"
+        re.I)
+    sents = re.split(r"(?<=[.;])\s+", reason)
+    kept = [s for s in sents if s.strip() and not bad.search(s)]
+    out = " ".join(kept).strip(" .;,—-").strip()
+    return out or reason
+
+
 def _normalize_interval_recovery(segments):
     """Pair each work segment with the recovery that follows it as N EQUAL
     rounds: the recovery inherits the work segment's rep count. Without this, a
@@ -345,7 +367,14 @@ def generate_week_runs(
         "   under target, add volume.\n"
         "4. At most ONE VO2 day per week. Saturday must have a run if they train "
         "   6 days. The long run is the week's longest.\n"
-        "5. Single values only — never a range.\n\n"
+        "5. Single values only — never a range.\n"
+        "6. The `reason` is ONE short, QUALITATIVE sentence. Do NOT state the total "
+        "   duration, do NOT show arithmetic or sums ('Total = 12 + … = 47 min', "
+        "   '44 min total (10+20+6+8)', weekly-mileage math), and do NOT restate "
+        "   the segment minutes — the SYSTEM computes and displays every number, "
+        "   and your restating it only creates a value that can contradict the "
+        "   headline. Explain WHY (the progression, what the log supports), not "
+        "   the math.\n\n"
         "Output JSON only: map `<day_idx>` to "
         '{"type": "<z2|vo2|tempo|long|streak|hill>", "label": "<short label>", '
         '"segments": [ ... ], "reason": "<data-grounded why, incl. any change>"}.\n'
@@ -422,7 +451,7 @@ def generate_week_runs(
             # Back-compat if the coach gives a freeform duration/detail.
             duration = v.get("duration") or v.get("time") or "30 min"
             detail = v.get("detail") or ""
-        reason = (v.get("reason") or "").strip()
+        reason = _strip_total_math((v.get("reason") or "").strip())
         if reason:
             detail = f"{detail} — {reason}" if detail else reason
         out[day_idx] = {
