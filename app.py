@@ -8976,7 +8976,12 @@ def api_admin_reset_password():
     user = User.query.filter(User.email.ilike(email)).first()
     if not user:
         return jsonify({"error": f"User '{email}' not found"}), 404
-    temp_password = secrets.token_urlsafe(10)
+    # Optional explicit password (admin sets a known value at the user's
+    # request); otherwise generate a random temp one.
+    _explicit = (data.get("password") or "").strip()
+    if _explicit and len(_explicit) < 6:
+        return jsonify({"error": "password too short (min 6)"}), 400
+    temp_password = _explicit or secrets.token_urlsafe(10)
     user.password_hash = generate_password_hash(temp_password)
     try:
         db.session.commit()
