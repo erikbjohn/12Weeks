@@ -1578,12 +1578,22 @@ function saveWeightInput(week, dayIdx, exIdx, exName) {
 
 function parseRestSeconds(rest) {
   if (!rest) return 0;
-  // Handle "60-90s" or "2-3 min" → use the lower bound, then apply unit
-  const m = rest.match(/(\d+)/);
+  const s = String(rest);
+  // Use the FIRST value and ITS OWN unit. "90s-2 min" is 90 SECONDS, not 90
+  // minutes — the old code saw "min" anywhere in the string and multiplied the
+  // first number (90s) by 60, producing a 90-MINUTE rest timer.
+  const m = s.match(/(\d+)/);
   if (!m) return 60;
-  const n = parseInt(m[1]);
-  // "min" / "minute(s)" → multiply by 60. Default unit is seconds.
-  return /\bmin(?:ute)?s?\b/i.test(rest) ? n * 60 : n;
+  const n = parseInt(m[1], 10);
+  // Unit for THIS number: the letters immediately after it (up to the next
+  // digit). "90s-2 min" -> "s"; "2 min" -> "min". If the first value carries no
+  // unit (e.g. "2-3 min"), fall back to the first time-unit later in the string.
+  const after = s.slice(m.index + m[1].length);
+  let unit = (after.match(/^\s*([a-z]+)/i) || [, ''])[1].toLowerCase();
+  if (unit[0] !== 's' && unit[0] !== 'm') {
+    unit = ((after.match(/\b(min(?:ute)?s?|s(?:ec(?:ond)?s?)?)\b/i) || [, ''])[1] || '').toLowerCase();
+  }
+  return unit[0] === 'm' ? n * 60 : n;  // m/min/minute(s) -> minutes; else seconds
 }
 
 // Confirm suspicious set entries. Returns true to proceed, false to bail.
