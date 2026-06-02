@@ -1088,6 +1088,20 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new) -> s
     return reason
 
 
+def _day_has_training(user_id, week, day_idx):
+    """True if the day has a prescribed run or lift. A fast day can still be a
+    fasted-TRAINING day (the Sunday long fasted run, a fasted lift day) — so its
+    meal note must not say "rest and recover" when there's training on the card."""
+    try:
+        if WeeklyRunPlan.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first():
+            return True
+        if WeeklyPrescription.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _generate_run_plan(user_id, week, day_idx, template_run):
     """Progress run based on week number. Returns dict with type/label/time/detail."""
     base_type = template_run.get('type', 'z2')
@@ -1295,6 +1309,7 @@ def api_regenerate_meals():
                 meal_plan = generate_meal_plan(
                     selected_foods=fs.selected_foods, day_type='fast_day',
                     targets=day_macros, fasting_protocol=fasting_protocol,
+                    has_training=_day_has_training(current_user.id, target_week, day_idx),
                 )
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
@@ -4530,6 +4545,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                         day_type='fast_day',
                         targets=day_macros,
                         fasting_protocol=fasting_protocol,
+                        has_training=_day_has_training(current_user.id, target_week, day_idx),
                     )
                 else:
                     meal_plan = MEAL_PLANS.get('fast_day', {})  # fallback only if no selections
@@ -9599,6 +9615,7 @@ def api_admin_generate_meals():
                 day_type=day_meal_type if day_meal_type != 'standard' else cal_day_type,
                 targets=day_macros,
                 fasting_protocol=fasting_protocol,
+                has_training=_day_has_training(user.id, week, day_idx),
             )
         except Exception as e:
             continue
@@ -9831,6 +9848,48 @@ def api_admin_debug_exec():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)[:300]}), 500
+
+
+@app.route("/api/admin/heal-prescriptions", methods=["POST"])
+@admin_required
+def api_admin_heal_prescriptions():
+    """Heal stored lift prescriptions in place so no row renders a non-loadable
+    barbell weight or a why that contradicts its number — covers PRESERVED/past/
+    pre-fix rows the generation-time loadability+reconcile never touched (e.g. a
+    re-derive that preserves Monday leaves its stale 'climbing to 140' on a load
+    that's actually 155). Idempotent. Body: {email, week?(int, all weeks if omitted)}."""
+    data = request.get_json() or {}
+    u = User.query.filter_by(email=data.get("email")).first()
+    if not u:
+        return jsonify({"error": "user not found"}), 404
+    q = WeeklyPrescription.query.filter_by(user_id=u.id, source='coach')
+    if data.get("week") is not None:
+        q = q.filter_by(week=int(data["week"]))
+    healed = []
+    for rx in q.all():
+        w0 = rx.target_weight
+        reason0 = rx.adjustment_reason or ""
+        recent_top = None
+        if w0 and w0 > 0:
+            recent_top = db.session.query(db.func.max(SetLog.weight)).filter(
+                SetLog.user_id == u.id, SetLog.exercise_name == rx.exercise_name,
+                SetLog.weight > 0, SetLog.week >= max(1, rx.week - 6)).scalar()
+        proposed = w0
+        neww = w0
+        if w0 and w0 > 0:
+            neww = _round_to_loadable(rx.exercise_name, w0)
+            if rx.week not in (4, 8, 12) and recent_top is not None and neww < recent_top:
+                neww = float(recent_top)
+        really_new = (recent_top is None)
+        newreason = _reconcile_lift_reason(reason0, neww, proposed, recent_top, really_new)
+        if (neww != w0) or (newreason != reason0):
+            healed.append({"week": rx.week, "day": rx.day_idx, "ex": rx.exercise_name,
+                           "weight": f"{w0}->{neww}", "reason_was": reason0[:60],
+                           "reason_now": newreason[:60]})
+            rx.target_weight = neww
+            rx.adjustment_reason = newreason
+    db.session.commit()
+    return jsonify({"ok": True, "healed_count": len(healed), "healed": healed[:60]})
 
 
 @app.route("/api/admin/debug/fix-indexes", methods=["POST"])

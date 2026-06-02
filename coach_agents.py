@@ -15,6 +15,7 @@ AGENTS = {
             "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
             "food_safety", "fasting", "user_rules",
             "today_sets", "today_status", "cut_status", "completed_days", "overrides",
+            "exercise_deltas",
         ],
     },
     "morning_checkin": {
@@ -43,7 +44,7 @@ AGENTS = {
             "today_sets", "today_status", "runs", "physical", "meals_today",
             "coach_memories", "goal", "food_safety", "fasting",
             "completed_days", "overrides", "next_week",
-            "session_analysis", "equipment", "user_rules",
+            "session_analysis", "equipment", "user_rules", "exercise_deltas",
         ],
     },
     "weekly_review": {
@@ -63,7 +64,7 @@ AGENTS = {
             "base", "chat_history", "workout_today", "today_sets", "today_status",
             "exercise_history", "exercise_analysis",
             "week_schedule", "next_week", "coach_memories",
-            "fasting", "user_rules",
+            "fasting", "user_rules", "exercise_deltas",
         ],
     },
     "run_complete": {

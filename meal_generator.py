@@ -330,7 +330,8 @@ def _generate_meal_name(position, protein_key, carb_key):
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8"):
+def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8",
+                       has_training=False):
     """Generate a single-day meal plan matching the workout_data.py MEAL_PLANS format.
 
     Parameters:
@@ -392,7 +393,13 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             "targetProtein": target_protein,
             "targetCarbs": targets.get("carbs", 0),
             "targetFat": targets.get("fat", 0),
-            "note": "Water, black coffee, electrolytes. Rest and recover.",
+            # A fast day can still carry a prescribed run/lift (fasted training —
+            # e.g. the Sunday long fasted run, or a fasted lift day). Don't tell
+            # the athlete to "rest and recover" when there's training on the card.
+            "note": ("Fasted training day — water, black coffee, electrolytes only; "
+                     "train in the fasted state, no food until you break the fast."
+                     if has_training else
+                     "Water, black coffee, electrolytes. Rest and recover."),
             "meals": meals,
         }
 

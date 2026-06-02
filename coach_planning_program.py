@@ -126,7 +126,8 @@ def validate_program(parsed, catalog, available_equipment):
 
 def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                    history_max_weight, history_top=None, new_move_frac=0.6,
-                   max_jump_frac=0.20):
+                   max_jump_frac=0.20, prev_by_day=None, min_per_day=4,
+                   deload=False):
     """Deterministic safety rails the LLM can't be trusted to honor. Mutates a
     copy. Returns (program, actions[]).
 
@@ -135,6 +136,12 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
        genuinely light start (<= new_move_frac of the athlete's max logged lift).
     2b. Existing movements: load can't LEAP — capped at the recent top set ×
        (1 + max_jump_frac), so a 97.5 -> 143 (+47%) jump is impossible.
+    2c. Per-day volume FLOOR (non-deload): every lifting day carries
+       >= min_per_day movements; if the coach under-prescribed, restore the
+       movement(s) that day ran LAST week (honest backfill from prev_by_day, not
+       a clone). This is the countervailing rail to the ceiling — without it a
+       day that drops low re-anchors low on each re-derive and ratchets Phase-3
+       volume DOWN (week 10 Tuesday 4->3 exercises = an unintended deload).
     3. Hard weekly working-set CEILING — trim accessories first, never the day's
        lead compound, until total <= ceiling.
 
@@ -187,6 +194,28 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                 # narrating the un-capped number (the "@70 but why says 65" class).
                 it["why"] = (f"{capped:g} lb — incremental step up from your recent "
                              f"top {prev_top:g} (held back from a {w:g} lb jump).")
+
+    # 2c. per-day volume FLOOR (non-deload) — restore movements the day ran last
+    #     week so the coach can't silently turn a training day into a deload.
+    if not deload and prev_by_day:
+        for d, items in out.items():
+            if d == rest_day_idx or len(items) >= min_per_day:
+                continue
+            have = {_movement_key(it["exercise"]) for it in items}
+            for pit in prev_by_day.get(d, []):
+                if len(items) >= min_per_day:
+                    break
+                if _movement_key(pit["exercise"]) in have:
+                    continue
+                restored = dict(pit)
+                restored["why"] = (
+                    f"Restored {pit['exercise']} — you trained it on this day last "
+                    f"week; Phase-3 volume holds, no regression.")
+                items.append(restored)
+                have.add(_movement_key(pit["exercise"]))
+                actions.append(
+                    f"Floored day {d} to {len(items)} exercises (coach "
+                    f"under-prescribed; restored {pit['exercise']}).")
 
     # 3. volume ceiling — trim non-lead (accessory) sets first
     def _total():
@@ -265,6 +294,33 @@ def _prev_program_block(user_id: int, week: int) -> str:
         lines.append(f"  day{r.day_idx} {r.exercise_name}: {r.sets}x{r.reps} @ {w}"
                      + (f" (rest {r.rest})" if r.rest else ""))
     return "\n".join(lines)
+
+
+def _prev_program_by_day(user_id: int, week: int) -> dict:
+    """Last week's prescribed movements, STRUCTURED per day — used to backfill a
+    day the coach under-prescribed (the volume FLOOR). Returns
+    {day_idx: [{exercise, sets, reps, weight, rest, why}]} or {} for week 1."""
+    if week <= 1:
+        return {}
+    try:
+        from models import WeeklyPrescription
+        rows = (WeeklyPrescription.query
+                .filter_by(user_id=user_id, week=week - 1)
+                .order_by(WeeklyPrescription.day_idx,
+                          WeeklyPrescription.exercise_order).all())
+    except Exception:
+        return {}
+    out: dict[int, list] = {}
+    for r in rows:
+        out.setdefault(r.day_idx, []).append({
+            "exercise": r.exercise_name,
+            "sets": r.sets or 3,
+            "reps": r.reps or "8",
+            "weight": r.target_weight,
+            "rest": r.rest or "90s",
+            "why": r.adjustment_reason or "",
+        })
+    return out
 
 
 def _injury_block(user_id: int) -> str:
@@ -425,6 +481,8 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         clean, rest_day_idx=rest_day, ceiling=ceiling,
         history_exercises=hist_ex, history_max_weight=hist_max,
         history_top=hist_top,
+        prev_by_day=_prev_program_by_day(user_id, week),
+        min_per_day=4, deload=deload,
     )
     notes = dropped + actions
     if notes:

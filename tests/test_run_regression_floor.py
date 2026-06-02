@@ -61,6 +61,28 @@ def test_baseline_language_allowed_in_week_one():
     assert "baseline" in out[0]["detail"].lower()
 
 
+def test_interval_recovery_normalized_so_structure_equals_headline():
+    """A coach that emits 5 work reps but 4 recoveries used to render
+    "5×3 hard / 2 easy" (reads as 5 easy → 43 min) under a 41-min headline.
+    After normalizing the recovery to the work's rep count, the rendered
+    structure and the computed duration describe the SAME rounds and agree."""
+    from coach_planning_runs import (_normalize_interval_recovery,
+                                      _segments_total_min, _segments_to_detail)
+    segs = [
+        {"kind": "warmup", "minutes": 10},
+        {"kind": "work", "minutes": 3, "reps": 5, "hr": "≤178"},
+        {"kind": "recovery", "minutes": 2, "reps": 4},  # coach gave only 4
+        {"kind": "cooldown", "minutes": 8},
+    ]
+    norm = _normalize_interval_recovery(segs)
+    total = _segments_total_min(norm)
+    detail = _segments_to_detail(norm)
+    assert total == 10 + 5 * 3 + 5 * 2 + 8 == 43        # recovery normalized to 5
+    assert "5×3 min hard" in detail and "/ 2 min easy" in detail
+    # what the user would sum from the rendered structure == the headline
+    assert total == 10 + 5 * (3 + 2) + 8
+
+
 def test_parse_run_magnitude():
     from coach_planning_runs import _parse_run_magnitude
     assert _parse_run_magnitude("38 min") == (38.0, "min")

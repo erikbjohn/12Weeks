@@ -173,6 +173,23 @@ def _segments_total_min(segments) -> int:
     return int(round(total))
 
 
+def _normalize_interval_recovery(segments):
+    """Pair each work segment with the recovery that follows it as N EQUAL
+    rounds: the recovery inherits the work segment's rep count. Without this, a
+    coach that emits 5 work reps but 4 recoveries makes the paired detail
+    ("5×3 min hard / 2 min easy", which reads as 5 rounds → 5 easy) disagree
+    with _segments_total_min (which counted the recovery's own 4 reps). After
+    normalizing, the rendered structure and the headline duration ALWAYS
+    describe the same N rounds and sum to the same number."""
+    segs = [dict(s) for s in (segments or [])]
+    for i, s in enumerate(segs):
+        if (s.get("kind") or "").lower() == "work":
+            n = int(s.get("reps") or 1)
+            if i + 1 < len(segs) and (segs[i + 1].get("kind") or "").lower() == "recovery":
+                segs[i + 1]["reps"] = n
+    return segs
+
+
 def _segments_to_detail(segments) -> str:
     """Human-readable structure built from the coach's own segments, so the
     detail always matches the computed duration. A work segment is PAIRED with
@@ -394,8 +411,11 @@ def generate_week_runs(
             continue
         segments = v.get("segments")
         if isinstance(segments, list) and segments:
-            # Duration is the SUM of the coach's own segments — never an invented
-            # headline number that contradicts the structure.
+            # Pair each work block with its recovery as N equal rounds so the
+            # rendered structure and the headline duration describe the SAME
+            # rounds (kills the "5×3 hard / 2 easy" headline=41 but structure=43
+            # split). Then duration is the honest SUM of those segments.
+            segments = _normalize_interval_recovery(segments)
             duration = f"{_segments_total_min(segments)} min"
             detail = _segments_to_detail(segments)
         else:

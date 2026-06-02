@@ -393,6 +393,44 @@ def _build_exercise_analysis():
     return {"exercise_analysis": analysis}
 
 
+@section_builder("exercise_deltas")
+def _build_exercise_deltas():
+    """THIS week vs LAST week, per exercise: load, reps, sets, and the DIRECTION
+    each moved. Without this the coach cannot state a true direction-of-change and
+    confabulates one (calling a flat 150→150 load "heavier loads"). Empty for
+    week 1 (no prior week to diff)."""
+    from models import WeeklyPrescription
+    from workout_data import resolve_name
+    week = _current_week()
+    if week <= 1:
+        return {"exercise_deltas": {}}
+
+    def _load(w):
+        out = {}
+        for rx in WeeklyPrescription.query.filter_by(user_id=current_user.id, week=w).all():
+            name = resolve_name(rx.exercise_name)
+            reps = int(rx.reps) if (rx.reps and str(rx.reps).isdigit()) else None
+            out[name] = (getattr(rx, "target_weight", None), reps, rx.sets)
+        return out
+
+    this_w, last_w = _load(week), _load(week - 1)
+    deltas = {}
+    for name, (tw, reps, sets) in this_w.items():
+        ptw, preps, psets = last_w.get(name, (None, None, None))
+        if ptw is None and preps is None:
+            continue  # no last-week number to compare — coach must say so, not guess
+        def _dir(now, prev):
+            if now is None or prev is None:
+                return "unknown"
+            return "flat" if now == prev else ("up" if now > prev else "down")
+        deltas[name] = {
+            "this_weight": tw, "last_weight": ptw, "load_dir": _dir(tw, ptw),
+            "this_reps": reps, "last_reps": preps, "rep_dir": _dir(reps, preps),
+            "this_sets": sets, "last_sets": psets,
+        }
+    return {"exercise_deltas": deltas}
+
+
 @section_builder("today_sets")
 def _build_today_sets():
     from models import SetLog
@@ -1021,6 +1059,15 @@ Intensity level: {anger_level_label}
 
 <non_negotiable_rules>
 1. DATA FIRST — Every claim must cite a number from <athlete_data>. Never invent stats.
+   DIRECTION OF CHANGE IS A NUMBER CLAIM. Before you say "heavier/lighter",
+   "more/fewer", "up/down", "increasing/decreasing", or "progressing", compare
+   THIS week's prescribed number to LAST week's. Only state the direction the
+   two numbers actually moved. If the load is UNCHANGED and only reps changed,
+   say exactly that — "load held at X; reps cut Z→Y — a volume change, not a load
+   bump" — NEVER "heavier loads, lower reps". Calling a flat load "heavier" is
+   fabrication and a Rule-20 failure. If you don't have last week's number, say
+   "I don't have last week's number to compare" — do not guess the direction.
+   Get it right the FIRST answer; do not wait for the athlete to push back.
 2. NO SYCOPHANCY — Banned phrases (NEVER use these or close variants):
    "great job", "good job", "amazing", "awesome", "love that", "love it",
    "proud of you", "I'm proud", "you're crushing it", "killing it", "nailed it",
@@ -1545,6 +1592,18 @@ def _format_athlete_data(ctx, requires):
         parts.append(_format_exercise_history(ctx["exercise_history"]))
     if ctx.get("exercise_analysis"):
         parts.append(_format_exercise_analysis(ctx["exercise_analysis"]))
+    ed = ctx.get("exercise_deltas")
+    if ed:
+        week = (ctx.get("week") or _current_week())
+        dl = [f"WEEK-OVER-WEEK PER-EXERCISE DELTA (wk {week} vs {week-1}) — CITE THIS for ANY "
+              f"direction claim. If an exercise is NOT listed, you have NO last-week number "
+              f"for it: say so, do not guess the direction:"]
+        for n, d in sorted(ed.items()):
+            dl.append(
+                f"  {n}: load {d['last_weight']}->{d['this_weight']} lb [{d['load_dir']}], "
+                f"reps {d['last_reps']}->{d['this_reps']} [{d['rep_dir']}], "
+                f"sets {d['last_sets']}->{d['this_sets']}")
+        parts.append("\n".join(dl))
     if ctx.get("today_sets"):
         parts.append(_format_today_sets(ctx["today_sets"]))
 
