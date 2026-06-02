@@ -10731,28 +10731,41 @@ async function renderDetail() {
     const isBodyweightPrescription = ex.target_weight === 0;
     let setRowsHtml = '';
     let carryWeight = weightVal;
+    let firstUndoneSet = -1;  // for timed multi-set: where the HIIT cycle resumes
     for (let s = 0; s < setCount; s++) {
       const setKey = `${currentWeek}_${currentDay}_${i}_${s}`;
       const setData = _setCache && _setCache[setKey];
       const setDone = !!(setData && setData.done);
+      if (!setDone && firstUndoneSet < 0) firstUndoneSet = s;
       const setWeight = isBodyweightPrescription
         ? ''  // BW: empty regardless of cache
         : (setData && setData.weight ? setData.weight : carryWeight);
       const setReps = setData && setData.reps ? setData.reps : '';
       if (!isBodyweightPrescription && setData && setData.weight) carryWeight = setData.weight;
 
-      if (isTimedEx) {
-        // Timed exercise: multi-set → HIIT modal, single-set → inline hold timer.
-        var timerOnclick = setCount > 1
-          ? `startExerciseHiit('${escapedName}',${currentWeek},${currentDay},${i},${timedSeconds},${restSeconds},${setCount},${s})`
-          : `startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})`;
-        var timerLabel = setCount > 1 ? `▶ ${targetRepsDisplay}` : targetRepsDisplay;
+      if (isTimedEx && setCount > 1) {
+        // Multi-set timed exercise = ONE interval (HIIT-style) cycle: WORK / REST
+        // repeated for every set. The single "Start interval timer" button above
+        // runs the whole cycle and auto-marks each set done as it advances — so
+        // these rows are STATUS ONLY (no per-set launch button, which used to read
+        // as three separate manual timers). Tapping the checkbox still toggles a
+        // set by hand if you did it without the timer.
         setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
           <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
             ${setDone ? '&#10003;' : ''}
           </button>
           <span class="set-label">Set ${s + 1}</span>
-          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="${timerOnclick}">${timerLabel}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay} &#10003;</span>`}
+          <span style="margin-left:auto;color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay}${setDone ? ' &#10003;' : ''}</span>
+          <div id="inline-timer-${i}-${s}" style="margin-left:8px;font-family:'DM Mono',monospace;font-size:15px;color:var(--accent)"></div>
+        </div>`;
+      } else if (isTimedEx) {
+        // Single-set timed hold → inline countdown timer in-row.
+        setRowsHtml += `<div class="set-row${setDone ? ' set-done' : ''}">
+          <button class="set-check${setDone ? ' done' : ''}" onclick="toggleSet(${currentWeek},${currentDay},${i},${s},${restSeconds},'${escapedName}',this)">
+            ${setDone ? '&#10003;' : ''}
+          </button>
+          <span class="set-label">Set ${s + 1}</span>
+          ${!setDone ? `<button class="btn btn-secondary" style="padding:4px 16px;font-size:13px;font-family:'DM Mono',monospace" onclick="startInlineTimer(${timedSeconds},this,'${escapedName}',${currentWeek},${currentDay},${i},${s},${restSeconds})">${targetRepsDisplay}</button>` : `<span style="color:var(--muted);font-family:'DM Mono',monospace;font-size:13px">${targetRepsDisplay} &#10003;</span>`}
           <div id="inline-timer-${i}-${s}" style="margin-left:8px;font-family:'DM Mono',monospace;font-size:15px;color:var(--accent)"></div>
         </div>`;
       } else if (isBW) {
@@ -10778,6 +10791,13 @@ async function renderDetail() {
       }
     }
 
+    // Multi-set timed exercise = one interval (HIIT-style) work/rest cycle.
+    // A single button runs WORK/REST for every set, auto-marking each done as it
+    // advances. Resumes at the first not-yet-completed set.
+    const timedCycleBtnHtml = (isTimedEx && setCount > 1)
+      ? `<button class="btn btn-primary" style="width:100%;margin:6px 0 10px;font-size:14px;padding:11px;font-family:'DM Mono',monospace" onclick="startExerciseHiit('${escapedName}',${currentWeek},${currentDay},${i},${timedSeconds},${restSeconds},${setCount},${firstUndoneSet < 0 ? 0 : firstUndoneSet})">&#9654; Start interval timer &mdash; ${setCount}&times;${timedSeconds}s work${restSeconds ? ' / ' + _fmtRest(restSeconds) + ' rest' : ''}</button>`
+      : '';
+
     return `<div class="exercise-block">
       <div class="ex-name-row">
         <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
@@ -10785,6 +10805,7 @@ async function renderDetail() {
       </div>
       <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + _fmtRest(parseRestSeconds(ex.rest)) + ' rest' : ''}${lastWt != null && !isBodyweightPrescription ? ' · Last: ' + lastWt + ' ' + unit : ''}${(!isSwapped && ex.target_weight) ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${(ex.target_weight && lastWt != null) ? (parseFloat(ex.target_weight) > parseFloat(lastWt) ? '↑' : parseFloat(ex.target_weight) < parseFloat(lastWt) ? '↓' : '—') : '—'}</span>` : ''}</div>
       ${(!isSwapped && ex.note) ? `<div class="ex-note">${ex.note}</div>` : ''}
+      ${timedCycleBtnHtml}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
       <div id="swap-container-${i}"></div>
