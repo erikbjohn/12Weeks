@@ -1753,6 +1753,49 @@ def _format_food_safety_block(ctx):
 # assemble_prompt — the main entry point
 # ---------------------------------------------------------------------------
 
+def _weekly_planning_progress():
+    """Compute how many days the weekly-planning walkthrough has shown SO FAR
+    (this session) and return a hard, specific directive so the model walks ONE
+    day at a time and can't skip to a week-lock. Deterministic — not a hope.
+
+    Counts [SHOW_NEXT_DAY] in assistant messages back to the session's overview
+    (the one ending '...Ready to see Monday?'). 0 shown -> show Monday next.
+    """
+    DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    shown = 0
+    try:
+        from models import ChatMessage
+        rows = (ChatMessage.query
+                .filter_by(user_id=current_user.id, role="assistant")
+                .order_by(ChatMessage.id.desc()).limit(30).all())  # newest first
+        for r in rows:
+            c = r.content or ""
+            if "Ready to see" in c:   # the overview = start of this session
+                break
+            shown += c.count("[SHOW_NEXT_DAY]")
+    except Exception:
+        return ""
+    shown = max(0, min(shown, 6))
+    if shown >= 6:
+        return ("\n\n<planning_progress>All 6 training days have been revealed one "
+                "at a time. NOW (and only now) give a 2-3 sentence week summary and "
+                "lock it.</planning_progress>")
+    nd = DAYS[shown]
+    remaining = 6 - shown
+    return (f"\n\n<planning_progress>PROGRESS: {shown} of 6 days revealed so far this "
+            f"session. {remaining} day(s) still unrevealed. The NEXT day to reveal is "
+            f"{nd}. HARD RULES for this turn:\n"
+            f"- NEVER reveal more than one day at a time, and NEVER lock or summarize "
+            f"the whole week — you may ONLY summarize/lock after all 6 are revealed.\n"
+            f"- When you DO advance, emit [SHOW_NEXT_DAY] on its own line and reveal "
+            f"ONLY {nd} (one highlight + one question). Do not skip ahead of {nd}.\n"
+            f"- If the athlete just requested a change (swap/weight/schedule), process "
+            f"it for the CURRENT day this turn and do NOT emit [SHOW_NEXT_DAY] yet — "
+            f"advance to {nd} only once they confirm no more changes.\n"
+            f"- Do NOT say 'week locked' or wrap up — {remaining} day(s) remain."
+            f"</planning_progress>")
+
+
 def assemble_prompt(agent_name, context):
     """Combine CORE_PROMPT + protocol + formatted data into a system prompt.
 
@@ -1782,6 +1825,11 @@ def assemble_prompt(agent_name, context):
 
     # Protocol
     protocol = PROTOCOL_MAP.get(agent_name, PROTOCOL_MAP.get("freeform", ""))
+
+    # Weekly planning: inject explicit, computed day-by-day progress so the
+    # model walks ONE day per turn and cannot skip straight to locking the week.
+    if agent_name == "weekly_planning":
+        protocol = protocol + _weekly_planning_progress()
 
     # Athlete data block
     athlete_data_block = _format_athlete_data(context, requires)
