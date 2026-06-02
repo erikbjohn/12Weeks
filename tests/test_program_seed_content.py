@@ -115,17 +115,21 @@ class TestPhase2Content:
             f"Phase 2 Mon Front Squat = 4×3 (speed); got {fs['sets']}"
         )
 
-    def test_phase_2_tuesday_db_bench_4x5(self, app_ctx):
-        # Spec §4 Tue: DB Bench 4x5 strength wave.
+    def test_phase_2_tuesday_barbell_bench_4x5(self, app_ctx):
+        # Tue strength wave is 4x5. Implement is Barbell Bench Press as of
+        # commit 8e11a3a (all Phase 2/deload/peak benches -> Barbell Bench).
         app, _ = app_ctx
         from workout_data import get_workouts
         with app.app_context():
             days = get_workouts(week=5)
         tue = days[1]
-        dbb = next((e for e in tue["exercises"]
-                    if e["name"] == "DB Bench Press"), None)
-        assert dbb is not None
-        assert dbb["sets"] == "4x5"
+        bench = next((e for e in tue["exercises"]
+                      if e["name"] == "Barbell Bench Press"), None)
+        assert bench is not None, (
+            "Phase 2 Tuesday should have Barbell Bench Press; got "
+            f"{[e['name'] for e in tue['exercises']]}"
+        )
+        assert bench["sets"] == "4x5"
 
 
 class TestPhase3Content:
