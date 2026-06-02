@@ -2728,7 +2728,8 @@ def api_workouts():
                 ex_dict = {
                     "name": rx.exercise_name,
                     "sets": f"{rx.sets}x{rx.reps}",
-                    "rest": rx.rest or "60s",
+                    # Coach-only rest — no hardcoded default, no template-row leak.
+                    "rest": rx.rest if rx.source == "coach" else None,
                     "note": rx.note or "",
                 }
                 # `is not None` (not truthy) so target_weight=0 — the
@@ -2965,7 +2966,8 @@ def api_week(week):
             ex_dict = {
                 "name": rx.exercise_name,
                 "sets": f"{rx.sets}x{rx.reps}",
-                "rest": rx.rest or "60s",
+                # Coach-only rest — no hardcoded default, no template-row leak.
+                "rest": rx.rest if rx.source == "coach" else None,
                 "note": rx.note or "",
             }
             ex_info = EXERCISES.get(rx.exercise_name, {})
@@ -3758,9 +3760,15 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         # the deterministic exerciseWhy() helper can give a plyo-appropriate
         # reason instead of a weight-based one.
         from workout_data import EXERCISES, resolve_name
+        # Prior week's PRESCRIPTION, so the planning delta compares plan-to-plan
+        # (not plan-vs-logged) — the fix for the phantom "was X" baseline.
+        _prev_presc = {(p.day_idx, p.exercise_name): p
+                       for p in WeeklyPrescription.query.filter_by(
+                           user_id=current_user.id, week=target_week - 1).all()}
         program = []
         for r in rows:
             info = EXERCISES.get(resolve_name(r.exercise_name)) or {}
+            _p = _prev_presc.get((r.day_idx, r.exercise_name))
             program.append({
                 "day": r.day_idx,
                 "exercise": r.exercise_name,
@@ -3769,6 +3777,8 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 "target_weight": r.target_weight,
                 "reason": r.adjustment_reason,
                 "rest": r.rest,
+                "prev_target_weight": (_p.target_weight if _p else None),
+                "prev_reps": (_p.reps if _p else None),
                 "note": r.note,
                 "tracked_metric": info.get("tracked_metric"),
                 "muscle_group": info.get("muscle_group"),
@@ -3831,6 +3841,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     # FAIL LOUD: domains the coach did not prescribe. No engine/template
     # fallback is written — these are surfaced so the UI can show "not planned".
     coach_failures = []
+    # Prior week's PRESCRIPTION for honest plan-vs-plan deltas (not plan-vs-logged).
+    _prev_presc = {(p.day_idx, p.exercise_name): p
+                   for p in WeeklyPrescription.query.filter_by(
+                       user_id=current_user.id, week=target_week - 1).all()}
 
     # Auto-swap exercises the user doesn't have equipment for
     from equipment_swaps import auto_swap_workout
@@ -4024,7 +4038,15 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             adjusted_reps = str(_it.get("reps") or "8")
             weight = _it.get("weight")
             reason = _it.get("why") or "Coach-designed"
-            base_rest = "90s"
+            # Rest is the coach's — NO hardcoded default. validate_program
+            # already guarantees a single committed rest on every kept item;
+            # this is the belt-and-suspenders coach-or-nothing guard.
+            coach_rest = (_it.get("rest") or "").strip()
+            if not coach_rest:
+                coach_failures.append({"domain": "lift", "day": day_idx,
+                                       "exercise": exercise_name,
+                                       "reason": "coach omitted rest"})
+                continue
             note = ""
             source = 'coach'
 
@@ -4051,7 +4073,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 exercise_name=exercise_name,
                 sets=adjusted_sets,
                 reps=adjusted_reps,
-                rest=base_rest,
+                rest=coach_rest,
                 note=note,
                 source=source,
                 target_weight=weight,
@@ -4060,14 +4082,18 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             ))
 
             _ex_info = EXERCISES.get(exercise_name) or {}
+            _p = _prev_presc.get((day_idx, exercise_name))
             program_summary.append({
                 "day": day_idx,
                 "exercise": exercise_name,
                 "sets": adjusted_sets,
                 "reps": adjusted_reps,
                 "target_weight": weight,
+                "rest": coach_rest,
                 "reason": reason,
                 "new": bool(_it.get("new")),
+                "prev_target_weight": (_p.target_weight if _p else None),
+                "prev_reps": (_p.reps if _p else None),
                 "tracked_metric": _ex_info.get("tracked_metric"),
                 "muscle_group": _ex_info.get("muscle_group"),
                 "category": _ex_info.get("category"),
@@ -6896,7 +6922,7 @@ def _build_coach_context():
         if _db_rx and workout_today:
             workout_today["exercises"] = [
                 {"name": rx.exercise_name, "sets": f"{rx.sets}x{rx.reps}",
-                 "rest": rx.rest or "60s", "note": rx.note or "",
+                 "rest": (rx.rest if rx.source == "coach" else None), "note": rx.note or "",
                  "target_weight": getattr(rx, 'target_weight', None)}
                 for rx in _db_rx
             ]

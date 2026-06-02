@@ -86,7 +86,7 @@ def test_coach_success_writes_coach_rows(ctx, monkeypatch):
         prog = {}
         for di in range(7):
             items = [{"exercise": resolve_name(ex["name"]), "sets": 3, "reps": "5",
-                      "weight": 100, "why": "test", "new": False}
+                      "weight": 100, "rest": "90s", "why": "test", "new": False}
                      for ex in (days[di].get("exercises", []) or [])]
             if items:
                 prog[di] = items
@@ -179,7 +179,7 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
         prog = {}
         for di in range(7):
             items = [{"exercise": resolve_name(ex["name"]), "sets": 3, "reps": "5",
-                      "weight": 222, "why": "fresh", "new": False}
+                      "weight": 222, "rest": "90s", "why": "fresh", "new": False}
                      for ex in (get_workouts(k["week"])[di].get("exercises", []) or [])]
             if items:
                 prog[di] = items

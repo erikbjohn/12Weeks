@@ -9474,7 +9474,13 @@ async function launchWeeklyPlanning(weekOverride) {
             } else {
                 _wt = '—';
             }
-            var _prev = lastWeekActual[_ex.exercise];
+            // Plan-vs-plan baseline: compare to last week's PRESCRIPTION
+            // (prev_target_weight/prev_reps served from the server), NOT logged
+            // work — that mismatch produced the phantom "was 38". Null when there
+            // is genuinely no prior plan (week 1 / new lift) -> no baseline shown.
+            var _prev = (_ex.prev_target_weight != null)
+                ? { weight: _ex.prev_target_weight, reps: _ex.prev_reps }
+                : null;
             var _changeHtml = '';
             if (_isBW) {
                 // Bodyweight: no weight delta — just show rep change if any
@@ -9496,15 +9502,15 @@ async function launchWeeklyPlanning(weekOverride) {
                 var _dr = _newReps - _prevReps;
                 var _changeWord = _isHeight ? 'height' : 'weight';
                 if (_dw > 0) {
-                    _changeHtml = '<span style="color:#4ade80"> — ' + _changeWord + ' UP ' + _dw + _unit + '</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#4ade80"> — ' + _changeWord + ' UP ' + _dw + _unit + '</span> <span style="color:var(--muted)">(last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dw < 0) {
-                    _changeHtml = '<span style="color:#ef4444"> — ' + _changeWord + ' DOWN ' + Math.abs(_dw) + _unit + '</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#ef4444"> — ' + _changeWord + ' DOWN ' + Math.abs(_dw) + _unit + '</span> <span style="color:var(--muted)">(last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dr > 0) {
-                    _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#4ade80"> — reps UP (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else if (_dr < 0) {
-                    _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:#ef4444"> — reps DOWN (' + _prevReps + '→' + _newReps + ')</span> <span style="color:var(--muted)">(last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 } else {
-                    _changeHtml = '<span style="color:var(--muted)"> — HOLD (was ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
+                    _changeHtml = '<span style="color:var(--muted)"> — HOLD (last plan ' + _prev.weight + _unit + ' × ' + _prev.reps + ')</span>';
                 }
             } else if (_ex.reason) {
                 _changeHtml = '<span style="color:var(--muted)"> — ' + _ex.reason + '</span>';

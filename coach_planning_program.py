@@ -57,7 +57,9 @@ def _anthropic_client():
 def validate_program(parsed, catalog, available_equipment):
     """Drop anything the athlete can't do. Pure + unit-tested.
 
-    parsed: {day(str|int): [{exercise, sets, reps, weight, why}]}
+    parsed: {day(str|int): [{exercise, sets, reps, weight, rest, why}]}
+    `rest` is REQUIRED and must be a single value (no range); items lacking it or
+    giving a range are dropped (coach-or-nothing — no default is substituted).
     catalog: {exercise_name: {equipment: [...], muscle_group: ...}}
     available_equipment: iterable of equipment keys the athlete has.
     Returns (clean: {int_day: [items]}, dropped: [reason strings]).
@@ -104,25 +106,43 @@ def validate_program(parsed, catalog, available_equipment):
                 weight = float(weight) if weight is not None else None
             except (TypeError, ValueError):
                 weight = None
+            # REST: the coach must commit ONE value — never a range, never
+            # omitted. No hardcoded default is substituted (coach-or-nothing);
+            # a rest-less or range item is dropped and surfaces as unplanned.
+            rest = str(it.get("rest") or "").strip()
+            if not rest:
+                dropped.append(f"day{day}: {name} missing rest")
+                continue
+            if any(sep in rest for sep in ("-", "–", "/", " to ")):
+                dropped.append(f"day{day}: {name} rest is a range {rest!r}")
+                continue
             kept.append({"exercise": name, "sets": sets, "reps": reps,
-                         "weight": weight, "why": (it.get("why") or "")})
+                         "weight": weight, "rest": rest,
+                         "why": (it.get("why") or "")})
         if kept:
             clean[day] = kept
     return clean, dropped
 
 
 def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
-                   history_max_weight, new_move_frac=0.6):
+                   history_max_weight, history_top=None, new_move_frac=0.6,
+                   max_jump_frac=0.20):
     """Deterministic safety rails the LLM can't be trusted to honor. Mutates a
     copy. Returns (program, actions[]).
 
     1. No lifting on the rest / long-run day.
     2. New (no-history) movements: flagged `new` and their load forced to a
        genuinely light start (<= new_move_frac of the athlete's max logged lift).
+    2b. Existing movements: load can't LEAP — capped at the recent top set ×
+       (1 + max_jump_frac), so a 97.5 -> 143 (+47%) jump is impossible.
     3. Hard weekly working-set CEILING — trim accessories first, never the day's
        lead compound, until total <= ceiling.
+
+    `rest` is carried through untouched on every item (a plain key on the copied
+    dict) — the rails NEVER invent or overwrite the coach's committed rest.
     """
     actions = []
+    history_top = history_top or {}
     out = {int(d): [dict(it) for it in items] for d, items in program.items()}
 
     # 1. rest day
@@ -147,6 +167,22 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                     # Keep the rationale coherent with the adjusted load.
                     it["why"] = (f"New movement — starting light at {neww:g} lb, "
                                  f"ramp up fast as you log it.")
+
+    # 2b. existing-movement jump cap — an already-logged lift can't leap more
+    #     than max_jump_frac over its recent top set (blocks the 97.5 -> 143
+    #     +47% nonsense). New movements are exempt (they ramp up by design).
+    for items in out.values():
+        for it in items:
+            if it.get("new"):
+                continue
+            prev_top = history_top.get(_movement_key(it["exercise"]))
+            w = it.get("weight")
+            if prev_top and w and w > prev_top * (1 + max_jump_frac):
+                capped = max(5, round(prev_top * (1 + max_jump_frac) / 5) * 5)
+                actions.append(
+                    f"Capped {it['exercise']} jump {w:g}->{capped:g} lb "
+                    f"(recent top {prev_top:g}; progress is incremental).")
+                it["weight"] = capped
 
     # 3. volume ceiling — trim non-lead (accessory) sets first
     def _total():
@@ -203,6 +239,30 @@ def _history_block(user_id: int, current_week: int, lookback_weeks: int = 4) -> 
     return "\n".join(lines)
 
 
+def _prev_program_block(user_id: int, week: int) -> str:
+    """Last week's PRESCRIBED lifts, so the coach anchors progression on the plan
+    it set (not only logged top sets) and can't leap a load week-over-week (the
+    97.5 -> 143 jump). Also shows the rest it committed so it stays consistent."""
+    if week <= 1:
+        return "(no prior week prescribed)"
+    try:
+        from models import WeeklyPrescription
+        rows = (WeeklyPrescription.query
+                .filter_by(user_id=user_id, week=week - 1)
+                .order_by(WeeklyPrescription.day_idx,
+                          WeeklyPrescription.exercise_order).all())
+    except Exception:
+        return "(unavailable)"
+    if not rows:
+        return "(no lifts prescribed last week)"
+    lines = []
+    for r in rows:
+        w = f"{r.target_weight:g} lb" if r.target_weight else "BW"
+        lines.append(f"  day{r.day_idx} {r.exercise_name}: {r.sets}x{r.reps} @ {w}"
+                     + (f" (rest {r.rest})" if r.rest else ""))
+    return "\n".join(lines)
+
+
 def _injury_block(user_id: int) -> str:
     try:
         from models import CoachMemory
@@ -240,6 +300,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
     available = set((eq.available_equipment if eq else []) or [])
     catalog_str, catalog = _catalog_for_prompt(available)
     history = _history_block(user_id, week)
+    prev_program = _prev_program_block(user_id, week)
     injuries = _injury_block(user_id)
 
     phase = user_context.get("phase", "?")
@@ -288,10 +349,19 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "   load). Lead each day with the heaviest compound when CNS is fresh.\n"
         f"6. Train {train_days} lifting days; the 7th day is rest (long run). "
         "   Use day indices 0=Mon … 6=Sun.\n"
-        "7. Each exercise needs a ONE-sentence why (load/selection rationale).\n\n"
+        "7. REST: choose ONE committed rest per exercise from the movement and "
+        "   intent — heavy compounds rest longer (e.g. 2-3 min), accessories "
+        "   shorter (e.g. 45-90s). Output a SINGLE value like \"90s\" or "
+        "   \"2 min\" — NEVER a range (not \"90s-2 min\"), never omit it.\n"
+        "8. NEVER jump a logged movement's load more than ~+10-15 lb (compound) "
+        "   or +5 lb (accessory) vs LAST WEEK'S PRESCRIPTION below. A +40 lb / "
+        "   +40% week-over-week jump is a hard fail — progress is incremental.\n"
+        "9. Each exercise needs a ONE-sentence why covering BOTH the load/"
+        "   selection AND the rest you chose.\n\n"
         "Output ONE JSON object mapping `<day_idx>` to a list of "
         '{"exercise": "<exact catalog name>", "sets": <int>, "reps": "<str>", '
-        '"weight": <num|0>, "why": "<one sentence>"}. JSON only, no prose.'
+        '"weight": <num|0>, "rest": "<single value, e.g. 90s or 2 min — never a '
+        'range>", "why": "<one sentence: load + rest rationale>"}. JSON only, no prose.'
     )
     user_prompt = (
         f"ATHLETE:\n- Goal {goal_type}, {current_wt} lb → {target_wt} lb\n"
@@ -299,6 +369,8 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         f"- Injuries/limits: {injuries}\n\n"
         f"ALLOWED EXERCISES (equipment-filtered — use these exact names):\n{catalog_str}\n\n"
         f"RECENT TOP SETS (last 4 weeks):\n{history}\n\n"
+        f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
+        f"nudge up incrementally, NEVER leap a load):\n{prev_program}\n\n"
         "Design the week. JSON only."
     )
 
@@ -330,11 +402,17 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
                          SetLog.week >= max(1, week - 4)).all())
     hist_ex = {resolve_name(r.exercise_name) for r in hist_rows}
     hist_max = max([r.weight for r in hist_rows], default=0)
+    hist_top = {}  # per-movement recent top set, for the jump cap
+    for r in hist_rows:
+        if r.weight:
+            k = _movement_key(resolve_name(r.exercise_name))
+            hist_top[k] = max(hist_top.get(k, 0), r.weight)
     rest_day = 6 if train_days <= 6 else -1  # Sunday is the long-run/rest day
     ceiling = int(target_sets) + 8
     clean, actions = enforce_safety(
         clean, rest_day_idx=rest_day, ceiling=ceiling,
         history_exercises=hist_ex, history_max_weight=hist_max,
+        history_top=hist_top,
     )
     notes = dropped + actions
     if notes:

@@ -3,7 +3,23 @@ these deterministic rails GUARANTEE the limits the prompt can't be trusted to
 hold: no lifting on the rest/long-run day, a hard weekly-volume ceiling, and
 new (no-history) movements forced to a genuinely light start.
 """
-from coach_planning_program import enforce_safety
+from coach_planning_program import enforce_safety, _movement_key
+
+
+def test_existing_movement_jump_capped():
+    """An already-logged lift can't leap more than ~20% over its recent top set
+    (the 97.5 -> 143 +47% nonsense). New movements are exempt. Rest survives."""
+    key = _movement_key("Barbell Bent-Over Row")
+    prog = {0: [{"exercise": "Barbell Bent-Over Row", "sets": 3, "reps": "6",
+                 "weight": 143, "rest": "90s", "why": "x"}]}
+    out, actions = enforce_safety(
+        prog, rest_day_idx=6, ceiling=50,
+        history_exercises={"Barbell Bent-Over Row"}, history_max_weight=97.5,
+        history_top={key: 97.5})
+    w = out[0][0]["weight"]
+    assert w <= 97.5 * 1.20 + 0.01, f"jump must be capped, got {w}"
+    assert any("Capped" in a for a in actions)
+    assert out[0][0]["rest"] == "90s"  # rails never touch the coach's rest
 
 
 def _prog():
