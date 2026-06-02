@@ -1387,8 +1387,7 @@ function renderMealInner(dayData) {
   if (!plan) return '';
 
   // Determine if we're viewing today's meals
-  const todayJsDay = new Date().getDay();
-  const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
+  const todayMonIdx = _userTodayMonIdx();  // user-tz "today", not device-local
   const isViewingToday = currentDay === todayMonIdx;
 
   // Fast day based on meal type (no toggle — it's the plan)
@@ -5565,8 +5564,7 @@ function buildMorningBriefing() {
   // Today's workout info
   const weekData = workoutData[String(currentWeek)];
   if (weekData) {
-    const todayIdx = new Date().getDay();
-    const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+    const mappedIdx = _userTodayMonIdx();  // user-tz "today", not device-local
     const dayData = weekData.days[mappedIdx];
     if (dayData) {
       lines.push('Today is ' + dayData.liftName + ' -- Week ' + currentWeek + '.');
@@ -6996,11 +6994,24 @@ function setDay(d) {
 // User's actual program week — computed from start_date, NOT the week the user is viewing.
 // Returns the week number (1-12) or null if state not loaded.
 function getActualProgramWeek() {
+  // Prefer the SERVER's current_week — it's computed in the user's stored
+  // timezone (_user_today). Computing from device-local new Date() drifted at
+  // the midnight boundary / across timezones, putting the header a week off.
+  if (_stateCache && _stateCache.current_week) return _stateCache.current_week;
   if (!_stateCache || !_stateCache.start_date) return null;
+  const originDate = (_stateCache.user_date || _stateCache.server_date);
+  const nowDt = originDate ? new Date(originDate + 'T00:00:00') : new Date();
   const startDt = new Date(_stateCache.start_date + 'T00:00:00');
-  const nowDt = new Date();
   const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
   return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+}
+
+// The user's "today" weekday (Mon=0..Sun=6) from the SERVER's user-timezone
+// date, not device-local time — so day-nav/streak don't drift at midnight.
+function _userTodayMonIdx() {
+  var ud = _stateCache && _stateCache.user_date;
+  var jsDay = ud ? new Date(ud + 'T00:00:00').getDay() : new Date().getDay();
+  return jsDay === 0 ? 6 : jsDay - 1;
 }
 
 // Used by swipe gestures — always navigates (no toggle), clamps at week boundaries
