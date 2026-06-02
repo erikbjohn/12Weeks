@@ -1092,6 +1092,49 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
     return reason
 
 
+_MUSCLE_LABELS = {
+    "chest": "Chest", "chest_triceps": "Chest & Triceps", "back": "Back",
+    "traps": "Traps", "shoulders": "Shoulders", "rear_delts": "Rear Delts",
+    "quads": "Quads", "posterior_chain": "Posterior Chain",
+    "hamstrings": "Hamstrings", "glutes": "Glutes", "calves": "Calves",
+    "biceps": "Biceps", "triceps": "Triceps", "full_body": "Full Body",
+    "power": "Power", "core": "Core",
+}
+
+
+def _derive_lift_name(exercise_names):
+    """Build an ACCURATE day title from the muscle groups the day actually
+    trains. The template's day label ("HEAVY Lower", "Shoulder/Arms") goes stale
+    when the coach redesigns the exercises — naming the day from its real
+    contents kills the liftName-vs-exercises contradiction class."""
+    from collections import Counter
+    from workout_data import EXERCISES, resolve_name
+    counts = Counter()
+    for nm in exercise_names or []:
+        info = EXERCISES.get(nm) or EXERCISES.get(resolve_name(nm)) or {}
+        g = info.get("muscle_group")
+        if not g:
+            n = (nm or "").lower()
+            if any(k in n for k in ("squat", "lunge", "leg press", "step-up")):
+                g = "quads"
+            elif "deadlift" in n or "rdl" in n or "good morning" in n:
+                g = "posterior_chain"
+            elif "calf" in n:
+                g = "calves"
+        if g:
+            counts[g] += 1
+    if not counts:
+        return None
+    # Core/abs don't name the day unless that's all there is.
+    non_core = {g: c for g, c in counts.items() if g != "core"}
+    use = non_core or counts
+    top = [g for g, _ in sorted(use.items(), key=lambda kv: (-kv[1], kv[0]))][:2]
+    name = " & ".join(_MUSCLE_LABELS.get(g, g.replace("_", " ").title()) for g in top)
+    if non_core and "core" in counts:
+        name += " + Core"
+    return name
+
+
 def _day_has_training(user_id, week, day_idx):
     """True if the day has a prescribed run or lift. A fast day can still be a
     fasted-TRAINING day (the Sunday long fasted run, a fasted lift day) — so its
@@ -2875,6 +2918,10 @@ def api_workouts():
             for day_idx, exercises in rx_by_day.items():
                 if day_idx < len(days):
                     days[day_idx]["exercises"] = exercises
+                    if not days[day_idx].get("isRest"):
+                        _dn = _derive_lift_name([e.get("name") for e in exercises])
+                        if _dn:
+                            days[day_idx]["liftName"] = _dn
 
         for day in days:
             if "exercises" in day:
@@ -3120,6 +3167,13 @@ def api_week(week):
         for day_idx, exercises in rx_by_day.items():
             if day_idx < len(days):
                 days[day_idx]["exercises"] = exercises
+                # Title the day from what it ACTUALLY trains — the template label
+                # ("HEAVY Lower", "Shoulder/Arms") goes stale when the coach
+                # redesigns the movements (the liftName-vs-exercises class).
+                if not days[day_idx].get("isRest"):
+                    _dn = _derive_lift_name([e.get("name") for e in exercises])
+                    if _dn:
+                        days[day_idx]["liftName"] = _dn
 
     for day in days:
         if "exercises" in day:
