@@ -7334,13 +7334,18 @@ function renderWarmupInner(dayData) {
     <div class="warmup-body visible" id="warmup-body">
       ${(wu.steps || []).map((step, i) => {
         const isWuDone = _warmupCache[currentWeek + '_' + currentDay + '_' + i];
-        // Warm-ups are mobility, not a prescription — show the name + a brief
-        // cue note only. No reps/time badge (it mislabeled durations as "reps").
+        // Show REPS. Bare numbers get a "reps" suffix ("15" -> "15 reps");
+        // qualified counts pass through ("10 per leg"); a genuine time hold
+        // ("30s") shows as-is. Never label a duration as "reps".
+        const _m = step.reps != null && step.reps !== '' ? String(step.reps) : (step.duration || '');
+        const repsHtml = _m
+          ? `<span class="warmup-step-reps">${/^\d+$/.test(_m.trim()) ? _m + ' reps' : _m}</span>`
+          : '';
         return `<div class="warmup-step" id="wu-step-${i}">
         <button class="wu-check${isWuDone ? ' done' : ''}" onclick="toggleWarmup(${currentWeek},${currentDay},${i},this)">${isWuDone ? '&#10003;' : ''}
         </button>
         <div class="wu-step-content" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="warmup-step-name">${step.name}</span>${step.note ? `<span class="warmup-step-note">· ${step.note}</span>` : ''}<a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>
+          <span class="warmup-step-name">${step.name}</span>${repsHtml}${step.note ? `<span class="warmup-step-note">· ${step.note}</span>` : ''}<a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(step.name + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a>
         </div>
       </div>`;
       }).join('')}
