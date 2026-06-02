@@ -750,6 +750,20 @@ def _parse_coach_markers(text, user_id, week):
                 existing.reason = reason
             else:
                 db.session.add(RunOverride(user_id=user_id, week=week, day_idx=day_idx, duration=duration, run_type=run_type, reason=reason))
+            # CODIFY, don't just advise: update the canonical WeeklyRunPlan row the
+            # day card + regen actually read, so the coach's stated run change is
+            # really applied (the bug where "holding at 40" left the plan at 38).
+            wrp = WeeklyRunPlan.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+            if wrp:
+                wrp.duration = duration
+                if run_type:
+                    wrp.run_type = run_type
+                wrp.source = 'coach'
+            else:
+                db.session.add(WeeklyRunPlan(
+                    user_id=user_id, week=week, day_idx=day_idx,
+                    run_type=run_type or 'z2', label=run_type or 'Run',
+                    duration=duration, detail=reason, source='coach'))
             db.session.commit()
         except Exception:
             db.session.rollback()

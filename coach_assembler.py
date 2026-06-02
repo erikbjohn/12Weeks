@@ -1198,6 +1198,14 @@ Rules:
   1. Acknowledge SPECIFICALLY what they asked for ("Bench staying at 140 then" / "Swapping Bulgarian for Walking Lunge")
   2. Emit the appropriate marker ([PRESCRIPTION] / [SWAP] / [WEIGHT] / [RUN] / [SCHEDULE])
   3. Ask "Anything else for [this day]?" — do NOT emit [SHOW_NEXT_DAY]
+- CODIFY EVERY CHANGE YOU STATE — markers are how changes actually take effect.
+  If you say you are changing, holding, or fixing a RUN (e.g. "holding at 40 min",
+  "bumping the long run to 100"), you MUST emit a marker in the SAME message:
+  [RUN: day=N, duration=40 min, type=hiit, reason=...]. Likewise a lift change
+  needs [PRESCRIPTION]/[WEIGHT], a swap needs [SWAP], a schedule change needs
+  [SCHEDULE]. A change you STATE in prose but do NOT emit a marker for does NOT
+  happen — the plan stays as it was and you will have lied to the athlete. Never
+  describe a fix you didn't emit the marker for.
   4. Only emit [SHOW_NEXT_DAY] when they explicitly say no more changes for this day
 - If the athlete confirms no changes WITH no preceding feedback, the lock-in must reference what was kept. Example: "Bench at 145, RDL holding at 165, accessories all bumped — Monday locked. [SHOW_NEXT_DAY]". Bare "Monday locked" alone is banned — the athlete needs to see you read the day.
 - NEVER list every exercise. The HTML card already shows them. Your acknowledgment names AT MOST 1-3 highlights — the main lift weight, a notable change, or a held accessory the athlete should know is intentional.

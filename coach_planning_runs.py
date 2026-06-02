@@ -53,6 +53,80 @@ def _build_run_history_block(user_id: int, current_week: int,
     return "\n".join(lines)
 
 
+def _prev_prescription_block(user_id: int, week: int) -> str:
+    """Last week's PRESCRIBED runs (not logged) so the coach anchors on the
+    plan it set and never proposes a regression against it. The run coach was
+    blind to this — it only saw RunLog — which is how a 40-min run drifted to
+    38."""
+    if week <= 1:
+        return "(no prior week)"
+    try:
+        from models import WeeklyRunPlan
+        rows = WeeklyRunPlan.query.filter_by(
+            user_id=user_id, week=week - 1).order_by(WeeklyRunPlan.day_idx).all()
+    except Exception:
+        return "(unavailable)"
+    if not rows:
+        return "(no runs prescribed last week)"
+    lines = []
+    for r in rows:
+        dn = _DAY_NAMES[r.day_idx] if 0 <= r.day_idx < 7 else "?"
+        lines.append(f"  day={r.day_idx} ({dn}): {r.run_type} — {r.duration} — {r.label}")
+    return "\n".join(lines)
+
+
+def _parse_run_magnitude(s):
+    """Return (value, unit) for a duration string like '38 min' or '9 mi',
+    else (None, None). Used to compare run prescriptions week-over-week."""
+    import re
+    if not s:
+        return (None, None)
+    s = str(s)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*mi\b", s)
+    if m:
+        return (float(m.group(1)), "mi")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*min", s)
+    if m:
+        return (float(m.group(1)), "min")
+    return (None, None)
+
+
+def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
+    """Code-enforced anti-regression rail (mirrors the lift 'floor at top set').
+
+    A run's prescribed duration may NOT drop below last week's same-day,
+    same-type run unless this is a deload week. The system prompt asks for this
+    (rule 1) but prompt adherence is unreliable — this is the hard guarantee.
+    Only floors when units AND run type match, so it never wrongly compares a
+    VO2 day against a Z2 day or minutes against miles.
+    """
+    if week in (4, 8, 12):  # deload weeks may legitimately reduce volume
+        return out
+    try:
+        from models import WeeklyRunPlan
+        prev = {r.day_idx: r for r in WeeklyRunPlan.query.filter_by(
+            user_id=user_id, week=week - 1).all()}
+    except Exception:
+        return out
+    for day_idx, plan in out.items():
+        prev_run = prev.get(day_idx)
+        if not prev_run:
+            continue
+        if (plan.get("type") or "").lower() != (prev_run.run_type or "").lower():
+            continue  # different run type — not comparable
+        cur_v, cur_u = _parse_run_magnitude(plan.get("duration"))
+        prev_v, prev_u = _parse_run_magnitude(prev_run.duration)
+        if cur_v is None or prev_v is None or cur_u != prev_u:
+            continue
+        if cur_v < prev_v:
+            plan["duration"] = prev_run.duration
+            plan["detail"] = (plan.get("detail") or "").rstrip(". ") + \
+                f". [held at last week's {prev_run.duration} — no regression outside deload]"
+            log.info("run floor: week %s day %s raised %s->%s",
+                     week, day_idx, f"{cur_v:g}{cur_u}", prev_run.duration)
+    return out
+
+
 def generate_week_runs(
     user_id: int,
     week: int,
@@ -74,6 +148,7 @@ def generate_week_runs(
         return {}
 
     history_block = _build_run_history_block(user_id, week)
+    prev_block = _prev_prescription_block(user_id, week)
     template_lines = []
     for r in template_runs:
         template_lines.append(
@@ -102,9 +177,13 @@ def generate_week_runs(
         "   value, e.g. \"9 mi\".\n"
         "0b. PRESCRIBE EVERY DAY in the template run structure below. Omitting "
         "   a day leaves the athlete with no run for it — a hard fail.\n"
-        "1. NEVER prescribe distance below the athlete's recent equivalent run "
-        "   unless this is a deload week (4 or 8). If they've been running 60-min "
-        "   Z2 for the last 3 weeks, don't drop to 30-min Z2 outside deload.\n"
+        "1. NEVER prescribe a run below LAST WEEK'S PRESCRIBED run for the same "
+        "   day/type (see 'LAST WEEK'S PRESCRIBED RUNS' below) — MATCH OR EXCEED "
+        "   it — unless this is a deload week (4/8/12) or an explicit taper. A "
+        "   regression vs last week's plan is a HARD FAIL. Do NOT use the logged "
+        "   runs to justify a drop: a logged run may be shorter than prescribed, "
+        "   but the PRESCRIPTION is the floor. Last week's 40-min VO2 → this week "
+        "   is 40+ min, never 38.\n"
         "2. HIT THE TARGET WEEKLY MILES. The target is a FLOOR, not a ceiling. "
         "   Sum up your prescribed durations × ~9 min/mi pace; if the total "
         "   is below the target, INCREASE durations until it's at or above. "
@@ -143,7 +222,10 @@ def generate_week_runs(
         f"- Week being prescribed: {week}\n"
         f"- Target weekly miles: {target_miles or 'unspecified'}\n\n"
         f"TEMPLATE RUN STRUCTURE (you pick load):\n{template_block}\n\n"
-        f"RECENT RUN LOG (last 4 weeks):\n{history_block}\n\n"
+        f"LAST WEEK'S PRESCRIBED RUNS (this week MUST match or exceed these for "
+        f"the same day/type — never regress outside deload):\n{prev_block}\n\n"
+        f"RECENT RUN LOG (last 4 weeks — what they actually ran; do NOT use this "
+        f"to justify dropping below the prescription above):\n{history_block}\n\n"
         "Prescribe the runs. JSON only."
     )
 
@@ -182,4 +264,7 @@ def generate_week_runs(
             "duration": v.get("duration") or v.get("time") or "30 min",
             "detail": v.get("detail") or "",
         }
+    # Hard backstop: even with the prompt + prior-prescription context, the LLM
+    # can still slip a regression through. This guarantees it never ships.
+    out = _apply_run_regression_floor(out, user_id, week)
     return out
