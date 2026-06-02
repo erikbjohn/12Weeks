@@ -1599,6 +1599,14 @@ function parseRestSeconds(rest) {
   return unit[0] === 'm' ? n * 60 : n;  // m/min/minute(s) -> minutes; else seconds
 }
 
+// Format the rest the way the TIMER actually uses it, so the displayed rest
+// never disagrees with the countdown (a "2-3 min" range showed but the timer
+// counted 2 min — show "2 min").
+function _fmtRest(sec) {
+  if (!sec) return '';
+  return (sec % 60 === 0) ? (sec / 60) + ' min' : sec + 's';
+}
+
 // Confirm suspicious set entries. Returns true to proceed, false to bail.
 // Caller passes repsTyped (what the user actually typed; 0 if not) so we don't
 // nag when the target placeholder is filled in by default.
@@ -10735,7 +10743,7 @@ async function renderDetail() {
         <span class="ex-name">${displayName}</span>${isSwapped ? '<span class="exercise-swapped">(swapped)</span>' : ''}
         <span class="ex-actions"><a class="ex-video-link" href="https://www.youtube.com/results?search_query=${encodeURIComponent(displayName + ' form short')}&sp=EgIYAQ%253D%253D" target="_blank" rel="noopener" title="Watch form video">&#9654;</a> <span class="ex-swap-icon" onclick="showExerciseSwap(${i},'${escapedName}',event)" title="Swap exercise">&#128260;</span></span>
       </div>
-      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + ex.rest + ' rest' : ''}${lastWt != null && !isBodyweightPrescription ? ' · Last: ' + lastWt + ' ' + unit : ''}${(!isSwapped && ex.target_weight) ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${suggestion.reason.includes('↑') || suggestion.reason.includes('+') ? '↑' : suggestion.reason.includes('↓') || suggestion.reason.includes('-') ? '↓' : suggestion.reason.includes('Deload') ? '○' : '—'}</span>` : ''}</div>
+      <div class="ex-detail-row">${ex.sets}${ex.rest ? ' · ' + _fmtRest(parseRestSeconds(ex.rest)) + ' rest' : ''}${lastWt != null && !isBodyweightPrescription ? ' · Last: ' + lastWt + ' ' + unit : ''}${(!isSwapped && ex.target_weight) ? ' → ' + ex.target_weight + ' ' + unit : ''}${suggestion.reason && suggestion.reason !== 'estimated' && suggestion.reason !== 'engine' ? ` <span class="ex-prog-indicator" title="${escapeHtml(suggestion.reason)}">${(ex.target_weight && lastWt != null) ? (parseFloat(ex.target_weight) > parseFloat(lastWt) ? '↑' : parseFloat(ex.target_weight) < parseFloat(lastWt) ? '↓' : '—') : '—'}</span>` : ''}</div>
       ${(!isSwapped && ex.note) ? `<div class="ex-note">${ex.note}</div>` : ''}
       <div class="set-rows">${setRowsHtml}</div>
       <div id="rest-timer-${i}" class="rest-timer"></div>
