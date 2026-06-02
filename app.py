@@ -8141,7 +8141,8 @@ def _compute_goal_for_user(user, overrides=None):
 
     phase_plan = compute_phase_plan(goal_type, weight, target_weight, est_bf)
     projection = project_weight_curve(weight, target_weight, tdee_info["tdee"], targets["calories"],
-                                     weeks=_weeks_remaining, height_in=height, age=age, sex=sex)
+                                     weeks=_weeks_remaining, height_in=height, age=age, sex=sex,
+                                     start_week=_current_week())
 
     # Compute per-day-type calories
     day_types = ["heavy_lift", "long_run", "moderate", "rest", "deload"]

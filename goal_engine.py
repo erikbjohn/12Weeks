@@ -475,7 +475,8 @@ def determine_fasting_protocol(goal_type, daily_calories):
 
 
 def project_weight_curve(starting_weight, target_weight, tdee, daily_calories,
-                          weeks=12, height_in=70, age=30, sex="male"):
+                          weeks=12, height_in=70, age=30, sex="male",
+                          start_week=1):
     """Project week-by-week weight change with metabolic modeling.
 
     Models water/glycogen effects in weeks 1-2, recalculates BMR as weight
@@ -533,7 +534,9 @@ def project_weight_curve(starting_weight, target_weight, tdee, daily_calories,
         current_tdee = new_bmr_data["tdee"] + adaptation_bump
 
         projection.append({
-            "week": week,
+            # ABSOLUTE program week, so milestone cards (week 4/8/12) line up
+            # mid-program instead of showing "?" against relative 1..N weeks.
+            "week": start_week + week - 1,
             "projected": current_weight,
             "tdee": current_tdee,
         })

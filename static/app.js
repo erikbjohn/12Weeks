@@ -3772,18 +3772,27 @@ async function showWeightProjection() {
   const proj = goalData.weight_projection;
   const startWeight = proj.length > 0 ? proj[0].projected : '?';
   const endWeight = proj.length > 0 ? proj[proj.length - 1].projected : '?';
-  const w4 = proj.find(p => p.week === 4);
-  const w8 = proj.find(p => p.week === 8);
-  const w12 = proj.find(p => p.week === 12);
+  // Milestones from the projection's ACTUAL (absolute) weeks — never "?".
+  // Prefer the 4/8/12 markers when they're in range; otherwise fall back to the
+  // first / middle / last projected points (e.g. mid-program: weeks 10/11/12).
+  const _ppts = proj.filter(p => p && p.projected != null);
+  let _mks = [4, 8, 12].map(w => _ppts.find(p => p.week === w)).filter(Boolean);
+  if (_mks.length < 2 && _ppts.length) {
+    const _seen = new Set(); _mks = [];
+    [_ppts[0], _ppts[Math.floor((_ppts.length - 1) / 2)], _ppts[_ppts.length - 1]]
+      .forEach(p => { if (p && !_seen.has(p.week)) { _seen.add(p.week); _mks.push(p); } });
+  }
+  const _milestonesHtml = _mks.map((p, i) =>
+    `<div class="proj-milestone${i === _mks.length - 1 ? ' highlight' : ''}">` +
+    `<span class="proj-week">Week ${p.week}</span>` +
+    `<span class="proj-weight">${p.projected} lbs</span></div>`).join('');
 
   el.innerHTML = `<div class="baseline-overlay">
     <div class="baseline-card" style="text-align:center">
       <h2>Your Weight Projection</h2>
       <div class="baseline-desc" style="margin-bottom:1rem">If you follow this plan exactly:</div>
       <div class="projection-milestones">
-        <div class="proj-milestone"><span class="proj-week">Week 4</span><span class="proj-weight">${w4 ? w4.projected : '?'} lbs</span></div>
-        <div class="proj-milestone"><span class="proj-week">Week 8</span><span class="proj-weight">${w8 ? w8.projected : '?'} lbs</span></div>
-        <div class="proj-milestone highlight"><span class="proj-week">Week 12</span><span class="proj-weight">${w12 ? w12.projected : '?'} lbs</span></div>
+        ${_milestonesHtml}
       </div>
       <canvas id="projection-chart" height="180" style="width:100%;margin:1rem auto;display:block"></canvas>
       <div style="font-size:13px;color:var(--muted);margin-top:0.5rem">
