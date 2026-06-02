@@ -59,6 +59,26 @@ def test_run_not_served_from_template_when_no_runplan(client_ctx):
     assert "min" not in str(day0.get("run"))  # no '25-30 min' style leak
 
 
+def test_logged_run_shows_instead_of_unplanned(client_ctx):
+    # A day the athlete already RAN (RunLog) but has no plan row must show the
+    # logged run, NOT a red "Run not planned" flag.
+    client, app, uid = client_ctx
+    from app import db
+    from models import WeeklyRunPlan, RunLog
+    from datetime import date
+    with app.app_context():
+        WeeklyRunPlan.query.filter_by(user_id=uid, week=2).delete()
+        RunLog.query.filter_by(user_id=uid, week=2).delete()
+        db.session.add(RunLog(user_id=uid, week=2, day_idx=0, distance_miles=3.74,
+                              duration_min=34, avg_hr=122, log_date=date.today()))
+        db.session.commit()
+
+    day0 = client.get("/api/workouts").get_json()["2"]["days"][0]
+    assert day0["run"] is not None, "logged run must be shown, not stripped"
+    assert day0["runStatus"] != "unplanned"
+    assert "34 min" in day0["run"]["time"]
+
+
 def test_day_without_prescription_strips_template_lifts(client_ctx):
     client, app, uid = client_ctx
     _seed_week9_lift_only(app, uid)  # only day 0 has a prescription

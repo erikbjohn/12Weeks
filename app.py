@@ -2830,6 +2830,24 @@ def api_workouts():
         except Exception:
             pass
 
+        # LOGGED-RUN overlay: a day the athlete already RAN but has no plan row
+        # should show their logged run — not a red "not planned" flag.
+        try:
+            from models import RunLog
+            for rl in RunLog.query.filter_by(user_id=current_user.id, week=week).all():
+                di = rl.day_idx
+                if di is None or di >= len(days) or di in runplan_day_set:
+                    continue
+                if not (rl.duration_min or rl.distance_miles):
+                    continue
+                _t = (f"{rl.duration_min} min" if rl.duration_min
+                      else f"{rl.distance_miles} mi")
+                days[di]["run"] = {"type": "z2", "label": "Run (logged)",
+                                   "time": _t, "detail": "Logged run."}
+                runplan_day_set.add(di)
+        except Exception:
+            pass
+
         # Warmup overlay
         try:
             warmups = WeeklyWarmup.query.filter_by(user_id=current_user.id, week=week).all()
@@ -2960,6 +2978,24 @@ def api_week(week):
             for rp in run_plans:
                 if rp.day_idx < len(days):
                     days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
+    except Exception:
+        pass
+
+    # LOGGED-RUN overlay (see /api/workouts): show an already-run day's logged
+    # run instead of a red "not planned" flag.
+    try:
+        from models import RunLog
+        for rl in RunLog.query.filter_by(user_id=current_user.id, week=week).all():
+            di = rl.day_idx
+            if di is None or di >= len(days) or di in runplan_day_set:
+                continue
+            if not (rl.duration_min or rl.distance_miles):
+                continue
+            _t = (f"{rl.duration_min} min" if rl.duration_min
+                  else f"{rl.distance_miles} mi")
+            days[di]["run"] = {"type": "z2", "label": "Run (logged)",
+                               "time": _t, "detail": "Logged run."}
+            runplan_day_set.add(di)
     except Exception:
         pass
 
