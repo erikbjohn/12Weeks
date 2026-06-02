@@ -538,7 +538,7 @@ RUNS = {
     "z2_45": {"type": "z2", "label": "Zone 2", "time": "45 min", "detail": "HR 130-145. Steady aerobic. Fat oxidation zone."},
     "z2_50": {"type": "z2", "label": "Zone 2", "time": "50 min", "detail": "HR 130-145. Longest Zone 2 of the week. Keep it honest."},
     "z2_55": {"type": "z2", "label": "Zone 2", "time": "55 min", "detail": "HR 130-145. Aerobic volume building."},
-    "z2_30": {"type": "z2", "label": "Zone 2", "time": "30 min", "detail": "HR 130-145. Easy aerobic. Deload / taper run."},
+    "z2_30": {"type": "z2", "label": "Zone 2", "time": "30 min", "detail": "HR 130-145. Easy aerobic. Deload-week recovery run."},
     "z2_20": {"type": "z2", "label": "Zone 2", "time": "20 min", "detail": "HR 130-145. Short easy aerobic. Deload week."},
     "tempo25": {"type": "tempo", "label": "Tempo", "time": "25 min", "detail": "HR 155-165. Comfortably hard. 5 min easy warmup, 15 min at tempo, 5 min cooldown."},
     "tempo30": {"type": "tempo", "label": "Tempo", "time": "30 min", "detail": "HR 155-165. 5 min easy, 20 min sustained tempo, 5 min cooldown."},

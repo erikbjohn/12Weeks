@@ -9587,7 +9587,9 @@ async function launchWeeklyPlanning(weekOverride) {
                 // (served as prev_duration), NOT the stale same-week cache that
                 // produced the phantom "was 38". No prior plan -> no baseline.
                 var _prevDur = _run.prev_duration;
-                if (_prevDur) {
+                // Only a minute-delta when BOTH sides are minute-based — never
+                // "UP 46 min (last plan 1 mile)".
+                if (_prevDur && /min/i.test(String(_prevDur)) && /min/i.test(String(_runTime))) {
                     var _prevMin = parseInt(_prevDur) || 0;
                     var _newMin = parseInt(_runTime) || 0;
                     if (_prevMin > 0 && _newMin > 0 && _newMin !== _prevMin) {
