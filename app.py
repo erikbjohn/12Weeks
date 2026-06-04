@@ -2874,10 +2874,15 @@ def _filter_meals_by_food_selections(days, user_food_ids):
                     filtered_foods.append(food)
                 # else: user didn't select this food — remove it
 
-            # Fast day protein substitution: if whey was removed, add user's preferred protein
+            # Fast day protein substitution: ONLY when the day's plan actually
+            # intends protein (a bulk/recomp fast that allows a shake) — never on
+            # a true 0-cal CUT fast, whose note says "no food until you break the
+            # fast". Injecting chicken there directly contradicts the header.
             has_caloric_food = any(f["item"] not in always_allowed and f.get("cal", 0) > 0 for f in filtered_foods)
             is_fast_meal = "Fast" in meal.get("name", "") or "fast" in meal.get("name", "")
-            if is_fast_meal and not has_caloric_food and user_food_ids:
+            _plan_allows_protein = ((mp.get("targetProtein") or 0) > 0
+                                    or (mp.get("targetCal") or 0) > 0)
+            if is_fast_meal and not has_caloric_food and user_food_ids and _plan_allows_protein:
                 # Find user's first selected protein and add a small portion
                 _PROTEIN_OPTIONS = {
                     "chicken_breast": {"item": "Grilled chicken breast", "portion": "4 oz", "cal": 130, "protein": 26, "carbs": 0, "fat": 3},
