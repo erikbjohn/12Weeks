@@ -1474,7 +1474,9 @@ def _format_athlete_data(ctx, requires):
         ts_lines.append(f"  date: {ts.get('weekday')} {ts.get('date')}")
         if ts.get("workout_prescribed"):
             if ts.get("workout_logged"):
-                ts_lines.append("  workout: DONE (sets logged for today)")
+                ts_lines.append("  workout: DONE — sets are logged for today. The lift "
+                                "is FINISHED. Do NOT say 'lift now', do NOT list the "
+                                "exercises, do NOT prescribe it. It's done.")
             else:
                 ts_lines.append("  workout: PENDING (prescribed but not yet logged)")
         else:
@@ -1657,7 +1659,10 @@ def _format_athlete_data(ctx, requires):
                 f"CURRENT FASTING STATE: {fasting_state['hours_fasted']} hours fasted "
                 f"(since {fasting_state['last_meal_day']} {fasting_state['last_meal_time']}). "
                 f"TODAY IS A FULL FAST DAY — NO eating window. Zero calories until tomorrow. "
-                f"Water, black coffee, electrolytes only. Do NOT suggest breaking the fast."
+                f"Water, black coffee, electrolytes only. Do NOT suggest breaking the fast — "
+                f"NO protein shake, NO chicken, NO food, NO post-workout meal, NO 'have a "
+                f"shake at Xpm', not even timed for later tonight. ZERO calories. If you are "
+                f"about to recommend ANY caloric food or drink today, STOP — it's a fast day."
             )
         else:
             parts.append(
