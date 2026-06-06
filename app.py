@@ -1092,62 +1092,6 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
     return reason
 
 
-_GATE_LIFT_CUE = re.compile(
-    r"\bon deck\b|\blift (?:starts|is)\b|\bstarts now\b|\breport after\b|"
-    r"\bramp set\b|\bno ego\b|\bacross all (?:three|four|five)\b|\bthen work\b|"
-    r"\bhold \d+\b|\bwarm-?up:\b|\d+\s*[×x]\s*\d+\s*(?:@|reps)|"
-    r"@\s*\d+\s*(?:lb)?\b[^.]*\blead|\bget under the bar\b|\blift's? (?:up|next|on)\b",
-    re.I)
-_GATE_FOOD_CUE = re.compile(
-    r"\b(?:protein )?shake\b|\bchicken\b|\beat\b|\bmeal\b|\bcalorie|\bcarbs?\b|"
-    r"\bgrams? of\b|\bpost-?workout (?:meal|shake|nutrition|fuel)\b|\brefuel\b|"
-    r"\bbreak (?:the|your) fast\b|\bhave (?:a|some) \w+ (?:now|tonight)\b",
-    re.I)
-
-
-def _gate_coach_response(text, user_id):
-    """DETERMINISTIC output gate. Prompt rules + grounding do NOT reliably stop
-    the LLM (it told Erik to do Back Squat 3×5 @155 that he had already logged,
-    and suggested a shake on a fast day — with today_status:DONE and the fast-day
-    block both present). So before any coach text ships: if today's lift is
-    already logged, strip sentences that PRESCRIBE the lift (future/imperative
-    cues, not past-tense acknowledgment); on a fast day, strip food suggestions.
-    No LLM call — pure code, the one thing that can guarantee it."""
-    if not text or not text.strip():
-        return text
-    today = _user_today()
-    week = _current_week()
-    didx = today.weekday()
-    try:
-        workout_logged = SetLog.query.filter_by(
-            user_id=user_id, week=week, day_idx=didx).first() is not None
-    except Exception:
-        workout_logged = False
-    try:
-        is_fast = _get_day_meal_type(user_id, week, didx) == "fast_day"
-    except Exception:
-        is_fast = False
-    if not (workout_logged or is_fast):
-        return text
-    sentences = re.split(r"(?<=[.!?—])\s+", text)
-    kept, dropped_lift = [], False
-    for s in sentences:
-        if workout_logged and _GATE_LIFT_CUE.search(s):
-            dropped_lift = True
-            continue
-        if is_fast and _GATE_FOOD_CUE.search(s):
-            continue
-        kept.append(s)
-    gated = " ".join(kept).strip(" —-").strip()
-    if not gated:
-        gated = ("Logged. You're done lifting for today."
-                 if workout_logged else
-                 "Fast day — water, black coffee, electrolytes only.")
-    elif dropped_lift:
-        gated += " Your lift's already logged — you're done for the day."
-    return gated
-
-
 _MUSCLE_LABELS = {
     "chest": "Chest", "chest_triceps": "Chest & Triceps", "back": "Back",
     "traps": "Traps", "shoulders": "Shoulders", "rear_delts": "Rear Delts",
@@ -7004,11 +6948,9 @@ def api_chat():
         max_tokens=agent_config["max_tokens"],
         agent_name=_route_info["agent_name"],
     )
-    # NOTE: the deterministic output gate (_gate_coach_response) is intentionally
-    # NOT applied — a dry run showed Opus 4.8 obeys the done-lift / fast-day rules
-    # on its own, and the gate's keyword match false-positives on correct answers
-    # (it would delete "no food, no shake" from a correct fast-day refusal). Kept
-    # the function + /api/admin/debug/coach-dryrun for future regression testing.
+    # No output gate: Opus 4.8 obeys the done-lift / fast-day rules on its own
+    # (verified via /api/admin/debug/coach-dryrun). An earlier keyword gate
+    # false-positived on correct answers, so it was removed.
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -10149,18 +10091,13 @@ def api_admin_coach_dryrun():
             resp = client.messages.create(model=CLAUDE_OPUS, max_tokens=600,
                                            system=sp, messages=messages)
             raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
-            import re as _re
             ts = ctx.get("today_status") or {}
-            lift_pitch = bool(_GATE_LIFT_CUE.search(raw))
-            food_pitch = bool(_GATE_FOOD_CUE.search(raw))
             return jsonify({
                 "model": CLAUDE_OPUS,
                 "agent": ri["agent_name"],
                 "forced": {"workout_logged": force_done, "fast_day": force_fast},
                 "signals_in_context": {"workout_logged": ts.get("workout_logged"),
                                        "is_fast_day": (ctx.get("fasting_state") or {}).get("is_fast_day")},
-                "model_prescribed_a_lift": lift_pitch,
-                "model_suggested_food": food_pitch,
                 "raw_response": raw,
             })
     except Exception as e:
