@@ -7004,9 +7004,11 @@ def api_chat():
         max_tokens=agent_config["max_tokens"],
         agent_name=_route_info["agent_name"],
     )
-    # Deterministic gate: the LLM ignores its own rules + grounding, so strip a
-    # prescription of an already-logged lift (or fast-day food) before it ships.
-    response_text = _gate_coach_response(response_text, current_user.id)
+    # NOTE: the deterministic output gate (_gate_coach_response) is intentionally
+    # NOT applied — a dry run showed Opus 4.8 obeys the done-lift / fast-day rules
+    # on its own, and the gate's keyword match false-positives on correct answers
+    # (it would delete "no food, no shake" from a correct fast-day refusal). Kept
+    # the function + /api/admin/debug/coach-dryrun for future regression testing.
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -7174,24 +7176,22 @@ def api_chat_stream():
                 messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
                 _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-                # Tool-using coach: server-side tool loop, then the final reply.
-                # BUFFER the whole reply, run the deterministic gate (strip an
-                # already-logged-lift prescription / fast-day food the LLM won't
-                # stop emitting on its own), THEN stream the gated text. The user
-                # must never see the un-gated version, so we can't stream live.
-                _raw = ""
+                # Tool-using coach: server-side tool loop, then chunked stream of
+                # the final reply. (No output gate — Opus 4.8 obeys the done-lift /
+                # fast-day rules on its own; the gate false-positived on correct
+                # answers. Streaming live again for responsiveness.)
                 for chunk in coach_chat_stream(
                     user_id=_current_user_id,
                     system_prompt=system_prompt,
                     messages=messages,
                     max_tokens=_agent_config["max_tokens"],
                 ):
-                    _raw += chunk + " "
-                full_text = _gate_coach_response(_raw.rstrip(), _current_user_id)
-                for _w in full_text.split(" "):
-                    yield f"data: {(_w + ' ').replace(chr(10), '\\n')}\n\n"
+                    full_text += chunk + " "
+                    safe_text = (chunk + " ").replace('\n', '\\n')
+                    yield f"data: {safe_text}\n\n"
 
             yield f"data: [DONE]\n\n"
+            full_text = full_text.rstrip()
         except GeneratorExit:
             import logging
             logging.warning("Client disconnected mid-stream")
