@@ -1092,6 +1092,62 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
     return reason
 
 
+_GATE_LIFT_CUE = re.compile(
+    r"\bon deck\b|\blift (?:starts|is)\b|\bstarts now\b|\breport after\b|"
+    r"\bramp set\b|\bno ego\b|\bacross all (?:three|four|five)\b|\bthen work\b|"
+    r"\bhold \d+\b|\bwarm-?up:\b|\d+\s*[×x]\s*\d+\s*(?:@|reps)|"
+    r"@\s*\d+\s*(?:lb)?\b[^.]*\blead|\bget under the bar\b|\blift's? (?:up|next|on)\b",
+    re.I)
+_GATE_FOOD_CUE = re.compile(
+    r"\b(?:protein )?shake\b|\bchicken\b|\beat\b|\bmeal\b|\bcalorie|\bcarbs?\b|"
+    r"\bgrams? of\b|\bpost-?workout (?:meal|shake|nutrition|fuel)\b|\brefuel\b|"
+    r"\bbreak (?:the|your) fast\b|\bhave (?:a|some) \w+ (?:now|tonight)\b",
+    re.I)
+
+
+def _gate_coach_response(text, user_id):
+    """DETERMINISTIC output gate. Prompt rules + grounding do NOT reliably stop
+    the LLM (it told Erik to do Back Squat 3×5 @155 that he had already logged,
+    and suggested a shake on a fast day — with today_status:DONE and the fast-day
+    block both present). So before any coach text ships: if today's lift is
+    already logged, strip sentences that PRESCRIBE the lift (future/imperative
+    cues, not past-tense acknowledgment); on a fast day, strip food suggestions.
+    No LLM call — pure code, the one thing that can guarantee it."""
+    if not text or not text.strip():
+        return text
+    today = _user_today()
+    week = _current_week()
+    didx = today.weekday()
+    try:
+        workout_logged = SetLog.query.filter_by(
+            user_id=user_id, week=week, day_idx=didx).first() is not None
+    except Exception:
+        workout_logged = False
+    try:
+        is_fast = _get_day_meal_type(user_id, week, didx) == "fast_day"
+    except Exception:
+        is_fast = False
+    if not (workout_logged or is_fast):
+        return text
+    sentences = re.split(r"(?<=[.!?—])\s+", text)
+    kept, dropped_lift = [], False
+    for s in sentences:
+        if workout_logged and _GATE_LIFT_CUE.search(s):
+            dropped_lift = True
+            continue
+        if is_fast and _GATE_FOOD_CUE.search(s):
+            continue
+        kept.append(s)
+    gated = " ".join(kept).strip(" —-").strip()
+    if not gated:
+        gated = ("Logged. You're done lifting for today."
+                 if workout_logged else
+                 "Fast day — water, black coffee, electrolytes only.")
+    elif dropped_lift:
+        gated += " Your lift's already logged — you're done for the day."
+    return gated
+
+
 _MUSCLE_LABELS = {
     "chest": "Chest", "chest_triceps": "Chest & Triceps", "back": "Back",
     "traps": "Traps", "shoulders": "Shoulders", "rear_delts": "Rear Delts",
@@ -6948,6 +7004,9 @@ def api_chat():
         max_tokens=agent_config["max_tokens"],
         agent_name=_route_info["agent_name"],
     )
+    # Deterministic gate: the LLM ignores its own rules + grounding, so strip a
+    # prescription of an already-logged lift (or fast-day food) before it ships.
+    response_text = _gate_coach_response(response_text, current_user.id)
 
     # Save assistant message
     asst_chat = ChatMessage(role="assistant", content=response_text, log_date=_user_today(), user_id=current_user.id, message_type=mode)
@@ -7115,20 +7174,24 @@ def api_chat_stream():
                 messages = _build_messages(user_msg, context.get("chat_history", []), user_timezone=context.get("user_timezone"))
                 _agent_config = AGENTS.get(_route_info["agent_name"], AGENTS["conversation"])
 
-                # Tool-using coach: server-side tool loop, then chunked stream of
-                # the final reply. User sees a 2-5s pause (tool calls), then text.
+                # Tool-using coach: server-side tool loop, then the final reply.
+                # BUFFER the whole reply, run the deterministic gate (strip an
+                # already-logged-lift prescription / fast-day food the LLM won't
+                # stop emitting on its own), THEN stream the gated text. The user
+                # must never see the un-gated version, so we can't stream live.
+                _raw = ""
                 for chunk in coach_chat_stream(
                     user_id=_current_user_id,
                     system_prompt=system_prompt,
                     messages=messages,
                     max_tokens=_agent_config["max_tokens"],
                 ):
-                    full_text += chunk + " "
-                    safe_text = (chunk + " ").replace('\n', '\\n')
-                    yield f"data: {safe_text}\n\n"
+                    _raw += chunk + " "
+                full_text = _gate_coach_response(_raw.rstrip(), _current_user_id)
+                for _w in full_text.split(" "):
+                    yield f"data: {(_w + ' ').replace(chr(10), '\\n')}\n\n"
 
             yield f"data: [DONE]\n\n"
-            full_text = full_text.rstrip()
         except GeneratorExit:
             import logging
             logging.warning("Client disconnected mid-stream")
