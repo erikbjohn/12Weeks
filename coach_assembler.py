@@ -592,7 +592,7 @@ def _build_today_status():
       - run_prescribed (from WeeklyRunPlan) / run_logged
       - actual numbers from today's RunLog if present
     """
-    from models import SetLog, RunLog, WeeklyRunPlan
+    from models import SetLog, RunLog, WeeklyRunPlan, DayCompletion
     today = _user_today()
     today_idx = today.weekday()
     week = _current_week()
@@ -604,23 +604,54 @@ def _build_today_status():
     # every weekday — wrong, and it propagated into multi-agent specialist
     # responses that faithfully cited the bad signal.
     resolved = _resolve_workout_for_day(week, today_idx)
+    prescribed_exercises = [
+        e for e in ((resolved or {}).get("exercises") or []) if e.get("name")
+    ]
     workout_prescribed = bool(
         resolved
         and not resolved.get("isRest")
-        and (resolved.get("exercises") or resolved.get("liftName"))
+        and (prescribed_exercises or resolved.get("liftName"))
     )
 
-    # Count ANY SetLog row for today — not just done=True. The /log_set endpoint
-    # creates rows with done=False unless the client explicitly passes done=true,
-    # so requiring done=True caused today_status to report PENDING for lifts the
-    # athlete had logged (numbers entered, sets visible). The coach then recited
-    # the prescription as "still owed" while the actual sets sat in the DB.
-    # Any row = at least an attempt = enough signal to not say "lift owed".
-    workout_logged_any = SetLog.query.filter(
+    # THREE-STATE workout status — not_started | in_progress | complete.
+    # A binary "any row exists -> DONE" was a lie: Erik had ONE bench set logged
+    # for a 5-exercise "Full Body" day and the coach told him "you're done
+    # lifting." So we now require a genuinely FINISHED session to say DONE:
+    #   complete  = DayCompletion.done, OR every prescribed exercise has a logged
+    #               set, OR the 6-sets/3-done heuristic (auto-completion lag).
+    #   not_started = zero rows for today's slot.
+    #   in_progress = some rows, but not the whole session.
+    slot_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
-    ).first() is not None
+    ).all()
+    workout_logged_any = len(slot_sets) > 0
+
+    def _norm(n):
+        return (n or "").strip().lower()
+
+    logged_names = {_norm(s.exercise_name) for s in slot_sets}
+    sets_done = sum(1 for s in slot_sets if getattr(s, "done", False))
+    prescribed_names = [e.get("name") for e in prescribed_exercises]
+    logged_exercises = [n for n in prescribed_names if _norm(n) in logged_names]
+    remaining_exercises = [n for n in prescribed_names if _norm(n) not in logged_names]
+
+    dc = DayCompletion.query.filter_by(
+        user_id=current_user.id, week=week, day_idx=today_idx,
+    ).first()
+    all_exercises_logged = bool(prescribed_names) and not remaining_exercises
+    heuristic_done = len(slot_sets) >= 6 and sets_done >= 3
+    workout_complete = bool((dc and dc.done) or all_exercises_logged or heuristic_done)
+
+    if not workout_prescribed:
+        workout_state = "rest"
+    elif not slot_sets:
+        workout_state = "not_started"
+    elif workout_complete:
+        workout_state = "complete"
+    else:
+        workout_state = "in_progress"
 
     run_plan = WeeklyRunPlan.query.filter_by(
         user_id=current_user.id, week=week, day_idx=today_idx,
@@ -650,6 +681,11 @@ def _build_today_status():
         "weekday": today.strftime("%A"),
         "workout_prescribed": workout_prescribed,
         "workout_logged": workout_logged_any,
+        "workout_state": workout_state,
+        "workout_logged_exercises": logged_exercises,
+        "workout_remaining_exercises": remaining_exercises,
+        "sets_logged": len(slot_sets),
+        "sets_done": sets_done,
         "run_prescribed": run_type,
         "run_label": run_label,
         "run_duration": run_duration,
@@ -658,6 +694,84 @@ def _build_today_status():
         "run_duration_today": run_today_log.duration_min if run_today_log else None,
         "run_avg_hr_today": run_today_log.avg_hr if run_today_log else None,
     }}
+
+
+def _format_today_status_block(ts):
+    """Render the <today_status> directive block the coach reads before
+    recommending any workout/run. PURE function of the today_status dict, so it
+    is unit-testable independent of DB/login.
+
+    THREE-STATE workout status (not_started | in_progress | complete | rest):
+    NEVER tells the model a partially-logged lift is finished. The old binary
+    ("any set logged -> DONE, the lift is FINISHED") made the coach tell Erik
+    "you're done lifting" after a SINGLE bench set on a 5-exercise day.
+    """
+    if not ts:
+        return []
+    lines = ["<today_status>"]
+    lines.append(f"  date: {ts.get('weekday')} {ts.get('date')}")
+
+    state = ts.get("workout_state")
+    if state is None:  # legacy fallback for any caller not yet emitting state
+        if not ts.get("workout_prescribed"):
+            state = "rest"
+        elif ts.get("workout_logged"):
+            state = "complete"
+        else:
+            state = "not_started"
+
+    if not ts.get("workout_prescribed") or state == "rest":
+        lines.append("  workout: REST DAY (no workout prescribed today)")
+    elif state == "complete":
+        lines.append("  workout: DONE — the full session is logged. The lift is "
+                     "FINISHED. Do NOT say 'lift now', do NOT list the exercises, "
+                     "do NOT prescribe it. It's done.")
+    elif state == "in_progress":
+        logged = ", ".join(ts.get("workout_logged_exercises") or [])
+        remaining = ", ".join(ts.get("workout_remaining_exercises") or [])
+        sd = ts.get("sets_done") or 0
+        msg = ("  workout: IN PROGRESS — only PART of today's lift is logged "
+               f"({sd} set(s) done"
+               + (f"; logged: {logged}" if logged else "")
+               + "). It is NOT finished. Do NOT say the workout is done or that "
+                 "they're 'done lifting'. Do NOT re-prescribe what's already logged.")
+        if remaining:
+            msg += f" Still open today: {remaining}."
+        lines.append(msg)
+    else:  # not_started
+        lines.append("  workout: PENDING (prescribed but not yet logged)")
+
+    if ts.get("run_logged"):
+        d = ts.get("run_distance_today")
+        dur = ts.get("run_duration_today")
+        hr = ts.get("run_avg_hr_today")
+        bits = []
+        if d: bits.append(f"{d}mi")
+        if dur:
+            bits.append(f"{dur}min")
+            if d:
+                bits.append(f"pace:{round(dur / d, 2)}min/mi")
+        else:
+            bits.append("[NO DURATION LOGGED — pace not computable]")
+        if hr:
+            bits.append(f"avg_hr_full_session:{hr}")
+        lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
+    elif ts.get("run_prescribed"):
+        lines.append(
+            f"  run: PENDING — {ts.get('run_label') or ts.get('run_prescribed')} "
+            f"{ts.get('run_duration') or ''}".rstrip()
+        )
+    else:
+        lines.append("  run: REST (no run prescribed today)")
+    lines.append("</today_status>")
+    lines.append(
+        "READ THIS BLOCK BEFORE recommending any workout or run for today. "
+        "If workout: DONE, the athlete already trained — do not prescribe a workout. "
+        "If workout: IN PROGRESS, acknowledge what's logged but the session is NOT "
+        "complete — never tell them they're finished or to skip the rest. "
+        "If run: DONE, the athlete already ran — do not say 'get the run done'."
+    )
+    return lines
 
 
 @section_builder("physical")
@@ -1466,50 +1580,14 @@ def _format_athlete_data(ctx, requires):
         )
         parts.append("\n".join(cs_lines))
 
-    # Today's status — explicit DONE/PENDING signal so the coach doesn't tell
-    # the athlete to "get the run done" five minutes after it was logged.
+    # Today's status — explicit state signal so the coach doesn't tell the
+    # athlete to "get the run done" after it was logged, OR (the inverse bug)
+    # tell them they're "done lifting" after a single partial set.
     ts = ctx.get("today_status")
     if ts:
-        ts_lines = ["<today_status>"]
-        ts_lines.append(f"  date: {ts.get('weekday')} {ts.get('date')}")
-        if ts.get("workout_prescribed"):
-            if ts.get("workout_logged"):
-                ts_lines.append("  workout: DONE — sets are logged for today. The lift "
-                                "is FINISHED. Do NOT say 'lift now', do NOT list the "
-                                "exercises, do NOT prescribe it. It's done.")
-            else:
-                ts_lines.append("  workout: PENDING (prescribed but not yet logged)")
-        else:
-            ts_lines.append("  workout: REST DAY (no workout prescribed today)")
-        if ts.get("run_logged"):
-            d = ts.get("run_distance_today")
-            dur = ts.get("run_duration_today")
-            hr = ts.get("run_avg_hr_today")
-            bits = []
-            if d: bits.append(f"{d}mi")
-            if dur:
-                bits.append(f"{dur}min")
-                if d:
-                    bits.append(f"pace:{round(dur / d, 2)}min/mi")
-            else:
-                bits.append("[NO DURATION LOGGED — pace not computable]")
-            if hr:
-                bits.append(f"avg_hr_full_session:{hr}")
-            ts_lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
-        elif ts.get("run_prescribed"):
-            ts_lines.append(
-                f"  run: PENDING — {ts.get('run_label') or ts.get('run_prescribed')} "
-                f"{ts.get('run_duration') or ''}".rstrip()
-            )
-        else:
-            ts_lines.append("  run: REST (no run prescribed today)")
-        ts_lines.append("</today_status>")
-        ts_lines.append(
-            "READ THIS BLOCK BEFORE recommending any workout or run for today. "
-            "If workout: DONE, the athlete already trained — do not prescribe a workout. "
-            "If run: DONE, the athlete already ran — do not say 'get the run done'."
-        )
-        parts.append("\n".join(ts_lines))
+        block = _format_today_status_block(ts)
+        if block:
+            parts.append("\n".join(block))
     # Ground phase explanations in the actual program structure so the coach
     # doesn't hallucinate (e.g. "Phase 2 drops to 3-4 days" — false; all phases run 6 lift days).
     if phase.get("lift_days_per_week") or phase.get("weekly_structure"):

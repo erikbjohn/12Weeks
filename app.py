@@ -1698,6 +1698,34 @@ def debug_api_workouts_as_user():
                         "traceback": traceback.format_exc()[-2000:]}), 500
 
 
+@app.route("/api/debug/today-status")
+def debug_today_status():
+    """Dump the coach's today_status GROUNDING for a user — the exact 3-state
+    workout signal (not_started/in_progress/complete) plus the rendered directive
+    block the model actually reads. Read-only, NO LLM call. This is the cheap way
+    to verify the coach won't be told a partially-logged lift is 'done'.
+    Query: ?email=...
+    """
+    email = request.args.get("email", "erik@placemetry.com")
+    try:
+        from models import User
+        from flask_login import login_user
+        from coach_assembler import _build_today_status, _format_today_status_block
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+        with app.test_request_context():
+            login_user(u, force=True)
+            ts = _build_today_status().get("today_status")
+            block = "\n".join(_format_today_status_block(ts)) if ts else ""
+        return jsonify({"email": email, "today_status": ts, "directive_block": block})
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/copy-runplan")
 def debug_copy_runplan():
     """Copy WeeklyRunPlan rows from one week to another. Used when the run
