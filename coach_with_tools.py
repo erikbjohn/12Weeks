@@ -154,7 +154,7 @@ def coach_chat(
         user_id=user_id,
         system_prompt=system_prompt,
         messages=messages,
-        model=model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-7"),
+        model=model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"),
         max_tokens=max_tokens,
     )
 
@@ -176,7 +176,7 @@ def coach_chat_stream(
     client = _client()
     convo = list(messages)
     full_system = system_prompt + _tool_addendum()
-    chosen_model = model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-7")
+    chosen_model = model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-8")
 
     # Tool loop — non-streaming until we know there are no more tool calls.
     for turn in range(MAX_TOOL_TURNS):

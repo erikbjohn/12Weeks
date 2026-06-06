@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 log = logging.getLogger(__name__)
 
-CLAUDE_OPUS = "claude-opus-4-7"
+CLAUDE_OPUS = "claude-opus-4-8"
 CLAUDE_SONNET = "claude-sonnet-4-6"
 
 

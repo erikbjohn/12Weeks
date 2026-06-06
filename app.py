@@ -10103,6 +10103,71 @@ def api_admin_heal_prescriptions():
     return jsonify({"ok": True, "healed_count": len(healed), "healed": healed[:60]})
 
 
+@app.route("/api/admin/debug/coach-dryrun", methods=["POST"])
+@admin_required
+def api_admin_coach_dryrun():
+    """Run the live coach for a user with the CURRENT model, NO output gate — to
+    test whether the raw model (e.g. Opus 4.8) prescribes an already-logged lift
+    or fast-day food on its own. Body: {email, message}. Returns the raw response
+    plus the grounding signals it had, and what the gate WOULD have done."""
+    from flask_login import login_user
+    from models import User as _User
+    data = request.get_json() or {}
+    u = _User.query.filter_by(email=data.get("email")).first()
+    if not u:
+        return jsonify({"error": "user not found"}), 404
+    msg = (data.get("message") or "").strip()
+    if not msg:
+        return jsonify({"error": "message required"}), 400
+    force_done = bool(data.get("force_workout_logged"))
+    force_fast = bool(data.get("force_fast_day"))
+    try:
+        with app.test_request_context():
+            login_user(u, force=True)
+            from coach_router import route_trigger
+            from coach_assembler import build_filtered_context, assemble_prompt
+            from coach import _build_messages, CLAUDE_OPUS
+            ri = route_trigger(msg)
+            ctx = build_filtered_context(ri["agent_name"])
+            # Inject the failure conditions into context WITHOUT touching the DB,
+            # so we can test the model on the exact signals that broke it.
+            if force_done:
+                ctx.setdefault("today_status", {})
+                ctx["today_status"]["workout_prescribed"] = True
+                ctx["today_status"]["workout_logged"] = True
+            if force_fast:
+                ctx["fasting_state"] = {"hours_fasted": 15.0, "last_meal_day": "yesterday",
+                                        "last_meal_time": "7:00pm", "is_fast_day": True,
+                                        "eating_window_opens": "NONE — full fast day"}
+            sp = assemble_prompt(ri["agent_name"], ctx)
+            messages = _build_messages(msg, ctx.get("chat_history", []),
+                                       user_timezone=ctx.get("user_timezone"))
+            # Direct, NO-TOOL call so the model answers from the prompt+context
+            # alone (tools would re-fetch real DB state and muddy the forced test).
+            import anthropic
+            client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), max_retries=2)
+            resp = client.messages.create(model=CLAUDE_OPUS, max_tokens=600,
+                                           system=sp, messages=messages)
+            raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
+            import re as _re
+            ts = ctx.get("today_status") or {}
+            lift_pitch = bool(_GATE_LIFT_CUE.search(raw))
+            food_pitch = bool(_GATE_FOOD_CUE.search(raw))
+            return jsonify({
+                "model": CLAUDE_OPUS,
+                "agent": ri["agent_name"],
+                "forced": {"workout_logged": force_done, "fast_day": force_fast},
+                "signals_in_context": {"workout_logged": ts.get("workout_logged"),
+                                       "is_fast_day": (ctx.get("fasting_state") or {}).get("is_fast_day")},
+                "model_prescribed_a_lift": lift_pitch,
+                "model_suggested_food": food_pitch,
+                "raw_response": raw,
+            })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e)[:300], "tb": traceback.format_exc()[:700]}), 500
+
+
 @app.route("/api/admin/debug/fix-indexes", methods=["POST"])
 @admin_required
 def api_admin_fix_indexes():
