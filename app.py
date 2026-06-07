@@ -1092,6 +1092,45 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
     return reason
 
 
+def _reconcile_prescription_to_logged(user_id, exercise, logged_weight, from_week):
+    """Auto-reconcile: when an athlete logs a BARBELL lift heavier than its
+    prescription, raise the plan (this week + forward, skipping deload weeks
+    4/8/12) up to the loadable logged weight — so the card never shows "plan 145"
+    next to a logged 155. This is the same logic as /api/admin/heal-prescriptions,
+    fired automatically at log time for ONE lift instead of by hand.
+
+    Barbell only: isolations may be deliberately light (new-movement light-starts)
+    and must NOT be force-raised. Never lowers a plan. Returns the changed rows.
+    """
+    if not exercise or not logged_weight or logged_weight <= 0:
+        return []
+    if not _is_barbell_movement(exercise):
+        return []
+    target = _round_to_loadable(exercise, logged_weight)
+    changed = []
+    rows = WeeklyPrescription.query.filter(
+        WeeklyPrescription.user_id == user_id,
+        WeeklyPrescription.exercise_name == exercise,
+        WeeklyPrescription.week >= from_week,
+    ).all()
+    for rx in rows:
+        if rx.week in (4, 8, 12):  # deload weeks stay light
+            continue
+        if rx.target_weight is None or rx.target_weight <= 0:
+            continue
+        if rx.target_weight >= target:  # never lower, never redundant
+            continue
+        old = rx.target_weight
+        rx.adjustment_reason = _reconcile_lift_reason(
+            rx.adjustment_reason or "", target, old, logged_weight, False, True)
+        rx.target_weight = target
+        changed.append({"week": rx.week, "day": rx.day_idx,
+                        "from": old, "to": target})
+    if changed:
+        db.session.commit()
+    return changed
+
+
 _MUSCLE_LABELS = {
     "chest": "Chest", "chest_triceps": "Chest & Triceps", "back": "Back",
     "traps": "Traps", "shoulders": "Shoulders", "rear_delts": "Rear Delts",
@@ -3673,6 +3712,16 @@ def api_set_log():
                             db.session.commit()
         except Exception:
             pass  # Don't fail the set save if auto-complete errors
+
+    # Auto-reconcile the prescription UP when a barbell lift is COMPLETED heavier
+    # than its plan, so the card never shows "plan 145" next to a logged 155.
+    # Gated on done so a typo mid-entry can't ratchet the program. No-op unless
+    # barbell + above plan (the helper enforces both).
+    if done_provided and done and weight and weight > 0:
+        try:
+            _reconcile_prescription_to_logged(current_user.id, exercise, weight, week)
+        except Exception:
+            pass  # never fail the set save on a reconcile error
 
     return jsonify({"ok": True, "id": existing.id})
 
