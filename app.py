@@ -4034,6 +4034,22 @@ def api_weekly_program_generate_status():
     with _GEN_JOBS_LOCK:
         job = _GEN_JOBS.get((current_user.id, week))
     if not job:
+        # The in-process job store does NOT survive a worker restart (a deploy
+        # mid-generation) or a multi-worker poll mismatch — but the generated
+        # program is PERSISTED. Fall back to the source of truth: if the week
+        # already has a coach program, serialize and return it as done so a lost
+        # job can never hide a finished plan from the athlete (the bug that made
+        # a completed week-11 plan "not show up").
+        try:
+            has_program = WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=week, source='coach').first()
+            if has_program:
+                out = dict(_weekly_generation_impl(week, False, None, {}) or {})
+                out["status"] = "done"
+                out["recovered"] = True
+                return jsonify(out)
+        except Exception:
+            pass
         return jsonify({"status": "none"})
     if job["status"] == "done":
         out = dict(job.get("result") or {})
