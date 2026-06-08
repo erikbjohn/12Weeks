@@ -9421,6 +9421,22 @@ async function launchWeeklyPlanning(weekOverride) {
         } catch(e) {}
     }
 
+    // Belt-and-suspenders: if polling ended WITHOUT a program — a lost job (server
+    // restart wiped the in-process status), an errored job that still committed, or
+    // a 3-min timeout — but the week was generated and PERSISTED, recover it
+    // directly so the plan ALWAYS renders right after running. generate-status now
+    // falls back to the saved program, so this returns it if it exists. Never leave
+    // a saved week showing a blank screen.
+    if (nextWeek <= 12 && (!programData || !programData.program)) {
+        try {
+            var _rec = await fetch('/api/weekly-program/generate-status?week=' + nextWeek);
+            if (_rec.ok) {
+                var _recj = await _rec.json();
+                if (_recj && _recj.status === 'done' && _recj.program) programData = _recj;
+            }
+        } catch(e) {}
+    }
+
     // Build the program summary WITH last week's actual data for comparison
     var programSummary = '';
     // Gather last week's actual set data from cache
