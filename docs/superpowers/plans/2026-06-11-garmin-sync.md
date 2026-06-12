@@ -911,7 +911,7 @@ def sync_activities(gc, user_id, days_back=3, today=None):
             elevation_ft=int(round((a.get("elevationGain") or 0) * 3.28084)),
             raw_summary=json.dumps({k: a.get(k) for k in _RAW_KEYS}),
         )
-        row = GarminActivity.query.filter_by(garmin_activity_id=aid).first()
+        row = GarminActivity.query.filter_by(user_id=user_id, garmin_activity_id=aid).first()
         if row:
             for k, v in fields.items():
                 setattr(row, k, v)
