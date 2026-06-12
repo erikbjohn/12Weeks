@@ -543,3 +543,69 @@ def test_push_schedule_failure_keeps_workout_id_for_retry_cleanup(app_ctx):
     assert orphan_id in gc.deleted
     link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=8, day_idx=1).first()
     assert link.status == "ok" and link.garmin_workout_id != orphan_id
+
+
+# ---------- GarminClient.get_wellness_for_day ----------
+
+class _FakeApi:
+    """Stub of the garminconnect.Garmin object for per-day getters."""
+    def get_hrv_data(self, day):
+        return {"hrvSummary": {"lastNightAvg": 52, "weeklyAvg": 55, "status": "BALANCED",
+                               "baseline": {"lowUpper": 45, "balancedHigh": 70}}}
+    def get_sleep_data(self, day):
+        return {"dailySleepDTO": {"sleepTimeSeconds": 26640, "deepSleepSeconds": 5000,
+                                  "lightSleepSeconds": 15000, "remSleepSeconds": 6000,
+                                  "awakeSleepSeconds": 640,
+                                  "sleepScores": {"overall": {"value": 82},
+                                                  "quality": {"qualifierKey": "GOOD"}}}}
+    def get_body_battery(self, day):
+        return [{"charged": 80, "drained": 22}]
+    def get_training_readiness(self, day):
+        return {"score": 71, "level": "HIGH"}
+    def get_training_status(self, day):
+        return {"trainingStatus": "PRODUCTIVE", "weeklyTrainingLoad": 500, "mostRecentVO2Max": 48.0}
+    def get_stress_data(self, day):
+        return {"overallStressLevel": 31, "restStressDuration": 30000, "highStressDuration": 1200}
+    def get_rhr_day(self, day):
+        return {"allMetrics": {"metricsMap": {"WELLNESS_RESTING_HEART_RATE": [{"value": 47}]}}}
+
+
+def _connected_client():
+    from garmin_client import GarminClient
+    gc = GarminClient(user_id=999)
+    gc.api = _FakeApi()
+    gc._connected = True
+    return gc
+
+
+def test_get_wellness_for_day_aggregates_all_metrics():
+    gc = _connected_client()
+    w = gc.get_wellness_for_day("2026-06-11")
+    assert w["hrv"]["lastNight"] == 52 and w["hrv"]["weeklyAvg"] == 55
+    assert w["sleep"]["durationSeconds"] == 26640 and w["sleep"]["score"] == 82
+    assert w["bodyBattery"]["current"] == 58  # 80 charged - 22 drained
+    assert w["trainingReadiness"]["score"] == 71
+    assert w["trainingStatus"]["vo2max"] == 48.0
+    assert w["stress"]["overall"] == 31
+    assert w["restingHr"] == 47
+
+
+def test_get_wellness_for_day_none_when_disconnected_or_rate_limited():
+    import time as _time
+    from garmin_client import GarminClient
+    gc = GarminClient()
+    assert gc.get_wellness_for_day("2026-06-11") is None  # not connected
+    gc2 = _connected_client()
+    gc2._rate_limited_until = _time.time() + 600
+    assert gc2.get_wellness_for_day("2026-06-11") is None  # rate limited → fetch-failed, not 'no data'
+
+
+def test_get_rhr_handles_missing_payload():
+    gc = _connected_client()
+    class NoRhrApi(_FakeApi):
+        def get_rhr_day(self, day):
+            return {"allMetrics": {"metricsMap": {}}}
+    gc.api = NoRhrApi()
+    gc._cache = {}
+    w = gc.get_wellness_for_day("2026-06-10")
+    assert w["restingHr"] is None

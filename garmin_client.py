@@ -313,3 +313,36 @@ class GarminClient:
         except Exception as e:
             log.warning("Garmin workout delete failed (%s): %s", workout_id, e)
             return False
+
+    # ── Daily wellness snapshot (history persistence) ─────────────────────
+
+    def _get_rhr(self, day):
+        def fetch():
+            data = self.api.get_rhr_day(day)
+            try:
+                vals = ((data or {}).get("allMetrics") or {}).get("metricsMap", {}) \
+                    .get("WELLNESS_RESTING_HEART_RATE") or []
+                v = vals[0].get("value") if vals else None
+                return int(v) if v is not None else None
+            except Exception:
+                return None
+        return self._cached(f"rhr_{day}", fetch)
+
+    def get_wellness_for_day(self, day_iso):
+        """All wellness metrics for one calendar date. Returns None for
+        known-bad states (not connected / rate limited) so callers treat it as
+        'fetch failed' and retry later; otherwise a dict whose per-metric
+        values may be None (Garmin had nothing — safe to persist as NULL)."""
+        if not self.connected:
+            return None
+        if time.time() < self._rate_limited_until:
+            return None
+        return {
+            "hrv": self._get_hrv(day_iso),
+            "sleep": self._get_sleep(day_iso),
+            "bodyBattery": self._get_body_battery(day_iso),
+            "trainingReadiness": self._get_training_readiness(day_iso),
+            "trainingStatus": self._get_training_status(day_iso),
+            "stress": self._get_stress(day_iso),
+            "restingHr": self._get_rhr(day_iso),
+        }
