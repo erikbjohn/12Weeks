@@ -33,7 +33,7 @@ from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
-    ProgressPhoto, PsychIntake, GarminTokens, GarminActivity, GarminWorkoutLink, PhysicalAssessment,
+    ProgressPhoto, PsychIntake, GarminTokens, GarminActivity, GarminWorkoutLink, GarminWellness, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, BodyweightRetest, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
     ComplianceState, MuscleGroupProfile, SessionAnalysis,
@@ -8306,6 +8306,13 @@ def garmin_sync_activities():
         today=_user_today())
     if not result.get("error"):
         _garmin_sync_last[current_user.id] = now
+    # Wellness snapshot rides the same throttled sync; failures are independent
+    # of the activity sync and reported separately.
+    try:
+        result["wellness"] = garmin_sync.sync_wellness(gc, current_user.id, today=_user_today())
+    except Exception:
+        logging.exception("[GARMIN] wellness sync failed")
+        result["wellness"] = {"wellness_error": "wellness sync crashed (see logs)"}
     return jsonify(result)
 
 
@@ -8347,6 +8354,31 @@ def garmin_sync_status():
             "garmin_workout_id": l.garmin_workout_id,
         } for l in sorted(links, key=lambda x: x.day_idx)],
     })
+
+
+
+@app.route("/api/garmin/wellness")
+@login_required
+def garmin_wellness():
+    """Stored wellness history (DB only — never triggers a Garmin call)."""
+    days = max(1, min(90, request.args.get("days", default=1, type=int) or 1))
+    since = _user_today() - timedelta(days=days - 1)
+    rows = GarminWellness.query.filter(
+        GarminWellness.user_id == current_user.id,
+        GarminWellness.date >= since,
+    ).order_by(GarminWellness.date.desc()).all()
+    return jsonify([{
+        "date": r.date.isoformat(),
+        "sleep_hours": round(r.sleep_seconds / 3600, 1) if r.sleep_seconds else None,
+        "sleep_score": r.sleep_score,
+        "hrv": r.hrv_last_night,
+        "hrv_weekly_avg": r.hrv_weekly_avg,
+        "body_battery": r.body_battery,
+        "readiness": r.training_readiness,
+        "resting_hr": r.resting_hr,
+        "stress": r.stress_overall,
+        "vo2max": r.vo2max,
+    } for r in rows])
 
 
 # ─── TIMEZONE ──────────────────────────────────────────────────────────────
