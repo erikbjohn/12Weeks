@@ -278,3 +278,96 @@ def aggregate_day(rows):
         "avg_hr": hr,
         "elevation_ft": elev or None,
     }
+
+# ---------------------------------------------------------------------------
+# PULL: Garmin activities → GarminActivity audit rows → RunLog
+# ---------------------------------------------------------------------------
+
+_RAW_KEYS = ("activityId", "activityName", "startTimeLocal", "distance",
+             "duration", "averageHR", "maxHR", "elevationGain")
+
+
+def sync_activities(gc, user_id, days_back=3, today=None):
+    """Pull recent running/HIIT activities and fill RunLog for days the user
+    hasn't logged manually. Manual logs (source NULL/'manual') are never
+    touched; sync-created logs (source='garmin') are kept up to date."""
+    from models import db, AppState, RunLog, GarminActivity
+
+    result = {"pulled": 0, "days_filled": [], "days_skipped_manual": [],
+              "ignored": 0, "error": None}
+    today = today or date.today()
+    state = AppState.query.filter_by(user_id=user_id).first()
+    start_date = state.start_date if state else None
+
+    start = (today - timedelta(days=days_back)).isoformat()
+    acts = gc.get_activities_between(start, today.isoformat())
+    if acts is None:
+        result["error"] = "Garmin activity fetch failed (not connected or rate limited)"
+        return result
+
+    touched = set()
+    for a in acts:
+        type_key = ((a.get("activityType") or {}).get("typeKey") or "").lower()
+        if type_key not in RUN_TYPE_KEYS | HIIT_TYPE_KEYS:
+            result["ignored"] += 1
+            continue
+        aid = str(a.get("activityId"))
+        start_local = a.get("startTimeLocal") or ""
+        act_date = None
+        if len(start_local) >= 10:
+            try:
+                act_date = date.fromisoformat(start_local[:10])
+            except ValueError:
+                act_date = None
+        week, day_idx = week_day_for_date(start_date, act_date)
+        fields = dict(
+            user_id=user_id,
+            type_key=type_key,
+            start_time_local=start_local,
+            activity_date=act_date,
+            week=week,
+            day_idx=day_idx,
+            distance_miles=round((a.get("distance") or 0) / 1609.344, 2),
+            duration_min=int(round((a.get("duration") or 0) / 60.0)),
+            avg_hr=int(a["averageHR"]) if a.get("averageHR") else None,
+            elevation_ft=int(round((a.get("elevationGain") or 0) * 3.28084)),
+            raw_summary=json.dumps({k: a.get(k) for k in _RAW_KEYS}),
+        )
+        row = GarminActivity.query.filter_by(user_id=user_id, garmin_activity_id=aid).first()
+        if row:
+            for k, v in fields.items():
+                setattr(row, k, v)
+        else:
+            db.session.add(GarminActivity(garmin_activity_id=aid, **fields))
+            result["pulled"] += 1
+        if week is not None:
+            touched.add((week, day_idx))
+    db.session.commit()
+
+    for week, day_idx in sorted(touched):
+        key = f"w{week}d{day_idx}"
+        existing = RunLog.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
+        if existing and (existing.source or "manual") != "garmin":
+            result["days_skipped_manual"].append(key)
+            continue
+        rows = GarminActivity.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).all()
+        agg = aggregate_day(rows)
+        if not agg:
+            continue
+        if not existing:
+            existing = RunLog(user_id=user_id, week=week, day_idx=day_idx,
+                              log_date=rows[0].activity_date)
+            db.session.add(existing)
+        existing.distance_miles = agg["distance_miles"]
+        existing.duration_min = agg["duration_min"]
+        existing.avg_hr = agg["avg_hr"]
+        existing.elevation_ft = agg["elevation_ft"]
+        existing.source = "garmin"
+        result["days_filled"].append(key)
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        log.exception("Garmin sync RunLog commit failed")
+        result["error"] = f"DB commit failed: {e}"
+    return result

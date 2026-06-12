@@ -196,3 +196,170 @@ def test_aggregate_day_missing_hr_and_empty():
     assert agg["avg_hr"] is None and agg["distance_miles"] == 3.0
     assert aggregate_day([]) is None
     assert aggregate_day([{"distance_miles": 0, "duration_min": 0, "avg_hr": None, "elevation_ft": 0}]) is None
+
+
+# ---------- DB tests: sync_activities ----------
+
+@pytest.fixture(scope="module")
+def app_ctx():
+    from app import app, db
+    with app.app_context():
+        db.create_all()
+        yield app, db
+
+
+def _mk_user(db, email):
+    from models import User
+    u = User.query.filter_by(email=email).first()
+    if not u:
+        u = User(email=email)
+        db.session.add(u)
+        db.session.commit()
+    return u
+
+
+def _mk_state(db, uid, start):
+    from models import AppState
+    s = AppState.query.filter_by(user_id=uid).first()
+    if not s:
+        s = AppState(user_id=uid)
+        db.session.add(s)
+    s.start_date = start
+    db.session.commit()
+    return s
+
+
+class FakeGC:
+    connected = True
+
+    def __init__(self, activities=None):
+        self.activities = activities or []
+        self.uploaded, self.scheduled, self.deleted = [], [], []
+        self._next_id = 1000
+
+    def get_activities_between(self, start_iso, end_iso):
+        return self.activities
+
+    def upload_workout(self, wj):
+        self._next_id += 1
+        self.uploaded.append(wj)
+        return {"workoutId": self._next_id}
+
+    def schedule_workout(self, wid, date_str):
+        self.scheduled.append((str(wid), date_str))
+        return {}
+
+    def delete_workout(self, wid):
+        self.deleted.append(str(wid))
+        return True
+
+
+def _act(aid, day_iso, type_key="running", meters=8047, secs=3000, hr=140, elev_m=30):
+    return {
+        "activityId": aid,
+        "activityName": "Morning Run",
+        "activityType": {"typeKey": type_key},
+        "startTimeLocal": f"{day_iso} 06:10:00",
+        "distance": meters,
+        "duration": secs,
+        "averageHR": hr,
+        "elevationGain": elev_m,
+    }
+
+
+def test_sync_creates_garmin_runlog_and_audit_row(app_ctx):
+    app_, db = app_ctx
+    from models import RunLog, GarminActivity
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    gc = FakeGC([_act(101, "2026-01-06")])  # week 1, day 1
+    res = sync_activities(gc, u.id, days_back=3, today=date(2026, 1, 7))
+    assert res["error"] is None
+    assert "w1d1" in res["days_filled"]
+    rl = RunLog.query.filter_by(user_id=u.id, week=1, day_idx=1).first()
+    assert rl is not None and rl.source == "garmin"
+    assert rl.distance_miles == 5.0 and rl.duration_min == 50 and rl.avg_hr == 140
+    assert GarminActivity.query.filter_by(garmin_activity_id="101").count() == 1
+
+
+def test_sync_never_overwrites_manual_log(app_ctx):
+    app_, db = app_ctx
+    from models import RunLog
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull2@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    db.session.add(RunLog(user_id=u.id, week=1, day_idx=2, distance_miles=5.2,
+                          avg_hr=131, duration_min=48, source="manual",
+                          log_date=date(2026, 1, 7)))
+    db.session.commit()
+    gc = FakeGC([_act(102, "2026-01-07", meters=8000, hr=145)])
+    res = sync_activities(gc, u.id, days_back=3, today=date(2026, 1, 8))
+    assert "w1d2" in res["days_skipped_manual"]
+    rl = RunLog.query.filter_by(user_id=u.id, week=1, day_idx=2).first()
+    assert rl.distance_miles == 5.2 and rl.avg_hr == 131  # untouched
+
+
+def test_sync_legacy_null_source_treated_as_manual(app_ctx):
+    app_, db = app_ctx
+    from models import RunLog
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull3@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    db.session.add(RunLog(user_id=u.id, week=1, day_idx=3, distance_miles=4.0,
+                          source=None, log_date=date(2026, 1, 8)))
+    db.session.commit()
+    gc = FakeGC([_act(103, "2026-01-08")])
+    res = sync_activities(gc, u.id, days_back=3, today=date(2026, 1, 9))
+    assert "w1d3" in res["days_skipped_manual"]
+    assert RunLog.query.filter_by(user_id=u.id, week=1, day_idx=3).first().distance_miles == 4.0
+
+
+def test_sync_doubles_aggregate_and_resync_idempotent(app_ctx):
+    app_, db = app_ctx
+    from models import RunLog, GarminActivity
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull4@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    gc = FakeGC([
+        _act(104, "2026-01-09", meters=6437, secs=2400, hr=120, elev_m=20),  # 4mi 40min
+        _act(105, "2026-01-09", meters=3219, secs=1200, hr=150, elev_m=10),  # 2mi 20min
+    ])
+    sync_activities(gc, u.id, days_back=3, today=date(2026, 1, 10))
+    rl = RunLog.query.filter_by(user_id=u.id, week=1, day_idx=4).first()
+    assert rl.distance_miles == 6.0 and rl.duration_min == 60 and rl.avg_hr == 130
+    # re-sync: no duplicate audit rows, log still correct (garmin rows updatable)
+    sync_activities(gc, u.id, days_back=3, today=date(2026, 1, 10))
+    assert GarminActivity.query.filter_by(user_id=u.id, week=1, day_idx=4).count() == 2
+    assert RunLog.query.filter_by(user_id=u.id, week=1, day_idx=4).count() == 1
+
+
+def test_sync_ignores_strength_and_out_of_program(app_ctx):
+    app_, db = app_ctx
+    from models import RunLog, GarminActivity
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull5@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    gc = FakeGC([
+        _act(106, "2026-01-10", type_key="strength_training"),
+        _act(107, "2026-01-01"),  # before program start
+    ])
+    res = sync_activities(gc, u.id, days_back=30, today=date(2026, 1, 10))
+    assert res["ignored"] == 1
+    row = GarminActivity.query.filter_by(garmin_activity_id="107").first()
+    assert row is not None and row.week is None and row.day_idx is None
+    assert RunLog.query.filter_by(user_id=u.id, week=None).count() == 0
+
+
+def test_sync_fetch_failure_reports_error(app_ctx):
+    app_, db = app_ctx
+    from garmin_sync import sync_activities
+    u = _mk_user(db, "pull6@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+
+    class DeadGC(FakeGC):
+        def get_activities_between(self, s, e):
+            return None
+
+    res = sync_activities(DeadGC(), u.id, days_back=3, today=date(2026, 1, 10))
+    assert res["error"] is not None
