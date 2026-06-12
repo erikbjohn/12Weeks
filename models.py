@@ -391,6 +391,32 @@ class GarminWorkoutLink(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
 
 
+class GarminWellness(db.Model):
+    """One row per user per date: daily wellness snapshot pulled from Garmin.
+    All metric columns nullable — NULL means Garmin had nothing for that
+    metric/day (never 0). Today's row is refreshed by each sync; past days are
+    written once (an all-NULL row marks 'checked, nothing there' and stops
+    re-fetching)."""
+    __tablename__ = "garmin_wellness"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False)
+    sleep_seconds = db.Column(db.Integer)
+    sleep_score = db.Column(db.Integer)
+    hrv_last_night = db.Column(db.Integer)
+    hrv_weekly_avg = db.Column(db.Integer)
+    hrv_status = db.Column(db.String(20))
+    body_battery = db.Column(db.Integer)
+    training_readiness = db.Column(db.Integer)
+    training_status = db.Column(db.String(30))
+    vo2max = db.Column(db.Float)
+    stress_overall = db.Column(db.Integer)
+    resting_hr = db.Column(db.Integer)
+    raw_json = db.Column(db.Text)
+    pulled_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (db.UniqueConstraint("user_id", "date"),)
+
+
 class PhysicalAssessment(db.Model):
     """Baseline physical assessment data (gym or bodyweight)."""
     __tablename__ = "physical_assessment"
