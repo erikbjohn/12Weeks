@@ -74,3 +74,74 @@ def test_segments_total_minutes():
         {"kind": "cooldown", "minutes": 7, "reps": 1},
     ]
     assert segments_total_minutes(segs) == 53
+
+
+# ---------- HR encoding + workout JSON builder ----------
+
+def test_hr_bounds_encoding():
+    from garmin_sync import _hr_bounds
+    assert _hr_bounds("≥165") == (165, 190)
+    assert _hr_bounds("≤135") == (90, 135)
+    assert _hr_bounds("150-160") == (150, 160)
+    assert _hr_bounds("142") == (137, 147)
+    assert _hr_bounds("Z2") is None
+    assert _hr_bounds(None) is None
+
+
+def test_build_workout_json_vo2_structure():
+    from garmin_sync import build_workout_json
+    segs = [
+        {"kind": "warmup", "minutes": 10, "reps": 1},
+        {"kind": "work", "minutes": 3, "reps": 6, "hr": "≥165"},
+        {"kind": "recovery", "minutes": 3, "reps": 6},
+        {"kind": "cooldown", "minutes": 7, "reps": 1},
+    ]
+    wj = build_workout_json("12W Wk11 Tue — VO2 53 min", segs)
+    assert wj["workoutName"] == "12W Wk11 Tue — VO2 53 min"
+    assert wj["sportType"]["sportTypeKey"] == "running"
+    steps = wj["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 3  # warmup, repeat-group, cooldown
+    warmup, repeat, cooldown = steps
+    assert warmup["stepType"]["stepTypeKey"] == "warmup"
+    assert warmup["endConditionValue"] == 600.0
+    assert warmup["targetType"]["workoutTargetTypeKey"] == "no.target"
+    assert repeat["type"] == "RepeatGroupDTO"
+    assert repeat["numberOfIterations"] == 6
+    work, rec = repeat["workoutSteps"]
+    assert work["stepType"]["stepTypeKey"] == "interval"
+    assert work["endConditionValue"] == 180.0
+    assert work["targetType"]["workoutTargetTypeKey"] == "heart.rate.zone"
+    assert (work["targetValueOne"], work["targetValueTwo"]) == (165, 190)
+    assert rec["stepType"]["stepTypeKey"] == "recovery"
+    assert cooldown["stepType"]["stepTypeKey"] == "cooldown"
+    # step orders strictly increasing and unique across nesting
+    orders = [warmup["stepOrder"], repeat["stepOrder"], work["stepOrder"],
+              rec["stepOrder"], cooldown["stepOrder"]]
+    assert orders == sorted(orders) and len(set(orders)) == 5
+
+
+def test_build_workout_json_steady_hr_ceiling():
+    from garmin_sync import build_workout_json
+    wj = build_workout_json("x", [{"kind": "steady", "minutes": 50, "reps": 1, "hr": "≤135"}])
+    step = wj["workoutSegments"][0]["workoutSteps"][0]
+    assert step["type"] == "ExecutableStepDTO"
+    assert step["endConditionValue"] == 3000.0
+    assert (step["targetValueOne"], step["targetValueTwo"]) == (90, 135)
+
+
+def test_build_simple_timed_workout():
+    from garmin_sync import build_simple_timed_workout
+    wj = build_simple_timed_workout("12W Wk11 Wed — Zone 2 50 min", 50)
+    steps = wj["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 1
+    assert steps[0]["endConditionValue"] == 3000.0
+    assert steps[0]["targetType"]["workoutTargetTypeKey"] == "no.target"
+
+
+def test_structure_hash_changes_with_content_and_date():
+    from garmin_sync import build_simple_timed_workout, structure_hash
+    a = build_simple_timed_workout("n", 50)
+    b = build_simple_timed_workout("n", 55)
+    assert structure_hash(a, "2026-06-15") != structure_hash(b, "2026-06-15")
+    assert structure_hash(a, "2026-06-15") != structure_hash(a, "2026-06-16")
+    assert structure_hash(a, "2026-06-15") == structure_hash(a, "2026-06-15")
