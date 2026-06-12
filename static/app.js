@@ -4770,6 +4770,7 @@ function showSettingsMenu() {
     <button onclick="${_c}regenerateProfile()">Regenerate Profile</button>
     <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
     <button onclick="${_c}showGroceryList()">Grocery List</button>
+    <button onclick="${_c}showGarminPanel()">&#8986; Garmin Sync</button>
     <button onclick="${_c}exportData()">Export Data</button>
     <button onclick="${_c}importData()">Import Data</button>
     <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'">Logout</button>
@@ -5267,6 +5268,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Warm-up completions
     try { const wuRes = await fetch('/api/warmup-completions'); _warmupCache = await wuRes.json(); } catch(e) { _warmupCache = {}; }
+
+    // Garmin auto-pull (server throttles to 15 min). Fire-and-forget; if new
+    // runs landed, refresh the cache + card. 401 (not connected) is silent.
+    fetch('/api/garmin/sync-activities', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (d && (d.days_filled || []).length) {
+          return fetch('/api/run-log').then(r => r.json())
+            .then(j => { _runLogCache = j; renderDetail(); });
+        }
+      })
+      .catch(() => {});
 
     // Run logs
     try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
@@ -6846,6 +6859,96 @@ function updateMicButton(active) {
 }
 
 // ─── GARMIN ─────────────────────────────────────────────────────────────────
+function closeGarminPanel() {
+  const el = document.getElementById('garmin-panel');
+  if (el) el.remove();
+}
+
+async function showGarminPanel() {
+  closeGarminPanel();
+  const wrap = document.createElement('div');
+  wrap.id = 'garmin-panel';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
+  wrap.innerHTML = '<div style="background:var(--card,#16181d);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;max-height:85vh;overflow-y:auto;padding:20px" onclick="event.stopPropagation()">' +
+      '<h3 style="font-size:20px;margin-bottom:14px">&#8986; Garmin Sync</h3>' +
+      '<div id="garmin-panel-body" style="font-size:16px">Loading&hellip;</div>' +
+      '<button class="btn btn-secondary" style="width:100%;margin-top:14px;font-size:16px" onclick="closeGarminPanel()">Close</button>' +
+    '</div>';
+  wrap.onclick = closeGarminPanel;
+  document.body.appendChild(wrap);
+  await renderGarminPanelBody();
+}
+
+async function renderGarminPanelBody() {
+  const body = document.getElementById('garmin-panel-body');
+  if (!body) return;
+  let st = null;
+  try { st = await (await fetch('/api/garmin/sync-status?week=' + currentWeek)).json(); } catch(e) {}
+  if (!st || !st.connected) {
+    body.innerHTML =
+      '<div style="color:var(--muted);margin-bottom:10px;font-size:16px">Not connected.</div>' +
+      '<input id="garmin-email" type="email" placeholder="Garmin email" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px">' +
+      '<input id="garmin-password" type="password" placeholder="Password" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px">' +
+      '<input id="garmin-mfa" type="text" placeholder="MFA code" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px;display:none">' +
+      '<div id="garmin-error" style="display:none;color:#e66;margin-bottom:8px;font-size:15px"></div>' +
+      '<button id="garmin-submit" class="btn btn-primary" style="width:100%;font-size:16px" onclick="garminLogin()">Connect</button>';
+    return;
+  }
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const rows = (st.workouts || []).map(w =>
+    '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:15px">' +
+      '<span>' + days[w.day_idx] + (w.scheduled_date ? ' &middot; ' + w.scheduled_date : '') + '</span>' +
+      (w.status === 'ok'
+        ? '<span style="color:var(--accent)">&#10003; on watch</span>'
+        : '<span style="color:#e66" title="' + String(w.error || '').replace(/"/g, '&quot;') + '">&#10007; failed</span>') +
+    '</div>').join('');
+  body.innerHTML =
+    '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>' +
+    '<div style="color:var(--muted);font-size:14px;margin-bottom:12px">Last run sync: ' +
+      (st.last_activity_sync ? st.last_activity_sync.replace('T', ' ').slice(0, 16) + ' UTC' : 'not yet (this server session)') + '</div>' +
+    '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:8px" onclick="garminSyncNow(this)">Sync runs now</button>' +
+    '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:12px" onclick="garminPushWeek(this)">Push Week ' + currentWeek + ' to watch</button>' +
+    '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Week ' + st.week + ' workouts on Garmin:</div>' +
+    (rows || '<div style="color:var(--muted);font-size:15px">None pushed yet.</div>') +
+    '<button class="btn btn-secondary" style="width:100%;margin-top:12px;font-size:14px" onclick="garminLogout().then(renderGarminPanelBody)">Disconnect Garmin</button>';
+}
+
+async function garminSyncNow(btn) {
+  btn.disabled = true; btn.textContent = 'Syncing…';
+  try {
+    const d = await (await fetch('/api/garmin/sync-activities', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({force: true}),
+    })).json();
+    if (d.error) { showToast('Garmin sync failed: ' + d.error, 'error'); }
+    else {
+      showToast('Synced. ' + (d.days_filled || []).length + ' day(s) filled' +
+        ((d.days_skipped_manual || []).length ? ', ' + d.days_skipped_manual.length + ' manual day(s) untouched' : ''), 'success');
+      const rl = await fetch('/api/run-log');
+      if (rl.ok) { _runLogCache = await rl.json(); renderDetail(); }
+    }
+  } catch(e) { showToast('Garmin sync failed', 'error'); }
+  btn.disabled = false; btn.textContent = 'Sync runs now';
+  renderGarminPanelBody();
+}
+
+async function garminPushWeek(btn) {
+  btn.disabled = true; btn.textContent = 'Pushing…';
+  try {
+    const d = await (await fetch('/api/garmin/push-week', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({week: currentWeek}),
+    })).json();
+    if (d.error) { showToast('Push failed: ' + d.error, 'error'); }
+    else {
+      showToast('Pushed ' + (d.pushed || []).length + ', skipped ' + (d.skipped || []).length +
+        ', failed ' + (d.failed || []).length, (d.failed || []).length ? 'error' : 'success');
+    }
+  } catch(e) { showToast('Push failed', 'error'); }
+  btn.disabled = false; btn.textContent = 'Push Week ' + currentWeek + ' to watch';
+  renderGarminPanelBody();
+}
+
 async function garminLogin() {
   const errEl = document.getElementById('garmin-error');
   errEl.style.display = 'none';
@@ -6870,7 +6973,7 @@ async function garminLogin() {
       const d = await res.json();
       if (d.connected) {
         garminConnected = true;
-        closeModal();
+        await renderGarminPanelBody();
         await refreshGarmin();
         renderAll();
       } else {
@@ -6908,7 +7011,7 @@ async function garminLogin() {
     const d = await res.json();
     if (d.connected) {
       garminConnected = true;
-      closeModal();
+      await renderGarminPanelBody();
       await refreshGarmin();
       renderAll();
     } else if (d.needs_mfa) {
@@ -7503,7 +7606,7 @@ async function saveRunLog() {
   });
 
   if (!_runLogCache) _runLogCache = {};
-  _runLogCache[key] = { distance_miles: dist, avg_hr: hr, elevation_ft: elev, duration_min: dur };
+  _runLogCache[key] = { distance_miles: dist, avg_hr: hr, elevation_ft: elev, duration_min: dur, source: 'manual' };
 
   showToast('Run logged!', 'success');
 
@@ -10257,6 +10360,7 @@ function buildRunSubsection(d, runClass) {
                 (existingRun.duration_min ? '<span>' + existingRun.duration_min + ' min</span>' : '') +
                 (existingRun.avg_hr ? '<span>HR ' + existingRun.avg_hr + '</span>' : '') +
                 (existingRun.elevation_ft ? '<span>' + existingRun.elevation_ft + ' ft</span>' : '') +
+                (existingRun.source === 'garmin' ? '<span style="opacity:0.75">&#8986; from Garmin</span>' : '') +
             '</div>' +
             '<button class="btn btn-secondary" style="width:100%;font-size:13px;padding:6px" onclick="document.getElementById(\'run-edit-form\').style.display=\'block\';this.style.display=\'none\'">Edit</button>' +
             '<div id="run-edit-form" style="display:none;margin-top:8px">' +
