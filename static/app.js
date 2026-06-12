@@ -5298,6 +5298,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const wRes = await fetch('/api/garmin/wellness?days=1');
       const w = wRes.ok ? await wRes.json() : [];
       _wellnessToday = (w && w.length) ? w[0] : null;
+      renderGarminBar();
     } catch(e) { _wellnessToday = null; }
 
     // Per-set completion cache — loaded per-day in renderDetail()
