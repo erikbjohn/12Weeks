@@ -342,7 +342,13 @@ def sync_activities(gc, user_id, days_back=3, today=None):
             result["pulled"] += 1
         if week is not None:
             touched.add((week, day_idx))
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        log.exception("Garmin sync audit commit failed")
+        result["error"] = f"Audit DB commit failed: {e}"
+        return result
 
     for week, day_idx in sorted(touched):
         key = f"w{week}d{day_idx}"

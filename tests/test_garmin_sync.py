@@ -280,7 +280,7 @@ def test_sync_creates_garmin_runlog_and_audit_row(app_ctx):
     rl = RunLog.query.filter_by(user_id=u.id, week=1, day_idx=1).first()
     assert rl is not None and rl.source == "garmin"
     assert rl.distance_miles == 5.0 and rl.duration_min == 50 and rl.avg_hr == 140
-    assert GarminActivity.query.filter_by(garmin_activity_id="101").count() == 1
+    assert GarminActivity.query.filter_by(user_id=u.id, garmin_activity_id="101").count() == 1
 
 
 def test_sync_never_overwrites_manual_log(app_ctx):

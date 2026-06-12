@@ -354,7 +354,7 @@ class GarminTokens(db.Model):
 
 class GarminActivity(db.Model):
     """Audit log of activities pulled from Garmin Connect. One row per Garmin
-    activity; the unique garmin_activity_id makes sync idempotent. week/day_idx
+    activity; the (user_id, garmin_activity_id) unique constraint makes sync idempotent. week/day_idx
     are NULL when the activity falls outside the program calendar."""
     __tablename__ = "garmin_activity"
     id = db.Column(db.Integer, primary_key=True)
