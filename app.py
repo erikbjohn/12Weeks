@@ -4277,7 +4277,15 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
         )
-        _garmin_push_week_best_effort(current_user.id, target_week)
+        # Off-thread: first push of a fresh week is ~14 Garmin HTTP calls and
+        # this branch runs on the request thread (hash-skips make reloads cheap).
+        def _push_async(uid=current_user.id, wk=target_week):
+            try:
+                with app.app_context():
+                    _garmin_push_week_best_effort(uid, wk)
+            except Exception:
+                logging.exception("[GARMIN] async push failed")
+        threading.Thread(target=_push_async, daemon=True).start()
         return {
             "message": "Existing prescriptions returned (not regenerated)",
             "week": target_week,
@@ -8241,9 +8249,13 @@ def garmin_sync_activities():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         return jsonify({"error": "Not connected to Garmin"}), 401
+    try:
+        days_back = max(1, min(30, int(data.get("days_back") or 3)))
+    except (TypeError, ValueError):
+        days_back = 3
     result = garmin_sync.sync_activities(
         gc, current_user.id,
-        days_back=int(data.get("days_back") or 3),
+        days_back=days_back,
         today=_user_today())
     if not result.get("error"):
         _garmin_sync_last[current_user.id] = now
