@@ -489,3 +489,39 @@ def test_push_prefers_segments_json_over_prose(app_ctx):
     assert [p["day"] for p in res["pushed"]] == [1]
     step = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"][0]
     assert step["endConditionValue"] == 2520.0 and step["targetValueTwo"] == 138
+
+
+def test_push_schedule_failure_keeps_workout_id_for_retry_cleanup(app_ctx):
+    # Upload succeeds, schedule fails → link must keep the uploaded workout id
+    # so the retry deletes the orphan instead of leaking one per attempt.
+    app_, db = app_ctx
+    from models import GarminWorkoutLink
+    from garmin_sync import push_week
+    u = _mk_user(db, "push8@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 8, 1, "30 min steady — why", "30 min")
+
+    class ScheduleFailGC(FakeGC):
+        def __init__(self):
+            super().__init__()
+            self.fail_schedule = True
+
+        def schedule_workout(self, wid, date_str):
+            if self.fail_schedule:
+                raise RuntimeError("garmin schedule 503")
+            return super().schedule_workout(wid, date_str)
+
+    gc = ScheduleFailGC()
+    res = push_week(gc, u.id, 8, today=date(2026, 2, 16))
+    assert [f["day"] for f in res["failed"]] == [1]
+    link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=8, day_idx=1).first()
+    assert link.status == "failed"
+    orphan_id = link.garmin_workout_id
+    assert orphan_id  # the uploaded id must be retained
+    # retry with schedule working: orphan deleted, exactly one new workout, ok
+    gc.fail_schedule = False
+    res2 = push_week(gc, u.id, 8, today=date(2026, 2, 16))
+    assert [p["day"] for p in res2["pushed"]] == [1]
+    assert orphan_id in gc.deleted
+    link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=8, day_idx=1).first()
+    assert link.status == "ok" and link.garmin_workout_id != orphan_id

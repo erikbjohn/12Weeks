@@ -408,7 +408,7 @@ def _resolve_segments(plan):
     if not segs:
         return None
     planned = _minutes_from_duration(plan.duration)
-    if planned is not None and abs(segments_total_minutes(segs) - planned) > 0.51:
+    if planned is not None and abs(segments_total_minutes(segs) - planned) > 0.51:  # >0.5 min absorbs float rounding in minutes arithmetic; real plan/structure mismatches are minutes apart
         log.warning("Parsed segments total %s != stored duration %s (w%sd%s) — falling back",
                     segments_total_minutes(segs), plan.duration, plan.week, plan.day_idx)
         return None
@@ -469,8 +469,10 @@ def push_week(gc, user_id, week, today=None):
             wid = str((resp or {}).get("workoutId"))
             if not wid or wid == "None":
                 raise RuntimeError(f"upload returned no workoutId: {resp}")
-            gc.schedule_workout(wid, day_date.isoformat())
+            # record the id BEFORE scheduling — a schedule failure must keep the
+            # handle so retry deletes the orphan instead of leaking one per attempt
             link.garmin_workout_id = wid
+            gc.schedule_workout(wid, day_date.isoformat())
             link.scheduled_date = day_date
             link.structure_hash = h
             link.status = "ok"
