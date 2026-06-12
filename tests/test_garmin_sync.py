@@ -363,3 +363,129 @@ def test_sync_fetch_failure_reports_error(app_ctx):
 
     res = sync_activities(DeadGC(), u.id, days_back=3, today=date(2026, 1, 10))
     assert res["error"] is not None
+
+
+# ---------- DB tests: push_week ----------
+
+def _mk_run_plan(db, uid, week, day_idx, detail, duration, label="Run", run_type="z2", segments_json=None):
+    from models import WeeklyRunPlan
+    WeeklyRunPlan.query.filter_by(user_id=uid, week=week, day_idx=day_idx).delete()
+    db.session.add(WeeklyRunPlan(
+        user_id=uid, week=week, day_idx=day_idx, run_type=run_type, label=label,
+        duration=duration, detail=detail, segments_json=segments_json, source="coach"))
+    db.session.commit()
+
+
+def test_push_week_uploads_and_schedules_future_days(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWorkoutLink
+    from garmin_sync import push_week
+    u = _mk_user(db, "push1@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 2, 1, "10 min warmup; 6×3 min hard @ HR ≥165 / 3 min easy; 7 min cooldown — why",
+                 "53 min", label="VO2", run_type="vo2")
+    gc = FakeGC()
+    res = push_week(gc, u.id, 2, today=date(2026, 1, 12))  # week 2 day 1 = Jan 13 (future)
+    assert [p["day"] for p in res["pushed"]] == [1]
+    assert len(gc.uploaded) == 1 and gc.scheduled[0][1] == "2026-01-13"
+    # interval structure made it through
+    steps = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"]
+    assert any(s.get("type") == "RepeatGroupDTO" and s["numberOfIterations"] == 6 for s in steps)
+    link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=2, day_idx=1).first()
+    assert link.status == "ok" and link.garmin_workout_id and link.scheduled_date == date(2026, 1, 13)
+
+
+def test_push_week_skips_past_days_and_unchanged(app_ctx):
+    app_, db = app_ctx
+    from garmin_sync import push_week
+    u = _mk_user(db, "push2@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 2, 0, "30 min steady (@ HR ≤135) — why", "30 min")  # Jan 12
+    _mk_run_plan(db, u.id, 2, 2, "40 min steady (@ HR ≤135) — why", "40 min")  # Jan 14
+    gc = FakeGC()
+    res = push_week(gc, u.id, 2, today=date(2026, 1, 13))
+    assert {s["day"] for s in res["skipped"] if s["reason"] == "past"} == {0}
+    assert [p["day"] for p in res["pushed"]] == [2]
+    # second push: unchanged → no new uploads
+    res2 = push_week(gc, u.id, 2, today=date(2026, 1, 13))
+    assert {s["day"] for s in res2["skipped"] if s["reason"] == "unchanged"} == {2}
+    assert len(gc.uploaded) == 1
+
+
+def test_push_week_replaces_changed_day(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWorkoutLink
+    from garmin_sync import push_week
+    u = _mk_user(db, "push3@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 3, 1, "30 min steady (@ HR ≤135) — why", "30 min")
+    gc = FakeGC()
+    push_week(gc, u.id, 3, today=date(2026, 1, 19))
+    old_id = GarminWorkoutLink.query.filter_by(user_id=u.id, week=3, day_idx=1).first().garmin_workout_id
+    _mk_run_plan(db, u.id, 3, 1, "45 min steady (@ HR ≤140) — why", "45 min")
+    res = push_week(gc, u.id, 3, today=date(2026, 1, 19))
+    assert [p["day"] for p in res["pushed"]] == [1]
+    assert gc.deleted == [old_id]
+    new_link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=3, day_idx=1).first()
+    assert new_link.garmin_workout_id != old_id and new_link.status == "ok"
+
+
+def test_push_duration_mismatch_falls_back_to_simple(app_ctx):
+    # Parsed prose totals 53 min but stored duration says 60 → push simple timed
+    app_, db = app_ctx
+    from garmin_sync import push_week
+    u = _mk_user(db, "push4@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 4, 1, "10 min warmup; 6×3 min hard / 3 min easy; 7 min cooldown — why",
+                 "60 min", label="VO2")
+    gc = FakeGC()
+    res = push_week(gc, u.id, 4, today=date(2026, 1, 26))
+    assert [p["day"] for p in res["pushed"]] == [1]
+    steps = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 1 and steps[0]["endConditionValue"] == 3600.0
+
+
+def test_push_unparseable_and_no_duration_fails_loud(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWorkoutLink
+    from garmin_sync import push_week
+    u = _mk_user(db, "push5@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 5, 1, "go by feel — why", None)
+    gc = FakeGC()
+    res = push_week(gc, u.id, 5, today=date(2026, 2, 2))
+    assert [f["day"] for f in res["failed"]] == [1]
+    assert GarminWorkoutLink.query.filter_by(user_id=u.id, week=5, day_idx=1).first().status == "failed"
+
+
+def test_push_upload_error_marks_failed(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWorkoutLink
+    from garmin_sync import push_week
+    u = _mk_user(db, "push6@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    _mk_run_plan(db, u.id, 6, 1, "30 min steady — why", "30 min")
+
+    class FailGC(FakeGC):
+        def upload_workout(self, wj):
+            raise RuntimeError("garmin 500")
+
+    res = push_week(FailGC(), u.id, 6, today=date(2026, 2, 9))
+    assert [f["day"] for f in res["failed"]] == [1]
+    link = GarminWorkoutLink.query.filter_by(user_id=u.id, week=6, day_idx=1).first()
+    assert link.status == "failed" and "garmin 500" in (link.error or "")
+
+
+def test_push_prefers_segments_json_over_prose(app_ctx):
+    app_, db = app_ctx
+    from garmin_sync import push_week
+    u = _mk_user(db, "push7@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    import json as _json
+    segs = [{"kind": "steady", "minutes": 42, "reps": 1, "hr": "≤138"}]
+    _mk_run_plan(db, u.id, 7, 1, "UNPARSEABLE PROSE", "42 min", segments_json=_json.dumps(segs))
+    gc = FakeGC()
+    res = push_week(gc, u.id, 7, today=date(2026, 2, 16))
+    assert [p["day"] for p in res["pushed"]] == [1]
+    step = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"][0]
+    assert step["endConditionValue"] == 2520.0 and step["targetValueTwo"] == 138

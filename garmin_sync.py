@@ -377,3 +377,111 @@ def sync_activities(gc, user_id, days_back=3, today=None):
         log.exception("Garmin sync RunLog commit failed")
         result["error"] = f"DB commit failed: {e}"
     return result
+
+
+# ---------------------------------------------------------------------------
+# PUSH: planned run/HIIT days → uploaded + calendar-scheduled Garmin workouts
+# ---------------------------------------------------------------------------
+
+_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _minutes_from_duration(duration):
+    """'53 min' → 53. None when absent/unparseable."""
+    if not duration:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)", str(duration))
+    return _num(m.group(1)) if m else None
+
+
+def _resolve_segments(plan):
+    """segments_json (authoritative) → prose parse (validated against the
+    stored duration) → None. A None means: fall back to simple timed."""
+    if plan.segments_json:
+        try:
+            segs = json.loads(plan.segments_json)
+            if isinstance(segs, list) and segs:
+                return segs
+        except Exception:
+            log.warning("Bad segments_json on w%sd%s", plan.week, plan.day_idx)
+    segs = parse_detail_to_segments(plan.detail)
+    if not segs:
+        return None
+    planned = _minutes_from_duration(plan.duration)
+    if planned is not None and abs(segments_total_minutes(segs) - planned) > 0.51:
+        log.warning("Parsed segments total %s != stored duration %s (w%sd%s) — falling back",
+                    segments_total_minutes(segs), plan.duration, plan.week, plan.day_idx)
+        return None
+    return segs
+
+
+def push_week(gc, user_id, week, today=None):
+    """Upload + schedule structured workouts for every planned run/HIIT day of
+    `week` that is today or later. Idempotent via structure_hash; a changed day
+    deletes its stale Garmin workout first. Failures are recorded on the link
+    row and reported — never raised."""
+    from models import db, AppState, WeeklyRunPlan, GarminWorkoutLink
+
+    result = {"pushed": [], "skipped": [], "failed": []}
+    today = today or date.today()
+    state = AppState.query.filter_by(user_id=user_id).first()
+    if not state or not state.start_date:
+        result["failed"].append({"day": None, "error": "no program start_date"})
+        return result
+
+    plans = WeeklyRunPlan.query.filter_by(user_id=user_id, week=week).all()
+    for plan in sorted(plans, key=lambda p: p.day_idx):
+        day_date = state.start_date + timedelta(days=(week - 1) * 7 + plan.day_idx)
+        if day_date < today:
+            result["skipped"].append({"day": plan.day_idx, "reason": "past"})
+            continue
+
+        segments = _resolve_segments(plan)
+        name = f"12W Wk{week} {_DAY_NAMES[plan.day_idx]} — {plan.label or 'Run'} {plan.duration or ''}".strip()
+        if segments:
+            wj = build_workout_json(name, segments)
+        else:
+            total = _minutes_from_duration(plan.duration)
+            wj = build_simple_timed_workout(name, total) if total else None
+
+        link = GarminWorkoutLink.query.filter_by(
+            user_id=user_id, week=week, day_idx=plan.day_idx).first()
+        if not link:
+            link = GarminWorkoutLink(user_id=user_id, week=week, day_idx=plan.day_idx)
+            db.session.add(link)
+
+        if wj is None:
+            link.status = "failed"
+            link.error = "no recoverable structure and no duration"
+            result["failed"].append({"day": plan.day_idx, "error": link.error})
+            db.session.commit()
+            continue
+
+        h = structure_hash(wj, day_date.isoformat())
+        if link.structure_hash == h and link.status == "ok":
+            result["skipped"].append({"day": plan.day_idx, "reason": "unchanged"})
+            continue
+
+        try:
+            if link.garmin_workout_id:
+                gc.delete_workout(link.garmin_workout_id)  # best-effort
+            resp = gc.upload_workout(wj)
+            wid = str((resp or {}).get("workoutId"))
+            if not wid or wid == "None":
+                raise RuntimeError(f"upload returned no workoutId: {resp}")
+            gc.schedule_workout(wid, day_date.isoformat())
+            link.garmin_workout_id = wid
+            link.scheduled_date = day_date
+            link.structure_hash = h
+            link.status = "ok"
+            link.error = None
+            link.pushed_at = datetime.now(timezone.utc)
+            result["pushed"].append({"day": plan.day_idx, "workout_id": wid,
+                                     "date": day_date.isoformat()})
+        except Exception as e:
+            log.exception("Garmin push failed w%sd%s", week, plan.day_idx)
+            link.status = "failed"
+            link.error = str(e)[:500]
+            result["failed"].append({"day": plan.day_idx, "error": str(e)[:200]})
+        db.session.commit()
+    return result
