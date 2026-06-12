@@ -208,6 +208,8 @@ with app.app_context():
         ("weekly_prescription", "adjustment_reason", "TEXT"),
         ("training_goal", "tdee", "INTEGER"),
         ("exercise_swap", "original_name", "VARCHAR(120)"),
+        ("run_log", "source", "VARCHAR(20)"),
+        ("weekly_run_plan", "segments_json", "TEXT"),
     ]
     try:
         inspector = sa_inspect(db.engine)

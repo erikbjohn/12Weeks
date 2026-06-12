@@ -203,6 +203,7 @@ class RunLog(db.Model):
     elevation_ft = db.Column(db.Integer)
     duration_min = db.Column(db.Integer)
     notes = db.Column(db.Text)
+    source = db.Column(db.String(20))  # 'manual' | 'garmin'; legacy NULL = manual
     __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
 
 
@@ -349,6 +350,44 @@ class GarminTokens(db.Model):
     token_data = db.Column(db.Text, nullable=False)  # garth token dump
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+
+class GarminActivity(db.Model):
+    """Audit log of activities pulled from Garmin Connect. One row per Garmin
+    activity; the unique garmin_activity_id makes sync idempotent. week/day_idx
+    are NULL when the activity falls outside the program calendar."""
+    __tablename__ = "garmin_activity"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    garmin_activity_id = db.Column(db.String(40), nullable=False, unique=True)
+    type_key = db.Column(db.String(40))
+    start_time_local = db.Column(db.String(30))
+    activity_date = db.Column(db.Date)
+    week = db.Column(db.Integer, nullable=True)
+    day_idx = db.Column(db.Integer, nullable=True)
+    distance_miles = db.Column(db.Float)
+    duration_min = db.Column(db.Integer)
+    avg_hr = db.Column(db.Integer)
+    elevation_ft = db.Column(db.Integer)
+    raw_summary = db.Column(db.Text)  # JSON of selected raw Garmin fields
+    pulled_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class GarminWorkoutLink(db.Model):
+    """Maps a planned run/HIIT day to the structured workout pushed to Garmin.
+    structure_hash makes re-push idempotent; status surfaces failures in the UI."""
+    __tablename__ = "garmin_workout_link"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week = db.Column(db.Integer, nullable=False)
+    day_idx = db.Column(db.Integer, nullable=False)
+    garmin_workout_id = db.Column(db.String(40))
+    scheduled_date = db.Column(db.Date)
+    structure_hash = db.Column(db.String(64))
+    status = db.Column(db.String(10), default="ok")  # ok | failed
+    error = db.Column(db.Text)
+    pushed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
 
 
 class PhysicalAssessment(db.Model):
@@ -599,6 +638,7 @@ class WeeklyRunPlan(db.Model):
     label = db.Column(db.String(30))  # "Zone 2", "Tempo", "HIIT", "Long"
     duration = db.Column(db.String(20))  # "45 min", "30 min"
     detail = db.Column(db.Text)  # Full coaching cue
+    segments_json = db.Column(db.Text)  # coach's structured segments [{kind,minutes,reps,hr,note}]
     source = db.Column(db.String(20), default='engine')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
