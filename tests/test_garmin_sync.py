@@ -491,6 +491,24 @@ def test_push_prefers_segments_json_over_prose(app_ctx):
     assert step["endConditionValue"] == 2520.0 and step["targetValueTwo"] == 138
 
 
+def test_push_stale_segments_json_mismatching_duration_falls_back(app_ctx):
+    # segments_json says 40 min but duration says 45 (regression floor raised it)
+    # → push the honest simple 45-min workout, never the stale intervals.
+    app_, db = app_ctx
+    from garmin_sync import push_week
+    import json as _json
+    u = _mk_user(db, "push9@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    segs = [{"kind": "steady", "minutes": 40, "reps": 1}]
+    _mk_run_plan(db, u.id, 9, 1, "45 min steady — why", "45 min",
+                 segments_json=_json.dumps(segs))
+    gc = FakeGC()
+    res = push_week(gc, u.id, 9, today=date(2026, 2, 23))
+    assert [p["day"] for p in res["pushed"]] == [1]
+    steps = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 1 and steps[0]["endConditionValue"] == 2700.0
+
+
 def test_push_schedule_failure_keeps_workout_id_for_retry_cleanup(app_ctx):
     # Upload succeeds, schedule fails → link must keep the uploaded workout id
     # so the retry deletes the orphan instead of leaking one per attempt.

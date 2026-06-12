@@ -743,6 +743,10 @@ def _parse_coach_markers(text, user_id, week):
             db.session.rollback()
 
     # [RUN: day=X, duration=50 min, type=zone2, reason=...]
+    # Collect weeks to push; spawn ONE thread after the loop so two markers in
+    # the same reply don't create two concurrent push_week calls on the same week
+    # (duplicate scheduled workouts, orphaned workout ids).
+    _garmin_weeks_to_push = set()
     for m in re.finditer(r'\[RUN:\s*day=(\d+),\s*duration=([^,]+),\s*type=([^,]+),\s*reason=([^\]]+)\]', text):
         try:
             day_idx, duration, run_type, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
@@ -769,17 +773,22 @@ def _parse_coach_markers(text, user_id, week):
                     run_type=run_type or 'z2', label=run_type or 'Run',
                     duration=duration, detail=reason, source='coach'))
             db.session.commit()
-            # Re-push the changed day to Garmin off-thread: up to 3 Garmin HTTP
-            # calls must not block the SSE worker (hash makes unchanged days no-ops).
-            def _repush_async(uid=user_id, wk=week):
-                try:
-                    with app.app_context():
-                        _garmin_push_week_best_effort(uid, wk)
-                except Exception:
-                    logging.exception("[GARMIN] async re-push failed")
-            threading.Thread(target=_repush_async, daemon=True).start()
+            _garmin_weeks_to_push.add(week)
         except Exception:
             db.session.rollback()
+    # Re-push all affected weeks to Garmin in a single off-thread serial pass:
+    # up to 3 Garmin HTTP calls must not block the SSE worker; the per-user lock
+    # inside _garmin_push_week_best_effort prevents any overlap with the
+    # generation hook's push that may fire concurrently.
+    if _garmin_weeks_to_push:
+        def _repush_async(uid=user_id, weeks=tuple(_garmin_weeks_to_push)):
+            try:
+                with app.app_context():
+                    for wk in weeks:
+                        _garmin_push_week_best_effort(uid, wk)
+            except Exception:
+                logging.exception("[GARMIN] async re-push failed")
+        threading.Thread(target=_repush_async, daemon=True).start()
 
     # [BMR_UPDATE: new_bmr=XXXX, reason=...]
     for m in re.finditer(r'\[BMR_UPDATE:\s*new_bmr=(\d+),\s*reason=([^\]]+)\]', text):
@@ -882,6 +891,10 @@ def _parse_coach_markers(text, user_id, week):
 
 # Per-user Garmin clients (keyed by user_id)
 _garmin_clients = {}
+# Per-user push locks: serializes concurrent push_week calls (marker thread vs
+# generation hook) so a single user never has two simultaneous pushes racing.
+_garmin_push_locks: dict = {}
+_garmin_push_locks_guard = threading.Lock()
 
 
 def _get_garmin(user_id=None):
@@ -897,27 +910,33 @@ def _get_garmin(user_id=None):
 
 def _garmin_push_week_best_effort(user_id, week):
     """Push a week's planned runs/HIIT to Garmin. Best-effort: never raises —
-    a Garmin failure must never break planning or chat."""
-    try:
-        import garmin_sync
-        gc = _get_garmin(user_id)
-        if not gc.connected:
-            gc.try_restore_tokens(user_id)
-        if not gc.connected:
-            return
-        # User-local 'today' WITHOUT request context (helper runs in worker threads).
+    a Garmin failure must never break planning or chat.
+
+    Serialized per user via _garmin_push_locks so concurrent callers (marker
+    thread + generation hook) queue instead of racing on the same week."""
+    with _garmin_push_locks_guard:
+        lock = _garmin_push_locks.setdefault(user_id, threading.Lock())
+    with lock:
         try:
-            from utils_time import user_local_now
-            _u = User.query.get(user_id)
-            tz = _u.timezone if _u and getattr(_u, "timezone", None) else "UTC"
-            local_today = user_local_now(tz).date()
+            import garmin_sync
+            gc = _get_garmin(user_id)
+            if not gc.connected:
+                gc.try_restore_tokens(user_id)
+            if not gc.connected:
+                return
+            # User-local 'today' WITHOUT request context (helper runs in worker threads).
+            try:
+                from utils_time import user_local_now
+                _u = User.query.get(user_id)
+                tz = _u.timezone if _u and getattr(_u, "timezone", None) else "UTC"
+                local_today = user_local_now(tz).date()
+            except Exception:
+                local_today = date.today()
+            res = garmin_sync.push_week(gc, user_id, week, today=local_today)
+            logging.info("[GARMIN] push wk%s: pushed=%s skipped=%s failed=%s",
+                         week, len(res["pushed"]), len(res["skipped"]), len(res["failed"]))
         except Exception:
-            local_today = date.today()
-        res = garmin_sync.push_week(gc, user_id, week, today=local_today)
-        logging.info("[GARMIN] push wk%s: pushed=%s skipped=%s failed=%s",
-                     week, len(res["pushed"]), len(res["skipped"]), len(res["failed"]))
-    except Exception:
-        logging.exception("[GARMIN] best-effort push failed (wk%s)", week)
+            logging.exception("[GARMIN] best-effort push failed (wk%s)", week)
 
 
 def _extract_age_from_intake(user_id):

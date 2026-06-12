@@ -395,24 +395,33 @@ def _minutes_from_duration(duration):
 
 
 def _resolve_segments(plan):
-    """segments_json (authoritative) → prose parse (validated against the
-    stored duration) → None. A None means: fall back to simple timed."""
+    """segments_json (coach-authoritative) → prose parse → None. Both sources
+    are validated against the stored duration — a mismatched structure is
+    discarded so the watch can never contradict the day card."""
+    planned = _minutes_from_duration(plan.duration)
+
+    def _validated(segs, source):
+        if not segs:
+            return None
+        # >0.5 min absorbs float rounding in minutes arithmetic; real
+        # plan/structure mismatches are minutes apart
+        if planned is not None and abs(segments_total_minutes(segs) - planned) > 0.51:
+            log.warning("%s total %s != stored duration %s (w%sd%s) — falling back",
+                        source, segments_total_minutes(segs), plan.duration,
+                        plan.week, plan.day_idx)
+            return None
+        return segs
+
     if plan.segments_json:
         try:
             segs = json.loads(plan.segments_json)
             if isinstance(segs, list) and segs:
-                return segs
+                validated = _validated(segs, "segments_json")
+                if validated:
+                    return validated
         except Exception:
             log.warning("Bad segments_json on w%sd%s", plan.week, plan.day_idx)
-    segs = parse_detail_to_segments(plan.detail)
-    if not segs:
-        return None
-    planned = _minutes_from_duration(plan.duration)
-    if planned is not None and abs(segments_total_minutes(segs) - planned) > 0.51:  # >0.5 min absorbs float rounding in minutes arithmetic; real plan/structure mismatches are minutes apart
-        log.warning("Parsed segments total %s != stored duration %s (w%sd%s) — falling back",
-                    segments_total_minutes(segs), plan.duration, plan.week, plan.day_idx)
-        return None
-    return segs
+    return _validated(parse_detail_to_segments(plan.detail), "parsed prose")
 
 
 def push_week(gc, user_id, week, today=None):

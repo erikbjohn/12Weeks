@@ -279,7 +279,12 @@ def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
             plan["duration"] = prev_run.duration
             plan["detail"] = (plan.get("detail") or "").rstrip(". ") + \
                 f". [held at last week's {prev_run.duration} — no regression outside deload]"
-            log.info("run floor: week %s day %s raised %s->%s",
+            # Void any coach-supplied segments: they were built for the shorter
+            # duration and now disagree with the stored duration.  garmin_sync
+            # validates segments_total vs duration and would push the wrong
+            # workout; None forces it to fall back to simple timed (honest).
+            plan["segments"] = None
+            log.info("run floor: week %s day %s raised %s->%s (segments voided)",
                      week, day_idx, f"{cur_v:g}{cur_u}", prev_run.duration)
     return out
 

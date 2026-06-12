@@ -161,3 +161,34 @@ def test_different_type_is_not_a_regression(ctx):
             {1: {"type": "z2", "label": "Z2", "duration": "30 min", "detail": ""}},
             uid, 10)
     assert out[1]["duration"] == "30 min"
+
+
+def test_floor_voids_segments_when_duration_raised(ctx):
+    """When the floor raises a plan's duration, segments must become None so
+    garmin_sync never pushes a structure that disagrees with the day card."""
+    app, uid = ctx
+    _seed_prev(app, uid, 9, 2, "z2", "45 min")
+    from coach_planning_runs import _apply_run_regression_floor
+    with app.app_context():
+        segs = [{"kind": "steady", "minutes": 38, "reps": 1}]
+        out = _apply_run_regression_floor(
+            {2: {"type": "z2", "label": "Z2", "duration": "38 min",
+                 "detail": "38 min steady — baseline", "segments": segs}},
+            uid, 10)
+    assert out[2]["duration"] == "45 min", "floor must raise to last week"
+    assert out[2]["segments"] is None, "stale segments must be voided when floor fires"
+
+
+def test_floor_preserves_segments_when_no_regression(ctx):
+    """When the floor does NOT fire (no regression), segments must be untouched."""
+    app, uid = ctx
+    _seed_prev(app, uid, 9, 3, "z2", "40 min")
+    from coach_planning_runs import _apply_run_regression_floor
+    with app.app_context():
+        segs = [{"kind": "steady", "minutes": 45, "reps": 1}]
+        out = _apply_run_regression_floor(
+            {3: {"type": "z2", "label": "Z2", "duration": "45 min",
+                 "detail": "45 min steady", "segments": segs}},
+            uid, 10)
+    assert out[3]["duration"] == "45 min", "no floor should fire for an increase"
+    assert out[3]["segments"] == segs, "segments must be preserved when floor does not fire"
