@@ -769,8 +769,15 @@ def _parse_coach_markers(text, user_id, week):
                     run_type=run_type or 'z2', label=run_type or 'Run',
                     duration=duration, detail=reason, source='coach'))
             db.session.commit()
-            # Re-push the changed day to Garmin (hash makes the other days no-ops).
-            _garmin_push_week_best_effort(user_id, week)
+            # Re-push the changed day to Garmin off-thread: up to 3 Garmin HTTP
+            # calls must not block the SSE worker (hash makes unchanged days no-ops).
+            def _repush_async(uid=user_id, wk=week):
+                try:
+                    with app.app_context():
+                        _garmin_push_week_best_effort(uid, wk)
+                except Exception:
+                    logging.exception("[GARMIN] async re-push failed")
+            threading.Thread(target=_repush_async, daemon=True).start()
         except Exception:
             db.session.rollback()
 
@@ -898,7 +905,15 @@ def _garmin_push_week_best_effort(user_id, week):
             gc.try_restore_tokens(user_id)
         if not gc.connected:
             return
-        res = garmin_sync.push_week(gc, user_id, week, today=_user_today())
+        # User-local 'today' WITHOUT request context (helper runs in worker threads).
+        try:
+            from utils_time import user_local_now
+            _u = User.query.get(user_id)
+            tz = _u.timezone if _u and getattr(_u, "timezone", None) else "UTC"
+            local_today = user_local_now(tz).date()
+        except Exception:
+            local_today = date.today()
+        res = garmin_sync.push_week(gc, user_id, week, today=local_today)
         logging.info("[GARMIN] push wk%s: pushed=%s skipped=%s failed=%s",
                      week, len(res["pushed"]), len(res["skipped"]), len(res["failed"]))
     except Exception:

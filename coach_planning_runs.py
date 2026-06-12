@@ -451,7 +451,7 @@ def generate_week_runs(
             # Back-compat if the coach gives a freeform duration/detail.
             duration = v.get("duration") or v.get("time") or "30 min"
             detail = v.get("detail") or ""
-            segments = None
+            segments = None  # freeform path — no structure to persist
         reason = _strip_total_math((v.get("reason") or "").strip())
         if reason:
             detail = f"{detail} — {reason}" if detail else reason
