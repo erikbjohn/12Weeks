@@ -167,6 +167,7 @@ let currentWeek = 1;
 let currentDay = null;
 let garminConnected = false; // Garmin disabled
 let garminData = null;
+let _wellnessToday = null; // today's GarminWellness row (served by /api/garmin/wellness?days=1)
 let readinessData = null;
 let _chatOverlayOpen = false;
 let _chatScrollPos = null;
@@ -5276,13 +5277,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       .then(d => {
         if (d && (d.days_filled || []).length) {
           return fetch('/api/run-log').then(r => r.json())
-            .then(j => { _runLogCache = j; renderDetail(); });
+            .then(j => { _runLogCache = j; renderDetail(); })
+            .then(() => d);
+        }
+        return d;
+      })
+      .then(d => {
+        if (d && !d.throttled) {
+          return fetch('/api/garmin/wellness?days=1').then(r => (r.ok ? r.json() : []))
+            .then(w => { _wellnessToday = (w && w.length) ? w[0] : null; renderGarminBar(); });
         }
       })
       .catch(() => {});
 
     // Run logs
     try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
+
+    // Today's wellness strip data (DB-only; server returns [] or [today's row])
+    try {
+      const wRes = await fetch('/api/garmin/wellness?days=1');
+      const w = wRes.ok ? await wRes.json() : [];
+      _wellnessToday = (w && w.length) ? w[0] : null;
+    } catch(e) { _wellnessToday = null; }
 
     // Per-set completion cache — loaded per-day in renderDetail()
     _setCache = {};
@@ -9246,7 +9262,30 @@ function quickCoachReply(msg) {
 }
 
 function renderGarminBar() {
-  // Garmin disabled
+  const el = document.getElementById('garmin-bar');
+  if (!el) return;
+  const w = _wellnessToday;
+  if (!w) { el.style.display = 'none'; return; }
+  const GOOD = '#4ade80', WARN = '#fbbf24', BAD = '#ef4444', NEUTRAL = 'var(--text)';
+  const dim = '<span style="color:var(--muted)">&mdash;</span>';
+  function band(v, good, warn) { return v == null ? NEUTRAL : (v >= good ? GOOD : (v >= warn ? WARN : BAD)); }
+  function chip(html, color) {
+    return '<div class="garmin-metric" style="font-family:\'DM Mono\',monospace;font-size:16px;text-align:center;padding:6px 4px;color:' + color + '">' + html + '</div>';
+  }
+  let hrvColor = NEUTRAL;
+  if (w.hrv != null && w.hrv_weekly_avg) {
+    const ratio = w.hrv / w.hrv_weekly_avg;
+    hrvColor = ratio >= 1 ? GOOD : (ratio >= 0.85 ? WARN : BAD);
+  }
+  el.innerHTML = '<div class="garmin-metrics">' +
+    chip(w.sleep_hours != null
+      ? '&#128564; ' + w.sleep_hours + 'h' + (w.sleep_score != null ? ' &middot; ' + w.sleep_score : '')
+      : '&#128564; ' + dim, band(w.sleep_score, 80, 60)) +
+    chip(w.hrv != null ? 'HRV ' + w.hrv : 'HRV ' + dim, hrvColor) +
+    chip(w.body_battery != null ? '&#128267; ' + w.body_battery : '&#128267; ' + dim, band(w.body_battery, 60, 30)) +
+    chip(w.readiness != null ? 'Ready ' + w.readiness : 'Ready ' + dim, band(w.readiness, 70, 40)) +
+    '</div>';
+  el.style.display = '';
 }
 
 function metric(label, value, sub, color) {
