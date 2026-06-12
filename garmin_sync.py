@@ -127,11 +127,12 @@ _HR_TARGET = {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone
 def _hr_bounds(hr_text):
     """Coach HR cue → (low, high) bpm for Garmin's custom HR range, which
     requires BOTH bounds. The bound the coach didn't state is an encoding
-    artifact (±window / generous cap), NOT plan content. Non-numeric → None."""
+    artifact (±window / generous cap), NOT plan content.
+    Non-numeric or implausible (e.g. "Z2", "zone 2") → None."""
     if not hr_text:
         return None
     t = str(hr_text)
-    nums = [int(n) for n in re.findall(r"(?<![A-Za-z])\d+(?![A-Za-z])", t)]
+    nums = [int(n) for n in re.findall(r"\b\d{2,3}\b", t) if 60 <= int(n) <= 220]
     if not nums:
         return None
     if len(nums) >= 2:

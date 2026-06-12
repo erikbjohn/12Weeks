@@ -86,6 +86,9 @@ def test_hr_bounds_encoding():
     assert _hr_bounds("142") == (137, 147)
     assert _hr_bounds("Z2") is None
     assert _hr_bounds(None) is None
+    assert _hr_bounds("zone 2") is None
+    assert _hr_bounds("165bpm") is None
+    assert _hr_bounds("165 bpm") == (160, 170)
 
 
 def test_build_workout_json_vo2_structure():
@@ -136,6 +139,17 @@ def test_build_simple_timed_workout():
     assert len(steps) == 1
     assert steps[0]["endConditionValue"] == 3000.0
     assert steps[0]["targetType"]["workoutTargetTypeKey"] == "no.target"
+
+
+def test_build_workout_json_solo_repeated_segment():
+    from garmin_sync import build_workout_json
+    wj = build_workout_json("x", [{"kind": "steady", "minutes": 5, "reps": 3}])
+    steps = wj["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 1
+    assert steps[0]["type"] == "RepeatGroupDTO"
+    assert steps[0]["numberOfIterations"] == 3
+    assert len(steps[0]["workoutSteps"]) == 1
+    assert steps[0]["workoutSteps"][0]["endConditionValue"] == 300.0
 
 
 def test_structure_hash_changes_with_content_and_date():
