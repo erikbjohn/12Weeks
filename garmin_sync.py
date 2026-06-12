@@ -496,3 +496,80 @@ def push_week(gc, user_id, week, today=None):
             result["failed"].append({"day": plan.day_idx, "error": str(e)[:200]})
         db.session.commit()
     return result
+
+# ---------------------------------------------------------------------------
+# WELLNESS: daily sleep/HRV/readiness snapshots → GarminWellness history
+# ---------------------------------------------------------------------------
+
+WELLNESS_BACKFILL_DAYS = 14
+
+
+def wellness_fields(day_data):
+    """Map GarminClient.get_wellness_for_day output to GarminWellness columns.
+    Zero-length sleep normalizes to NULL (no datum, not a falsy zero)."""
+    sleep = day_data.get("sleep") or {}
+    hrv = day_data.get("hrv") or {}
+    bb = day_data.get("bodyBattery") or {}
+    tr = day_data.get("trainingReadiness") or {}
+    ts = day_data.get("trainingStatus") or {}
+    stress = day_data.get("stress") or {}
+    return {
+        "sleep_seconds": sleep.get("durationSeconds") or None,
+        "sleep_score": sleep.get("score"),
+        "hrv_last_night": hrv.get("lastNight"),
+        "hrv_weekly_avg": hrv.get("weeklyAvg"),
+        "hrv_status": hrv.get("status"),
+        "body_battery": bb.get("current"),
+        "training_readiness": tr.get("score"),
+        "training_status": ts.get("status"),
+        "vo2max": ts.get("vo2max"),
+        "stress_overall": stress.get("overall"),
+        "resting_hr": day_data.get("restingHr"),
+    }
+
+
+def sync_wellness(gc, user_id, today=None):
+    """Snapshot today's wellness (refreshed every sync — body battery moves)
+    and backfill missing past days once, capped at WELLNESS_BACKFILL_DAYS.
+    A successfully-fetched day with no data writes an all-NULL row (stops
+    re-fetching); a FAILED fetch writes nothing (retried next sync)."""
+    from models import db, GarminWellness
+
+    result = {"wellness_upserted": 0, "wellness_backfilled": [], "wellness_error": None}
+    today = today or date.today()
+
+    existing = {r.date for r in GarminWellness.query.filter(
+        GarminWellness.user_id == user_id,
+        GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
+    ).all()}
+    targets = [today] + [today - timedelta(days=i)
+                         for i in range(1, WELLNESS_BACKFILL_DAYS + 1)
+                         if today - timedelta(days=i) not in existing]
+
+    for d in targets:
+        data = gc.get_wellness_for_day(d.isoformat())
+        if data is None:
+            if d == today:
+                result["wellness_error"] = "wellness fetch failed (not connected or rate limited)"
+            break  # known-bad client state — later days would fail the same way
+        fields = wellness_fields(data)
+        row = GarminWellness.query.filter_by(user_id=user_id, date=d).first()
+        if row is None:
+            row = GarminWellness(user_id=user_id, date=d)
+            db.session.add(row)
+        for k, v in fields.items():
+            setattr(row, k, v)
+        row.raw_json = json.dumps({k: data.get(k) for k in
+                                   ("hrv", "sleep", "bodyBattery", "trainingReadiness",
+                                    "trainingStatus", "stress", "restingHr")})
+        row.pulled_at = datetime.now(timezone.utc)
+        result["wellness_upserted"] += 1
+        if d != today:
+            result["wellness_backfilled"].append(d.isoformat())
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        log.exception("Garmin wellness commit failed")
+        result["wellness_error"] = f"DB commit failed: {e}"
+    return result

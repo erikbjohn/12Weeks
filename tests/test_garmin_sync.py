@@ -3,7 +3,7 @@
 Parser fixtures are REAL stored WeeklyRunPlan.detail strings from wk11/12
 (produced by coach_planning_runs._segments_to_detail + appended rationale).
 """
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -622,3 +622,95 @@ def test_get_wellness_for_day_none_on_midflight_rate_limit():
     gc.api = RateLimitedApi()
     gc._cache = {}
     assert gc.get_wellness_for_day("2026-06-09") is None
+
+# ---------- DB tests: sync_wellness ----------
+
+def _wellness_payload(hrv=52, sleep_secs=26640, sleep_score=82, bb=58, ready=71,
+                      vo2=48.0, stress=31, rhr=47):
+    return {
+        "hrv": {"lastNight": hrv, "weeklyAvg": 55, "status": "BALANCED"},
+        "sleep": {"durationSeconds": sleep_secs, "score": sleep_score},
+        "bodyBattery": {"current": bb},
+        "trainingReadiness": {"score": ready},
+        "trainingStatus": {"status": "PRODUCTIVE", "vo2max": vo2},
+        "stress": {"overall": stress},
+        "restingHr": rhr,
+    }
+
+
+class WellnessGC(FakeGC):
+    def __init__(self, by_day=None, default=True):
+        super().__init__()
+        self.by_day = by_day or {}
+        self.default = default
+        self.fetched_days = []
+
+    def get_wellness_for_day(self, day_iso):
+        self.fetched_days.append(day_iso)
+        if day_iso in self.by_day:
+            return self.by_day[day_iso]
+        return _wellness_payload() if self.default else None
+
+
+def test_sync_wellness_creates_today_and_backfills(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWellness
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well1@test.com")
+    today = date(2026, 6, 12)
+    res = sync_wellness(WellnessGC(), u.id, today=today)
+    assert res["wellness_error"] is None
+    row = GarminWellness.query.filter_by(user_id=u.id, date=today).first()
+    assert row.sleep_seconds == 26640 and row.sleep_score == 82
+    assert row.hrv_last_night == 52 and row.hrv_weekly_avg == 55
+    assert row.body_battery == 58 and row.training_readiness == 71
+    assert row.vo2max == 48.0 and row.stress_overall == 31 and row.resting_hr == 47
+    # backfilled the full 14-day window on first sync
+    assert GarminWellness.query.filter_by(user_id=u.id).count() == 15
+
+
+def test_sync_wellness_refreshes_today_but_not_past(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWellness
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well2@test.com")
+    today = date(2026, 6, 12)
+    sync_wellness(WellnessGC(), u.id, today=today)
+    yesterday = today - timedelta(days=1)
+    gc2 = WellnessGC(by_day={
+        today.isoformat(): _wellness_payload(bb=23),
+        yesterday.isoformat(): _wellness_payload(bb=99),
+    })
+    res2 = sync_wellness(gc2, u.id, today=today)
+    assert GarminWellness.query.filter_by(user_id=u.id, date=today).first().body_battery == 23
+    assert GarminWellness.query.filter_by(user_id=u.id, date=yesterday).first().body_battery == 58
+    assert gc2.fetched_days == [today.isoformat()]  # past days not re-fetched
+    assert GarminWellness.query.filter_by(user_id=u.id).count() == 15  # no dupes
+
+
+def test_sync_wellness_null_metrics_and_zero_sleep(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWellness
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well3@test.com")
+    today = date(2026, 6, 12)
+    payload = {"hrv": None, "sleep": {"durationSeconds": 0, "score": None},
+               "bodyBattery": None, "trainingReadiness": None,
+               "trainingStatus": None, "stress": None, "restingHr": None}
+    gc = WellnessGC(by_day={(today - timedelta(days=i)).isoformat(): payload for i in range(15)})
+    sync_wellness(gc, u.id, today=today)
+    row = GarminWellness.query.filter_by(user_id=u.id, date=today).first()
+    assert row is not None
+    assert row.sleep_seconds is None  # 0 normalized to NULL, never falsy-zero
+    assert row.hrv_last_night is None and row.body_battery is None
+
+
+def test_sync_wellness_fetch_failure_reports_error_and_retries_later(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWellness
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well4@test.com")
+    today = date(2026, 6, 12)
+    res = sync_wellness(WellnessGC(default=False), u.id, today=today)  # all fetches fail
+    assert res["wellness_error"] is not None
+    assert GarminWellness.query.filter_by(user_id=u.id).count() == 0  # nothing written → retried next sync
