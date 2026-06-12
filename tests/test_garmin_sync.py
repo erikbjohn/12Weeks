@@ -767,3 +767,36 @@ def test_sync_wellness_flags_truncated_backfill(app_ctx):
     res = sync_wellness(gc, u.id, today=today)
     assert res["wellness_error"] is None  # today succeeded
     assert res["wellness_backfill_truncated"] is True
+
+
+# ---------- HTTP seam test: /api/garmin/wellness ----------
+
+def test_wellness_endpoint_serves_today_only_with_strip_keys(app_ctx):
+    app_, db = app_ctx
+    from models import GarminWellness
+    from datetime import date as _date
+    u = _mk_user(db, "wellhttp@test.com")
+    today = _date.today()
+    GarminWellness.query.filter_by(user_id=u.id).delete()
+    db.session.add(GarminWellness(user_id=u.id, date=today, sleep_seconds=27000,
+                                  sleep_score=80, hrv_last_night=50, hrv_weekly_avg=54,
+                                  body_battery=60, training_readiness=70, resting_hr=46,
+                                  stress_overall=25))
+    db.session.add(GarminWellness(user_id=u.id, date=today - timedelta(days=1),
+                                  sleep_seconds=20000, sleep_score=60))
+    db.session.commit()
+    client = app_.test_client()
+    with client.session_transaction() as sess:
+        sess["_user_id"] = str(u.id)
+        sess["_fresh"] = True
+    r = client.get("/api/garmin/wellness?days=1")
+    assert r.status_code == 200
+    rows = r.get_json()
+    assert len(rows) == 1 and rows[0]["date"] == today.isoformat()
+    row = rows[0]
+    for key in ("date", "sleep_hours", "sleep_score", "hrv", "hrv_weekly_avg",
+                "body_battery", "readiness", "resting_hr", "stress", "vo2max"):
+        assert key in row
+    assert row["sleep_hours"] == 7.5 and row["readiness"] == 70
+    r2 = client.get("/api/garmin/wellness?days=2")
+    assert len(r2.get_json()) == 2
