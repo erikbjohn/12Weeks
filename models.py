@@ -359,7 +359,8 @@ class GarminActivity(db.Model):
     __tablename__ = "garmin_activity"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    garmin_activity_id = db.Column(db.String(40), nullable=False, unique=True)
+    garmin_activity_id = db.Column(db.String(40), nullable=False)
+    __table_args__ = (db.UniqueConstraint("user_id", "garmin_activity_id"),)
     type_key = db.Column(db.String(40))
     start_time_local = db.Column(db.String(30))
     activity_date = db.Column(db.Date)
@@ -384,7 +385,7 @@ class GarminWorkoutLink(db.Model):
     garmin_workout_id = db.Column(db.String(40))
     scheduled_date = db.Column(db.Date)
     structure_hash = db.Column(db.String(64))
-    status = db.Column(db.String(10), default="ok")  # ok | failed
+    status = db.Column(db.String(20), default="ok")  # ok | failed
     error = db.Column(db.Text)
     pushed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     __table_args__ = (db.UniqueConstraint("user_id", "week", "day_idx"),)
