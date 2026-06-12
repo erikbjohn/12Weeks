@@ -1,5 +1,6 @@
 """Flask app for 12 Weeks Tracker with Garmin integration."""
 
+import json
 import logging
 import os
 import re
@@ -761,12 +762,15 @@ def _parse_coach_markers(text, user_id, week):
                 if run_type:
                     wrp.run_type = run_type
                 wrp.source = 'coach'
+                wrp.segments_json = None  # duration changed — old structure is void
             else:
                 db.session.add(WeeklyRunPlan(
                     user_id=user_id, week=week, day_idx=day_idx,
                     run_type=run_type or 'z2', label=run_type or 'Run',
                     duration=duration, detail=reason, source='coach'))
             db.session.commit()
+            # Re-push the changed day to Garmin (hash makes the other days no-ops).
+            _garmin_push_week_best_effort(user_id, week)
         except Exception:
             db.session.rollback()
 
@@ -882,6 +886,23 @@ def _get_garmin(user_id=None):
         client = GarminClient(user_id=uid)
         _garmin_clients[uid] = client
     return _garmin_clients[uid]
+
+
+def _garmin_push_week_best_effort(user_id, week):
+    """Push a week's planned runs/HIIT to Garmin. Best-effort: never raises —
+    a Garmin failure must never break planning or chat."""
+    try:
+        import garmin_sync
+        gc = _get_garmin(user_id)
+        if not gc.connected:
+            gc.try_restore_tokens(user_id)
+        if not gc.connected:
+            return
+        res = garmin_sync.push_week(gc, user_id, week, today=_user_today())
+        logging.info("[GARMIN] push wk%s: pushed=%s skipped=%s failed=%s",
+                     week, len(res["pushed"]), len(res["skipped"]), len(res["failed"]))
+    except Exception:
+        logging.exception("[GARMIN] best-effort push failed (wk%s)", week)
 
 
 def _extract_age_from_intake(user_id):
@@ -1798,6 +1819,7 @@ def debug_copy_runplan():
                 run_type=r.run_type, label=r.label,
                 duration=r.duration, detail=r.detail,
                 source=r.source,
+                segments_json=r.segments_json,
             )
             db.session.add(new)
             copied.append({"day_idx": r.day_idx, "label": r.label,
@@ -3997,6 +4019,7 @@ def _fill_missing_week_runs(user_id, target_week):
             user_id=user_id, week=target_week, day_idx=di,
             run_type=cr["type"], label=cr["label"], duration=cr["duration"],
             detail=cr.get("detail", ""), source='coach',
+            segments_json=json.dumps(cr["segments"]) if cr.get("segments") else None,
         ))
         run_summary.append({
             "day": di, "type": cr["type"], "label": cr["label"],
@@ -4866,6 +4889,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 "label": coach_run["label"],
                 "time": coach_run["duration"],
                 "detail": coach_run["detail"],
+                "segments": coach_run.get("segments"),
             }
 
             db.session.add(WeeklyRunPlan(
@@ -4877,6 +4901,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                 duration=progressed.get('time', '30 min'),
                 detail=progressed.get('detail', ''),
                 source='coach',
+                segments_json=json.dumps(progressed["segments"]) if progressed.get("segments") else None,
             ))
 
             run_summary.append({

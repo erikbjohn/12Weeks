@@ -451,6 +451,7 @@ def generate_week_runs(
             # Back-compat if the coach gives a freeform duration/detail.
             duration = v.get("duration") or v.get("time") or "30 min"
             detail = v.get("detail") or ""
+            segments = None
         reason = _strip_total_math((v.get("reason") or "").strip())
         if reason:
             detail = f"{detail} — {reason}" if detail else reason
@@ -459,6 +460,7 @@ def generate_week_runs(
             "label": v.get("label") or "Run",
             "duration": duration,
             "detail": detail,
+            "segments": segments,
         }
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
