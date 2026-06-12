@@ -60,20 +60,34 @@ def main():
             f.write(tokens)
         print("Tokens saved to /tmp/garmin_tokens.txt")
 
-        # Upload to app
-        print(f"\nUploading tokens to {APP_URL}...")
-        print("You need to be logged into the app first.")
-        print()
-        print("Option 1: Copy this curl command and run it while logged in:")
-        print(f'  curl -X POST {APP_URL}/api/garmin/save-tokens \\')
-        print(f'    -H "Content-Type: application/json" \\')
-        print(f'    -b your_session_cookie \\')
-        print(f'    -d \'{{"tokens": "<paste from /tmp/garmin_tokens.txt>"}}\' ')
-        print()
-        print("Option 2: Open the app in your browser, open console (F12), and run:")
-        print(f"""  fetch('/api/garmin/save-tokens', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{tokens: `{tokens[:50]}...`}})}}).then(r=>r.json()).then(d=>console.log(d))""")
-        print()
-        print("(The full token is saved in /tmp/garmin_tokens.txt)")
+        # Upload to app via the admin endpoint (one shot, no browser needed)
+        admin_key = os.environ.get("ADMIN_API_KEY") or getpass.getpass(
+            "App admin key (blank to skip auto-upload): ")
+        if admin_key:
+            app_email = input("App account email [erik@placemetry.com]: ").strip() \
+                or "erik@placemetry.com"
+            print(f"\nUploading tokens to {APP_URL}...")
+            import urllib.request
+            req = urllib.request.Request(
+                f"{APP_URL}/api/admin/garmin/save-tokens",
+                data=json.dumps({"email": app_email, "tokens": tokens}).encode(),
+                headers={"Content-Type": "application/json", "X-Admin-Key": admin_key},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    print("Upload response:", resp.read().decode())
+                print("\nDone — open the app's Garmin Sync panel; it should show Connected.")
+            except Exception as e:
+                body = getattr(e, "read", lambda: b"")()
+                print(f"Upload failed: {e} {body.decode(errors='replace') if body else ''}")
+                print("Tokens are still saved at /tmp/garmin_tokens.txt — re-run to retry.")
+        else:
+            print("\nSkipped auto-upload. Manual option: while logged into the app,")
+            print(f'  curl -X POST {APP_URL}/api/garmin/save-tokens \\')
+            print(f'    -H "Content-Type: application/json" \\')
+            print(f'    -b your_session_cookie \\')
+            print(f'    -d \'{{"tokens": "<paste from /tmp/garmin_tokens.txt>"}}\' ')
 
     except Exception as e:
         print(f"\nError: {e}")

@@ -8232,6 +8232,34 @@ def garmin_save_tokens():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/admin/garmin/save-tokens", methods=["POST"])
+@admin_required
+def admin_garmin_save_tokens():
+    """Save Garmin tokens for a user from the local token helper (CLI + admin key).
+    Bypasses Garmin's rate-limited web login: tokens are minted locally by
+    garmin_token_helper.py and uploaded here. Validates by restoring a session."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    tokens = data.get("tokens")
+    if not email or not tokens:
+        return jsonify({"error": "email + tokens required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    try:
+        from garminconnect import Garmin as G
+        gc = _get_garmin(user.id)
+        gc.api = G()
+        gc.api.login(tokenstore=tokens)
+        gc._connected = True
+        gc._cache = {}
+        gc._user_id = user.id
+        gc._save_tokens()
+        return jsonify({"connected": True, "user_id": user.id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/garmin/logout", methods=["POST"])
 @login_required
 def garmin_logout():
