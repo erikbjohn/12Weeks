@@ -337,7 +337,7 @@ class GarminClient:
             return None
         if time.time() < self._rate_limited_until:
             return None
-        return {
+        data = {
             "hrv": self._get_hrv(day_iso),
             "sleep": self._get_sleep(day_iso),
             "bodyBattery": self._get_body_battery(day_iso),
@@ -346,3 +346,7 @@ class GarminClient:
             "stress": self._get_stress(day_iso),
             "restingHr": self._get_rhr(day_iso),
         }
+        if time.time() < self._rate_limited_until:
+            # A 429 hit mid-flight — partial Nones are 'fetch failed', not 'no data'
+            return None
+        return data

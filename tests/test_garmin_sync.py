@@ -609,3 +609,16 @@ def test_get_rhr_handles_missing_payload():
     gc._cache = {}
     w = gc.get_wellness_for_day("2026-06-10")
     assert w["restingHr"] is None
+
+
+def test_get_wellness_for_day_none_on_midflight_rate_limit():
+    # A 429 raised by a sub-fetch sets _rate_limited_until mid-call; the call
+    # must return None (fetch failed), NOT a dict of Nones that would be
+    # persisted as a permanent all-NULL day.
+    gc = _connected_client()
+    class RateLimitedApi(_FakeApi):
+        def get_hrv_data(self, day):
+            raise Exception("429 Too Many Requests")
+    gc.api = RateLimitedApi()
+    gc._cache = {}
+    assert gc.get_wellness_for_day("2026-06-09") is None
