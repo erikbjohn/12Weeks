@@ -33,7 +33,7 @@ from models import (
     db, User, Invite, ExerciseLog, ExerciseCompletion, ExerciseSwap, DayCompletion,
     MealLog, AppState, BodyWeight, BodyMeasurement,
     WeeklyCheckIn, SupplementLog, MorningCheckIn, ChatMessage,
-    ProgressPhoto, PsychIntake, GarminTokens, PhysicalAssessment,
+    ProgressPhoto, PsychIntake, GarminTokens, GarminActivity, GarminWorkoutLink, PhysicalAssessment,
     UserConstraints, TrainingGoal, UserFoodSelections, WeeklyReport,
     UserEquipment, BodyweightRetest, WarmupCompletion, RunLog, SetLog, CoachMemory, CoachRule,
     ComplianceState, MuscleGroupProfile, SessionAnalysis,
@@ -4277,6 +4277,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
         )
+        _garmin_push_week_best_effort(current_user.id, target_week)
         return {
             "message": "Existing prescriptions returned (not regenerated)",
             "week": target_week,
@@ -5072,6 +5073,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     # round-trip. WHYs that didn't come from the coach can be backfilled
     # later or render the deterministic fallback on the client.
 
+    _garmin_push_week_best_effort(current_user.id, target_week)
     return {
         "week": target_week,
         "phase": phase,
@@ -8217,6 +8219,77 @@ def garmin_logout():
     return jsonify({"connected": False})
 
 
+_garmin_sync_last = {}  # user_id -> epoch seconds of last successful pull
+
+
+@app.route("/api/garmin/sync-activities", methods=["POST"])
+@login_required
+def garmin_sync_activities():
+    """Pull recent Garmin activities into RunLog. Throttled to 15 min unless
+    {"force": true} (the manual Sync Now button)."""
+    import garmin_sync
+    data = request.get_json(silent=True) or {}
+    force = bool(data.get("force"))
+    now = time.time()
+    last = _garmin_sync_last.get(current_user.id, 0)
+    if not force and now - last < 900:
+        return jsonify({"throttled": True,
+                        "seconds_until_next": int(900 - (now - last)),
+                        "days_filled": []})
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if not gc.connected:
+        return jsonify({"error": "Not connected to Garmin"}), 401
+    result = garmin_sync.sync_activities(
+        gc, current_user.id,
+        days_back=int(data.get("days_back") or 3),
+        today=_user_today())
+    if not result.get("error"):
+        _garmin_sync_last[current_user.id] = now
+    return jsonify(result)
+
+
+@app.route("/api/garmin/push-week", methods=["POST"])
+@login_required
+def garmin_push_week():
+    """Push the given week's planned runs/HIIT to the watch as scheduled workouts."""
+    import garmin_sync
+    data = request.get_json(silent=True) or {}
+    week = int(data.get("week") or _current_week())
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    if not gc.connected:
+        return jsonify({"error": "Not connected to Garmin"}), 401
+    result = garmin_sync.push_week(gc, current_user.id, week, today=_user_today())
+    return jsonify(result)
+
+
+@app.route("/api/garmin/sync-status")
+@login_required
+def garmin_sync_status():
+    """Connection + last pull + per-day push status for the settings panel."""
+    week = request.args.get("week", type=int) or _current_week()
+    gc = _get_garmin()
+    if not gc.connected:
+        gc.try_restore_tokens(current_user.id)
+    last = _garmin_sync_last.get(current_user.id)
+    links = GarminWorkoutLink.query.filter_by(user_id=current_user.id, week=week).all()
+    return jsonify({
+        "connected": gc.connected,
+        "last_activity_sync": datetime.fromtimestamp(last, timezone.utc).isoformat() if last else None,
+        "week": week,
+        "workouts": [{
+            "day_idx": l.day_idx,
+            "status": l.status,
+            "error": l.error,
+            "scheduled_date": l.scheduled_date.isoformat() if l.scheduled_date else None,
+            "garmin_workout_id": l.garmin_workout_id,
+        } for l in sorted(links, key=lambda x: x.day_idx)],
+    })
+
+
 # ─── TIMEZONE ──────────────────────────────────────────────────────────────
 
 @app.route('/api/user/timezone', methods=['POST'])
@@ -10416,12 +10489,13 @@ def api_run_log():
         existing.elevation_ft = data.get("elevation_ft")
         existing.duration_min = data.get("duration_min")
         existing.notes = data.get("notes")
+        existing.source = "manual"
     else:
         existing = RunLog(
             user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx"),
             distance_miles=data.get("distance_miles"), avg_hr=data.get("avg_hr"),
             elevation_ft=data.get("elevation_ft"), duration_min=data.get("duration_min"),
-            notes=data.get("notes"), log_date=_user_today(),
+            notes=data.get("notes"), log_date=_user_today(), source="manual",
         )
         db.session.add(existing)
     try:
@@ -10439,6 +10513,7 @@ def api_run_logs():
     return jsonify({f"{l.week}_{l.day_idx}": {
         "distance_miles": l.distance_miles, "avg_hr": l.avg_hr,
         "elevation_ft": l.elevation_ft, "duration_min": l.duration_min,
+        "source": l.source or "manual",
     } for l in logs})
 
 
