@@ -276,3 +276,40 @@ class GarminClient:
             if hrv and hrv.get("lastNight") is not None:
                 results.append({"date": day, "hrv": hrv["lastNight"]})
         return results
+
+    # ── Activities + workouts (sync support) ──────────────────────────────
+
+    def get_activities_between(self, start_iso, end_iso):
+        """List activities between two ISO dates (inclusive). None on failure
+        (caller treats None as 'fetch failed', distinct from empty list)."""
+        if not self.connected:
+            return None
+        try:
+            return self.api.get_activities_by_date(start_iso, end_iso)
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "Too Many" in err:
+                self._rate_limited_until = time.time() + 900
+            log.warning("Garmin activities fetch failed: %s", e)
+            return None
+
+    def upload_workout(self, workout_json):
+        """Create a structured workout on Garmin Connect. Raises on failure —
+        push_week records the error on the link row."""
+        return self.api.upload_workout(workout_json)
+
+    def schedule_workout(self, workout_id, date_str):
+        """Schedule an uploaded workout on a calendar date (YYYY-MM-DD)."""
+        return self.api.schedule_workout(workout_id, date_str)
+
+    def delete_workout(self, workout_id):
+        """Best-effort delete of a previously pushed workout (stale re-push).
+        garminconnect has no delete_workout — hit the endpoint via garth."""
+        try:
+            self.api.garth.request(
+                "DELETE", "connectapi",
+                f"{self.api.garmin_workouts}/workout/{workout_id}", api=True)
+            return True
+        except Exception as e:
+            log.warning("Garmin workout delete failed (%s): %s", workout_id, e)
+            return False
