@@ -89,6 +89,8 @@ def test_hr_bounds_encoding():
     assert _hr_bounds("zone 2") is None
     assert _hr_bounds("165bpm") is None
     assert _hr_bounds("165 bpm") == (160, 170)
+    assert _hr_bounds("≥200") is None
+    assert _hr_bounds("≤80") is None
 
 
 def test_build_workout_json_vo2_structure():
@@ -159,3 +161,38 @@ def test_structure_hash_changes_with_content_and_date():
     assert structure_hash(a, "2026-06-15") != structure_hash(b, "2026-06-15")
     assert structure_hash(a, "2026-06-15") != structure_hash(a, "2026-06-16")
     assert structure_hash(a, "2026-06-15") == structure_hash(a, "2026-06-15")
+
+
+# ---------- date mapping + aggregation ----------
+
+def test_week_day_for_date():
+    from garmin_sync import week_day_for_date
+    start = date(2026, 1, 5)  # Monday, week 1 day 0
+    assert week_day_for_date(start, date(2026, 1, 5)) == (1, 0)
+    assert week_day_for_date(start, date(2026, 1, 11)) == (1, 6)
+    assert week_day_for_date(start, date(2026, 1, 12)) == (2, 0)
+    assert week_day_for_date(start, date(2026, 1, 4)) == (None, None)    # before program
+    assert week_day_for_date(start, date(2026, 3, 30)) == (None, None)   # week 13 — outside
+    assert week_day_for_date(None, date(2026, 1, 5)) == (None, None)
+
+
+def test_aggregate_day_doubles_weighted_hr():
+    from garmin_sync import aggregate_day
+    rows = [
+        {"distance_miles": 4.0, "duration_min": 40, "avg_hr": 120, "elevation_ft": 100},
+        {"distance_miles": 2.0, "duration_min": 20, "avg_hr": 150, "elevation_ft": 50},
+    ]
+    agg = aggregate_day(rows)
+    assert agg["distance_miles"] == 6.0
+    assert agg["duration_min"] == 60
+    assert agg["avg_hr"] == 130  # (120*40 + 150*20) / 60
+    assert agg["elevation_ft"] == 150
+
+
+def test_aggregate_day_missing_hr_and_empty():
+    from garmin_sync import aggregate_day
+    rows = [{"distance_miles": 3.0, "duration_min": 30, "avg_hr": None, "elevation_ft": None}]
+    agg = aggregate_day(rows)
+    assert agg["avg_hr"] is None and agg["distance_miles"] == 3.0
+    assert aggregate_day([]) is None
+    assert aggregate_day([{"distance_miles": 0, "duration_min": 0, "avg_hr": None, "elevation_ft": 0}]) is None

@@ -128,7 +128,7 @@ def _hr_bounds(hr_text):
     """Coach HR cue → (low, high) bpm for Garmin's custom HR range, which
     requires BOTH bounds. The bound the coach didn't state is an encoding
     artifact (±window / generous cap), NOT plan content.
-    Non-numeric or implausible (e.g. "Z2", "zone 2") → None."""
+    Non-numeric, implausible (e.g. "Z2", "zone 2"), or degenerate (low >= high) → None."""
     if not hr_text:
         return None
     t = str(hr_text)
@@ -136,13 +136,17 @@ def _hr_bounds(hr_text):
     if not nums:
         return None
     if len(nums) >= 2:
-        return (nums[0], nums[1])
-    n = nums[0]
-    if "≥" in t or ">" in t:
-        return (n, min(n + 25, 200))
-    if "≤" in t or "<" in t:
-        return (max(n - 45, 80), n)
-    return (n - 5, n + 5)
+        bounds = (nums[0], nums[1])
+    else:
+        n = nums[0]
+        if "≥" in t or ">" in t:
+            bounds = (n, min(n + 25, 200))
+        elif "≤" in t or "<" in t:
+            bounds = (max(n - 45, 80), n)
+        else:
+            bounds = (n - 5, n + 5)
+    low, high = bounds
+    return None if low >= high else (low, high)
 
 
 def _exec_step(seg, order):
@@ -229,3 +233,48 @@ def structure_hash(workout_json, date_iso):
     """Idempotency key: same structure + same calendar date → no re-push."""
     payload = json.dumps(workout_json, sort_keys=True) + "|" + date_iso
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Program calendar mapping + daily aggregation
+# ---------------------------------------------------------------------------
+
+def week_day_for_date(start_date, d):
+    """Inverse of app.py's `start_date + (week-1)*7 + day_idx`. (None, None)
+    when outside the 12-week program window."""
+    if not start_date or not d:
+        return (None, None)
+    diff = (d - start_date).days
+    if diff < 0:
+        return (None, None)
+    week = diff // 7 + 1
+    if week > 12:
+        return (None, None)
+    return (week, diff % 7)
+
+
+def aggregate_day(rows):
+    """Aggregate one day's activities (dicts or GarminActivity rows) into
+    RunLog fields. Doubles sum distance/duration/elevation; HR is the
+    duration-weighted mean (consistent with avg_hr = whole-run mean)."""
+    def _get(r, k):
+        return r.get(k) if isinstance(r, dict) else getattr(r, k, None)
+
+    rows = [r for r in (rows or [])
+            if (_get(r, "duration_min") or 0) > 0 or (_get(r, "distance_miles") or 0) > 0]
+    if not rows:
+        return None
+    dist = round(sum(_get(r, "distance_miles") or 0 for r in rows), 2)
+    dur = int(sum(_get(r, "duration_min") or 0 for r in rows))
+    elev = int(sum(_get(r, "elevation_ft") or 0 for r in rows))
+    hr_rows = [r for r in rows if _get(r, "avg_hr") and _get(r, "duration_min")]
+    hr = None
+    if hr_rows:
+        hr = int(round(sum(_get(r, "avg_hr") * _get(r, "duration_min") for r in hr_rows)
+                       / sum(_get(r, "duration_min") for r in hr_rows)))
+    return {
+        "distance_miles": dist or None,
+        "duration_min": dur or None,
+        "avg_hr": hr,
+        "elevation_ft": elev or None,
+    }
