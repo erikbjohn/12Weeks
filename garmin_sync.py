@@ -518,28 +518,52 @@ def _is_all_null(r):
 
 
 
+def _as_number(v):
+    """Real numbers only — the live Garmin API sometimes nests objects where
+    fixtures had scalars (PROD 2026-06-12: mostRecentVO2Max arrived as a dict
+    and crashed the Float column insert). Bools excluded."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _vo2_value(v):
+    """mostRecentVO2Max is a bare float in old payloads but a dict from the
+    live API: {"generic": {"vo2MaxValue": ..., "vo2MaxPreciseValue": ...}}."""
+    n = _as_number(v)
+    if n is not None:
+        return n
+    if isinstance(v, dict):
+        g = v.get("generic") if isinstance(v.get("generic"), dict) else v
+        for key in ("vo2MaxPreciseValue", "vo2MaxValue"):
+            n = _as_number(g.get(key))
+            if n is not None:
+                return n
+    return None
+
+
 def wellness_fields(day_data):
     """Map GarminClient.get_wellness_for_day output to GarminWellness columns.
-    Zero-length sleep normalizes to NULL (no datum, not a falsy zero)."""
+    Zero-length sleep normalizes to NULL (no datum, not a falsy zero); every
+    numeric column is type-guarded so an unexpected API structure degrades to
+    NULL instead of crashing the whole sync's insert."""
     sleep = day_data.get("sleep") or {}
     hrv = day_data.get("hrv") or {}
     bb = day_data.get("bodyBattery") or {}
     tr = day_data.get("trainingReadiness") or {}
     ts = day_data.get("trainingStatus") or {}
     stress = day_data.get("stress") or {}
+    stress_val = _as_number(stress.get("overall"))
     return {
-        "sleep_seconds": sleep.get("durationSeconds") or None,
-        "sleep_score": sleep.get("score"),
-        "hrv_last_night": hrv.get("lastNight"),
-        "hrv_weekly_avg": hrv.get("weeklyAvg"),
-        "hrv_status": hrv.get("status"),
-        "body_battery": bb.get("current") or None,
-        "training_readiness": tr.get("score"),
-        "training_status": ts.get("status"),
-        "vo2max": ts.get("vo2max"),
-        "stress_overall": stress.get("overall") if (
-            stress.get("overall") is not None and stress.get("overall") >= 0) else None,
-        "resting_hr": day_data.get("restingHr"),
+        "sleep_seconds": _as_number(sleep.get("durationSeconds")) or None,
+        "sleep_score": _as_number(sleep.get("score")),
+        "hrv_last_night": _as_number(hrv.get("lastNight")),
+        "hrv_weekly_avg": _as_number(hrv.get("weeklyAvg")),
+        "hrv_status": hrv.get("status") if isinstance(hrv.get("status"), str) else None,
+        "body_battery": _as_number(bb.get("current")) or None,
+        "training_readiness": _as_number(tr.get("score")),
+        "training_status": ts.get("status") if isinstance(ts.get("status"), str) else None,
+        "vo2max": _vo2_value(ts.get("vo2max")),
+        "stress_overall": stress_val if (stress_val is not None and stress_val >= 0) else None,
+        "resting_hr": _as_number(day_data.get("restingHr")),
     }
 
 

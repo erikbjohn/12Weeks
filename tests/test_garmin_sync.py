@@ -800,3 +800,24 @@ def test_wellness_endpoint_serves_today_only_with_strip_keys(app_ctx):
     assert row["sleep_hours"] == 7.5 and row["readiness"] == 70
     r2 = client.get("/api/garmin/wellness?days=2")
     assert len(r2.get_json()) == 2
+
+
+def test_wellness_fields_handles_real_vo2max_dict_and_type_garbage():
+    # PROD BUG 2026-06-12: Garmin returns mostRecentVO2Max as a dict
+    # ({"generic": {"vo2MaxValue": ...}}), which crashed the Float column insert
+    # mid-loop (autoflush, outside the commit try) and killed the whole wellness
+    # sync with zero rows. Numbers pass; structures are mined or dropped.
+    from garmin_sync import wellness_fields
+    base = {"hrv": None, "sleep": None, "bodyBattery": None, "trainingReadiness": None,
+            "stress": None, "restingHr": None}
+    f = wellness_fields({**base, "trainingStatus": {"status": "PRODUCTIVE",
+        "vo2max": {"generic": {"vo2MaxValue": 48.0, "vo2MaxPreciseValue": 48.2}}}})
+    assert f["vo2max"] == 48.2
+    f2 = wellness_fields({**base, "trainingStatus": {"status": "X", "vo2max": 47.5}})
+    assert f2["vo2max"] == 47.5
+    f3 = wellness_fields({**base, "trainingStatus": {"status": "X", "vo2max": "garbage"}})
+    assert f3["vo2max"] is None
+    # int-typed columns also reject structures instead of crashing the insert
+    f4 = wellness_fields({**base, "hrv": {"lastNight": {"weird": 1}, "weeklyAvg": 55},
+                          "trainingStatus": None})
+    assert f4["hrv_last_night"] is None and f4["hrv_weekly_avg"] == 55
