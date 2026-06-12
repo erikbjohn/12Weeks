@@ -714,3 +714,56 @@ def test_sync_wellness_fetch_failure_reports_error_and_retries_later(app_ctx):
     res = sync_wellness(WellnessGC(default=False), u.id, today=today)  # all fetches fail
     assert res["wellness_error"] is not None
     assert GarminWellness.query.filter_by(user_id=u.id).count() == 0  # nothing written → retried next sync
+
+
+# ---------- Fix 1: watch-sync lag — recent all-NULL rows stay refresh-eligible ----------
+
+def test_sync_wellness_retries_recent_all_null_days_for_watch_lag(app_ctx):
+    # Watch hadn't uploaded: yesterday backfilled all-NULL. Once Garmin has
+    # data, a later sync must refresh it — but only within the 3-day window.
+    app_, db = app_ctx
+    from models import GarminWellness
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well5@test.com")
+    today = date(2026, 6, 12)
+    empty = {"hrv": None, "sleep": None, "bodyBattery": None, "trainingReadiness": None,
+             "trainingStatus": None, "stress": None, "restingHr": None}
+    old_gap = today - timedelta(days=5)
+    gc1 = WellnessGC(by_day={(today - timedelta(days=i)).isoformat(): empty for i in range(15)})
+    sync_wellness(gc1, u.id, today=today)
+    yesterday = today - timedelta(days=1)
+    assert GarminWellness.query.filter_by(user_id=u.id, date=yesterday).first().sleep_seconds is None
+    # watch uploads — Garmin now has data for every day
+    gc2 = WellnessGC()
+    sync_wellness(gc2, u.id, today=today)
+    assert GarminWellness.query.filter_by(user_id=u.id, date=yesterday).first().sleep_seconds == 26640
+    # the 5-day-old all-NULL row is OUTSIDE the retry window — stays locked
+    assert GarminWellness.query.filter_by(user_id=u.id, date=old_gap).first().sleep_seconds is None
+    assert old_gap.isoformat() not in gc2.fetched_days
+
+
+# ---------- Fix 2: sentinel normalization in wellness_fields ----------
+
+def test_wellness_fields_normalizes_sentinels():
+    from garmin_sync import wellness_fields
+    f = wellness_fields({"sleep": {"durationSeconds": 0, "score": None}, "hrv": None,
+                         "bodyBattery": {"current": 0}, "trainingReadiness": None,
+                         "trainingStatus": None, "stress": {"overall": -1}, "restingHr": None})
+    assert f["sleep_seconds"] is None and f["body_battery"] is None and f["stress_overall"] is None
+    f2 = wellness_fields({"sleep": None, "hrv": None, "bodyBattery": {"current": 42},
+                          "trainingReadiness": None, "trainingStatus": None,
+                          "stress": {"overall": 18}, "restingHr": None})
+    assert f2["body_battery"] == 42 and f2["stress_overall"] == 18
+
+
+# ---------- Fix 3: flag truncated backfill ----------
+
+def test_sync_wellness_flags_truncated_backfill(app_ctx):
+    app_, db = app_ctx
+    from garmin_sync import sync_wellness
+    u = _mk_user(db, "well6@test.com")
+    today = date(2026, 6, 12)
+    gc = WellnessGC(by_day={(today - timedelta(days=2)).isoformat(): None})  # day-2 fetch fails
+    res = sync_wellness(gc, u.id, today=today)
+    assert res["wellness_error"] is None  # today succeeded
+    assert res["wellness_backfill_truncated"] is True

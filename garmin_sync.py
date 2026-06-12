@@ -502,6 +502,20 @@ def push_week(gc, user_id, week, today=None):
 # ---------------------------------------------------------------------------
 
 WELLNESS_BACKFILL_DAYS = 14
+RECENT_RETRY_DAYS = 3  # all-NULL rows within this window stay refresh-eligible
+
+_WELLNESS_KEYS = ("hrv", "sleep", "bodyBattery", "trainingReadiness",
+                  "trainingStatus", "stress", "restingHr")
+
+_METRIC_COLS = ("sleep_seconds", "sleep_score", "hrv_last_night", "hrv_weekly_avg",
+                "hrv_status", "body_battery", "training_readiness", "training_status",
+                "vo2max", "stress_overall", "resting_hr")
+
+
+def _is_all_null(r):
+    """True when every metric column on a GarminWellness row is None."""
+    return all(getattr(r, c) is None for c in _METRIC_COLS)
+
 
 
 def wellness_fields(day_data):
@@ -519,11 +533,12 @@ def wellness_fields(day_data):
         "hrv_last_night": hrv.get("lastNight"),
         "hrv_weekly_avg": hrv.get("weeklyAvg"),
         "hrv_status": hrv.get("status"),
-        "body_battery": bb.get("current"),
+        "body_battery": bb.get("current") or None,
         "training_readiness": tr.get("score"),
         "training_status": ts.get("status"),
         "vo2max": ts.get("vo2max"),
-        "stress_overall": stress.get("overall"),
+        "stress_overall": stress.get("overall") if (
+            stress.get("overall") is not None and stress.get("overall") >= 0) else None,
         "resting_hr": day_data.get("restingHr"),
     }
 
@@ -532,25 +547,38 @@ def sync_wellness(gc, user_id, today=None):
     """Snapshot today's wellness (refreshed every sync — body battery moves)
     and backfill missing past days once, capped at WELLNESS_BACKFILL_DAYS.
     A successfully-fetched day with no data writes an all-NULL row (stops
-    re-fetching); a FAILED fetch writes nothing (retried next sync)."""
+    re-fetching); a FAILED fetch writes nothing (retried next sync).
+
+    Watch-lag exception: all-NULL rows within RECENT_RETRY_DAYS remain
+    refresh-eligible so the watch upload eventually lands."""
     from models import db, GarminWellness
 
-    result = {"wellness_upserted": 0, "wellness_backfilled": [], "wellness_error": None}
+    result = {"wellness_upserted": 0, "wellness_backfilled": [],
+              "wellness_error": None, "wellness_backfill_truncated": False}
     today = today or date.today()
 
-    existing = {r.date for r in GarminWellness.query.filter(
-        GarminWellness.user_id == user_id,
-        GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
-    ).all()}
-    targets = [today] + [today - timedelta(days=i)
-                         for i in range(1, WELLNESS_BACKFILL_DAYS + 1)
-                         if today - timedelta(days=i) not in existing]
+    # Fix 1: load full rows; skip all-NULL rows inside the retry window so they
+    # get re-fetched once the watch uploads.
+    retry_cutoff = today - timedelta(days=RECENT_RETRY_DAYS)
+    existing = {
+        r.date
+        for r in GarminWellness.query.filter(
+            GarminWellness.user_id == user_id,
+            GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
+        ).all()
+        if not (_is_all_null(r) and r.date >= retry_cutoff)
+    }
+    # Fix 5: walrus form computes candidate date once per iteration
+    targets = [today] + [d for i in range(1, WELLNESS_BACKFILL_DAYS + 1)
+                         if (d := today - timedelta(days=i)) not in existing]
 
     for d in targets:
         data = gc.get_wellness_for_day(d.isoformat())
         if data is None:
             if d == today:
                 result["wellness_error"] = "wellness fetch failed (not connected or rate limited)"
+            else:
+                result["wellness_backfill_truncated"] = True  # Fix 3: flag truncated backfill
             break  # known-bad client state — later days would fail the same way
         fields = wellness_fields(data)
         row = GarminWellness.query.filter_by(user_id=user_id, date=d).first()
@@ -559,9 +587,7 @@ def sync_wellness(gc, user_id, today=None):
             db.session.add(row)
         for k, v in fields.items():
             setattr(row, k, v)
-        row.raw_json = json.dumps({k: data.get(k) for k in
-                                   ("hrv", "sleep", "bodyBattery", "trainingReadiness",
-                                    "trainingStatus", "stress", "restingHr")})
+        row.raw_json = json.dumps({k: data.get(k) for k in _WELLNESS_KEYS})  # Fix 5: single source
         row.pulled_at = datetime.now(timezone.utc)
         result["wellness_upserted"] += 1
         if d != today:
@@ -572,4 +598,7 @@ def sync_wellness(gc, user_id, today=None):
         db.session.rollback()
         log.exception("Garmin wellness commit failed")
         result["wellness_error"] = f"DB commit failed: {e}"
+        # Fix 4: rolled back — nothing actually persisted
+        result["wellness_upserted"] = 0
+        result["wellness_backfilled"] = []
     return result
