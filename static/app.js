@@ -167,7 +167,7 @@ let currentWeek = 1;
 let currentDay = null;
 let garminConnected = false; // Garmin disabled
 let garminData = null;
-let _wellnessToday = null; // today's GarminWellness row (served by /api/garmin/wellness?days=1)
+let _wellnessToday = null; // most-recent GarminWellness row (today's if present, else latest in the last 7 days; rendered with a date tag when not today)
 let readinessData = null;
 let _chatOverlayOpen = false;
 let _chatScrollPos = null;
@@ -5284,7 +5284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
       .then(d => {
         if (d && !d.throttled) {
-          return fetch('/api/garmin/wellness?days=1').then(r => (r.ok ? r.json() : []))
+          return fetch('/api/garmin/wellness?days=7').then(r => (r.ok ? r.json() : []))
             .then(w => { _wellnessToday = (w && w.length) ? w[0] : null; renderGarminBar(); });
         }
       })
@@ -5293,9 +5293,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Run logs
     try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
 
-    // Today's wellness strip data (DB-only; server returns [] or [today's row])
+    // Wellness strip data (DB-only). Pull the last 7 days and use the most
+    // recent row — today's if synced, otherwise the latest reading (tagged with
+    // its date in the strip) so the strip never blanks out just because today's
+    // Garmin sync hasn't landed yet.
     try {
-      const wRes = await fetch('/api/garmin/wellness?days=1');
+      const wRes = await fetch('/api/garmin/wellness?days=7');
       const w = wRes.ok ? await wRes.json() : [];
       _wellnessToday = (w && w.length) ? w[0] : null;
       renderGarminBar();
@@ -9281,6 +9284,16 @@ function renderGarminBar() {
     const ratio = w.hrv / w.hrv_weekly_avg;
     hrvColor = ratio >= 1 ? GOOD : (ratio >= 0.85 ? WARN : BAD);
   }
+  // Honest staleness tag: if the latest reading isn't today's, label the day so
+  // we never present an old reading as "today" but also never blank the strip.
+  let dateTag = '';
+  try {
+    const todayIso = new Date().toLocaleDateString('en-CA');  // YYYY-MM-DD, local
+    if (w.date && w.date !== todayIso) {
+      const dn = new Date(w.date + 'T00:00:00').toLocaleDateString(undefined, {weekday: 'short'});
+      dateTag = '<div class="garmin-metric" style="font-family:\'DM Mono\',monospace;font-size:13px;text-align:center;padding:6px 4px;color:var(--muted)">' + dn + ' &#8635;</div>';
+    }
+  } catch(e) {}
   el.innerHTML = '<div class="garmin-metrics">' +
     chip(w.sleep_hours != null
       ? '&#128564; ' + w.sleep_hours + 'h' + (w.sleep_score != null ? ' &middot; ' + w.sleep_score : '')
@@ -9288,6 +9301,7 @@ function renderGarminBar() {
     chip(w.hrv != null ? 'HRV ' + w.hrv : 'HRV ' + dim, hrvColor) +
     chip(w.body_battery != null ? '&#128267; ' + w.body_battery : '&#128267; ' + dim, band(w.body_battery, 60, 30)) +
     chip(w.readiness != null ? 'Ready ' + w.readiness : 'Ready ' + dim, band(w.readiness, 70, 40)) +
+    dateTag +
     '</div>';
   el.style.display = '';
 }
