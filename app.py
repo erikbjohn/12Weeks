@@ -4148,6 +4148,22 @@ def api_generate_weekly_program():
     if preserve_through is not None:
         preserve_through = max(-1, min(6, preserve_through))
         force_regen = True
+        # Don't preserve trailing days that have nothing worth keeping (no logged
+        # work, no coach plan). Otherwise "plan this week" on an un-started today
+        # preserves an EMPTY today and the coach only plans the days after it —
+        # leaving today blank (the Monday-runless / no-weights bug). Only ever
+        # decrement, so logged work and coach-planned days stay protected.
+        if preserve_through >= 0 and target_week == _current_week():
+            def _day_has_content(_d):
+                _uid = current_user.id
+                return bool(
+                    SetLog.query.filter_by(user_id=_uid, week=target_week, day_idx=_d, done=True).first()
+                    or RunLog.query.filter_by(user_id=_uid, week=target_week, day_idx=_d).first()
+                    or WeeklyPrescription.query.filter_by(user_id=_uid, week=target_week, day_idx=_d, source='coach').first()
+                    or WeeklyRunPlan.query.filter_by(user_id=_uid, week=target_week, day_idx=_d, source='coach').first()
+                )
+            while preserve_through >= 0 and not _day_has_content(preserve_through):
+                preserve_through -= 1
 
     # The non-regen path is fast (it only reads existing rows) — run it inline.
     # The force_regen path does 30-90s of LLM work; running THAT synchronously
@@ -4195,6 +4211,50 @@ def api_generate_weekly_program():
 
     threading.Thread(target=_bg_generate, daemon=True).start()
     return jsonify({"status": "started", "week": target_week})
+
+
+@app.route("/api/admin/replan-week", methods=["POST"])
+@admin_required
+def admin_replan_week():
+    """Admin trigger: force a full coach re-plan of a week for a user, no session
+    needed. Runs in a background thread (login-impersonated) so it can't time out;
+    poll the DB to confirm rows land. Default preserve_through_day=-1 replans the
+    whole week (every day, including today)."""
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    week = data.get("week")
+    if not email or week is None:
+        return jsonify({"error": "email + week required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    week = int(week)
+    preserve = int(data.get("preserve_through_day", -1))
+    uid = user.id
+    key = (uid, week)
+    with _GEN_JOBS_LOCK:
+        _GEN_JOBS[key] = {"status": "running"}
+
+    def _bg():
+        from flask_login import login_user
+        from models import User as _User
+        try:
+            with app.app_context(), app.test_request_context():
+                _u = db.session.get(_User, uid)
+                if _u:
+                    login_user(_u)
+                _res = _weekly_generation_impl(week, True, preserve, {})
+            with _GEN_JOBS_LOCK:
+                _GEN_JOBS[key] = {"status": "done", "result": _res}
+        except Exception as _e:
+            import logging, traceback
+            logging.error("admin replan failed: %s\n%s", _e, traceback.format_exc())
+            with _GEN_JOBS_LOCK:
+                _GEN_JOBS[key] = {"status": "error", "error": str(_e)}
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return jsonify({"ok": True, "started": True, "email": email,
+                    "week": week, "preserve_through_day": preserve})
 
 
 def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
