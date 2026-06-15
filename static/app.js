@@ -6919,8 +6919,11 @@ async function renderGarminPanelBody() {
         ? '<span style="color:var(--accent)">&#10003; on watch</span>'
         : '<span style="color:#e66" title="' + String(w.error || '').replace(/"/g, '&quot;') + '">&#10007; failed</span>') +
     '</div>').join('');
+  var connLine = (st.live === false)
+    ? '<div style="margin-bottom:10px;color:var(--run-tempo);font-size:16px">&#10003; Connected &middot; reconnecting&hellip;</div>'
+    : '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>';
   body.innerHTML =
-    '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>' +
+    connLine +
     '<div style="color:var(--muted);font-size:14px;margin-bottom:12px">Last run sync: ' +
       (st.last_activity_sync ? st.last_activity_sync.replace('T', ' ').slice(0, 16) + ' UTC' : 'not yet (this server session)') + '</div>' +
     '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:8px" onclick="garminSyncNow(this)">Sync runs now</button>' +

@@ -908,6 +908,18 @@ def _get_garmin(user_id=None):
     return _garmin_clients[uid]
 
 
+def _garmin_linked(uid):
+    """True if the user has a saved Garmin token. This is the durable
+    'connected' state — it survives server restarts and outlives any single
+    in-memory session. The live session (gc.connected) is just a cache; losing
+    it (deploy, rate-limited restore) must NEVER present as 'logged out' while a
+    token exists."""
+    try:
+        return GarminTokens.query.filter_by(user_id=uid).first() is not None
+    except Exception:
+        return False
+
+
 def _garmin_push_week_best_effort(user_id, week):
     """Push a week's planned runs/HIIT to Garmin. Best-effort: never raises —
     a Garmin failure must never break planning or chat.
@@ -8230,7 +8242,8 @@ def garmin_status():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
-    return jsonify({"connected": gc.connected})
+    linked = gc.connected or _garmin_linked(current_user.id)
+    return jsonify({"connected": linked, "live": gc.connected, "linked": linked})
 
 
 @app.route("/api/garmin/today")
@@ -8240,6 +8253,9 @@ def garmin_today():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
+        if _garmin_linked(current_user.id):
+            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
+                            "linked": True, "reconnecting": True}), 503
         return jsonify({"error": "Not connected to Garmin"}), 401
     summary = gc.get_today_summary()
     if summary is None:
@@ -8331,6 +8347,14 @@ def garmin_logout():
     if uid in _garmin_clients:
         del _garmin_clients[uid]
     session.pop("garmin_connected", None)
+    # Delete the saved token so the account is genuinely unlinked. Connection
+    # state is now driven by token presence, so a logout that left the token
+    # behind would keep showing "Connected" — this is the real disconnect.
+    try:
+        GarminTokens.query.filter_by(user_id=uid).delete()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     return jsonify({"connected": False})
 
 
@@ -8355,6 +8379,9 @@ def garmin_sync_activities():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
+        if _garmin_linked(current_user.id):
+            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
+                            "linked": True, "reconnecting": True}), 503
         return jsonify({"error": "Not connected to Garmin"}), 401
     try:
         days_back = max(1, min(30, int(data.get("days_back") or 3)))
@@ -8387,6 +8414,9 @@ def garmin_push_week():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
+        if _garmin_linked(current_user.id):
+            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
+                            "linked": True, "reconnecting": True}), 503
         return jsonify({"error": "Not connected to Garmin"}), 401
     result = garmin_sync.push_week(gc, current_user.id, week, today=_user_today())
     return jsonify(result)
@@ -8400,10 +8430,13 @@ def garmin_sync_status():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
+    linked = gc.connected or _garmin_linked(current_user.id)
     last = _garmin_sync_last.get(current_user.id)
     links = GarminWorkoutLink.query.filter_by(user_id=current_user.id, week=week).all()
     return jsonify({
-        "connected": gc.connected,
+        "connected": linked,
+        "live": gc.connected,
+        "linked": linked,
         "last_activity_sync": datetime.fromtimestamp(last, timezone.utc).isoformat() if last else None,
         "week": week,
         "workouts": [{
