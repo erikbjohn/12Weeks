@@ -7769,26 +7769,33 @@ def _build_coach_context():
             "calorie_by_day_type": goal.calorie_by_day_type,
         }
 
-    # Exercise history — last 3 entries per exercise (shows progression)
-    exercise_logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
-        ExerciseLog.logged_date.desc(), ExerciseLog.id.desc()
-    ).limit(200).all()
+    # Exercise history — last 3 SESSIONS per exercise from SetLog (live table),
+    # top set each. ExerciseLog is dead (unwritten since April), which left the
+    # morning-briefing coach with empty/stale lift history.
     from workout_data import resolve_name
-    exercise_history = {}
-    for log in exercise_logs:
-        canonical = resolve_name(log.exercise_name)
-        if canonical not in exercise_history:
-            exercise_history[canonical] = []
-        if len(exercise_history[canonical]) < 3:
-            entry = {
-                "weight": log.weight, "rpe": log.rpe,
-                "reps_completed": log.reps_completed,
-                "week": log.week,
-                "date": log.logged_date.isoformat() if log.logged_date else None,
-            }
-            if log.estimated_1rm:
-                entry["estimated_1rm"] = log.estimated_1rm
-            exercise_history[canonical].append(entry)
+    _hist_rows = (SetLog.query
+                  .filter(SetLog.user_id == current_user.id, SetLog.weight.isnot(None))
+                  .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
+                  .limit(500).all())
+    _sess, _ord = {}, {}
+    for s in _hist_rows:
+        canonical = resolve_name(s.exercise_name)
+        skey = (s.week, s.day_idx, s.logged_date)
+        d = _sess.setdefault(canonical, {})
+        if skey not in d:
+            if len(_ord.setdefault(canonical, [])) >= 3:
+                continue
+            _ord[canonical].append(skey)
+            d[skey] = {"weight": s.weight, "rpe": None, "reps_completed": s.reps,
+                       "week": s.week,
+                       "date": s.logged_date.isoformat() if s.logged_date else None,
+                       "estimated_1rm": round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)}
+        else:
+            e = d[skey]
+            if s.weight is not None and s.weight > e["weight"]:
+                e["weight"], e["reps_completed"] = s.weight, s.reps
+                e["estimated_1rm"] = round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)
+    exercise_history = {c: [_sess[c][k] for k in keys] for c, keys in _ord.items()}
 
     # Per-set data for today — use date-based query, not week number
     today_idx = local_today.weekday()
