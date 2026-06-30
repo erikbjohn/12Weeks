@@ -146,11 +146,15 @@ def _compute_workout_status(
         return "rest"
     from models import SetLog, DayCompletion
 
-    # Authoritative complete (passed week, day_idx)
+    # Authoritative complete (passed week, day_idx) — DATE-GATED. Honor dc.done
+    # only if it was recorded today; a stale flag from a prior cycle (week clamps
+    # at 12 once the block ends) must not read "complete" today. Legacy rows have
+    # null completed_at -> fall through to the date-keyed sets_today logic below.
+    from utils_time import parse_completion_date
     dc = DayCompletion.query.filter_by(
         user_id=user_id, week=week, day_idx=day_idx,
     ).first()
-    if dc and dc.done:
+    if dc and dc.done and parse_completion_date(dc.completed_at) == today_date:
         return "complete"
 
     # Any sets logged today across ANY (week, day_idx) — covers UI/engine
@@ -170,7 +174,7 @@ def _compute_workout_status(
         dc = DayCompletion.query.filter_by(
             user_id=user_id, week=w, day_idx=d,
         ).first()
-        if dc and dc.done:
+        if dc and dc.done and parse_completion_date(dc.completed_at) == today_date:
             return "complete"
 
     # Heuristic: 6+ sets today and at least 3 marked done = de-facto complete.

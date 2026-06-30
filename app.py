@@ -980,6 +980,51 @@ def _user_today():
     except Exception:
         return date.today()
 
+# Block-2 CLIMBING weekly working-set target. Block 1 ran a FLAT 81 and the
+# coach obeyed "more is not better" at the low end, so volume tapered 163->48.
+# This curve makes volume climb across the block — non-deload weeks strictly
+# increase; weeks 4/8/12 notch down (deload/test). Peak ~106 at wk11 is Erik's
+# explicit "aggressive" governor call (2026-06-29 debrief). The real anti-taper
+# enforcement is the FLOOR rail in coach_planning_program.enforce_safety; this
+# sets the target/ceiling the floor ratchets toward.
+_BLOCK_WEEKLY_SETS = {1: 84, 2: 87, 3: 90, 4: 52, 5: 93, 6: 96,
+                      7: 99, 8: 56, 9: 102, 10: 104, 11: 106, 12: 58}
+
+
+def _target_weekly_sets(week):
+    """Climbing weekly working-set target for the given program week (1-12)."""
+    return _BLOCK_WEEKLY_SETS.get(int(week), 84)
+
+
+def _despiked_current_weight(user_id):
+    """Weight to anchor cut math on, ignoring a suspected GLUTEN/WATER spike.
+
+    A one-week 3-8 lb jump against a prior downtrend is water and inflammation,
+    not fat — recalibrating the deficit off it would TIGHTEN calories on a
+    glutened week (the exact block-1 failure, requirement #3). When a spike is
+    detected, anchor on the prior (lower) weigh-in instead. Returns
+    (weight_or_None, spiked: bool)."""
+    from models import BodyWeight
+    # Deterministic ordering (log_date desc, id desc) so a same-date re-logged
+    # weigh-in resolves to the SAME "latest" row as coach_assembler._build_cut_status
+    # (which uses asc + id asc). Null weights excluded. The spike rule below MUST
+    # match _build_cut_status exactly: latest jump 3-8 lb within ~10 days on a
+    # prior-down step, with >=3 weigh-ins to establish the trend.
+    rows = (BodyWeight.query.filter_by(user_id=user_id)
+            .filter(BodyWeight.weight_lbs.isnot(None))
+            .order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all())
+    if not rows:
+        return None, False
+    latest = rows[0].weight_lbs
+    if len(rows) >= 3 and rows[1].weight_lbs is not None and rows[2].weight_lbs is not None:
+        step = latest - rows[1].weight_lbs
+        step_days = (rows[0].log_date - rows[1].log_date).days
+        prior_down = rows[1].weight_lbs < rows[2].weight_lbs
+        if 3 <= step <= 8 and prior_down and 0 < step_days <= 10:
+            return rows[1].weight_lbs, True
+    return latest, False
+
+
 def _current_week():
     """Compute current program week from start_date (not stale DB value).
 
@@ -4445,13 +4490,19 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     _goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
     _bw = (BodyWeight.query.filter_by(user_id=current_user.id)
            .order_by(BodyWeight.log_date.desc()).first())
+    # Gluten/water guard (C4): anchor planning on the DE-SPIKED weight so a
+    # glutened week (3-8 lb water jump) doesn't drive the meal coach to deepen the
+    # deficit. water_spike flags it so the nutrition prompt holds the line.
+    _despiked_wt, _water_spike = _despiked_current_weight(current_user.id)
     _common_ctx = {
         "phase": phase,
         "deload": target_week in (4, 8, 12),
         "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
-        "current_weight": _bw.weight_lbs if _bw else None,
+        "current_weight": (_despiked_wt if _despiked_wt is not None
+                           else (_bw.weight_lbs if _bw else None)),
         "target_weight": _goal.target_weight if _goal else None,
         "weeks_remaining": max(0, 12 - target_week + 1),
+        "water_spike_suspected": _water_spike,
     }
 
     # Build template_runs for the running coach NOW so we can fire all three
@@ -4528,8 +4579,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     # day, injury, new-movement light-start) are enforced in code inside the
     # coach module.
     _program_ctx = dict(_common_ctx)
-    _program_ctx["target_weekly_sets"] = (
-        round(81 * 0.55) if target_week in (4, 8, 12) else 81)
+    # CLIMBING target (deload weeks are already notched down in the curve) — the
+    # flat 81 that let block 1 taper is gone. The enforce_safety FLOOR rail makes
+    # this a minimum the coach can't undercut.
+    _program_ctx["target_weekly_sets"] = _target_weekly_sets(target_week)
     _program_ctx["train_days"] = 6
 
     def _call_program():
@@ -4764,7 +4817,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
         bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
         if goal and goal.target_weight and bw:
-            current_weight = bw.weight_lbs
+            # Gluten/water guard (C4): anchor on the DE-SPIKED weight so a glutened
+            # week (3-8 lb water jump) can't silently tighten the deficit.
+            despiked, _spiked = _despiked_current_weight(current_user.id)
+            current_weight = despiked if despiked is not None else bw.weight_lbs
             target_weight_val = goal.target_weight
             weeks_remaining = max(1, 12 - target_week + 1)
             required_weekly = (current_weight - target_weight_val) / weeks_remaining
@@ -4835,7 +4891,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
         if not bw:
             bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-        current_weight = bw.weight_lbs if bw else 200
+        # De-spiked for per-day scaling too (C4) — a glutened week must not drive
+        # protein/calorie math off the water-inflated number.
+        _dsw, _ = _despiked_current_weight(current_user.id)
+        current_weight = _dsw if _dsw is not None else (bw.weight_lbs if bw else 200)
 
         base_calories = goal.daily_calories if goal else 1800
         # Use deficit-adjusted calories if available
@@ -5550,6 +5609,10 @@ def api_toggle_day():
     else:
         dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
         db.session.add(dc)
+    # Stamp WHEN it was completed so a stale done-flag from a prior cycle can't
+    # read as "trained today" once the program clamps the week at 12 (the phantom
+    # bug). Date-keyed; cleared when toggled back off.
+    dc.completed_at = _user_today().isoformat() if dc.done else None
     # Save workout timing if provided
     if "workout_started_at" in data:
         dc.workout_started_at = data["workout_started_at"]
@@ -6060,8 +6123,19 @@ def api_progress_dashboard():
     current_week = _current_week()
     today = _user_today()
 
-    # ── 1. Body weight series ────────────────────────────────────────────
-    bw_entries = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date).all()
+    # ── 1. Body weight series — BLOCK-SCOPED ─────────────────────────────
+    # Scope to THIS 12-week block (>= start_date). Without this, start_weight is
+    # the all-time first weigh-in (block 1's 226 on Mar 30), so block 2's day-1
+    # dashboard draws a 226->target "where you need to be" line and an ON-PACE
+    # badge over a nonsense projection — the contradiction the adversarial pass
+    # caught. The raw trend chart (api_progress) still shows full history; only
+    # the plan line + projection + badge are block-scoped.
+    _bstate = AppState.query.filter_by(user_id=uid).first()
+    _block_start = _bstate.start_date if _bstate and _bstate.start_date else None
+    _bw_q = BodyWeight.query.filter_by(user_id=uid)
+    if _block_start is not None:
+        _bw_q = _bw_q.filter(BodyWeight.log_date >= _block_start)
+    bw_entries = _bw_q.order_by(BodyWeight.log_date).all()
     bw_series = []
     for i, e in enumerate(bw_entries):
         window = bw_entries[max(0, i - 6):i + 1]
@@ -6225,10 +6299,11 @@ def api_progress_dashboard():
             recent_rate_per_day = (recent[0].weight_lbs - recent[-1].weight_lbs) / span_days
             weekly_rate = recent_rate_per_day * 7
             projected_final_weight = round(current_weight - weekly_rate * weeks_remaining, 1)
-        elif start_weight is not None and current_week > 0:
-            # Fallback for users with too few recent entries: old formula
-            weekly_rate = (start_weight - current_weight) / max(current_week, 1)
-            projected_final_weight = round(current_weight - weekly_rate * weeks_remaining, 1)
+        # No fallback: with fewer than 2 in-block weigh-ins there is NOT enough
+        # data to project. The old fallback amortized the block-START-to-now drop
+        # over current_week (==1 at block start) and produced absurd projections
+        # (58 / 269 lb) plus a false ON-PACE badge on day 1. Better to show no
+        # projection than a fabricated one. projected_final_weight stays None.
 
     # On pace: does the projected end state hit the target? This matches the
     # copy shown to the user ("tracking to X by Week 12") — judging pace off the

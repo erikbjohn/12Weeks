@@ -97,6 +97,7 @@ def generate_week_meals(
     weeks_rem = user_context.get("weeks_remaining")
     tdee = user_context.get("tdee")
     fasting = user_context.get("fasting_protocol", "")
+    water_spike = user_context.get("water_spike_suspected", False)
 
     system = (
         "You are a sports nutritionist prescribing per-day calorie and macro "
@@ -131,6 +132,19 @@ def generate_week_meals(
         'protein, deeper deficit for cut"}\n'
         '}'
     )
+
+    if water_spike:
+        # Gluten/water guard (C4): override rules 6-7 — a suspected water spike must
+        # never deepen the deficit. The athlete's weight is already de-spiked in
+        # current_wt, but make the HOLD explicit so the coach can't "catch up."
+        system += (
+            "\n\nWATER-SPIKE OVERRIDE (highest priority): the athlete's most recent "
+            "weigh-in is a suspected gluten/water spike (a 3-8 lb jump on a downtrend) "
+            "— inflammation, NOT fat. HOLD calories at the current deficit. Do NOT "
+            "deepen the deficit this week, and do NOT treat the athlete as 'behind "
+            "pace' — rules 6 and 7 are SUSPENDED for this week. The water flushes in "
+            "1-2 weeks."
+        )
 
     user_prompt = (
         f"ATHLETE CONTEXT:\n"

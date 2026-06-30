@@ -9,6 +9,29 @@ except ImportError:
             return _pytz_tz(key)
 
 
+def parse_completion_date(value):
+    """DayCompletion.completed_at is a VARCHAR ISO string (date or datetime).
+    Return its date portion, or None if unset/unparseable.
+
+    Used to DATE-GATE a `DayCompletion.done` flag: a completion is only "today's"
+    if its recorded date is today. Without this, a stale done-flag from an earlier
+    cycle (the program clamps the week at 12 once the block ends) reads as a
+    finished workout TODAY — the phantom "you trained today" bug. completed_at is
+    null on legacy rows (it was never written), so callers must treat None as
+    "cannot confirm" and fall back to date-keyed SetLog evidence."""
+    if not value:
+        return None
+    try:
+        from datetime import datetime, date
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value)[:10])
+    except Exception:
+        return None
+
+
 def to_user_local(utc_dt, user_timezone):
     """Convert UTC datetime to user's local timezone."""
     if utc_dt is None:

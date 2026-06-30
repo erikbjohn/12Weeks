@@ -215,6 +215,11 @@ class DayCompletion(db.Model):
     day_idx = db.Column(db.Integer, nullable=False)
     done = db.Column(db.Boolean, default=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    # ISO date string of WHEN the day was marked done. Date-gates the done-flag so
+    # a stale completion from a prior cycle can't read as "trained today" once the
+    # week clamps at 12 (the phantom-done bug). Pre-existed in prod via runtime
+    # migration (app.py ALTER TABLE) but was never mapped on the model.
+    completed_at = db.Column(db.Text, nullable=True)
     workout_started_at = db.Column(db.Text, nullable=True)
     workout_ended_at = db.Column(db.Text, nullable=True)
     workout_duration_min = db.Column(db.Integer, nullable=True)

@@ -580,6 +580,11 @@ class TestWorkoutStatusVsCompletion:
         assert s == "in_progress", f"expected in_progress (no DayCompletion.done), got {s}"
 
     def test_day_completion_flag_returns_complete(self, app_ctx):
+        # An explicit DayCompletion.done marks the day complete — but ONLY when it
+        # was completed TODAY (C5 date-gate). api_toggle_day now stamps
+        # completed_at, so a real same-day "mark done" carries today's date. A
+        # bare flag from a prior cycle no longer reads complete (see
+        # test_phantom_done_durable for the stale case).
         from coach_rules import _compute_workout_status
         from models import DayCompletion
         from datetime import date
@@ -588,7 +593,8 @@ class TestWorkoutStatusVsCompletion:
         from models import User
         u = User(email=f"dc-test-{id(self)}@example.com", password_hash="x")
         db.session.add(u); db.session.commit()
-        db.session.add(DayCompletion(user_id=u.id, week=5, day_idx=0, done=True))
+        db.session.add(DayCompletion(user_id=u.id, week=5, day_idx=0, done=True,
+                                     completed_at=date.today().isoformat()))
         db.session.commit()
         with app_obj.test_request_context():
             s = _compute_workout_status(

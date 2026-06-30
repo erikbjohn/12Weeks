@@ -127,7 +127,7 @@ def validate_program(parsed, catalog, available_equipment):
 def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                    history_max_weight, history_top=None, new_move_frac=0.6,
                    max_jump_frac=0.20, prev_by_day=None, min_per_day=4,
-                   deload=False):
+                   deload=False, floor=0):
     """Deterministic safety rails the LLM can't be trusted to honor. Mutates a
     copy. Returns (program, actions[]).
 
@@ -247,6 +247,46 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
     if trimmed:
         actions.append(f"Trimmed volume to ceiling of {ceiling} working sets.")
 
+    # 4. weekly volume FLOOR (non-deload) — the anti-taper rail. Total working
+    #    sets may not fall below `floor` (max of 0.92*target and the last
+    #    non-deload week's total, computed by the caller). Backfill sets onto
+    #    EXISTING movements — accessories first, then leads — capped at 6 sets
+    #    per exercise, and NEVER above the ceiling just enforced (the two rails
+    #    can't fight). This is what makes the block CLIMB instead of bleeding out
+    #    the way block 1 did (163 -> 48). The coach keeps full discretion over
+    #    exercise selection and loads; it just can't let total volume collapse.
+    if not deload and floor:
+        floor = min(int(floor), ceiling)  # clamp — the floor can't break the ceiling
+        backfilled = False
+        guard = 0
+        while _total() < floor and guard < 1000:
+            guard += 1
+            cand = None  # (rank, day, item) — accessories first, then fewest sets
+            for d, items in out.items():
+                for idx, it in enumerate(items):
+                    if it["sets"] >= 6:
+                        continue
+                    rank = (0 if idx > 0 else 1, it["sets"])
+                    if cand is None or rank < cand[0]:
+                        cand = (rank, d, it)
+            if cand is None:
+                break  # every movement at the 6-set cap — can't reach floor
+            _, d, it = cand
+            it["sets"] += 1
+            backfilled = True
+        if backfilled:
+            reached = _total()
+            if reached >= floor:
+                actions.append(
+                    f"Backfilled volume up to floor of {floor} working sets (anti-taper).")
+            else:
+                # Honest: don't claim we hit the floor when every movement is at the
+                # 6-set cap. Surfaces that the coach needs MORE movements, not sets.
+                log.warning("volume floor %s unreachable — all movements at 6-set cap (got %s)",
+                            floor, reached)
+                actions.append(
+                    f"Volume short of floor {floor} (reached {reached}) — movements capped at 6 sets.")
+
     out = {d: items for d, items in out.items() if items}
     return out, actions
 
@@ -321,6 +361,34 @@ def _prev_program_by_day(user_id: int, week: int) -> dict:
             "why": r.adjustment_reason or "",
         })
     return out
+
+
+_DELOAD_WEEKS = {4, 8, 12}
+
+
+def _prev_nondeload_total(user_id: int, week: int) -> int:
+    """Total prescribed working sets of the most recent prior NON-deload week
+    (< `week`, within this block, skipping weeks 4/8/12). This is the anti-taper
+    ANCHOR: a non-deload week may never prescribe fewer total sets than the last
+    real week, so volume can't bleed out the way block 1 did (163 -> 48).
+
+    `_prev_program_by_day` only reads `week-1`, which after a deload IS the
+    deload week — anchoring on that low total would stall the climb. This walks
+    back to the last genuine training week instead. Returns 0 when there is no
+    such prior week (e.g. block week 1)."""
+    if week <= 1:
+        return 0
+    try:
+        from models import WeeklyPrescription
+        for w in range(week - 1, 0, -1):
+            if w in _DELOAD_WEEKS:
+                continue
+            rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=w).all()
+            if rows:
+                return sum((r.sets or 0) for r in rows)
+    except Exception:
+        return 0
+    return 0
 
 
 def _injury_block(user_id: int) -> str:
@@ -405,11 +473,14 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "3b. Your `why` MUST state the SAME final number you prescribe in "
         "   `weight`. If you write a delta ('+10 from 145'), it must add up to "
         "   that exact weight. Never narrate a different number than you load.\n"
-        f"4. WEEKLY VOLUME: aim for {target_sets} working sets and treat "
-        f"   {target_sets + 8} as a HARD CEILING. Do NOT exceed it. More is "
-        "   NOT better — the athlete also runs ~40 mi/wk in a calorie deficit, "
-        "   so recovery is the binding constraint. Roughly "
-        f"   {max(3, round(target_sets / max(1, train_days) / 3.5))}-5 exercises "
+        f"4. WEEKLY VOLUME: prescribe AT LEAST {target_sets} working sets — a "
+        f"   FLOOR to meet or exceed, never to undershoot — and treat "
+        f"   {target_sets + 8} as a HARD CEILING you may approach but not exceed. "
+        "   Volume TRENDS UP across the block: NEVER prescribe fewer total working "
+        "   sets than the last non-deload week. The athlete also runs daily in a "
+        "   calorie deficit, so manage recovery through LOAD selection and exercise "
+        "   choice — do NOT cut total volume to do it. Roughly "
+        f"   {max(4, round(target_sets / max(1, train_days) / 3.5))}-6 exercises "
         "   per lifting day. On a deload week use ~55% volume and lighter loads.\n"
         "5. Cover the major muscle groups across the week (legs, chest, back, "
         "   shoulders, arms, posterior chain, core) WITHOUT overlapping the same "
@@ -477,12 +548,19 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
             hist_top[k] = max(hist_top.get(k, 0), r.weight)
     rest_day = 6 if train_days <= 6 else -1  # Sunday is the long-run/rest day
     ceiling = int(target_sets) + 8
+    # Weekly volume FLOOR — the anti-taper rail. Never below 0.92*target, and
+    # never below the last NON-deload week's prescribed total (so a post-deload
+    # week can't anchor on the deload's low number and stall the climb). Week 1
+    # has no prior week -> _prev_nondeload_total returns 0, so the floor is just
+    # the 0.92*target clause (no throw, no zero-floor).
+    floor = 0 if deload else max(round(0.92 * int(target_sets)),
+                                 _prev_nondeload_total(user_id, week))
     clean, actions = enforce_safety(
         clean, rest_day_idx=rest_day, ceiling=ceiling,
         history_exercises=hist_ex, history_max_weight=hist_max,
         history_top=hist_top,
         prev_by_day=_prev_program_by_day(user_id, week),
-        min_per_day=4, deload=deload,
+        min_per_day=4, deload=deload, floor=floor,
     )
     notes = dropped + actions
     if notes:

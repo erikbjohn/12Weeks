@@ -501,10 +501,20 @@ def _build_cut_status():
     target_weight = goal.target_weight
     tdee = goal.tdee or (goal.daily_calories or 0) + 1500  # fall-back estimate
 
-    # ── Body-weight pace ─────────────────────────────────────────────────────
-    bws = (BodyWeight.query
-           .filter_by(user_id=current_user.id)
-           .order_by(BodyWeight.log_date.asc()).all())
+    # ── Body-weight pace — BLOCK-SCOPED ──────────────────────────────────────
+    # Scope to THIS block (>= start_date). Without this, bws[0] is block 1's first
+    # weigh-in (226, Mar 30) and the coach quotes a stale overall pace / "25 weeks
+    # to target" that contradicts the (block-scoped) dashboard — a day-1 contradiction.
+    # Null-guard weight_lbs and add a deterministic id tiebreak so same-date
+    # weigh-ins resolve identically here and in app._despiked_current_weight.
+    _cs_state = AppState.query.filter_by(user_id=current_user.id).first()
+    _cs_block_start = _cs_state.start_date if _cs_state and _cs_state.start_date else None
+    _bws_q = (BodyWeight.query
+              .filter_by(user_id=current_user.id)
+              .filter(BodyWeight.weight_lbs.isnot(None)))
+    if _cs_block_start is not None:
+        _bws_q = _bws_q.filter(BodyWeight.log_date >= _cs_block_start)
+    bws = _bws_q.order_by(BodyWeight.log_date.asc(), BodyWeight.id.asc()).all()
     pace_per_week = None
     weeks_to_target = None
     proj_at_week_12 = None
@@ -525,6 +535,42 @@ def _build_cut_status():
             weeks_elapsed = max(0, (today - state.start_date).days // 7)
             weeks_left = max(0, 12 - weeks_elapsed)
             proj_at_week_12 = round(current_weight + (pace_per_week * weeks_left), 1)
+
+    # ── RECENT trailing slope + reversal + water-spike (C3/C4) ───────────────
+    # The start-to-now pace above MASKS a late reversal: block 1 went 204.6 (May10)
+    # -> 212 (May31) while the start-to-now slope still read "losing". The coach
+    # must see the RECENT direction and react. A one-week 3-8 lb jump on a
+    # downtrend is a gluten/water spike (inflammation), NOT fat regain.
+    recent_pace = None
+    trend_reversal = False
+    water_spike_suspected = False
+    if len(bws) >= 2:
+        recent = bws[-3:] if len(bws) >= 3 else bws[-2:]
+        rdays = max(1, (recent[-1].log_date - recent[0].log_date).days)
+        recent_pace = round((recent[-1].weight_lbs - recent[0].weight_lbs) / (rdays / 7), 2)
+        if pace_per_week is not None and pace_per_week < 0 and recent_pace > 0:
+            trend_reversal = True  # overall losing, recently gaining
+        # Acute spike: the LATEST weigh-in jumped 3-8 lb WITHIN ~10 days while the
+        # step before it was still descending, with >=3 weigh-ins to establish the
+        # trend. Strict so a genuine multi-week regain isn't excused as water — a
+        # slow regain still surfaces via trend_reversal, which the coach reacts to.
+        # This definition MUST match _despiked_current_weight in app.py exactly.
+        last_step = bws[-1].weight_lbs - bws[-2].weight_lbs
+        step_days = (bws[-1].log_date - bws[-2].log_date).days
+        prior_down = len(bws) >= 3 and bws[-2].weight_lbs < bws[-3].weight_lbs
+        if 3 <= last_step <= 8 and prior_down and 0 < step_days <= 10:
+            water_spike_suspected = True
+
+    # Latest weigh-in note (e.g. "glutened at dinner") — surfaces context the coach
+    # would otherwise never see.
+    latest_note = None
+    try:
+        from models import BodyMeasurement
+        bm = (BodyMeasurement.query.filter_by(user_id=current_user.id)
+              .order_by(BodyMeasurement.log_date.desc()).first())
+        latest_note = bm.notes if bm and getattr(bm, "notes", None) else None
+    except Exception:
+        latest_note = None
 
     # ── Weekly deficit (last 7 days) ─────────────────────────────────────────
     week_ago = today - _td(days=6)
@@ -566,6 +612,10 @@ def _build_cut_status():
         "current_weight": current_weight,
         "target_weight": target_weight,
         "pace_per_week": pace_per_week,
+        "recent_pace": recent_pace,
+        "trend_reversal": trend_reversal,
+        "water_spike_suspected": water_spike_suspected,
+        "latest_note": latest_note,
         "weeks_to_target": weeks_to_target,
         "projected_week_12_weight": proj_at_week_12,
         "weekly_deficit_estimate": weekly_deficit,
@@ -621,10 +671,17 @@ def _build_today_status():
     #               set, OR the 6-sets/3-done heuristic (auto-completion lag).
     #   not_started = zero rows for today's slot.
     #   in_progress = some rows, but not the whole session.
+    # MUST also match today's calendar date. The (week, day_idx) slot is unique
+    # to one date only WHILE the program is live; once the 12-week block ends,
+    # _current_week() clamps at 12 forever, so a later Monday (day_idx 0) would
+    # otherwise re-find an OLD week-12 Monday session and report it as done TODAY
+    # (Erik's 2026-06-29 phantom "you trained today"). The run side already
+    # filters on log_date==today — workout-done must do the same.
     slot_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
+        SetLog.logged_date == today,
     ).all()
     workout_logged_any = len(slot_sets) > 0
 
@@ -642,7 +699,15 @@ def _build_today_status():
     ).first()
     all_exercises_logged = bool(prescribed_names) and not remaining_exercises
     heuristic_done = len(slot_sets) >= 6 and sets_done >= 3
-    workout_complete = bool((dc and dc.done) or all_exercises_logged or heuristic_done)
+    # DATE-GATE the DayCompletion flag: honor dc.done only if it was recorded
+    # TODAY. Without this, once the program clamps the week at 12 (block over), a
+    # later same-weekday re-finds a stale dc.done from an earlier cycle and reads
+    # "complete" even after the athlete logs just ONE set today (slot_sets is then
+    # non-empty so the not_started branch doesn't catch it). all_exercises_logged
+    # and heuristic_done are already date-safe (slot_sets is logged_date==today).
+    from utils_time import parse_completion_date
+    dc_done_today = bool(dc and dc.done and parse_completion_date(dc.completed_at) == today)
+    workout_complete = bool(dc_done_today or all_exercises_logged or heuristic_done)
 
     if not workout_prescribed:
         workout_state = "rest"
@@ -1006,9 +1071,15 @@ def _build_completed_days():
     week = _current_week()
     week_monday = local_today - timedelta(days=local_today.weekday())
     completed = []
-    # DayCompletion records
+    # DayCompletion records — DATE-GATED. Only count a done-flag whose recorded
+    # completion date falls in THIS week's window; a stale flag from a prior
+    # cycle (week clamps at 12 after the block ends) must not mark a day done
+    # this week. Legacy rows have null completed_at -> not counted here; the
+    # date-keyed SetLog loop below still catches any day actually trained.
+    from utils_time import parse_completion_date
     for dc in DayCompletion.query.filter_by(user_id=current_user.id, week=week).all():
-        if dc.done and dc.day_idx not in completed:
+        cdate = parse_completion_date(dc.completed_at)
+        if dc.done and cdate and week_monday <= cdate <= local_today and dc.day_idx not in completed:
             completed.append(dc.day_idx)
     # SetLog by date range. Don't filter on done=True — log_set creates rows
     # with done=False by default, so requiring done=True undercounts completed
@@ -1239,6 +1310,11 @@ Intensity level: {anger_level_label}
     - If both DONE → it's a recovery/recap conversation. Do NOT manufacture work that isn't there.
     Crossing turns counts. If turn N said "good run", turn N+1 cannot say "get ready for your run" — same day, same state. The athlete's chat_history plus today_status is the joint state; reconcile both before responding.
 20. NEVER FABRICATE A RATIONALE — NEVER DEFEND AN ANOMALY AS A FEATURE. If the athlete questions a prescription that looks wrong — a RANGE where a single number belongs ("60-90 min", "25-35 min"), a placeholder, a value you cannot tie to their actual data — do NOT invent a justification for it. Specifically: NEVER claim a range exists "so you can choose", "for flexibility", "to give you options", or any similar made-up reason. A range in a prescription is a BUG, not a feature. Say so plainly: "That's a range where there should be one committed number — that's a bug, not something I'd prescribe on purpose. I'm flagging it." You commit to ONE number, always. If you genuinely don't know why a value is what it is, say "I don't know — that looks wrong" and stop. Inventing a reason to make a defect sound deliberate is a LIE and a system failure — the single worst thing you can do, because it makes the athlete distrust everything. When in doubt, side with the athlete's suspicion that something is off, not with defending the data you were handed.
+21. RUN THE CUT — REACT TO THE SCALE. When <cut_status> is present (the athlete is cutting), the scale is the #1 signal and you OWN it every day. Read cut_status every response:
+    a) If a recent weigh-in is present, name where it sits vs target and pace WITH THE NUMBER — on-pace, ahead, stalled, or regained — and give ONE cut directive tied to it (hold the deficit / ease 100 kcal / tighten). Never go silent on the scale.
+    b) If no weigh-in has been logged recently, CHASE IT: "No weigh-in since [date]. I can't run the cut blind. Fasted, this morning. Now." A missing weigh-in is not a reason to ignore the cut — it's the first thing to fix.
+    c) GLUTEN / WATER GUARD: a one-week jump of roughly 3-8 lb against a downtrend (cut_status.water_spike_suspected or trend_reversal true) is WATER and inflammation, NOT fat. Say so plainly. HOLD the deficit — do NOT deepen it, do NOT call it a blown cut, do NOT panic-cut calories. Expect it to flush in 1-2 weeks. A glutening is an event, not a failure.
+    ASSUMING the athlete handled the cut on their own — saying nothing about the scale — is the exact failure that cost block 1. Do not repeat it. The cut is coached, not tracked. (Cross-turn: if you already gave the scale directive earlier in THIS chat and nothing has changed since — no new weigh-in — do not repeat it every message. Like rule 19, reconcile against chat_history; coach the cut, don't nag it.)
 </non_negotiable_rules>
 
 <markers>
@@ -1562,6 +1638,14 @@ def _format_athlete_data(ctx, requires):
             )
         if cs.get("pace_per_week") is not None:
             cs_lines.append(f"  pace: {cs['pace_per_week']} lb/wk (overall, since wk 1)")
+        if cs.get("recent_pace") is not None:
+            cs_lines.append(f"  recent_pace: {cs['recent_pace']} lb/wk (last ~3 weigh-ins — the live direction)")
+        if cs.get("trend_reversal"):
+            cs_lines.append("  TREND_REVERSAL: overall losing but RECENTLY GAINING — react to this, don't quote the stale overall pace as if on track.")
+        if cs.get("water_spike_suspected"):
+            cs_lines.append("  WATER_SPIKE_SUSPECTED: last weigh-in jumped 3-8 lb on a downtrend = gluten/water/inflammation, NOT fat. HOLD the deficit, do NOT deepen, do NOT call it a blown cut. Expect it to flush in 1-2 wks.")
+        if cs.get("latest_note"):
+            cs_lines.append(f"  latest_weigh_in_note: {cs['latest_note']}")
         if cs.get("weeks_to_target") is not None:
             cs_lines.append(f"  weeks_to_target_at_pace: {cs['weeks_to_target']}")
         if cs.get("projected_week_12_weight") is not None:

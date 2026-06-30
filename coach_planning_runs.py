@@ -370,8 +370,9 @@ def generate_week_runs(
         "   cutting the PRESCRIPTION.\n"
         "3. Hit the target weekly miles (a FLOOR): sum durations × ~9 min/mi; if "
         "   under target, add volume.\n"
-        "4. At most ONE VO2 day per week. Saturday must have a run if they train "
-        "   6 days. The long run is the week's longest.\n"
+        "4. EVERY day has a run — the athlete runs ALL 7 days, Monday included "
+        "   (easy/recovery on heavy-lower days). No day may be left runless. At "
+        "   most ONE VO2 day per week. The long run is the week's longest.\n"
         "5. Single values only — never a range.\n"
         "6. The `reason` is ONE short, QUALITATIVE sentence. Do NOT state the total "
         "   duration, do NOT show arithmetic or sums ('Total = 12 + … = 47 min', "
@@ -432,8 +433,11 @@ def generate_week_runs(
             text = text.strip()
         parsed = json.loads(text)
     except Exception as e:
-        log.warning("generate_week_runs failed: %s", e)
-        return {}
+        # Even on total LLM/parse failure, never leave the week runless — the
+        # 7-day floor still applies (Erik runs every day). Returning {} here would
+        # bypass _ensure_seven_day_runs entirely.
+        log.warning("generate_week_runs failed: %s — applying 7-day floor", e)
+        return _ensure_seven_day_runs({}, week)
 
     out: dict[int, dict] = {}
     for k, v in parsed.items():
@@ -473,4 +477,25 @@ def generate_week_runs(
     # Hard backstop: never let a "baseline / first / no prior history" claim
     # reach an athlete who is mid-program. Prompt adherence is unreliable.
     out = _strip_baseline_confabulation(out, week)
+    # Hard backstop: Erik runs ALL 7 days — no day may be runless (the generator
+    # historically left Monday blank). Fill any gap with an easy Z2 recovery run.
+    out = _ensure_seven_day_runs(out, week)
+    return out
+
+
+def _ensure_seven_day_runs(out: dict, week: int) -> dict:
+    """7-day run floor. Every day_idx 0-6 must carry a run — least of all Monday
+    (day 0, the heavy-lower day), which the generator has left blank before.
+    A missing day gets an easy Zone 2 recovery run; deload weeks run shorter."""
+    deload = week in (4, 8, 12)
+    mins = 22 if deload else 28
+    for d in range(7):
+        if not out.get(d):
+            out[d] = {
+                "type": "z2",
+                "label": "Z2 Easy",
+                "duration": f"{mins} min",
+                "detail": "Easy aerobic recovery — every day gets a run.",
+                "segments": [{"kind": "steady", "minutes": mins, "hr": "≤132"}],
+            }
     return out
