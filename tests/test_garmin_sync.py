@@ -774,9 +774,13 @@ def test_sync_wellness_flags_truncated_backfill(app_ctx):
 def test_wellness_endpoint_serves_today_only_with_strip_keys(app_ctx):
     app_, db = app_ctx
     from models import GarminWellness
-    from datetime import date as _date
+    from utils_time import user_local_now
     u = _mk_user(db, "wellhttp@test.com")
-    today = _date.today()
+    # The endpoint filters by _user_today() = user-local date (UTC for a user with
+    # no timezone). Seed with the SAME convention, not the server's local
+    # date.today() — on a non-UTC dev machine near UTC midnight those diverge and
+    # the "today" row would be filtered out (a test-determinism bug, not endpoint).
+    today = user_local_now("UTC").date()
     GarminWellness.query.filter_by(user_id=u.id).delete()
     db.session.add(GarminWellness(user_id=u.id, date=today, sleep_seconds=27000,
                                   sleep_score=80, hrv_last_night=50, hrv_weekly_avg=54,
