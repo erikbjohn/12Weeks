@@ -281,37 +281,28 @@ def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> 
 
 
 def _tool_get_e1rm(user_id: int, exercise_name: str) -> str:
-    """Same exact-then-fuzzy fallback pattern as get_recent_sets — exercise
-    naming has drifted ('Front Squat' vs 'Barbell Front Squat' etc.) and
-    exact match was making real e1RM history invisible to the coach."""
-    from models import ExerciseLog
-    base = ExerciseLog.query.filter_by(user_id=user_id)
-    rows = (base
-            .filter(ExerciseLog.exercise_name == exercise_name)
-            .order_by(ExerciseLog.id.desc())
-            .limit(20).all())
-    matched_name = exercise_name
-    if not rows:
-        rows = (base
-                .filter(ExerciseLog.exercise_name.ilike(f"%{exercise_name}%"))
-                .order_by(ExerciseLog.id.desc())
-                .limit(20).all())
-        if rows:
-            matched_name = rows[0].exercise_name
-    if not rows:
+    """Estimated-1RM history from SetLog (the live table), not the dead
+    ExerciseLog. e1RM is the Epley estimate of each session's top set. Matches
+    equipment variants by movement (a logged 'DB Bench Press' answers a query for
+    'Barbell Bench Press') so real history isn't hidden behind the equipment name.
+    """
+    from lift_history import lift_session_history
+    hist = lift_session_history(user_id, exercise_name, limit_sessions=20)
+    hist = [h for h in hist if h["e1rm"] is not None]
+    if not hist:
         return json.dumps({
             "exercise": exercise_name,
             "e1rm_history": [],
             "note": f"No e1RM history for {exercise_name!r}.",
         })
     return json.dumps({
-        "exercise": matched_name,
+        "exercise": hist[-1]["exercise_name"],
         "queried_as": exercise_name,
-        "current": rows[0].estimated_1rm,
+        "current": hist[-1]["e1rm"],
         "e1rm_history": [
-            {"date": str(getattr(r, "log_date", None) or getattr(r, "created_at", None)),
-             "e1rm": r.estimated_1rm}
-            for r in rows if r.estimated_1rm is not None
+            {"date": str(h["date"]), "e1rm": h["e1rm"],
+             "top_set": f"{h['top_weight']:g}x{h['top_reps']}"}
+            for h in hist
         ],
     }, default=str)
 

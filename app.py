@@ -6080,10 +6080,17 @@ def api_progress():
         "Barbell Bench Press", "Barbell Back Squat", "Conventional Deadlift",
         "Barbell OHP", "Barbell Bent-Over Row", "Lat Pulldown",
     ]
+    # Read progression from SetLog (live table), not the dead ExerciseLog. Match
+    # equipment variants by movement so a logged "DB Bench Press" shows under the
+    # "Barbell Bench Press" key. Top set per session; e1RM via Epley.
+    from lift_history import lift_session_history
     lifts = {}
     for name in key_lifts:
-        logs = ExerciseLog.query.filter_by(user_id=current_user.id, exercise_name=name).order_by(ExerciseLog.logged_date).all()
-        lifts[name] = [{"date": l.logged_date.isoformat(), "weight": l.weight, "week": l.week} for l in logs]
+        hist = lift_session_history(current_user.id, name)
+        lifts[name] = [{"date": h["date"].isoformat() if h["date"] else None,
+                        "weight": h["top_weight"], "week": h["week"],
+                        "e1rm": h["e1rm"], "exercise": h["exercise_name"]}
+                       for h in hist]
 
     # Body measurements (all fields for Stats screen + charts)
     measurements = [{
