@@ -157,6 +157,48 @@ def test_coach_and_dashboard_agree_on_lift_planned_state(app_ctx):
     assert _coach_unplanned(target) is False
 
 
+def test_coach_rules_unplanned_does_not_prescribe_template(app_ctx):
+    """coach_rules (the validated-pipeline path) must also treat a no-prescription
+    day as unplanned: the summary carries lift_unplanned, the prefilled schedule
+    says NOT PLANNED, and the directive offers to plan instead of 'Lift now {lift}'.
+    """
+    from datetime import datetime
+    from flask_login import login_user
+    import coach_rules as cr
+    app_, db = app_ctx
+    u = _fresh_user(db, "cr-unplanned@test.com")
+    with app_.test_request_context():
+        login_user(u, force=True)
+        summ = None
+        for d in range(7):
+            s = cr._resolve_workout_for_day_summary(u.id, 1, d)
+            if s and not s.is_rest:
+                summ = s
+                break
+    assert summ is not None
+    assert summ.lift_unplanned is True
+    assert summ.lift_name == ""  # template name NOT leaked
+
+    sched = cr._render_prefilled_schedule(
+        now_local=datetime(2026, 1, 5, 10, 0), workout_today=summ,
+        workout_today_scheduled_at=None, run_today=None,
+        workout_tomorrow=None, workout_tomorrow_scheduled_at=None, run_tomorrow=None)
+    sched_txt = sched if isinstance(sched, str) else "\n".join(sched)
+    assert "Today workout: NOT PLANNED" in sched_txt
+
+    d = cr._compute_directive(
+        now_local=datetime(2026, 1, 5, 10, 0),
+        workout_today=summ, workout_today_scheduled_at=None,
+        workout_today_status="unplanned",
+        run_today=None, run_today_status="none",
+        workout_tomorrow=None, workout_tomorrow_scheduled_at=None, run_tomorrow=None,
+        fasting_active=False, weekend_fast_active=False,
+        is_pr_session=False, next_target_hint=None,
+        refusal_required=False, phase_summary="Phase 1 (week 1)")
+    assert "plan the week" in d.text.lower()
+    assert "lift now" not in d.text.lower()
+
+
 def test_unplanned_directive_tells_coach_to_plan_not_prescribe():
     from coach_assembler import _format_today_status_block
     block = "\n".join(_format_today_status_block({

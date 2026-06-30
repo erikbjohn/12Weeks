@@ -38,6 +38,7 @@ class WorkoutSummary:
     lift_name: str
     exercise_names: list[str]
     is_rest: bool
+    lift_unplanned: bool = False  # training day with no coach/engine prescription
 
 
 @dataclass(frozen=True)
@@ -113,9 +114,10 @@ def _resolve_workout_for_day_summary(user_id: int, week: int, day_idx: int) -> O
         )
     exercises = day.get("exercises", []) or []
     return WorkoutSummary(
-        lift_name=day.get("liftName", ""),
+        lift_name=day.get("liftName") or "",
         exercise_names=[e.get("name", "") for e in exercises if e.get("name")],
         is_rest=False,
+        lift_unplanned=bool(day.get("lift_unplanned")),
     )
 
 
@@ -464,6 +466,14 @@ def _compute_directive(
             category="workout_done_run_pending",
         )
 
+    # Rule 3b — workout UNPLANNED: no coach prescription. Never prescribe the
+    # (stripped) template lift; tell the athlete to plan the week.
+    if workout_today_status == "unplanned":
+        return Directive(
+            text="Today's lifts aren't planned. Plan the week.",
+            category="workout_unplanned",
+        )
+
     # Rule 4 — workout pending, in window
     if workout_today_status == "not_started" and workout_today and not workout_today.is_rest:
         window = _in_workout_window(now_local, workout_today_scheduled_at)
@@ -601,6 +611,8 @@ def _render_prefilled_schedule(
         lines.append("Today workout: (none)")
     elif workout_today.is_rest:
         lines.append("Today workout: REST")
+    elif getattr(workout_today, "lift_unplanned", False):
+        lines.append("Today workout: NOT PLANNED (plan the week)")
     else:
         sched = workout_today_scheduled_at.strftime("%H:%M") if workout_today_scheduled_at else "(unscheduled)"
         lines.append(f"Today workout: {workout_today.lift_name} at {sched}")
@@ -695,6 +707,11 @@ def compute_coach_rules(
     workout_today_status = _compute_workout_status(
         user_id, week, weekday_idx, today, is_rest_today,
     )
+    # Coach-or-nothing: a training day with no prescription is UNPLANNED, not
+    # 'not_started' — never prescribe the (stripped) template lift; offer to plan.
+    if (workout_today and getattr(workout_today, "lift_unplanned", False)
+            and not is_rest_today and workout_today_status == "not_started"):
+        workout_today_status = "unplanned"
 
     # Workout tomorrow (clamp to week 12)
     next_week_clamped = min(12, next_week)
