@@ -73,15 +73,19 @@ def prescribe_starting_weight(
               .first())
     body_weight = bw_row.weight_lbs if bw_row else None
 
-    # Estimated 1RMs from ExerciseLog (most-recent per exercise)
+    # Estimated 1RMs = best recent Epley estimate per exercise from SetLog (the
+    # live table). ExerciseLog.estimated_1rm is dead (table unwritten since April).
     one_rms: dict[str, float] = {}
-    el_rows = (ExerciseLog.query
-               .filter_by(user_id=user_id)
-               .order_by(ExerciseLog.id.desc())
-               .all())
-    for r in el_rows:
-        if r.estimated_1rm and r.exercise_name not in one_rms:
-            one_rms[r.exercise_name] = round(float(r.estimated_1rm), 1)
+    e1rm_rows = (SetLog.query
+                 .filter(SetLog.user_id == user_id, SetLog.weight.isnot(None))
+                 .order_by(SetLog.logged_date.desc())
+                 .limit(200).all())
+    for s in e1rm_rows:
+        if not s.weight:
+            continue
+        est = round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)
+        if s.exercise_name not in one_rms or est > one_rms[s.exercise_name]:
+            one_rms[s.exercise_name] = est
 
     # Recent peak weights (top weight per exercise across last ~120 done sets)
     recent_peaks: dict[str, float] = {}

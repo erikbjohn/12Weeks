@@ -73,26 +73,21 @@ def compute_weekly_metrics(week_num, user_id=None):
         "Barbell Bench Press", "Barbell Back Squat", "Conventional Deadlift",
         "Barbell OHP", "Barbell Bent-Over Row",
     ]
+    # PRs from SetLog (the live table), matched by movement so a logged
+    # "DB Bench Press" counts for "Barbell Bench Press". The old ExerciseLog +
+    # exact-name query returned nothing (table dead since April) so weekly reports
+    # showed no lifts.
     lifts_summary = {}
-    for name in key_lift_names:
-        q = ExerciseLog.query.filter(
-            ExerciseLog.exercise_name == name,
-            ExerciseLog.week == week_num,
-        )
-        if user_id is not None:
-            q = q.filter(ExerciseLog.user_id == user_id)
-        logs = q.all()
-        if logs:
-            max_weight = max(l.weight for l in logs)
-            # Check if PR
-            q2 = ExerciseLog.query.filter(
-                ExerciseLog.exercise_name == name,
-                ExerciseLog.week < week_num,
-            )
-            if user_id is not None:
-                q2 = q2.filter(ExerciseLog.user_id == user_id)
-            all_time = q2.all()
-            prev_max = max((l.weight for l in all_time), default=0)
+    if user_id is not None:
+        from lift_history import lift_session_history
+        for name in key_lift_names:
+            hist = lift_session_history(user_id, name)
+            this_week = [h["top_weight"] for h in hist if h["week"] == week_num]
+            if not this_week:
+                continue
+            max_weight = max(this_week)
+            prev_max = max((h["top_weight"] for h in hist
+                            if (h["week"] or 0) < week_num), default=0)
             lifts_summary[name] = {
                 "weight": max_weight,
                 "is_pr": max_weight > prev_max and prev_max > 0,

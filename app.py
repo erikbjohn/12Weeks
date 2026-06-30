@@ -5989,19 +5989,30 @@ def api_export():
 
 
 def _serialize_weights(user_id=None):
+    # Built from SetLog (the live table), not the dead ExerciseLog. One history
+    # entry per exercise per SESSION = that session's top working set, in
+    # chronological order; `current` is the most recent session's top set.
     uid = user_id or current_user.id
-    logs = ExerciseLog.query.filter_by(user_id=uid).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
+    rows = (SetLog.query
+            .filter(SetLog.user_id == uid, SetLog.weight.isnot(None))
+            .order_by(SetLog.logged_date, SetLog.id).all())
     result = {}
-    for log in logs:
-        name = log.exercise_name
-        if name not in result:
-            result[name] = {"current": 0, "history": []}
-        result[name]["history"].append({
-            "weight": log.weight, "reps": log.sets_label,
-            "rpe": log.rpe, "date": log.logged_date.isoformat() if log.logged_date else None,
-            "week": log.week, "day": log.day_idx,
-        })
-        result[name]["current"] = log.weight
+    sessions = {}  # (name, week, day, date) -> the entry dict in result[name]["history"]
+    for s in rows:
+        name = s.exercise_name
+        skey = (name, s.week, s.day_idx, s.logged_date)
+        e = sessions.get(skey)
+        if e is None:
+            e = {"weight": s.weight, "reps": s.reps, "rpe": None,
+                 "date": s.logged_date.isoformat() if s.logged_date else None,
+                 "week": s.week, "day": s.day_idx}
+            sessions[skey] = e
+            result.setdefault(name, {"current": 0, "history": []})["history"].append(e)
+        elif s.weight is not None and s.weight > e["weight"]:
+            e["weight"], e["reps"] = s.weight, s.reps
+    for data in result.values():
+        if data["history"]:
+            data["current"] = data["history"][-1]["weight"]
     return result
 
 
