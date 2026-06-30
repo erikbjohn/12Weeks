@@ -102,6 +102,19 @@ def _login_fresh_user(db, email):
     return u
 
 
+def _seed_coach_rx(db, uid, week, day_idx, names):
+    """Seed a real COACH prescription for the slot. Required now that the coach
+    no longer falls back to the static template (coach-or-nothing): a day with no
+    prescription is 'unplanned', not a prescribed workout."""
+    from models import WeeklyPrescription
+    WeeklyPrescription.query.filter_by(user_id=uid, week=week, day_idx=day_idx).delete()
+    for i, n in enumerate(names):
+        db.session.add(WeeklyPrescription(
+            user_id=uid, week=week, day_idx=day_idx, exercise_order=i,
+            exercise_name=n, sets=4, reps="8", rest="90s", source="coach"))
+    db.session.commit()
+
+
 def test_build_today_status_in_progress_on_partial_log(app_ctx, monkeypatch):
     app_, db = app_ctx
     import coach_assembler as ca
@@ -115,9 +128,10 @@ def test_build_today_status_in_progress_on_partial_log(app_ctx, monkeypatch):
         login_user(u, force=True)
         monkeypatch.setattr(ca, "_current_week", lambda: 5)
         monkeypatch.setattr(ca, "_user_today", lambda: today)
-        resolved = ca._resolve_workout_for_day(5, 3)
+        _seed_coach_rx(db, u.id, 5, 3, ["Barbell Bench Press", "Incline DB Press"])
+        resolved = ca._resolve_workout_for_day(5, 3)  # post equipment-swap names
         names = [e.get("name") for e in (resolved or {}).get("exercises", []) if e.get("name")]
-        assert len(names) >= 2, f"need a multi-exercise day to test partial: {resolved}"
+        assert len(names) >= 2, resolved
         # wipe slot, then log ONLY the first exercise (one done set) — a partial
         SetLog.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
         DayCompletion.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
@@ -142,7 +156,8 @@ def test_build_today_status_complete_when_all_exercises_logged(app_ctx, monkeypa
         login_user(u, force=True)
         monkeypatch.setattr(ca, "_current_week", lambda: 5)
         monkeypatch.setattr(ca, "_user_today", lambda: today)
-        resolved = ca._resolve_workout_for_day(5, 3)
+        _seed_coach_rx(db, u.id, 5, 3, ["Barbell Bench Press", "Incline DB Press"])
+        resolved = ca._resolve_workout_for_day(5, 3)  # post equipment-swap names
         names = [e.get("name") for e in (resolved or {}).get("exercises", []) if e.get("name")]
         SetLog.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
         DayCompletion.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
@@ -153,6 +168,41 @@ def test_build_today_status_complete_when_all_exercises_logged(app_ctx, monkeypa
         db.session.commit()
         ts = ca._build_today_status()["today_status"]
         assert ts["workout_state"] == "complete", ts
+
+
+def test_build_today_status_not_started_when_slot_sets_are_from_an_earlier_date(app_ctx, monkeypatch):
+    """Erik's real failure (2026-06-29): the 12-week program ended June 21, so
+    _current_week() clamps at 12 forever. On a later Monday (day_idx 0) the
+    workout-done check queried SetLog by (week=12, day_idx=0) ONLY — with no date
+    filter — and found his June 15 Monday session, then reported today as DONE.
+    He had logged NOTHING today. A set logged on a prior calendar date must never
+    count as today's workout. Mirror the run side, which already filters on date.
+    """
+    app_, db = app_ctx
+    import coach_assembler as ca
+    from models import User, SetLog, DayCompletion
+    from flask_login import login_user
+    today = date(2026, 6, 29)        # Monday — calendar is past the 12-week block
+    assert today.weekday() == 0
+    earlier = date(2026, 6, 15)      # the week-12 Monday he actually trained
+    with app_.test_request_context():
+        u = _login_fresh_user(db, "stale-slot@test.com")
+        login_user(u, force=True)
+        monkeypatch.setattr(ca, "_current_week", lambda: 12)
+        monkeypatch.setattr(ca, "_user_today", lambda: today)
+        names = ["Barbell Back Squat", "Romanian Deadlift"]
+        _seed_coach_rx(db, u.id, 12, 0, names)
+        SetLog.query.filter_by(user_id=u.id, week=12, day_idx=0).delete()
+        DayCompletion.query.filter_by(user_id=u.id, week=12, day_idx=0).delete()
+        for n in names:  # a FULLY logged session — but on an EARLIER date
+            db.session.add(SetLog(user_id=u.id, week=12, day_idx=0,
+                                  exercise_name=n, set_number=0,
+                                  weight=100, reps=5, done=True, logged_date=earlier))
+        db.session.commit()
+        ts = ca._build_today_status()["today_status"]
+        assert ts["workout_state"] == "not_started", ts
+        assert ts["sets_logged"] == 0, ts
+        assert ts["workout_logged"] is False, ts
 
 
 def test_build_today_status_not_started_when_nothing_logged(app_ctx, monkeypatch):
@@ -166,6 +216,7 @@ def test_build_today_status_not_started_when_nothing_logged(app_ctx, monkeypatch
         login_user(u, force=True)
         monkeypatch.setattr(ca, "_current_week", lambda: 5)
         monkeypatch.setattr(ca, "_user_today", lambda: today)
+        _seed_coach_rx(db, u.id, 5, 3, ["Barbell Bench Press", "Incline DB Press"])
         SetLog.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
         DayCompletion.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
         db.session.commit()

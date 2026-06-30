@@ -177,10 +177,12 @@ def _resolve_workout_for_day(week, day_idx):
     day = workouts[day_idx]
 
     # Prescriptions replace the template wholesale when present.
+    had_rx = False
     try:
         rx_rows = WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=week, day_idx=day_idx
         ).order_by(WeeklyPrescription.exercise_order).all()
+        had_rx = bool(rx_rows)
         if rx_rows:
             day["exercises"] = [{
                 "name": rx.exercise_name,
@@ -217,6 +219,16 @@ def _resolve_workout_for_day(week, day_idx):
                 day["exercises"][sw.exercise_idx]["name"] = sw.swapped_to
     except Exception:
         pass
+
+    # COACH-OR-NOTHING: a lift day with NO prescription is UNPLANNED. Strip the
+    # raw template exercises and flag it, exactly like the dashboard EXERCISE card
+    # (plan_overlay.finalize_day_plan). Without this the coach narrated the static
+    # template ("the prescription was 4x8 building to 12, plus RDLs...") while the
+    # card said "your coach hasn't planned these lifts yet / Plan this week" — a
+    # contradiction, and a static-template leak the no-static-fallback rule forbids.
+    if not had_rx and not day.get("isRest"):
+        day["exercises"] = []
+        day["lift_unplanned"] = True
 
     return day
 
@@ -667,12 +679,17 @@ def _build_today_status():
     # every weekday — wrong, and it propagated into multi-agent specialist
     # responses that faithfully cited the bad signal.
     resolved = _resolve_workout_for_day(week, today_idx)
+    # lift_unplanned = a real training day with NO coach/engine prescription. The
+    # resolver strips the template for these (coach-or-nothing) so the coach can't
+    # narrate template lifts the dashboard says aren't planned.
+    lift_unplanned = bool(resolved and resolved.get("lift_unplanned"))
     prescribed_exercises = [
         e for e in ((resolved or {}).get("exercises") or []) if e.get("name")
     ]
     workout_prescribed = bool(
         resolved
         and not resolved.get("isRest")
+        and not lift_unplanned
         and (prescribed_exercises or resolved.get("liftName"))
     )
 
@@ -722,11 +739,21 @@ def _build_today_status():
     dc_done_today = bool(dc and dc.done and parse_completion_date(dc.completed_at) == today)
     workout_complete = bool(dc_done_today or all_exercises_logged or heuristic_done)
 
-    if not workout_prescribed:
+    if resolved and resolved.get("isRest"):
         workout_state = "rest"
     elif not slot_sets:
-        workout_state = "not_started"
+        # Nothing logged today. Distinguish unplanned (training day, no plan ->
+        # offer to plan, don't narrate template) from not_started (planned) from
+        # rest.
+        if lift_unplanned:
+            workout_state = "unplanned"
+        elif workout_prescribed:
+            workout_state = "not_started"
+        else:
+            workout_state = "rest"
     elif workout_complete:
+        # Sets logged today — the athlete trained (even on an unplanned day). Never
+        # report it as 'unplanned'; acknowledge the logged work.
         workout_state = "complete"
     else:
         workout_state = "in_progress"
@@ -758,6 +785,7 @@ def _build_today_status():
         "date": today.isoformat(),
         "weekday": today.strftime("%A"),
         "workout_prescribed": workout_prescribed,
+        "workout_unplanned": lift_unplanned,
         "workout_logged": workout_logged_any,
         "workout_state": workout_state,
         "workout_logged_exercises": logged_exercises,
@@ -798,7 +826,14 @@ def _format_today_status_block(ts):
         else:
             state = "not_started"
 
-    if not ts.get("workout_prescribed") or state == "rest":
+    if state == "unplanned":
+        lines.append(
+            "  workout: NOT PLANNED YET — today is a training day but the coach "
+            "has NOT planned the lifts. Do NOT describe, list, or prescribe "
+            "specific exercises (there is no template to fall back on — "
+            "coach-or-nothing; the dashboard shows 'Plan this week'). Tell the "
+            "athlete the lifts aren't planned and to plan the week.")
+    elif not ts.get("workout_prescribed") or state == "rest":
         lines.append("  workout: REST DAY (no workout prescribed today)")
     elif state == "complete":
         lines.append("  workout: DONE — the full session is logged. The lift is "

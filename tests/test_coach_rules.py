@@ -119,6 +119,16 @@ class TestWorkoutResolution:
         from coach_rules import _resolve_workout_for_day_summary
         app, _ = app_ctx
         u = self._make_user(app_ctx)
+        # Coach-or-nothing: the resolver no longer falls back to the static
+        # template, so seed a real COACH prescription for this day.
+        from app import db as _db
+        from models import WeeklyPrescription
+        WeeklyPrescription.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
+        for i, nm in enumerate(["Barbell Bent-Over Row", "Weighted Pull-Up"]):
+            _db.session.add(WeeklyPrescription(user_id=u.id, week=5, day_idx=3,
+                                               exercise_order=i, exercise_name=nm, sets=4,
+                                               reps="8", rest="90s", source="coach"))
+        _db.session.commit()
         with app.test_request_context():
             from flask_login import login_user
             login_user(u)

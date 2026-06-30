@@ -77,6 +77,14 @@ def test_assembler_partial_log_with_stale_daycompletion_is_in_progress(app_ctx, 
         login_user(u, force=True)
         monkeypatch.setattr(ca, "_current_week", lambda: 12)
         monkeypatch.setattr(ca, "_user_today", lambda: today)
+        # Seed a real COACH prescription (coach-or-nothing: no template fallback).
+        from models import WeeklyPrescription
+        WeeklyPrescription.query.filter_by(user_id=u.id, week=12, day_idx=0).delete()
+        for i, nm in enumerate(["Barbell Back Squat", "Romanian Deadlift"]):
+            db.session.add(WeeklyPrescription(user_id=u.id, week=12, day_idx=0,
+                                              exercise_order=i, exercise_name=nm, sets=4,
+                                              reps="8", rest="90s", source="coach"))
+        db.session.commit()
         resolved = ca._resolve_workout_for_day(12, 0)
         names = [e.get("name") for e in (resolved or {}).get("exercises", []) if e.get("name")]
         assert len(names) >= 2, f"need a multi-exercise day: {resolved}"
