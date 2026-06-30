@@ -177,12 +177,15 @@ def _resolve_workout_for_day(week, day_idx):
     day = workouts[day_idx]
 
     # Prescriptions replace the template wholesale when present.
-    had_rx = False
+    # rx_known_empty is True ONLY when the query SUCCEEDED and returned nothing —
+    # so a transient query exception never strips a genuinely-planned day to
+    # "unplanned" (which would tell the athlete to re-plan a week they planned).
+    rx_known_empty = False
     try:
         rx_rows = WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=week, day_idx=day_idx
         ).order_by(WeeklyPrescription.exercise_order).all()
-        had_rx = bool(rx_rows)
+        rx_known_empty = not rx_rows
         if rx_rows:
             day["exercises"] = [{
                 "name": rx.exercise_name,
@@ -226,8 +229,9 @@ def _resolve_workout_for_day(week, day_idx):
     # template ("the prescription was 4x8 building to 12, plus RDLs...") while the
     # card said "your coach hasn't planned these lifts yet / Plan this week" — a
     # contradiction, and a static-template leak the no-static-fallback rule forbids.
-    if not had_rx and not day.get("isRest"):
+    if rx_known_empty and not day.get("isRest"):
         day["exercises"] = []
+        day["liftName"] = None  # don't leak the template lift NAME either
         day["lift_unplanned"] = True
 
     return day
@@ -833,7 +837,10 @@ def _format_today_status_block(ts):
             "specific exercises (there is no template to fall back on — "
             "coach-or-nothing; the dashboard shows 'Plan this week'). Tell the "
             "athlete the lifts aren't planned and to plan the week.")
-    elif not ts.get("workout_prescribed") or state == "rest":
+    elif state == "rest":
+        # Note: gate on STATE, not workout_prescribed — an unplanned day with
+        # LOGGED sets has workout_prescribed=False but state complete/in_progress,
+        # and must NOT be mislabeled a rest day.
         lines.append("  workout: REST DAY (no workout prescribed today)")
     elif state == "complete":
         lines.append("  workout: DONE — the full session is logged. The lift is "
@@ -1737,7 +1744,12 @@ def _format_athlete_data(ctx, requires):
             parts.append("Today is a rest day (streak mile only).")
         else:
             run_info = w.get('run', {})
-            parts.append(f"Today's workout: {w.get('liftName', 'Rest')}. Run: {run_info.get('label', '?')} {run_info.get('time', '')}.")
+            run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+            if w.get("lift_unplanned") or not w.get("liftName"):
+                # Coach-or-nothing: no plan -> do NOT name a (template) lift.
+                parts.append("Today's lifts are NOT planned yet — plan the week." + run_tail)
+            else:
+                parts.append(f"Today's workout: {w.get('liftName')}.{run_tail}")
             if w.get("exercises"):
                 parts.append("Prescribed exercises:")
                 for ex in w["exercises"]:

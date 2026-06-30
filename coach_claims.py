@@ -162,6 +162,10 @@ def build_claims(user_id: int, scope: tuple[str, ...] = ()) -> list[Claim]:
                         value=str(ts["workout_lift_name"]),
                         source="today_status",
                     ))
+            elif ts.get("workout_unplanned") or ts.get("workout_state") == "unplanned":
+                # Unplanned TRAINING day — NOT rest. Do not emit a citable
+                # is_rest_day fact (the coach could otherwise validate "rest today").
+                pass
             else:
                 out.append(Claim(
                     claim_id="today.workout.is_rest",

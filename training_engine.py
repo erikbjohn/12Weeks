@@ -209,7 +209,7 @@ def _round_weight(weight):
 
 
 def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=None,
-                         allow_llm=True):
+                         allow_llm: bool = True):
     """Compute targets for the next time this exercise appears.
 
     exercise_order disambiguates exercises that appear multiple times in the same

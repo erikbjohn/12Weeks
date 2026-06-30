@@ -73,6 +73,42 @@ def test_today_status_unplanned_when_no_prescription(app_ctx, monkeypatch):
         assert ts["workout_prescribed"] is False, ts
 
 
+def test_resolver_strips_liftname_on_unplanned(app_ctx):
+    """The resolver must blank the template lift NAME too, not just exercises —
+    else it leaks through the workout summary and the claims table."""
+    app_, db = app_ctx
+    import coach_assembler as ca
+    from flask_login import login_user
+    u = _fresh_user(db, "unplanned-liftname@test.com")
+    with app_.test_request_context():
+        login_user(u, force=True)
+        for d in range(7):
+            r = ca._resolve_workout_for_day(1, d)
+            if r and not r.get("isRest"):
+                assert r.get("lift_unplanned") is True
+                assert r.get("liftName") is None, r.get("liftName")
+                return
+        pytest.skip("no template lift day found")
+
+
+def test_logged_workout_on_unplanned_day_is_not_rest_in_directive():
+    """An unplanned day with LOGGED sets has workout_prescribed=False but state
+    in_progress/complete — the directive must acknowledge the training, NOT emit
+    'REST DAY' (the old `not workout_prescribed` check fired first)."""
+    from coach_assembler import _format_today_status_block
+    block = "\n".join(_format_today_status_block({
+        "weekday": "Monday", "date": "2026-01-05",
+        "workout_prescribed": False, "workout_unplanned": True,
+        "workout_state": "in_progress", "workout_logged": True,
+        "workout_logged_exercises": ["Barbell Back Squat"],
+        "workout_remaining_exercises": ["Romanian Deadlift"],
+        "sets_done": 2, "sets_logged": 4,
+        "run_prescribed": None, "run_logged": False,
+    })).lower()
+    assert "rest day" not in block, block
+    assert "in progress" in block, block
+
+
 def test_unplanned_directive_tells_coach_to_plan_not_prescribe():
     from coach_assembler import _format_today_status_block
     block = "\n".join(_format_today_status_block({
