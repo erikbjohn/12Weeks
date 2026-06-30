@@ -237,6 +237,27 @@ def _tool_get_recent_sets(user_id: int, exercise_name: str, limit: int = 12) -> 
             # Use the first row's actual name so the coach sees what was logged.
             matched_name = rows[0].exercise_name
     if not rows:
+        # Movement-key fallback: substring ilike is asymmetric — a longer query
+        # name isn't a substring of a shorter logged name, so "Barbell Bench Press"
+        # missed logged "DB Bench Press" and the coach hallucinated "no bench
+        # logged" (judge prog_001). Match equipment variants by canonical movement.
+        try:
+            from coach_planning_program import _movement_key
+            target_key = _movement_key(exercise_name)
+            if target_key:
+                names = [n for (n,) in base.with_entities(SetLog.exercise_name).distinct().all()]
+                variants = [n for n in names if _movement_key(n) == target_key]
+                if variants:
+                    rows = (base
+                            .filter(SetLog.exercise_name.in_(variants))
+                            .order_by(SetLog.logged_date.desc(), SetLog.set_number.asc())
+                            .limit(int(limit))
+                            .all())
+                    if rows:
+                        matched_name = rows[0].exercise_name
+        except Exception:
+            pass
+    if not rows:
         return json.dumps({
             "exercise": exercise_name,
             "sets": [],

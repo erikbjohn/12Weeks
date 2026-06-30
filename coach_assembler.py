@@ -320,24 +320,37 @@ def _build_week_schedule():
 
 @section_builder("exercise_history")
 def _build_exercise_history():
-    from models import ExerciseLog
+    # Reads SetLog (the LIVE logging table), not the legacy ExerciseLog which the
+    # logging flow stopped writing (dead in prod since April). Reading the dead
+    # table made the coach answer "no logged bench sets on file" while the athlete
+    # had bench logged — a trust-killing hallucination on any history question.
+    # Mirrors _build_today_sets, which already reads SetLog. Per exercise (by
+    # canonical name) we surface the 3 most recent SESSIONS, each as that session's
+    # TOP working set so the coach can cite "last bench: 75x4".
+    from models import SetLog
     from workout_data import resolve_name
-    rows = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
-        ExerciseLog.logged_date.desc(), ExerciseLog.id.desc()
-    ).limit(200).all()
-    history = {}
-    for log in rows:
-        canonical = resolve_name(log.exercise_name)
-        if canonical not in history:
-            history[canonical] = []
-        if len(history[canonical]) < 3:
-            entry = {"weight": log.weight, "rpe": log.rpe,
-                     "reps_completed": log.reps_completed,
-                     "week": log.week,
-                     "date": log.logged_date.isoformat() if log.logged_date else None}
-            if log.estimated_1rm:
-                entry["estimated_1rm"] = log.estimated_1rm
-            history[canonical].append(entry)
+    rows = (SetLog.query
+            .filter(SetLog.user_id == current_user.id, SetLog.weight.isnot(None))
+            .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
+            .limit(500).all())
+    sessions = {}   # canonical -> {session_key -> entry}
+    order = {}      # canonical -> [session_key] in recency order (most recent first)
+    for s in rows:
+        canonical = resolve_name(s.exercise_name)
+        skey = (s.week, s.day_idx, s.logged_date.isoformat() if s.logged_date else None)
+        d = sessions.setdefault(canonical, {})
+        if skey not in d:
+            if len(order.setdefault(canonical, [])) >= 3:
+                continue  # already have the 3 most recent sessions for this lift
+            order[canonical].append(skey)
+            d[skey] = {"weight": s.weight, "reps_completed": s.reps, "sets": 0,
+                       "week": s.week,
+                       "date": s.logged_date.isoformat() if s.logged_date else None}
+        e = d[skey]
+        e["sets"] += 1
+        if s.weight is not None and (e["weight"] is None or s.weight > e["weight"]):
+            e["weight"], e["reps_completed"] = s.weight, s.reps  # keep the session's top set
+    history = {c: [sessions[c][k] for k in keys] for c, keys in order.items()}
     return {"exercise_history": history}
 
 
