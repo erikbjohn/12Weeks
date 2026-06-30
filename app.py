@@ -448,7 +448,12 @@ with app.app_context():
             filled = 0
             for rx in rx_null:
                 try:
-                    targets = compute_next_targets(rx.user_id, rx.exercise_name, rx.week, rx.day_idx)
+                    # allow_llm=False: this runs at IMPORT inside app_context — it must
+                    # never block boot on a network/LLM call (it would hang startup; a
+                    # fresh week of no-history prescriptions floods it). History-based
+                    # fills still work; new-movement starts stay null until first log.
+                    targets = compute_next_targets(rx.user_id, rx.exercise_name, rx.week,
+                                                   rx.day_idx, allow_llm=False)
                     if targets.get('target_weight'):
                         rx.target_weight = targets['target_weight']
                         filled += 1

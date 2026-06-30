@@ -208,7 +208,8 @@ def _round_weight(weight):
     return int(math.ceil(weight / 5) * 5)
 
 
-def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=None):
+def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=None,
+                         allow_llm=True):
     """Compute targets for the next time this exercise appears.
 
     exercise_order disambiguates exercises that appear multiple times in the same
@@ -281,15 +282,20 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
         target_sets = configured_sets_first or (4 if phase <= 2 else 3)
         scheme = f"{target_sets}x{_get_configured_reps_str(exercise_name, week, day_idx, exercise_order) or target_reps}"
 
-        try:
-            from lifting_agent import prescribe_starting_weight
-            agent = prescribe_starting_weight(
-                user_id=user_id,
-                exercise_name=exercise_name,
-                prescribed_scheme=scheme,
-            )
-        except Exception:
-            agent = None
+        # allow_llm=False callers (e.g. the app-startup backfill) must NOT make a
+        # blocking network call — an LLM call here at import time hangs/slows boot
+        # and a freshly-generated week floods it. They get the baseline below.
+        agent = None
+        if allow_llm:
+            try:
+                from lifting_agent import prescribe_starting_weight
+                agent = prescribe_starting_weight(
+                    user_id=user_id,
+                    exercise_name=exercise_name,
+                    prescribed_scheme=scheme,
+                )
+            except Exception:
+                agent = None
 
         if agent and agent.get("weight_lbs"):
             return {
