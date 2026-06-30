@@ -9829,12 +9829,14 @@ def api_physical_assessment_reset():
     return jsonify({"ok": True})
 
 
-# ─── BODYWEIGHT RETEST (week 12 only) ──────────────────────────────────────
-# Week 6 retest disabled per Erik's request — it was an intrusive blocking
-# gate that interrupted the program at the phase 1→2 boundary. The week 12
-# retest still fires for the program-wrap delta against PhysicalAssessment
-# baseline.
-RETEST_WEEKS = (12,)
+# ─── BODYWEIGHT RETEST (disabled) ──────────────────────────────────────────
+# Both retests disabled per Erik's request — they were intrusive blocking gates.
+# Week 6 (phase 1→2 boundary) was removed first; the week-12 retest was removed
+# 2026-06-29 because it hard-locked the entire app at week 12 (no dashboard,
+# coach, or settings until you completed a 4×60s test, no "later" escape).
+# Empty tuple => the status endpoint never reports due_and_pending, so the
+# frontend gate never fires; the POST endpoint rejects any retest week.
+RETEST_WEEKS = ()
 
 
 @app.route("/api/bodyweight-retest/status")
