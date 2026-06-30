@@ -23,6 +23,12 @@ def finalize_day_plan(day, *, has_prescriptions, has_runplan, has_mealplan):
 
     Booleans are PER-DAY: does this day_idx have at least one real row of that
     kind for the week?
+
+    SISTER LOGIC: coach_assembler._resolve_workout_for_day applies the SAME
+    "no prescription -> strip the template lifts as unplanned" rule for the coach
+    prompt (it sets lift_unplanned + nulls liftName, where this sets liftStatus).
+    test_coach_unplanned_day.test_coach_and_dashboard_agree_on_lift_planned_state
+    pins the two together — keep the planned/unplanned definition identical.
     """
     # ─── LIFTS ───
     if day.get("isRest"):

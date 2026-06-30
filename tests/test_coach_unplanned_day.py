@@ -109,6 +109,54 @@ def test_logged_workout_on_unplanned_day_is_not_rest_in_directive():
     assert "in progress" in block, block
 
 
+def test_coach_and_dashboard_agree_on_lift_planned_state(app_ctx):
+    """Pin the coach (_resolve_workout_for_day.lift_unplanned) and the dashboard
+    (/api/workouts liftStatus) together so the 'is this day planned' definition
+    can't silently drift apart (review finding: two sources of truth). They
+    legitimately differ on liftName handling, but MUST agree on planned/unplanned.
+    """
+    app_, db = app_ctx
+    import coach_assembler as ca
+    from flask_login import login_user
+    from models import WeeklyPrescription
+    u = _fresh_user(db, "agree@test.com")  # no prescriptions
+    client = app_.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = str(u.id); s["_fresh"] = True
+
+    def _coach_unplanned(d):
+        with app_.test_request_context():
+            login_user(u, force=True)
+            r = ca._resolve_workout_for_day(1, d)
+        return bool(r and r.get("lift_unplanned"))
+
+    def _dash_status(d):
+        return client.get("/api/workouts").get_json()["1"]["days"][d].get("liftStatus")
+
+    target = None
+    for d in range(7):
+        with app_.test_request_context():
+            login_user(u, force=True)
+            r = ca._resolve_workout_for_day(1, d)
+        if r and not r.get("isRest"):
+            target = d
+            break
+    assert target is not None, "no template lift day found"
+
+    # UNPLANNED (no prescription): both must agree it's unplanned.
+    assert _dash_status(target) == "unplanned"
+    assert _coach_unplanned(target) is True
+
+    # PLANNED (seed a coach prescription): both must agree it's planned.
+    for i, n in enumerate(["Barbell Back Squat", "Romanian Deadlift"]):
+        db.session.add(WeeklyPrescription(user_id=u.id, week=1, day_idx=target,
+                                          exercise_order=i, exercise_name=n, sets=4,
+                                          reps="8", rest="90s", source="coach"))
+    db.session.commit()
+    assert _dash_status(target) == "planned"
+    assert _coach_unplanned(target) is False
+
+
 def test_unplanned_directive_tells_coach_to_plan_not_prescribe():
     from coach_assembler import _format_today_status_block
     block = "\n".join(_format_today_status_block({

@@ -714,3 +714,15 @@ class CoachFeedback(db.Model):
     note = db.Column(db.Text, nullable=True)                # optional user free text
     user_message = db.Column(db.Text, nullable=True)        # what the user said before the coach replied
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class SystemFlag(db.Model):
+    """Tiny key-value store for one-shot data migrations and global flags that
+    must persist across deploys. Render's filesystem is ephemeral (a file marker
+    resets every deploy), so guarded one-shot startup work records its completion
+    here instead of re-running on every worker boot."""
+    __tablename__ = "system_flag"
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

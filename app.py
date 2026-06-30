@@ -438,20 +438,24 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # ONE-TIME: Backfill target_weight for existing prescriptions
+    # ONE-SHOT (guarded): backfill target_weight for legacy null-target prescriptions.
+    # Runs AT MOST ONCE ever (persisted SystemFlag), not on every worker boot. The
+    # old version re-scanned every null-target row + queried SetLog history per row
+    # at import on EVERY deploy, and never converged (history-less rows stay null
+    # forever; new weeks add fresh nulls). New prescriptions get target_weight at
+    # creation, so this only ever needed to fix pre-existing legacy rows once.
     try:
-        from training_engine import compute_next_targets
-        rx_null = WeeklyPrescription.query.filter(
-            WeeklyPrescription.target_weight == None
-        ).all()
-        if rx_null:
+        from models import SystemFlag
+        _BACKFILL_KEY = "target_weight_backfill_v1"
+        if not SystemFlag.query.filter_by(key=_BACKFILL_KEY).first():
+            from training_engine import compute_next_targets
+            rx_null = WeeklyPrescription.query.filter(
+                WeeklyPrescription.target_weight == None
+            ).all()
             filled = 0
             for rx in rx_null:
                 try:
-                    # allow_llm=False: this runs at IMPORT inside app_context — it must
-                    # never block boot on a network/LLM call (it would hang startup; a
-                    # fresh week of no-history prescriptions floods it). History-based
-                    # fills still work; new-movement starts stay null until first log.
+                    # allow_llm=False: never block boot on a network/LLM call.
                     targets = compute_next_targets(rx.user_id, rx.exercise_name, rx.week,
                                                    rx.day_idx, allow_llm=False)
                     if targets.get('target_weight'):
@@ -459,10 +463,12 @@ with app.app_context():
                         filled += 1
                 except Exception:
                     pass
+            db.session.add(SystemFlag(key=_BACKFILL_KEY, value=str(filled)))
+            db.session.commit()
             if filled:
-                db.session.commit()
-                logging.info("[migration] Backfilled %d prescription target_weights", filled)
+                logging.info("[migration] Backfilled %d prescription target_weights (one-shot)", filled)
     except Exception as e:
+        db.session.rollback()
         logging.warning("[migration] target_weight backfill skipped: %s", e)
 
     # PRE-START COACH EMAIL: Send day before start date
