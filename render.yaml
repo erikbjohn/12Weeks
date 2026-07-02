@@ -8,7 +8,7 @@ services:
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: ADMIN_API_KEY
-        generateValue: true
+        sync: false
       - key: PYTHON_VERSION
         value: "3.12"
       - key: DATABASE_URL
