@@ -576,8 +576,13 @@ NAME_ALIASES = {
     "Back Squat - 1RM test": "Barbell Back Squat",
     "Deadlift - 1RM test": "Conventional Deadlift",
     "Lat Pulldown - max weight": "Lat Pulldown",
-    "Inverted Row (table edge)": "Inverted Row (table/ledge)",
-    "Inverted Row (table)": "Inverted Row (table/ledge)",
+    # ALL inverted-row variants canonicalize to the catalog's "Inverted Row".
+    # The old target "Inverted Row (table/ledge)" is not movement-key-equal to
+    # "Inverted Row", so BW-template history fragmented away from the coach's
+    # catalog-name prescriptions (progression math restarted from zero).
+    "Inverted Row (table edge)": "Inverted Row",
+    "Inverted Row (table)": "Inverted Row",
+    "Inverted Row (table/ledge)": "Inverted Row",
     "Tricep Dips (chair)": "Tricep Dips (chair/bench)",
     "Tricep Dips (bench)": "Tricep Dips (chair/bench)",
     "DB Bench Press": "DB Bench Press",  # Keep as-is (different from Barbell Bench)
@@ -1952,13 +1957,14 @@ def get_workouts_for_user(week, has_gym=True):
     if has_gym:
         return get_workouts(week)
 
-    is_deload = week in (4, 8)
-    is_test = week == 12
+    # Deload WEEKS match the gym path's cadence (4, 8, 12) — wk12 is a deload
+    # week, NOT a taper (2026-06-01 rebuild). The old 'test_bw' taper path made
+    # wk12 headers say POWER (HOLD) and meals say heavy_lift while the content
+    # was a taper — three contradicting signals on one card.
+    is_deload = week in (4, 8, 12)
     phase = get_phase(week)
 
-    if is_test:
-        template = PHASE_TEMPLATES.get("test_bw", BW_PHASE_TEMPLATES.get(1, {}))
-    elif is_deload:
+    if is_deload:
         template = PHASE_TEMPLATES.get("deload_bw", BW_PHASE_TEMPLATES.get(1, {}))
     else:
         template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
@@ -1973,6 +1979,17 @@ def get_workouts_for_user(week, has_gym=True):
         5: "Full Body Cleanup" if phase == 1 else ("Full Body / Glute Volume" if phase == 2 else "Full Body (volume cut)"),
         6: "Rest",
     }
+    # Deload labels are phase-neutral (mirrors gym _deload_week names) so a
+    # deload card never carries a POWER/HOLD header over deload content.
+    bw_deload_labels = {
+        0: "Deload BW — Lower",
+        1: "Deload BW — Press + Shoulder",
+        2: "Deload BW — Shoulder/Arms (light)",
+        3: "Deload BW — Pull",
+        4: "Deload BW — Heavy Lower (light)",
+        5: "Deload BW — Full Body Light",
+        6: "Rest",
+    }
 
     days = []
     for day_idx in range(7):
@@ -1980,11 +1997,10 @@ def get_workouts_for_user(week, has_gym=True):
         day_name = day_names[day_idx]
         is_rest = len(exercises) == 0
 
-        label = bw_day_labels.get(day_idx, "Bodyweight")
         if is_deload:
-            label = f"Deload BW - {label}"
-        elif is_test:
-            label = f"Test BW - {label}"
+            label = bw_deload_labels.get(day_idx, "Deload BW")
+        else:
+            label = bw_day_labels.get(day_idx, "Bodyweight")
 
         # Convert template format (exercise/sets/reps) to display format (name/sets)
         display_exercises = []

@@ -3216,6 +3216,74 @@ def _filter_meals_by_food_selections(days, user_food_ids):
     return filtered_days
 
 
+def _apply_exercise_swap_overlay(days, user_id, week):
+    """Apply user-explicit ExerciseSwap rows to a week's day dicts, AFTER
+    auto_swap_workout, so a manual/coach swap overrides the equipment-driven
+    substitution. Recomputes target_weight, note, and catalog metadata against
+    the SWAP TARGET's actual history rather than letting the slot's original
+    prescription leak through. Shared by /api/workouts and /api/workouts/<week>
+    so the two endpoints can't disagree on a swapped slot."""
+    try:
+        from equipment_swaps import EXERCISE_SWAPS
+        from workout_data import EXERCISES
+        _swap_rows = ExerciseSwap.query.filter_by(
+            user_id=user_id, week=week
+        ).all()
+        _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
+                     for s in _swap_rows}
+        if not _swap_map:
+            return
+        for _day_idx, _day in enumerate(days):
+            for _ex_idx, _ex in enumerate(_day.get("exercises", []) or []):
+                _key = (_day_idx, _ex_idx)
+                if _key not in _swap_map:
+                    continue
+                _swap_target, _orig_recorded = _swap_map[_key]
+                _orig_displayed = _ex.get("name", "")
+                _ex["swapped_from"] = _orig_displayed
+                _ex["name"] = _swap_target
+                # Recompute target_weight via engine using the swap target's
+                # SetLog history, not the original slot's prescription value.
+                try:
+                    _t = compute_next_targets(
+                        user_id, _swap_target, week, _day_idx,
+                        exercise_order=_ex_idx,
+                    )
+                    if _t and _t.get("target_weight"):
+                        _ex["target_weight"] = _t["target_weight"]
+                    else:
+                        _ex.pop("target_weight", None)
+                except Exception:
+                    _ex.pop("target_weight", None)
+                # Pull note from the original's catalog alternative entry.
+                # If the swap was recorded against a different "original"
+                # (e.g. earlier auto-swap renamed the slot), fall back to
+                # the displayed original or the catalog's own note.
+                _alt_note = None
+                for _candidate in (_orig_recorded, _orig_displayed):
+                    if not _candidate:
+                        continue
+                    _entry = EXERCISE_SWAPS.get(_candidate) or {}
+                    for _alt in _entry.get("alternatives", []) or []:
+                        if _alt.get("name") == _swap_target:
+                            _alt_note = _alt.get("note")
+                            break
+                    if _alt_note:
+                        break
+                if _alt_note:
+                    _ex["note"] = _alt_note
+                else:
+                    _ex["note"] = ""
+                # Refresh tracked_metric for the swap target.
+                _info = EXERCISES.get(_swap_target, {})
+                if _info.get("tracked_metric"):
+                    _ex["tracked_metric"] = _info["tracked_metric"]
+                elif _ex.get("tracked_metric"):
+                    del _ex["tracked_metric"]
+    except Exception:
+        pass
+
+
 @app.route("/api/workouts")
 @login_required
 def api_workouts():
@@ -3296,66 +3364,10 @@ def api_workouts():
                         _ex["tracked_metric"] = _info["tracked_metric"]
 
         # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout so a
-        # manual swap overrides the equipment-driven substitution. Recompute
-        # target_weight, note, and catalog metadata against the SWAP TARGET's
-        # actual history rather than letting the slot's original prescription
-        # leak through (which produced 175-lb DB RDL from a Conv DL slot).
-        try:
-            from equipment_swaps import EXERCISE_SWAPS
-            _swap_rows = ExerciseSwap.query.filter_by(
-                user_id=current_user.id, week=week
-            ).all()
-            _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
-                         for s in _swap_rows}
-            for _day_idx, _day in enumerate(days):
-                for _ex_idx, _ex in enumerate(_day.get("exercises", []) or []):
-                    _key = (_day_idx, _ex_idx)
-                    if _key not in _swap_map:
-                        continue
-                    _swap_target, _orig_recorded = _swap_map[_key]
-                    _orig_displayed = _ex.get("name", "")
-                    _ex["swapped_from"] = _orig_displayed
-                    _ex["name"] = _swap_target
-                    # Recompute target_weight via engine using the swap target's
-                    # SetLog history, not the original slot's prescription value.
-                    try:
-                        _t = compute_next_targets(
-                            current_user.id, _swap_target, week, _day_idx,
-                            exercise_order=_ex_idx,
-                        )
-                        if _t and _t.get("target_weight"):
-                            _ex["target_weight"] = _t["target_weight"]
-                        else:
-                            _ex.pop("target_weight", None)
-                    except Exception:
-                        _ex.pop("target_weight", None)
-                    # Pull note from the original's catalog alternative entry.
-                    # If the swap was recorded against a different "original"
-                    # (e.g. earlier auto-swap renamed the slot), fall back to
-                    # the displayed original or the catalog's own note.
-                    _alt_note = None
-                    for _candidate in (_orig_recorded, _orig_displayed):
-                        if not _candidate:
-                            continue
-                        _entry = EXERCISE_SWAPS.get(_candidate) or {}
-                        for _alt in _entry.get("alternatives", []) or []:
-                            if _alt.get("name") == _swap_target:
-                                _alt_note = _alt.get("note")
-                                break
-                        if _alt_note:
-                            break
-                    if _alt_note:
-                        _ex["note"] = _alt_note
-                    else:
-                        _ex["note"] = ""
-                    # Refresh tracked_metric for the swap target.
-                    _info = EXERCISES.get(_swap_target, {})
-                    if _info.get("tracked_metric"):
-                        _ex["tracked_metric"] = _info["tracked_metric"]
-                    elif _ex.get("tracked_metric"):
-                        del _ex["tracked_metric"]
-        except Exception:
-            pass
+        # manual swap overrides the equipment-driven substitution (which
+        # produced 175-lb DB RDL from a Conv DL slot). Shared helper — the
+        # per-week endpoint applies the identical overlay.
+        _apply_exercise_swap_overlay(days, current_user.id, week)
 
         # Check for user-specific meal plans
         try:
@@ -3546,6 +3558,11 @@ def api_week(week):
     for day in days:
         if "exercises" in day:
             day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
+
+    # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout — the same
+    # overlay /api/workouts applies, so the two endpoints can't disagree on a
+    # day that has a manual or coach [SWAP].
+    _apply_exercise_swap_overlay(days, current_user.id, week)
 
     # Check for user-specific meal plans
     try:
@@ -3839,7 +3856,12 @@ def api_set_log():
         existing.reps = reps
         if done_provided:
             existing.done = done
-        existing.logged_date = _user_today()
+        # PRESERVE the original logged_date on update. Re-stamping to today
+        # made a Wednesday edit of Monday's set (a) count as trained-today in
+        # date-keyed checks and (b) split the session in lift_session_history,
+        # whose session key includes logged_date. Only stamp if missing.
+        if existing.logged_date is None:
+            existing.logged_date = _user_today()
     else:
         existing = SetLog(
             user_id=current_user.id, exercise_name=exercise,
@@ -3868,9 +3890,13 @@ def api_set_log():
             existing.target_weight = targets["target_weight"]
             existing.target_reps = targets.get("target_reps")
 
-        # Compare against PRESCRIPTION, not computed target
-        compare_weight = prescribed_weight or (targets.get("target_weight") if targets else None)
-        if compare_weight and weight and compare_weight > 0:
+        # Compare against PRESCRIPTION, not computed target. `is not None`
+        # (NOT `or`) so a target_weight=0 bodyweight prescription is honored
+        # instead of falling through to an engine weight the user never saw —
+        # which falsely stamped 'decreased_weight' on an athlete who ADDED load.
+        compare_weight = (prescribed_weight if prescribed_weight is not None
+                          else (targets.get("target_weight") if targets else None))
+        if compare_weight is not None and weight is not None and compare_weight >= 0:
             if weight > compare_weight * 1.02:
                 existing.user_modified = True
                 existing.modification_direction = 'increased_weight'
@@ -6029,14 +6055,10 @@ def api_measurements_record():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
 
-    # Fix broken unique index: log_date was indexed as UNIQUE (should not be — multiple
-    # users need to submit on the same date). Drop the unique constraint if it exists.
-    try:
-        db.session.execute(text('DROP INDEX IF EXISTS ix_body_measurement_log_date'))
-        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)'))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # NOTE: the broken-unique-index repair for ix_body_measurement_log_date
+    # runs ONCE at startup (_broken_indexes block, top of this file). It used
+    # to run as DDL inside this handler on every POST — index churn + lock
+    # contention on a hot write path — and was removed 2026-07.
 
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if not bm:
@@ -7140,6 +7162,9 @@ Conversation:
                 ci.notes = (ci.notes or '') + ' [AI-extracted values]'
                 db.session.commit()
             return jsonify(values)
+        # Model replied with no JSON object (refusal / plain text). Return a
+        # structured error instead of falling off the end (None -> Flask 500).
+        return jsonify({"error": "No JSON object in extraction response"}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -11176,7 +11201,7 @@ def api_deficit_plan():
     if not bw:
         return jsonify({"error": "No weight data"}), 400
 
-    current_weight = bw.weight
+    current_weight = bw.weight_lbs  # BodyWeight has no `.weight` — was a live AttributeError/500
     target_weight = goal.target_weight
 
     week = _current_week()
