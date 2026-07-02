@@ -1385,6 +1385,14 @@ function calcMealMacros(foods, multiplier) {
 
 function renderMealInner(dayData) {
   const plan = dayData.mealPlan;
+  // FAIL LOUD: no static template meals. If the coach hasn't planned this
+  // day's meals, say so — never render hardcoded template food as the plan.
+  if (!plan && dayData.mealStatus === 'unplanned') {
+    return '<div class="plan-missing">' +
+        '<div>&#9888; Your coach hasn’t planned these meals yet.</div>' +
+        '<button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="launchWeeklyPlanning(currentWeek)">Plan this week</button>' +
+    '</div>';
+  }
   if (!plan) return '';
 
   // Determine if we're viewing today's meals
@@ -2030,35 +2038,12 @@ function getLastRPEs(exName, count) {
   return data.history.slice(-count).map(h => h.rpe);
 }
 
-// Fallback weight estimates for exercises without history
-const WEIGHT_ESTIMATES = {
-  "Incline DB Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : 20; },
-  "Cable Seated Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.8) : 40; },
-  "Face Pull": () => 25,
-  "Lateral Raise": () => 15,
-  "EZ-Bar Curl": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.35) : 30; },
-  "Cable Tricep Pushdown": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.4) : 30; },
-  "Leg Press": (cache) => { const squat = cache["Barbell Back Squat"]; return squat ? Math.round(squat.current * 1.5) : 135; },
-  "Romanian Deadlift": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.65) : 95; },
-  "Leg Curl": () => 50,
-  "Leg Extension": () => 50,
-  "Calf Raise": () => 100,
-  "Dumbbell Shoulder Press": (cache) => { const bench = cache["Barbell Bench Press"]; return bench ? Math.round(bench.current * 0.3) : 20; },
-  "Cable Lateral Raise": () => 10,
-  "Barbell Row": (cache) => { const dl = cache["Conventional Deadlift"]; return dl ? Math.round(dl.current * 0.5) : 65; },
-  "Dumbbell Row": (cache) => { const lat = cache["Lat Pulldown"]; return lat ? Math.round(lat.current * 0.4) : 25; },
-  "Hammer Curl": () => 25,
-  "Overhead Tricep Extension": () => 25,
-  "Walking Lunge": () => 20,
-  "Standing Calf Raise": () => 25,
-  "Nordic Hamstring Curl": () => 0,
-  "Bulgarian Split Squat": () => 20,
-  "Glute Bridge": () => 0,
-  "Hip Thrust": (cache) => { const sq = cache["Barbell Back Squat"]; return sq ? Math.round(sq.current * 0.6) : 95; },
-  "Seated Calf Raise": () => 45,
-  "Goblet Squat": () => 35,
-  "Step-Up": () => 20,
-};
+// COACH-OR-NOTHING: the old WEIGHT_ESTIMATES table (Face Pull 25 lb, Leg Curl
+// 50 lb, bench*0.35 ratios, ...) silently prefilled weight inputs with static
+// guesses for any exercise with no history and no prescribed target_weight —
+// then checking the set logged that invented weight into SetLog as performance
+// data. Removed: with no prescription and no history, the input stays EMPTY
+// and the athlete types what they actually lift.
 
 /**
  * Resolve the value to display in a set's weight input.
@@ -2088,31 +2073,9 @@ function resolveDisplayWeight(ex, suggestion, displayName) {
 function getSuggestedWeight(exName, currentWeekNum) {
   const data = getExerciseData(exName);
   if (!data) {
-    // No history — try to estimate from related exercises
-    const estimator = WEIGHT_ESTIMATES[exName];
-    if (estimator) {
-      const cache = _weightsCache || {};
-      const est = estimator(cache);
-      if (est != null) return { weight: est, reason: est > 0 ? 'estimated' : 'bodyweight' };
-    }
-    // Generic fallback: guess based on exercise name keywords
-    const nl = exName.toLowerCase();
-    const cache = _weightsCache || {};
-    const bench = cache["Barbell Bench Press"];
-    const squat = cache["Barbell Back Squat"];
-    const dl = cache["Conventional Deadlift"];
-    if (nl.includes('curl') || nl.includes('raise') || nl.includes('fly') || nl.includes('extension')) {
-      return { weight: bench ? Math.round(bench.current * 0.25) : 20, reason: 'estimated' };
-    }
-    if (nl.includes('press') || nl.includes('row')) {
-      return { weight: bench ? Math.round(bench.current * 0.5) : 50, reason: 'estimated' };
-    }
-    if (nl.includes('squat') || nl.includes('lunge') || nl.includes('step')) {
-      return { weight: squat ? Math.round(squat.current * 0.3) : 25, reason: 'estimated' };
-    }
-    if (nl.includes('deadlift') || nl.includes('hip') || nl.includes('thrust')) {
-      return { weight: dl ? Math.round(dl.current * 0.5) : 65, reason: 'estimated' };
-    }
+    // No logged history for this lift. COACH-OR-NOTHING: never invent a
+    // static estimate (the old table + keyword ratios prefilled e.g. 25 lb
+    // for Face Pull with no indication it was a guess). Leave it empty.
     return { weight: null, reason: '' };
   }
 
@@ -5382,12 +5345,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Travel banner
     renderTravelBanner();
 
-    // Ensure current week has prescriptions seeded from template
-    await fetch('/api/prescription/seed', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ week: currentWeek }),
-    }).catch(function() {});
+    // COACH-OR-NOTHING: no template seeding on load. An unplanned week stays
+    // unplanned and renders the 'Plan this week' empty state — the old
+    // /api/prescription/seed call here silently converted it into a static
+    // template week the coach never designed.
 
     // Load chat history BEFORE rendering so coach has messages
     await loadChatHistory();
@@ -5609,7 +5570,7 @@ function buildMorningBriefing() {
     const mappedIdx = _userTodayMonIdx();  // user-tz "today", not device-local
     const dayData = weekData.days[mappedIdx];
     if (dayData) {
-      lines.push('Today is ' + dayData.liftName + ' -- Week ' + currentWeek + '.');
+      lines.push('Today is ' + (dayData.liftName || (dayData.isRest ? 'a rest day' : 'not planned yet')) + ' -- Week ' + currentWeek + '.');
     }
   }
   lines.push('How are you feeling?');
@@ -6385,10 +6346,10 @@ async function showSundayFlow() {
       <div class="morning-checkin-card" style="max-width:500px">
         <h2>Week ${m.week || currentWeek} Summary</h2>
         <div class="report-stats">
-          <div class="report-stat"><span class="report-stat-label">Workouts</span><span class="report-stat-val">${m.workouts_completed || 0}/${m.workouts_total || 6}</span></div>
+          <div class="report-stat"><span class="report-stat-label">Workouts</span><span class="report-stat-val">${m.workouts_completed || 0}/${m.workouts_total != null ? m.workouts_total : '&mdash;'}</span></div>
           <div class="report-stat"><span class="report-stat-label">Weight</span><span class="report-stat-val">${m.weight_change ? (m.weight_change > 0 ? '+' : '') + m.weight_change + ' lbs' : '--'}</span></div>
           <div class="report-stat"><span class="report-stat-label">vs Target</span><span class="report-stat-val">${m.weight_vs_projected || '--'}</span></div>
-          <div class="report-stat"><span class="report-stat-label">Adherence</span><span class="report-stat-val">${m.adherence_pct || 0}%</span></div>
+          <div class="report-stat"><span class="report-stat-label">Adherence</span><span class="report-stat-val">${m.adherence_pct != null ? m.adherence_pct + '%' : '&mdash;'}</span></div>
         </div>
         ${narrative ? '<div class="report-narrative">' + narrative + '</div>' : ''}
         <div id="bw-progression-section"></div>
@@ -7308,7 +7269,7 @@ function toggleDay(week, dayIdx, e) {
     const weekData = workoutData[String(week)];
     if (weekData && weekData.days[dayIdx]) {
       const d = weekData.days[dayIdx];
-      const summary = `[WORKOUT_COMPLETE] Just finished ${d.liftName}. ` +
+      const summary = `[WORKOUT_COMPLETE] Just finished ${d.liftName || 'the workout'}. ` +
           `${d.exercises ? d.exercises.length : 0} exercises completed.`;
       // Send to coach via chat (don't open overlay, just send)
       fetch('/api/chat', {
@@ -9154,7 +9115,7 @@ async function triggerMorningPopup() {
     const todayJsDay = new Date().getDay();
     const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
     const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
-    const workoutName = dayData ? dayData.liftName : 'Rest';
+    const workoutName = dayData ? (dayData.liftName || 'not planned yet') : 'Rest';
     const timing = dayData && dayData.timing ? dayData.timing[0] : '6:00';
     const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const dayName = dayNames[todayMon];
@@ -9203,11 +9164,11 @@ async function triggerEndOfDayPopup() {
 
     const weekData = workoutData[String(currentWeek)];
     const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
-    const workoutName = dayData ? dayData.liftName : 'workout';
+    const workoutName = (dayData && dayData.liftName) || 'workout';
     const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const tomorrowMon = (todayMon + 1) % 7;
     const tomorrowData = weekData && weekData.days ? weekData.days[tomorrowMon] : null;
-    const tomorrowName = tomorrowData ? tomorrowData.liftName : 'Rest';
+    const tomorrowName = tomorrowData ? (tomorrowData.liftName || 'not planned yet') : 'Rest';
 
     const triggerMsg = `[END_OF_DAY] Today's workout (${workoutName}) is done. Tomorrow is ${dayNames[tomorrowMon]}: ${tomorrowName}. Give a brief end-of-day summary. 1-2 sentences. This is a popup — no questions.`;
 
@@ -9412,7 +9373,7 @@ function renderTodayHero() {
     <div class="th-top">
       <div>
         <div class="th-label">${dayLabel}</div>
-        <div class="th-title">${d.liftName}</div>
+        <div class="th-title">${liftTitleHtml(d)}</div>
       </div>
       <div class="th-progress-ring">${exDone}/${exCount}</div>
     </div>
@@ -9451,6 +9412,16 @@ function renderWeekTabs() {
   }).join('');
 }
 
+// Fail-loud lift title: on an unplanned day the server nulls liftName
+// (coach-or-nothing — the template workout name is not the user's plan).
+// Render a loud marker instead of 'null' or a template name.
+function liftTitleHtml(d) {
+  if (d && d.liftName) return d.liftName;
+  if (d && d.liftStatus === 'unplanned') return '&#9888; Not planned';
+  if (d && d.isRest) return 'Rest Day';
+  return '';
+}
+
 // Fail-loud run pill: the static template is never shown as the plan. When a
 // run has no real coach/engine plan (runStatus 'unplanned' or run missing),
 // render a loud marker instead of a fabricated duration.
@@ -9477,7 +9448,7 @@ function renderDayGrid() {
         <div class="day-abbr">${d.day}</div>
       </div>
       <div class="day-card-center">
-        <div class="day-lift-label">${d.liftName}</div>
+        <div class="day-lift-label">${liftTitleHtml(d)}</div>
         <div class="day-run-label">
           ${runPillHtml(d)}
         </div>
@@ -10466,15 +10437,14 @@ let _hiitAudioCtx = null;
 function _parseHiitDetail(detail, totalTime) {
     // Parse structured part: "5 min warmup, 8x 30:90, 3 min cooldown"
     // The structured part is canonical — never silently adjust to fit a label.
-    var work = 30, rest = 90, rounds = 8, warmup = 300, cooldown = 180;
+    // COACH-OR-NOTHING: if the coach's text doesn't parse, return null so the
+    // caller fails loud. The old hardcoded defaults (8x30:90, 5-min warmup)
+    // silently ran a DIFFERENT workout than the card described.
+    var work = null, rest = null, rounds = null, warmup = 0;
 
     // Parse warmup: "5 min warmup" or "5 min warm"
     var warmupMatch = detail.match(/(\d+)\s*min\s*warm/i);
     if (warmupMatch) warmup = parseInt(warmupMatch[1]) * 60;
-
-    // Parse cooldown: "3 min cooldown" or "3 min cool"
-    var cooldownMatch = detail.match(/(\d+)\s*min\s*cool/i);
-    if (cooldownMatch) cooldown = parseInt(cooldownMatch[1]) * 60;
 
     // Parse work:rest ratio from "30:90" format (most reliable)
     var ratioMatch = detail.match(/(\d+):(\d+)/);
@@ -10499,10 +10469,12 @@ function _parseHiitDetail(detail, totalTime) {
         if (fallbackRound) rounds = parseInt(fallbackRound[1]);
     }
 
-    // Cooldown always matches warmup
-    cooldown = warmup;
+    // FAIL LOUD: the interval structure (work, rest, rounds) must all come from
+    // the coach's text. No fabricated defaults.
+    if (!work || !rest || !rounds) return null;
 
-    return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: cooldown };
+    // Cooldown always matches warmup
+    return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: warmup };
 }
 
 function _playBeep(freq, duration) {
@@ -10538,13 +10510,24 @@ function startHiitTimer() {
     if (!d || !d.run || d.run.type !== 'hiit') return;
 
     var cfg = _parseHiitDetail(d.run.detail || '', d.run.time || '');
+    if (!cfg) {
+        // FAIL LOUD: never run a fabricated default (8x30:90) that differs from
+        // the workout the card describes. Follow the coach's text manually.
+        var errEl = document.getElementById('hiit-timer-container');
+        if (errEl) {
+            errEl.innerHTML = '<div class="plan-missing" style="margin-top:10px">' +
+                '&#9888; Couldn’t read the interval structure from the coach’s prescription — ' +
+                'run it from the card text (no timer).</div>';
+        }
+        return;
+    }
     var phases = [];
-    phases.push({ name: 'WARMUP', duration: cfg.warmup, color: '#3b82f6' });
+    if (cfg.warmup > 0) phases.push({ name: 'WARMUP', duration: cfg.warmup, color: '#3b82f6' });
     for (var r = 0; r < cfg.rounds; r++) {
         phases.push({ name: 'ALL OUT', round: r + 1, total: cfg.rounds, duration: cfg.work, color: '#ef4444' });
         phases.push({ name: 'RECOVERY', round: r + 1, total: cfg.rounds, duration: cfg.rest, color: '#22c55e' });
     }
-    phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
+    if (cfg.cooldown > 0) phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
 
     var phaseIdx = 0;
     var paused = false;
@@ -11154,7 +11137,7 @@ async function renderDetail() {
 
   panel.innerHTML = `<div class="detail-inner">
     <div class="detail-header">
-      <div class="detail-title">Week ${currentWeek} &middot; ${d.day} &mdash; ${d.liftName}</div>
+      <div class="detail-title">Week ${currentWeek} &middot; ${d.day} &mdash; ${liftTitleHtml(d)}</div>
       <div class="detail-meta">
         ${!d.isRest || travelExercises ? `<span class="meta-chip" style="background:var(--lift-bg);border-color:var(--lift-border);color:var(--lift)">${isTraveling ? 'Travel' : 'Lift'} &middot; ${displayExercises.length} exercises</span>` : ''}
         ${(d.run && d.runStatus !== 'unplanned') ? `<span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>` : `<span class="meta-chip run-unplanned">&#9888; Run not planned</span>`}
@@ -11608,7 +11591,7 @@ async function completeWorkoutSession() {
 
   var weekData = workoutData[String(currentWeek)];
   var dayData = weekData ? weekData.days[currentDay] : null;
-  var workoutName = dayData ? dayData.liftName : 'workout';
+  var workoutName = (dayData && dayData.liftName) || 'workout';
 
   // Show inline coach chat in the exercise-focus overlay
   var el = document.getElementById('exercise-focus');

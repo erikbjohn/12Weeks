@@ -595,6 +595,12 @@ NAME_ALIASES = {
     "Kettlebell Swing": "KB Swing",
     "Kettlebell Swings": "KB Swing",
     "KB Swings": "KB Swing",
+    # PHASE_TEMPLATES[2]/[3] used to say "Cable Face Pull" while the display
+    # builders and EXERCISES catalog say "Face Pull" — the mismatch broke
+    # name reconciliation (configured sets/reps lookup + catalog video/muscle
+    # metadata silently missed). Templates renamed; alias canonicalizes any
+    # existing DB rows saved under the old name.
+    "Cable Face Pull": "Face Pull",
 }
 
 
@@ -1115,7 +1121,7 @@ PHASE_TEMPLATES = {
             {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
              "rest": "60s",
              "note": "Constant tension. Lateral delt strength."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s",
              "note": "Postural — mandatory each press/pull day."},
         ],
@@ -1140,7 +1146,7 @@ PHASE_TEMPLATES = {
              "note": "75-82% wave. 45-deg torso, pull to belly button."},
             {"exercise": "Lat Pulldown", "sets": 3, "reps": "10",
              "rest": "60-90s", "note": "Neutral grip. Different angle."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         4: [  # Fri - HEAVY Lower
@@ -1190,7 +1196,7 @@ PHASE_TEMPLATES = {
              "note": "Each side."},
             {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
              "rest": "60s", "note": "Shoulder priority."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         2: [  # Wed - Shoulder/Arms
@@ -1212,7 +1218,7 @@ PHASE_TEMPLATES = {
              "rest": "90s-2 min", "note": "Progress when clean."},
             {"exercise": "Lat Pulldown", "sets": 3, "reps": "10",
              "rest": "60-90s", "note": "Neutral grip."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         4: [  # Fri - HEAVY Lower
@@ -2166,7 +2172,7 @@ def _phase2_week():
              "note": "Each side. Heavier P2 progression."},
             {"name": "Cable Lateral Raise", "sets": "3x12", "rest": "60s",
              "note": "Constant tension. Lateral delt strength."},
-            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+            {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural — mandatory each press/pull day."},
         ],
         "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",
@@ -2210,7 +2216,7 @@ def _phase2_week():
              "note": "75-82% wave. 45-deg torso, pull to belly button."},
             {"name": "Lat Pulldown", "sets": "3x10", "rest": "60-90s",
              "note": "Neutral grip. Different angle."},
-            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+            {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural."},
         ],
         "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",

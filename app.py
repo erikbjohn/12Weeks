@@ -413,32 +413,11 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # Seed WeeklyPrescription for existing users who don't have any
-    try:
-        from workout_data import PHASE_TEMPLATES, get_phase
-        users_with_state = db.session.query(AppState).filter(AppState.start_date.isnot(None)).all()
-        for state in users_with_state:
-            existing = WeeklyPrescription.query.filter_by(user_id=state.user_id, week=1).first()
-            if not existing:
-                phase = get_phase(1)
-                template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
-                for day_idx in range(7):
-                    for order, ex in enumerate(template.get(day_idx, [])):
-                        db.session.add(WeeklyPrescription(
-                            user_id=state.user_id,
-                            week=1,
-                            day_idx=day_idx,
-                            exercise_order=order,
-                            exercise_name=ex['exercise'],
-                            sets=ex['sets'],
-                            reps=ex['reps'],
-                            rest=ex.get('rest', '60s'),
-                            note=ex.get('note', ''),
-                            source='template',
-                        ))
-                db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # NOTE: the startup week-1 template seeder is GONE (coach-or-nothing).
+    # It copied PHASE_TEMPLATES into WeeklyPrescription (source='template') for
+    # any user with a start_date and no week-1 rows, which made an unplanned
+    # week render as a full 'planned' week of static template exercises.
+    # Plans come only from the coach planning flow.
 
     # ONE-SHOT (guarded): backfill target_weight for legacy null-target prescriptions.
     # Runs AT MOST ONCE ever (persisted SystemFlag), not on every worker boot. The
@@ -3228,6 +3207,7 @@ def api_workouts():
         # below so the static template never reaches the UI as the user's plan.
         presc_day_set = {rx.day_idx for rx in prescriptions}
         runplan_day_set = set()
+        mealplan_day_set = set()
 
         if prescriptions:
             rx_by_day = {}
@@ -3348,8 +3328,9 @@ def api_workouts():
                     if day_idx < len(days) and meal_data:
                         days[day_idx]["mealPlan"] = meal_data
                         days[day_idx]["mealType"] = meal_data.get("label", "custom")
+                        mealplan_day_set.add(day_idx)
         except Exception:
-            pass  # Fall back to hardcoded meal plans
+            pass  # No coach meals resolved — finalize_day_plan strips the template ones
 
         # Run plan overlay
         try:
@@ -3434,14 +3415,15 @@ def api_workouts():
 
         # FAIL LOUD: strip any leftover template content for domains with no
         # real coach/engine plan so the static skeleton never reaches the UI as
-        # the user's plan. Meals deferred (food-selection filtering owns them).
+        # the user's plan — meals included (a hardcoded has_mealplan=True let
+        # static template meals ship labeled 'planned' on never-planned weeks).
         from plan_overlay import finalize_day_plan
         for _di, _day in enumerate(days):
             finalize_day_plan(
                 _day,
                 has_prescriptions=(_di in presc_day_set),
                 has_runplan=(_di in runplan_day_set),
-                has_mealplan=True,
+                has_mealplan=(_di in mealplan_day_set),
             )
 
         days = _filter_meals_by_food_selections(days, user_food_ids)
@@ -3492,6 +3474,7 @@ def api_week(week):
 
     presc_day_set = {rx.day_idx for rx in prescriptions}
     runplan_day_set = set()
+    mealplan_day_set = set()
 
     if prescriptions:
         rx_by_day = {}
@@ -3535,8 +3518,9 @@ def api_week(week):
                 if day_idx < len(days) and meal_data:
                     days[day_idx]["mealPlan"] = meal_data
                     days[day_idx]["mealType"] = meal_data.get("label", "custom")
+                    mealplan_day_set.add(day_idx)
     except Exception:
-        pass  # Fall back to hardcoded meal plans
+        pass  # No coach meals resolved — finalize_day_plan strips the template ones
 
     # Run plan overlay
     try:
@@ -3613,14 +3597,14 @@ def api_week(week):
                 _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
 
     # FAIL LOUD: strip leftover template content for unplanned domains (run +
-    # lifts). Mirrors /api/workouts. Meals deferred to food-selection filter.
+    # lifts + meals). Mirrors /api/workouts.
     from plan_overlay import finalize_day_plan
     for _di, _day in enumerate(days):
         finalize_day_plan(
             _day,
             has_prescriptions=(_di in presc_day_set),
             has_runplan=(_di in runplan_day_set),
-            has_mealplan=True,
+            has_mealplan=(_di in mealplan_day_set),
         )
 
     days = _filter_meals_by_food_selections(days, user_food_ids)
@@ -3959,42 +3943,26 @@ def api_get_sets():
 @app.route("/api/prescription/seed", methods=["POST"])
 @login_required
 def api_prescription_seed():
-    """Seed WeeklyPrescription rows for a week from the phase template."""
-    data = request.get_json()
+    """COACH-OR-NOTHING: this endpoint no longer seeds anything.
+
+    It used to copy PHASE_TEMPLATES into WeeklyPrescription (source='template')
+    for any week with zero rows — and the client called it on every app load —
+    which silently converted a deliberately-unplanned week into a full week of
+    static template exercises rendered as 'planned' (destroying the
+    'Plan this week' empty state). Plans come from the coach planning flow only;
+    an unplanned week STAYS unplanned. Kept as a safe no-op so cached/older
+    clients that still POST here don't 404.
+    """
+    data = request.get_json(silent=True) or {}
     week = data.get("week", _current_week())
-    from workout_data import PHASE_TEMPLATES, BW_PHASE_TEMPLATES, get_phase
-
-    # Don't overwrite existing prescriptions
-    existing = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).first()
-    if existing:
-        return jsonify({"message": "Prescriptions already exist for this week", "count": WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()})
-
-    # Use BW templates for no-gym users
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    has_gym = pa.has_gym if pa else True
-    phase = get_phase(week)
-    if has_gym:
-        template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
-    else:
-        template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
-    count = 0
-    for day_idx in range(7):
-        for order, ex in enumerate(template.get(day_idx, [])):
-            db.session.add(WeeklyPrescription(
-                user_id=current_user.id,
-                week=week,
-                day_idx=day_idx,
-                exercise_order=order,
-                exercise_name=ex['exercise'],
-                sets=ex['sets'],
-                reps=ex['reps'],
-                rest=ex.get('rest', '60s'),
-                note=ex.get('note', ''),
-                source='template',
-            ))
-            count += 1
-    db.session.commit()
-    return jsonify({"seeded": count, "week": week})
+    count = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()
+    return jsonify({
+        "seeded": 0,
+        "week": week,
+        "count": count,
+        "message": "Template seeding removed — plans are coach-or-nothing. "
+                   "Use the weekly planning flow to plan this week.",
+    })
 
 
 def _enrich_program_with_whys(user_id, target_week, program, run_summary):
@@ -9400,20 +9368,19 @@ def api_shopping_list():
     s = _get_state()
     week = _current_week()
 
-    # Use ACTUAL meal plans from DB (generated by meal_generator), not templates
+    # Use ACTUAL meal plans from DB (generated by meal_generator), not templates.
+    # COACH-OR-NOTHING: if no coach-generated meals exist for the week, the
+    # grocery list is EMPTY/unplanned — never aggregate the static template
+    # mealPlan foods into a list the user would shop from.
     db_meals = WeeklyMealPlan.query.filter_by(
         user_id=current_user.id, week=week
     ).all()
-    if db_meals:
-        workouts = []
-        for mp in db_meals:
-            if mp.meal_data:
-                workouts.append({"mealPlan": mp.meal_data})
-    else:
-        # Fallback to template if no generated meals exist
-        workouts = get_workouts(week)
-        user_food_ids = _get_user_food_ids()
-        workouts = _filter_meals_by_food_selections(workouts, user_food_ids)
+    workouts = []
+    for mp in db_meals:
+        if mp.meal_data:
+            workouts.append({"mealPlan": mp.meal_data})
+    if not workouts:
+        return jsonify({"week": week, "categories": [], "unplanned": True})
 
     # Map recipe names → raw grocery item + unit normalization
     INGREDIENT_MAP = {
@@ -9771,12 +9738,24 @@ def api_morning_briefing():
     else:
         status = "RED"
 
-    # Get today's workout
+    # Get today's workout through the SAME resolver the coach/dashboard use
+    # (prescription overlay + coach-or-nothing strip) — the old raw
+    # get_workouts() read announced static template lift names on days the
+    # card shows as 'Plan this week'.
     s = _get_state()
-    workouts = get_workouts(_current_week())
     today_idx = _user_today().weekday()
-    workout_today = workouts[today_idx] if today_idx < len(workouts) else None
-    workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
+    from coach_assembler import _resolve_workout_for_day
+    workout_today = _resolve_workout_for_day(_current_week(), today_idx)
+    if workout_today is None or workout_today.get("isRest"):
+        workout_name = "Rest"
+        today_line = "Today is a rest day"
+    elif workout_today.get("lift_unplanned"):
+        workout_name = "Not planned yet"
+        today_line = ("Today's lifts are NOT PLANNED yet (coach-or-nothing — "
+                      "do not name or invent a workout; offer to plan the week)")
+    else:
+        workout_name = workout_today.get("liftName") or "Workout"
+        today_line = f"Today is {workout_name}"
 
     # Build checkin summary
     checkin_summary = f"Morning check-in: Sleep {data.get('sleep_quality', 5)}/10, Stress {data.get('stress_level', 5)}/10, Soreness {data.get('soreness', 5)}/10, Mood {data.get('mood', 5)}/10, Motivation {data.get('motivation', 5)}/10, Anxiety {data.get('anxiety', 3)}/10."
@@ -9784,7 +9763,7 @@ def api_morning_briefing():
         checkin_summary += f" Notes: {data['notes']}"
 
     # Use full coach context + special trigger
-    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). Today is {workout_name} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
+    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). {today_line} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
     context = _build_coach_context()
     response_text = get_coach_response(briefing_msg, context)

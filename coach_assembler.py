@@ -234,6 +234,27 @@ def _resolve_workout_for_day(week, day_idx):
         day["liftName"] = None  # don't leak the template lift NAME either
         day["lift_unplanned"] = True
 
+    # COACH-OR-NOTHING for the RUN domain too. The dashboard strips the template
+    # run when no WeeklyRunPlan row exists (plan_overlay: run=None, runStatus
+    # 'unplanned'); the coach must see the same — otherwise it narrated "today's
+    # run is Zone 2 easy, 35 min" from the template while the card said no run
+    # was planned. When a real row exists, overlay it (same shape the UI uses).
+    # Mirrors the rx_known_empty pattern: only strip when the query SUCCEEDED
+    # and returned nothing, so a transient DB error can't blank a planned run.
+    try:
+        from models import WeeklyRunPlan
+        rp = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx
+        ).first()
+        if rp and rp.run_type:
+            day["run"] = {"type": rp.run_type, "label": rp.label,
+                          "time": rp.duration, "detail": rp.detail or ""}
+        else:
+            day["run"] = None
+            day["run_unplanned"] = True
+    except Exception:
+        pass
+
     return day
 
 
@@ -316,7 +337,6 @@ def _build_workout_tomorrow():
 @section_builder("week_schedule")
 def _build_week_schedule():
     from models import WeeklyDaySchedule
-    from workout_data import get_workouts
     week = _current_week()
     rows = WeeklyDaySchedule.query.filter_by(
         user_id=current_user.id, week=week
@@ -327,10 +347,22 @@ def _build_week_schedule():
                      "liftName": ds.lift_name or "Rest",
                      "isRest": ds.is_rest or False} for ds in rows]
     else:
-        workouts = get_workouts(week)
-        schedule = [{"day_idx": i, "day": DAY_NAMES[i],
-                     "liftName": w.get("liftName", "Rest"),
-                     "isRest": w.get("isRest", False)} for i, w in enumerate(workouts)]
+        # COACH-OR-NOTHING: no per-user schedule rows (rows are only written by
+        # the planning apply path). The old fallback listed raw PHASE-template
+        # lift names for every day, so the prompt's WEEK SCHEDULE contradicted
+        # the today_status 'NOT PLANNED' block and the dashboard's 'Plan this
+        # week' state. Resolve each day through the same resolver as
+        # workout_today instead — unplanned days carry NO template name.
+        schedule = []
+        for i in range(7):
+            day = _resolve_workout_for_day(week, i) or {}
+            schedule.append({
+                "day_idx": i,
+                "day": DAY_NAMES[i],
+                "liftName": day.get("liftName"),  # None when unplanned
+                "isRest": bool(day.get("isRest")),
+                "unplanned": bool(day.get("lift_unplanned")),
+            })
     return {"week_schedule": schedule}
 
 
@@ -372,12 +404,16 @@ def _build_exercise_history():
 
 @section_builder("exercise_analysis")
 def _build_exercise_analysis():
-    """Read pre-computed analysis from WeeklyPrescription (set by training engine during
-    program generation). Falls back to live compute_next_targets only if no prescriptions exist."""
+    """Read pre-computed analysis from WeeklyPrescription (set by training engine
+    during program generation). COACH-OR-NOTHING: if the week has no prescriptions
+    the analysis is EMPTY — no live engine compute, no reads of the dead
+    ExerciseLog table. The old fallback harvested exercise names from ExerciseLog
+    (frozen since April 2026) and synthesized engine targets for a week the
+    dashboard shows as 'Plan this week', letting the coach quote weights that
+    exist nowhere in the UI."""
     from models import WeeklyPrescription
     from workout_data import resolve_name
     week = _current_week()
-    today_idx = _user_today().weekday()
     analysis = {}
     # Read from pre-generated prescriptions (authoritative)
     rx_list = WeeklyPrescription.query.filter_by(
@@ -395,30 +431,8 @@ def _build_exercise_analysis():
                     "progression_indicator": getattr(rx, 'progression_indicator', 'hold') or 'hold',
                     "coach_alert": None,
                 }
-    # Fallback: if no prescriptions, compute live
-    if not analysis:
-        try:
-            from models import ExerciseLog
-            from training_engine import compute_next_targets
-            rows = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
-                ExerciseLog.logged_date.desc()
-            ).limit(200).all()
-            names = set(resolve_name(log.exercise_name) for log in rows)
-            for ex_name in names:
-                try:
-                    result = compute_next_targets(current_user.id, ex_name, week, today_idx)
-                    analysis[ex_name] = {
-                        "target_weight": result.get("target_weight"),
-                        "target_reps": result.get("target_reps"),
-                        "target_sets": result.get("target_sets"),
-                        "adjustment_reason": result.get("adjustment_reason", ""),
-                        "progression_indicator": result.get("progression_indicator", "hold"),
-                        "coach_alert": result.get("coach_alert"),
-                    }
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    # No prescriptions -> EMPTY analysis (unplanned week). Never fall back to a
+    # live engine compute seeded from the dead ExerciseLog table.
     return {"exercise_analysis": analysis}
 
 
@@ -769,17 +783,14 @@ def _build_today_status():
         user_id=current_user.id, log_date=today,
     ).order_by(RunLog.id.desc()).first()
 
-    # Same fallback as workout_prescribed: when no per-user WeeklyRunPlan
-    # row exists, fall back to the template's run for the day.
+    # COACH-OR-NOTHING: no WeeklyRunPlan row means NO run is prescribed. The old
+    # fallback to the static template's run made the coach say "today's run is
+    # Zone 2 easy, 35 min" while the dashboard card (plan_overlay) showed the
+    # run as unplanned — a direct coach/card contradiction.
     if run_plan and run_plan.run_type:
         run_type = run_plan.run_type
         run_label = run_plan.label
         run_duration = run_plan.duration
-    elif resolved and resolved.get("run"):
-        tr = resolved["run"]
-        run_type = tr.get("type")
-        run_label = tr.get("label")
-        run_duration = tr.get("duration")
     else:
         run_type = None
         run_label = None
@@ -1746,8 +1757,13 @@ def _format_athlete_data(ctx, requires):
         if w.get("isRest"):
             parts.append("Today is a rest day (streak mile only).")
         else:
-            run_info = w.get('run', {})
-            run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+            run_info = w.get('run') or {}
+            if run_info:
+                run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+            else:
+                # Coach-or-nothing: no WeeklyRunPlan row -> the run is NOT
+                # planned. Never quote the template's run.
+                run_tail = " Run: not planned yet."
             if w.get("lift_unplanned") or not w.get("liftName"):
                 # Coach-or-nothing: no plan -> do NOT name a (template) lift.
                 parts.append("Today's lifts are NOT planned yet — plan the week." + run_tail)
@@ -1976,7 +1992,10 @@ def _format_full_week_program(week):
             out.append(f"  {DAY_NAMES[d]}: (no data)")
             continue
 
-        lift = day.get("liftName") or ("Rest" if day.get("isRest") else "?")
+        if day.get("lift_unplanned"):
+            lift = "lifts NOT PLANNED (coach-or-nothing — do not invent)"
+        else:
+            lift = day.get("liftName") or ("Rest" if day.get("isRest") else "?")
         out.append(f"  {DAY_NAMES[d]} — {lift}:")
 
         if day.get("isRest"):

@@ -431,7 +431,14 @@ def _format_week_schedule(schedule, completed):
     for day in schedule:
         idx = day['day_idx']
         name = day.get('day', '?')
-        lift = day.get('liftName', 'Rest')
+        # COACH-OR-NOTHING: an unplanned day has no lift name — never print a
+        # template name (or the literal 'None') for a day the coach never planned.
+        if day.get('unplanned'):
+            lift = "NOT PLANNED (do not name lifts — offer to plan the week)"
+        elif day.get('isRest'):
+            lift = "Rest"
+        else:
+            lift = day.get('liftName') or "Rest"
         done = idx in completed_indices
         marker = "[DONE]" if done else "[    ]"
         lines.append(f"  {marker} {name}: {lift}")
