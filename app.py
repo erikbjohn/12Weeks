@@ -1618,9 +1618,14 @@ def api_regenerate_meals():
         base_calories = goal.daily_calories
         fasting_protocol = goal.fasting_protocol or "16_8"
 
+        # "rest" and "deload" MUST be mapped explicitly — without them a rest
+        # day fell through to "training" calories while the card said
+        # "Rest Day ... Recovery focus" (cut lost its -200, recomp overshot
+        # by 200 kcal/day). Matches the admin generate-meals map.
         _cal_day_type_map = {
             "heavy_lift": "heavy", "long_run": "long_run",
             "moderate": "training", "fast_day": "fast_day",
+            "rest": "rest", "deload": "rest",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
 
@@ -1669,9 +1674,12 @@ def api_regenerate_meals():
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
                 day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+                # targets already day-adjusted by compute_day_calories — don't
+                # let the generator's day-type carb multiplier compound on top.
                 meal_plan = generate_meal_plan(
                     selected_foods=fs.selected_foods, day_type=day_type,
                     targets=day_macros, fasting_protocol=fasting_protocol,
+                    targets_pre_adjusted=True,
                 )
 
             db.session.add(WeeklyMealPlan(
@@ -5048,12 +5056,17 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             # Deficit already computed above; keep base_calories from goal
             pass
 
-        # Map DAY_MEAL_TYPES day types to compute_day_calories day types
+        # Map DAY_MEAL_TYPES day types to compute_day_calories day types.
+        # "rest"/"deload" MUST be mapped explicitly — without them a rest day
+        # fell through to "training" calories while the card said "Rest Day ...
+        # Recovery focus" (goal_engine's rest branch was unreachable).
         _cal_day_type_map = {
             "heavy_lift": "heavy",
             "long_run": "long_run",
             "moderate": "training",
             "fast_day": "fast_day",
+            "rest": "rest",
+            "deload": "rest",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"
@@ -5138,13 +5151,39 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                     current_weight,
                 )
 
-                # Generate personalized meal plan
+                # COACH OWNS THE PRESCRIPTION: when the nutritionist agent
+                # prescribed explicit numbers for this day, they REPLACE the
+                # engine deficit-calculator output. The old code paid for the
+                # LLM call, read only day_type, and threw the per-day
+                # calories/macros (incl. the water-spike calorie HOLD) away.
+                _nv = _nutri_day_overrides.get(day_idx) or {}
+                _nv_cal = _nv.get("calories") or 0
+                _nv_pro = _nv.get("protein") or 0
+                if _nv_cal > 0 and _nv_pro > 0:
+                    day_macros = {
+                        "calories": int(_nv_cal),
+                        "protein": int(_nv_pro),
+                        "carbs": max(int(_nv.get("carbs") or 0), 0),
+                        "fat": max(int(_nv.get("fat") or 0), 0),
+                    }
+
+                # Generate personalized meal plan. Targets are already
+                # day-adjusted (nutritionist or compute_day_calories) — don't
+                # let the generator's day-type carb multiplier compound.
                 meal_plan = generate_meal_plan(
                     selected_foods=user_foods,
                     day_type=day_type,
                     targets=day_macros,
                     fasting_protocol=fasting_protocol,
+                    targets_pre_adjusted=True,
                 )
+                # Surface the nutritionist's rationale on the served card so
+                # the athlete sees WHY the day is fueled this way.
+                if _nv_cal > 0 and _nv.get("rationale"):
+                    _base_note = (meal_plan.get("note") or "").strip()
+                    meal_plan["note"] = (
+                        f"{_base_note} Coach: {str(_nv['rationale']).strip()}".strip()
+                    )
             else:
                 # No food selections yet — skip meal generation
                 continue
@@ -9830,10 +9869,18 @@ def api_goal_recalibrate():
                 except ValueError:
                     pass
 
+    # recalibrate_projection requires daily_calories + target_weight in every
+    # branch — omitting them made this endpoint 500 (TypeError on None math)
+    # on ANY weigh-in.
+    if goal.daily_calories is None or goal.target_weight is None:
+        return jsonify({"error": "Goal has no daily_calories/target_weight — recompute the goal first"}), 400
+
     tdee_params = {
         "height_in": pa.height_inches or 70,
         "age": age,
         "sex": sex,
+        "daily_calories": goal.daily_calories,
+        "target_weight": goal.target_weight,
     }
 
     result = recalibrate_projection(
@@ -10508,6 +10555,7 @@ def api_admin_generate_meals():
                 targets=day_macros,
                 fasting_protocol=fasting_protocol,
                 has_training=_day_has_training(user.id, week, day_idx),
+                targets_pre_adjusted=True,
             )
         except Exception as e:
             continue

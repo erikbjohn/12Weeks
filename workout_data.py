@@ -601,6 +601,9 @@ NAME_ALIASES = {
     # metadata silently missed). Templates renamed; alias canonicalizes any
     # existing DB rows saved under the old name.
     "Cable Face Pull": "Face Pull",
+    # Template variants of catalog exercises — same movement, same equipment.
+    "DB Hammer Curl": "Hammer Curl",
+    "Diamond Push-Up": "Diamond Push-Ups",
 }
 
 
@@ -659,6 +662,12 @@ EXERCISES = {
         "equipment": ["dip_station"],
         "video": "weighted dips chest tricep form tutorial",
     },
+    "DB Fly": {
+        "muscle_group": "chest",
+        "category": "isolation",
+        "equipment": ["dumbbells", "flat_bench"],
+        "video": "dumbbell fly chest form tutorial",
+    },
     # ─── BACK ──────────────────────────────────────────────
     "Cable Seated Row": {
         "muscle_group": "back",
@@ -696,6 +705,18 @@ EXERCISES = {
         "equipment": ["trx"],
         "video": "ring row form tutorial",
     },
+    "Pull-Ups": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["pull_up_bar"],
+        "video": "pull up proper form tutorial dead hang",
+    },
+    "Weighted Pull-Up": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["pull_up_bar"],
+        "video": "weighted pull up form tutorial belt",
+    },
     "DB Shrug": {
         "muscle_group": "traps",
         "category": "isolation",
@@ -727,6 +748,24 @@ EXERCISES = {
         "equipment": ["dumbbells"],
         "video": "dumbbell lateral raise proper form",
     },
+    "Cable Lateral Raise": {
+        "muscle_group": "shoulders",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "cable lateral raise form tutorial constant tension",
+    },
+    "Landmine Press": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "landmine press form tutorial shoulder friendly",
+    },
+    "Reverse Pec Deck": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["chest_press_machine"],
+        "video": "reverse pec deck rear delt form tutorial",
+    },
     "Face Pull": {
         "muscle_group": "rear_delts",
         "category": "isolation",
@@ -745,6 +784,12 @@ EXERCISES = {
         "category": "compound",
         "equipment": ["barbell"],
         "video": "barbell back squat proper form tutorial",
+    },
+    "Front Squat": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "front squat form tutorial rack position",
     },
     "Conventional Deadlift": {
         "muscle_group": "posterior_chain",
@@ -932,6 +977,30 @@ EXERCISES = {
         "category": "compound",
         "equipment": [],
         "video": "nordic hamstring curl eccentric form tutorial",
+    },
+    "Single-Leg Romanian Deadlift": {
+        "muscle_group": "hamstrings",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "single leg romanian deadlift form tutorial balance",
+    },
+    "Inverted Row (table/ledge)": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": [],
+        "video": "inverted row under table bodyweight tutorial",
+    },
+    "Squat Jump": {
+        "muscle_group": "power",
+        "category": "power",
+        "equipment": [],
+        "video": "squat jump plyometric form tutorial",
+    },
+    "Band Reverse Fly": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band reverse fly rear delt tutorial",
     },
     "Pike Push-Ups": {
         "muscle_group": "shoulders",

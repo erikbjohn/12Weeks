@@ -2055,6 +2055,51 @@ function getLastRPEs(exName, count) {
   return data.history.slice(-count).map(h => h.rpe);
 }
 
+// Mirrors equipment_swaps._equipment_class / scale_for_swap — keep in sync.
+// The client has no exercise catalog, so classification is keyword-based with
+// explicit entries for catalog exercises whose names don't carry an equipment
+// keyword (Goblet Squat is dumbbells, Romanian Deadlift is barbell, ...).
+const _EQUIP_CLASS_BY_NAME = {
+  'goblet squat': 'dumbbell', 'bulgarian split squat': 'dumbbell',
+  'walking lunge': 'dumbbell', 'step-up': 'dumbbell', 'lateral raise': 'dumbbell',
+  'hammer curl': 'dumbbell', 'rear delt fly': 'dumbbell', 'incline db press': 'dumbbell',
+  'single-arm db row': 'dumbbell', 'standing calf raise': 'dumbbell',
+  'overhead tricep extension': 'dumbbell', 'arnold press': 'dumbbell',
+  'conventional deadlift': 'bar', 'romanian deadlift': 'bar', 'power clean': 'bar',
+  'push press': 'bar', 'hang clean': 'bar', 'front squat': 'bar',
+  'close-grip bench press': 'bar', 'skull crusher': 'bar', 'skull crushers (ez-bar)': 'bar',
+  'hip thrust': 'bar', 'landmine press': 'bar',
+  'lat pulldown': 'stack', 'wide-grip lat pulldown': 'stack', 'leg press': 'stack',
+  'leg extension': 'stack', 'lying leg curl': 'stack', 'face pull': 'stack',
+  'reverse pec deck': 'stack',
+};
+
+function equipClassFor(name) {
+  var nl = (name || '').toLowerCase();
+  if (_EQUIP_CLASS_BY_NAME[nl]) return _EQUIP_CLASS_BY_NAME[nl];
+  var kw = function(list) { return list.some(function(k) { return nl.includes(k); }); };
+  if (kw(['dumbbell', 'db ', 'kettlebell', 'kb ', 'goblet'])) return 'dumbbell';
+  if (kw(['cable', 'machine', 'pulldown', 'leg press', 'pec deck', 'smith'])) return 'stack';
+  if (kw(['barbell', 'ez-bar', 'ez bar', 'landmine'])) return 'bar';
+  if (kw(['band', 'trx', 'push-up', 'pushup', 'pull-up', 'pullup', 'dip', 'plank', 'jump', 'burpee', 'bodyweight'])) return 'other';
+  return null;
+}
+
+const _SWAP_FACTORS = {
+  'bar>dumbbell': 0.7, 'dumbbell>bar': 1.43,
+  'stack>dumbbell': 0.5, 'dumbbell>stack': 2.0,
+  'stack>bar': 0.8, 'bar>stack': 1.25,
+};
+
+function scaleForSwap(fromName, toName) {
+  if (!fromName || !toName) return 1.0;
+  if (fromName.toLowerCase() === toName.toLowerCase()) return 1.0;
+  var fc = equipClassFor(fromName);
+  var tc = equipClassFor(toName);
+  if (!fc || !tc || fc === tc || fc === 'other' || tc === 'other') return 1.0;
+  return _SWAP_FACTORS[fc + '>' + tc] || 1.0;
+}
+
 // COACH-OR-NOTHING: the old WEIGHT_ESTIMATES table (Face Pull 25 lb, Leg Curl
 // 50 lb, bench*0.35 ratios, ...) silently prefilled weight inputs with static
 // guesses for any exercise with no history and no prescribed target_weight —
@@ -10871,13 +10916,7 @@ async function renderDetail() {
       var origSuggestion = getWeightForExercise(ex.name, currentWeek);
       if (origSuggestion.weight != null) {
         // Mirrors equipment_swaps.scale_for_swap() — keep in sync.
-        var origLower = ex.name.toLowerCase();
-        var swapLower = displayName.toLowerCase();
-        var toDB = swapLower.includes('dumbbell') || swapLower.includes('db ');
-        var scale = 1.0;
-        if ((origLower.includes('cable') || origLower.includes('machine')) && toDB) scale = 0.5;
-        else if (origLower.includes('barbell') && toDB) scale = 0.7;
-        else if ((origLower.includes('cable') || origLower.includes('machine')) && origLower !== swapLower) scale = 0.8;
+        var scale = scaleForSwap(ex.name, displayName);
         suggestion = { weight: roundWeight(origSuggestion.weight * scale, displayName), reason: 'estimated from ' + ex.name };
       }
       if (!lastWt) lastWt = null; // Don't show original exercise's last weight — different movement

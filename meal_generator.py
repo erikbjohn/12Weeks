@@ -331,7 +331,7 @@ def _generate_meal_name(position, protein_key, carb_key):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8",
-                       has_training=False):
+                       has_training=False, targets_pre_adjusted=False):
     """Generate a single-day meal plan matching the workout_data.py MEAL_PLANS format.
 
     Parameters:
@@ -343,6 +343,11 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
         day_type: one of "heavy_lift", "long_run", "moderate", "rest", "deload", "fast_day"
         targets: dict {"calories": int, "protein": int, "carbs": int, "fat": int}
         fasting_protocol: one of "16_8", "18_6", "20_4", "omad", "none"
+        targets_pre_adjusted: True when the caller already computed day-specific
+            targets (goal_engine.compute_day_calories / the nutritionist agent).
+            Skips the _DAY_MODIFIERS carb multiplier so day-type adjustments
+            don't COMPOUND (goal_engine's +100 heavy-day carbs then got x1.5-2.0
+            here, blowing the card ~600 kcal past its own displayed target).
 
     Returns:
         dict matching MEAL_PLANS structure in workout_data.py:
@@ -405,6 +410,8 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
 
     proto = _FASTING_PROTOCOLS.get(fasting_protocol, _FASTING_PROTOCOLS["16_8"])
     modifiers = _DAY_MODIFIERS.get(day_type, _DAY_MODIFIERS["moderate"])
+    if targets_pre_adjusted:
+        modifiers = {"carbs": 1.0, "calories": 1.0}
     label, note = _DAY_LABELS.get(day_type, ("Training Day", "Standard meal plan."))
 
     # Apply day-type modifiers to targets
@@ -412,10 +419,26 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
     adj_protein = targets["protein"]  # Protein stays constant
     adj_carbs = round(targets["carbs"] * modifiers["carbs"])
     adj_fat = targets["fat"]
-    # Rebalance fat to keep total calories consistent after carb adjustment
-    carb_cal_delta = (adj_carbs - targets["carbs"]) * 4
-    fat_cal_adjust = carb_cal_delta / 9
-    adj_fat = max(20, round(adj_fat - fat_cal_adjust))
+    if adj_carbs != targets["carbs"]:
+        # Fat funds the carb shift so total calories stay flat. When there
+        # isn't enough fat headroom above the floor, CLAMP THE CARB BUMP
+        # instead of silently overshooting — the old code floored fat at 20 g
+        # without recomputing anything, so the served card's macros could sum
+        # hundreds of kcal past its own targetCal.
+        carb_cal_delta = (adj_carbs - targets["carbs"]) * 4
+        fat_floor = min(20, adj_fat)  # the floor never RAISES fat above its base
+        new_fat = round(adj_fat - carb_cal_delta / 9)
+        if new_fat < fat_floor:
+            fundable_cal = max(0, (adj_fat - fat_floor) * 9)
+            adj_carbs = targets["carbs"] + int(fundable_cal / 4)
+            new_fat = fat_floor
+        adj_fat = new_fat
+    # The displayed calorie target must never sit below what the prescribed
+    # macros actually sum to — eating the card's own food must not "blow past"
+    # the card's own calorie line.
+    _macro_cal = adj_protein * 4 + adj_carbs * 4 + adj_fat * 9
+    if _macro_cal > adj_cal:
+        adj_cal = _macro_cal
 
     # Don't promise "higher carbs for endurance/training fuel" when the cut's
     # keto-floor base keeps carbs low even after the multiplier (5g * 2.0 = 10g
@@ -560,14 +583,25 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
     )
     shortfall = adj_protein - plan_total_protein
     if shortfall >= 15:
-        # Prefer whey (24g/scoop, easy to scale). Fall back to cottage cheese
-        # then Greek yogurt — both are reasonable evening protein sources.
-        # Auto-pulled from catalog regardless of user selections; users who
-        # explicitly hate whey can mark this supplement uneaten and adjust.
+        # Supplement ONLY from the user's own selected proteins — selections
+        # were already filtered by their dietary restrictions. The old
+        # hardcoded whey/cottage-cheese/Greek-yogurt trio pulled from the
+        # UNfiltered catalog and prescribed dairy to dairy-free/vegan users.
+        # Prefer shakes (easy to scale), then dense selected dairy-style
+        # options IF selected, then any selected protein.
+        _selected_proteins = list(selected_foods.get("proteins", []) or [])
+        supp_candidates = []
+        for pid in _selected_proteins:
+            if pid in ("whey_protein", "plant_protein"):
+                supp_candidates.append((pid, 3))
+        for pid in ("cottage_cheese", "greek_yogurt"):
+            if pid in _selected_proteins:
+                supp_candidates.append((pid, 2))
+        for pid in _selected_proteins:
+            if not any(pid == c[0] for c in supp_candidates):
+                supp_candidates.append((pid, 2))
         supp_food = None
-        for supp_id, max_units in (
-            ("whey_protein", 3), ("cottage_cheese", 2), ("greek_yogurt", 2),
-        ):
+        for supp_id, max_units in supp_candidates:
             food_info = get_food(supp_id)
             if not food_info or not food_info.get("protein"):
                 continue
