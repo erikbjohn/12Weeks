@@ -3673,35 +3673,17 @@ def api_state_update():
 @app.route("/api/weights")
 @login_required
 def api_weights():
-    # Merge legacy ExerciseLog with the modern SetLog table.
+    # SetLog only — ExerciseLog is DEAD (no live reads; the old merge
+    # double-counted a session that existed in both tables).
     # Per-exercise history collapses multi-set days into ONE entry per day
     # (max weight × max reps_completed for that day) so e1RM downstream is meaningful.
+    # Only actually-performed sets count: done=True and not skipped.
     result = {}
 
-    # 1. Legacy ExerciseLog entries
-    logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
-    for log in logs:
-        name = log.exercise_name
-        if name not in result:
-            result[name] = {"current": 0, "history": []}
-        entry = {
-            "weight": log.weight,
-            "reps": log.sets_label,
-            "reps_completed": log.reps_completed,
-            "rpe": log.rpe,
-            "date": log.logged_date.isoformat() if log.logged_date else None,
-            "week": log.week,
-            "day": log.day_idx,
-        }
-        if log.test_weight is not None:
-            entry["testWeight"] = log.test_weight
-            entry["testReps"] = log.test_reps
-            entry["estimated1RM"] = log.estimated_1rm
-        result[name]["history"].append(entry)
-        result[name]["current"] = log.weight
-
-    # 2. Modern SetLog entries — collapse per (exercise, week, day) to the max-weight set
-    set_logs = SetLog.query.filter_by(user_id=current_user.id, done=True).order_by(SetLog.logged_date, SetLog.id).all()
+    set_logs = (SetLog.query
+                .filter_by(user_id=current_user.id, done=True)
+                .filter(SetLog.set_skipped.isnot(True))
+                .order_by(SetLog.logged_date, SetLog.id).all())
     by_day = {}  # (name, week, day) -> {weight, reps}
     for s in set_logs:
         if not s.weight or s.weight <= 0:
@@ -3734,49 +3716,47 @@ def api_weights():
 @app.route("/api/weights", methods=["POST"])
 @login_required
 def api_weights_record():
+    """Persist a session-summary weight to SetLog. ExerciseLog is DEAD — this
+    endpoint must never write it.
+
+    The focus-mode flow already saves every set via /api/sets before this
+    fires, so when any SetLog row exists for (exercise, week, day) this is a
+    no-op (the per-set rows ARE the record; a second summary row would
+    double-count the session). When none exist — the onboarding baseline
+    lifts, which post week=0/day_idx=0 — one performed set is recorded so all
+    SetLog-based history readers see it.
+    """
     from workout_data import resolve_name
     data = request.get_json()
-    data["exercise"] = resolve_name(data["exercise"])
-    weight = data.get("weight", 0)
+    exercise = resolve_name(data["exercise"])
+    weight = data.get("weight")
+    weight = 0 if weight is None else weight
     if weight < 0 or weight > 1500:
         return jsonify({"error": "Invalid weight"}), 400
+    # week/day 0 are valid values — explicit None checks (falsy-zero rule).
+    week = data.get("week")
+    week = 0 if week is None else week
+    day_idx = data.get("day_idx")
+    day_idx = 0 if day_idx is None else day_idx
 
-    # Upsert: update existing entry for same exercise/week/day/user
-    existing = None
-    if data.get("week") is not None and data.get("day_idx") is not None:
-        existing = ExerciseLog.query.filter_by(
-            exercise_name=data["exercise"],
-            week=data.get("week"),
-            day_idx=data.get("day_idx"),
-            user_id=current_user.id,
-        ).first()
-
+    existing = SetLog.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise,
+        week=week, day_idx=day_idx,
+    ).first()
     if existing:
-        existing.weight = weight
-        existing.sets_label = data.get("sets_label")
-        existing.rpe = data.get("rpe")
-        existing.rpe_score = data.get("rpe_score")
-        existing.reps_completed = data.get("reps_completed")
-        existing.logged_date = _user_today()
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": "Save failed"}), 500
-        return jsonify({"ok": True, "id": existing.id, "updated": True})
+        # Session already recorded set-by-set via /api/sets.
+        return jsonify({"ok": True, "already_logged": True})
 
-    log = ExerciseLog(
-        exercise_name=data["exercise"],
-        weight=weight,
-        sets_label=data.get("sets_label"),
-        rpe=data.get("rpe"),
-        rpe_score=data.get("rpe_score"),
-        reps_completed=data.get("reps_completed"),
-        difficulty_notes=data.get("difficulty_notes"),
-        week=data.get("week"),
-        day_idx=data.get("day_idx"),
+    reps = data.get("reps_completed")
+    try:
+        reps = int(reps) if reps is not None else 0
+    except (TypeError, ValueError):
+        reps = 0
+    log = SetLog(
+        user_id=current_user.id, exercise_name=exercise,
+        week=week, day_idx=day_idx, set_number=0,
+        weight=weight, reps=reps, done=True,
         logged_date=_user_today(),
-        user_id=current_user.id,
     )
     db.session.add(log)
     try:
@@ -5343,24 +5323,38 @@ def api_exercise_targets(exercise_name):
 @app.route("/api/weights/baseline", methods=["POST"])
 @login_required
 def api_weights_baseline():
+    """Record baseline test lifts into SetLog (ExerciseLog is DEAD — this was
+    its last live write path).
+
+    Each baseline is stored as the set that was actually performed —
+    test_weight × test_reps, at week 0 / day 0 — so every SetLog-based
+    history reader (lift_session_history, /api/weights, export) sees it and
+    the Epley e1RM derived downstream equals the client's estimated_1rm.
+    Upserts on (exercise, 0, 0, set 0) so redoing the baseline never
+    duplicates rows.
+    """
     from workout_data import resolve_name
     data = request.get_json()
     for entry in data.get("exercises", []):
-        entry["name"] = resolve_name(entry["name"])
-        log = ExerciseLog(
-            exercise_name=entry["name"],
-            weight=entry["working_weight"],
-            sets_label=f"baseline: {entry['test_weight']}lb x {entry['test_reps']}",
-            rpe="just_right",
-            week=0,
-            day_idx=0,
-            logged_date=_user_today(),
-            test_weight=entry.get("test_weight"),
-            test_reps=entry.get("test_reps"),
-            estimated_1rm=entry.get("estimated_1rm"),
-            user_id=current_user.id,
-        )
-        db.session.add(log)
+        name = resolve_name(entry["name"])
+        test_weight = entry.get("test_weight")
+        weight = test_weight if test_weight is not None else entry.get("working_weight", 0)
+        try:
+            reps = int(entry.get("test_reps")) if entry.get("test_reps") is not None else 0
+        except (TypeError, ValueError):
+            reps = 0
+        row = SetLog.query.filter_by(
+            user_id=current_user.id, exercise_name=name,
+            week=0, day_idx=0, set_number=0,
+        ).first()
+        if row is None:
+            row = SetLog(user_id=current_user.id, exercise_name=name,
+                         week=0, day_idx=0, set_number=0)
+            db.session.add(row)
+        row.weight = weight
+        row.reps = reps
+        row.done = True
+        row.logged_date = _user_today()
     try:
         db.session.commit()
     except Exception as e:
@@ -5386,7 +5380,9 @@ def api_weight_detail(exercise_name):
         if s.weight and s.weight > 0:
             reps = min(s.reps or 10, 15)  # Cap at 15
             e1rm = round(s.weight * (1 + reps / 30))
-            wk = s.week or 1
+            # week 0 = baseline test rows — keep them distinct from week 1
+            # (falsy-zero: `s.week or 1` folded baseline into week 1).
+            wk = s.week if s.week is not None else 1
             if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                 weekly_e1rm[wk] = e1rm
 
@@ -5466,13 +5462,17 @@ def api_weight_detail(exercise_name):
     rating = None
     baseline_1rm = None
 
-    # Baseline from ExerciseLog test entries
+    # Baseline from legacy ExerciseLog test entries (frozen pre-April data),
+    # else from week-0 SetLog rows (where /api/weights/baseline writes now).
     baseline_entries = [l for l in logs if l.test_weight]
     if baseline_entries:
         bl = baseline_entries[0]
         bl_reps = min(bl.test_reps or 10, 15)
         baseline_1rm = round(bl.test_weight * (1 + bl_reps / 30))
+    elif 0 in weekly_e1rm:
+        baseline_1rm = weekly_e1rm[0]
 
+    if baseline_1rm:
         # Population percentile — get age/sex from psych intake
         try:
             pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
@@ -6097,20 +6097,54 @@ def api_import():
     """Import data from a backup JSON (from localStorage migration or backup restore)."""
     data = request.get_json()
 
-    # Import weights
+    # Import weights — into SetLog, the live table (/api/export builds the
+    # "weights" block from SetLog; ExerciseLog is DEAD and rows written there
+    # were invisible to every history reader). Each history entry is one
+    # session top set -> one done SetLog row.
     if "weights" in data:
+        import re as _re
+        from workout_data import resolve_name
+        # Next free set_number per (exercise, week, day) so the unique
+        # constraint never trips against existing or just-imported rows.
+        next_set = {}
+        for r in SetLog.query.filter_by(user_id=current_user.id).all():
+            k = (r.exercise_name, r.week, r.day_idx)
+            next_set[k] = max(next_set.get(k, 0), (r.set_number or 0) + 1)
         for name, info in data["weights"].items():
+            cname = resolve_name(name)
             for h in info.get("history", []):
-                log = ExerciseLog(
-                    exercise_name=name, weight=h["weight"],
-                    sets_label=h.get("reps"), rpe=h.get("rpe"),
-                    week=h.get("week", 0), day_idx=h.get("day", 0),
-                    logged_date=date.fromisoformat(h["date"]) if h.get("date") else _user_today(),
-                    test_weight=h.get("testWeight"), test_reps=h.get("testReps"),
-                    estimated_1rm=h.get("estimated1RM"),
-                    user_id=current_user.id,
-                )
-                db.session.add(log)
+                # Legacy baseline entries carry the actually-performed test set.
+                weight = h.get("testWeight") if h.get("testWeight") is not None else h.get("weight")
+                if weight is None:
+                    continue
+                reps = h.get("testReps") if h.get("testReps") is not None else (
+                    h.get("reps_completed") if h.get("reps_completed") is not None else h.get("reps"))
+                try:
+                    reps = int(reps)
+                except (TypeError, ValueError):
+                    m = _re.search(r"(\d+)", str(reps or ""))
+                    reps = int(m.group(1)) if m else 0
+                # week/day 0 are valid (baseline) — explicit None checks.
+                wk = h.get("week")
+                wk = 0 if wk is None else wk
+                di = h.get("day")
+                di = 0 if di is None else di
+                d = date.fromisoformat(h["date"]) if h.get("date") else _user_today()
+                # Skip entries already present (idempotent re-import).
+                dup = SetLog.query.filter_by(
+                    user_id=current_user.id, exercise_name=cname,
+                    week=wk, day_idx=di, weight=weight, logged_date=d,
+                ).first()
+                if dup:
+                    continue
+                k = (cname, wk, di)
+                sn = next_set.get(k, 0)
+                next_set[k] = sn + 1
+                db.session.add(SetLog(
+                    user_id=current_user.id, exercise_name=cname,
+                    week=wk, day_idx=di, set_number=sn,
+                    weight=weight, reps=reps, done=True, logged_date=d,
+                ))
 
     # Import body weight
     if "bodyweight" in data:

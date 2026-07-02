@@ -1559,6 +1559,10 @@ function getExerciseData(exName) {
 }
 
 function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, repsCompleted) {
+  // Local cache only — the session is already persisted set-by-set via
+  // /api/sets (SetLog, the source of truth) before this is called. The old
+  // POST /api/weights here wrote a duplicate summary row into the dead
+  // ExerciseLog table; never resurrect it.
   if (!_weightsCache) _weightsCache = {};
   if (!_weightsCache[exName]) {
     _weightsCache[exName] = { current: weight, history: [] };
@@ -1574,7 +1578,6 @@ function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, re
     week: week,
     day: dayIdx,
   });
-  apiPost('/api/weights', { exercise: exName, weight, sets_label: setsLabel, rpe, rpe_score: rpeScore, reps_completed: repsCompleted, week, day_idx: dayIdx });
 }
 
 function saveWeightInput(week, dayIdx, exIdx, exName) {
@@ -1586,8 +1589,8 @@ function saveWeightInput(week, dayIdx, exIdx, exName) {
   if (!_weightsCache) _weightsCache = {};
   if (!_weightsCache[exName]) _weightsCache[exName] = { current: 0, history: [] };
   _weightsCache[exName].current = weight;
-  // Save to backend (without RPE — that comes later)
-  apiPost('/api/weights', { exercise: exName, weight, week, day_idx: dayIdx });
+  // Cache only. A typed weight is NOT a performed set — persistence happens
+  // when the set is actually completed (/api/sets with done=true).
 }
 
 function parseRestSeconds(rest) {
@@ -2481,12 +2484,13 @@ function baselineNext() {
   const repsVal = parseInt(document.getElementById('bl-reps').value) || 0;
   baselineWeights[lift.name] = { reps: repsVal };
 
-  // Save this lift immediately to the DB so nothing is lost
-  const oneRM = estimate1RM(lift.suggested, repsVal);
-  const working = workingWeightFrom1RM(oneRM);
+  // Save this lift immediately to the DB so nothing is lost. Send the set
+  // that was actually performed (test weight x reps) — the server persists
+  // it to SetLog; /api/weights/baseline upserts the final values at the end.
   apiPost('/api/weights', {
     exercise: lift.name,
-    weight: working,
+    weight: lift.suggested,
+    reps_completed: repsVal,
     sets_label: `baseline: ${lift.suggested}lb x ${repsVal}`,
     rpe: 'just_right',
     week: 0,
@@ -12003,7 +12007,7 @@ function logFocusSet() {
     // Last set done — auto-record weight and advance (no RPE)
     _focusSetIdx = _focusSetCount;
 
-    // Gather last weight and reps for ExerciseLog history
+    // Gather last weight and reps for the local weights cache
     let recWeight = 0;
     let recReps = 0;
     for (let s = 0; s < _focusSetCount; s++) {
