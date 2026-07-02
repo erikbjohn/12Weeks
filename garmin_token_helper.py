@@ -55,10 +55,15 @@ def main():
         tokens = api.garth.dumps()
         print(f"Tokens obtained ({len(tokens)} bytes)")
 
-        # Save locally as backup
-        with open("/tmp/garmin_tokens.txt", "w") as f:
+        # Save locally as backup — owner-only perms (0600): these are bearer
+        # tokens granting full Garmin account access; a world-readable /tmp
+        # file hands them to any local user/process.
+        token_path = "/tmp/garmin_tokens.txt"
+        fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             f.write(tokens)
-        print("Tokens saved to /tmp/garmin_tokens.txt")
+        os.chmod(token_path, 0o600)  # tighten even if the file pre-existed
+        print(f"Tokens saved to {token_path} (owner-only permissions)")
 
         # Upload to app via the admin endpoint (one shot, no browser needed)
         admin_key = os.environ.get("ADMIN_API_KEY") or getpass.getpass(

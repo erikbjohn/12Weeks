@@ -9,13 +9,17 @@ if not os.path.exists(python):
     subprocess.check_call([python, "-m", "pip", "install", "garminconnect", "-q"])
 
 os.execv(python, [python, "-c", """
+import os
 from garminconnect import Garmin
 email = "erikbjohn@gmail.com"
 pw = input("Password: ")
 api = Garmin(email, pw, prompt_mfa=lambda: input("MFA Code: "))
 api.login()
 tokens = api.garth.dumps()
-with open("/tmp/gt.txt", "w") as f:
+# Owner-only perms: bearer tokens must never be world-readable in /tmp.
+fd = os.open("/tmp/gt.txt", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
     f.write(tokens)
-print("DONE - tokens saved")
+os.chmod("/tmp/gt.txt", 0o600)
+print("DONE - tokens saved (owner-only permissions)")
 """])

@@ -7916,7 +7916,7 @@ def _build_coach_context():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     if gc.connected:
-        garmin_data = gc.get_today_summary()
+        garmin_data = gc.get_today_summary(today=local_today)
         readiness_data = assess_readiness(garmin_data)
 
     # Current state
@@ -8627,7 +8627,7 @@ def garmin_today():
             return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
                             "linked": True, "reconnecting": True}), 503
         return jsonify({"error": "Not connected to Garmin"}), 401
-    summary = gc.get_today_summary()
+    summary = gc.get_today_summary(today=_user_today())
     if summary is None:
         return jsonify({"error": "Failed to fetch Garmin data"}), 500
     return jsonify(summary)
@@ -8641,7 +8641,7 @@ def garmin_readiness():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         return jsonify(assess_readiness(None))
-    summary = gc.get_today_summary()
+    summary = gc.get_today_summary(today=_user_today())
     return jsonify(assess_readiness(summary))
 
 
@@ -9913,11 +9913,16 @@ def api_morning_briefing():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
-    garmin_data = gc.get_today_summary() if gc.connected else None
+    garmin_data = gc.get_today_summary(today=_user_today()) if gc.connected else None
     readiness = assess_readiness(garmin_data)
-    score = readiness.get("score") or 70
+    # Honest readiness: assess_readiness returns score=None when there is no
+    # Garmin data. NEVER fabricate a number here — inventing "70 → GREEN" told
+    # the user (and the coach) they were recovered on a day we knew nothing.
+    score = readiness.get("score")
 
-    if score >= 65:
+    if score is None:
+        status = "UNKNOWN"
+    elif score >= 65:
         status = "GREEN"
     elif score >= 40:
         status = "YELLOW"
@@ -9949,7 +9954,13 @@ def api_morning_briefing():
         checkin_summary += f" Notes: {data['notes']}"
 
     # Use full coach context + special trigger
-    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). {today_line} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
+    if score is None:
+        status_part = ("Readiness: UNKNOWN — no Garmin recovery data available. "
+                       "Do NOT invent a readiness score or verdict; coach from the "
+                       "self-reported check-in only.")
+    else:
+        status_part = f"Status: {status} ({score}/100)."
+    briefing_msg = f"[MORNING_BRIEFING] {status_part} {today_line} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
     context = _build_coach_context()
     response_text = get_coach_response(briefing_msg, context)

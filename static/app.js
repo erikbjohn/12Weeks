@@ -6278,7 +6278,7 @@ function submitMorningCheckin() {
       const loading = card.querySelector('.mc-coach-loading');
       if (loading) loading.style.display = 'none';
 
-      const statusColor = d.status === 'GREEN' ? 'var(--accent)' : d.status === 'YELLOW' ? 'var(--amber)' : 'var(--red)';
+      const statusColor = d.status === 'GREEN' ? 'var(--accent)' : d.status === 'YELLOW' ? 'var(--amber)' : d.status === 'RED' ? 'var(--red)' : 'var(--muted)';
       const responseEl = document.getElementById('mc-coach-response');
       if (responseEl) {
         responseEl.style.display = 'block';
@@ -6937,8 +6937,21 @@ async function showGarminPanel() {
 async function renderGarminPanelBody() {
   const body = document.getElementById('garmin-panel-body');
   if (!body) return;
-  let st = null;
-  try { st = await (await fetch('/api/garmin/sync-status?week=' + currentWeek)).json(); } catch(e) {}
+  let st = null, stFailed = false;
+  try {
+    const r = await fetch('/api/garmin/sync-status?week=' + currentWeek);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    st = await r.json();
+  } catch(e) { stFailed = true; }
+  if (stFailed) {
+    // A failed status fetch is NOT "disconnected" — showing the login form
+    // here invited a connected user to re-enter credentials (fresh login +
+    // possible MFA) over a transient network blip / 500.
+    body.innerHTML =
+      '<div style="color:var(--muted);margin-bottom:10px;font-size:16px">Couldn&rsquo;t load Garmin status (network or server error). Your connection is unchanged.</div>' +
+      '<button class="btn btn-primary" style="width:100%;font-size:16px" onclick="renderGarminPanelBody()">Retry</button>';
+    return;
+  }
   if (!st || !st.connected) {
     body.innerHTML =
       '<div style="color:var(--muted);margin-bottom:10px;font-size:16px">Not connected.</div>' +

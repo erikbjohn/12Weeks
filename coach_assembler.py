@@ -143,9 +143,14 @@ def _build_bodyweight():
 
 @section_builder("garmin")
 def _build_garmin():
-    from garmin_client import GarminClient
     from overtraining import assess_readiness
-    gc = GarminClient(user_id=current_user.id)
+    # REUSE the app-level per-user client (shared 15-min cache + 429 cooldown).
+    # A brand-new GarminClient per coach message forced a full token restore
+    # (OAuth2 exchange + profile fetch) plus 6 uncached metric requests every
+    # message, and forgot any rate-limit cooldown — the dominant Garmin
+    # lockout driver. Lazy import: app.py imports this module at startup.
+    from app import _get_garmin
+    gc = _get_garmin(current_user.id)
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     garmin_data = gc.get_today_summary() if gc.connected else None
