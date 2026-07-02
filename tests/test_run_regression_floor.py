@@ -61,26 +61,45 @@ def test_baseline_language_allowed_in_week_one():
     assert "baseline" in out[0]["detail"].lower()
 
 
-def test_interval_recovery_normalized_so_structure_equals_headline():
-    """A coach that emits 5 work reps but 4 recoveries used to render
-    "5×3 hard / 2 easy" (reads as 5 easy → 43 min) under a 41-min headline.
-    After normalizing the recovery to the work's rep count, the rendered
-    structure and the computed duration describe the SAME rounds and agree."""
+def test_interval_recovery_explicit_reps_respected():
+    """The coach's EXPLICIT recovery rep count is the prescription — the system
+    prompt itself teaches work reps=5 / recovery reps=4 (recoveries between
+    intervals, none after the last). Force-overwriting 4→5 silently inflated
+    the stored duration and the Garmin workout beyond what the coach designed.
+    The detail must state the recovery count honestly so the structure the
+    athlete reads still sums to the headline."""
     from coach_planning_runs import (_normalize_interval_recovery,
                                       _segments_total_min, _segments_to_detail)
     segs = [
         {"kind": "warmup", "minutes": 10},
         {"kind": "work", "minutes": 3, "reps": 5, "hr": "≤178"},
-        {"kind": "recovery", "minutes": 2, "reps": 4},  # coach gave only 4
+        {"kind": "recovery", "minutes": 2, "reps": 4},  # explicit: between reps
         {"kind": "cooldown", "minutes": 8},
     ]
     norm = _normalize_interval_recovery(segs)
     total = _segments_total_min(norm)
     detail = _segments_to_detail(norm)
-    assert total == 10 + 5 * 3 + 5 * 2 + 8 == 43        # recovery normalized to 5
-    assert "5×3 min hard" in detail and "/ 2 min easy" in detail
-    # what the user would sum from the rendered structure == the headline
-    assert total == 10 + 5 * (3 + 2) + 8
+    assert norm[2]["reps"] == 4                          # NOT overwritten to 5
+    assert total == 10 + 5 * 3 + 4 * 2 + 8 == 41         # coach's real session
+    # detail says the recovery count honestly (n-1 → between reps), so what
+    # the user sums from the rendered structure == the headline
+    assert "5×3 min hard" in detail and "2 min easy between reps" in detail
+
+
+def test_interval_recovery_missing_reps_default_to_work_reps():
+    """A recovery with NO rep count still pairs as one recovery per work rep —
+    the original normalize behavior, kept for underspecified output."""
+    from coach_planning_runs import (_normalize_interval_recovery,
+                                      _segments_total_min, _segments_to_detail)
+    segs = [
+        {"kind": "work", "minutes": 3, "reps": 5},
+        {"kind": "recovery", "minutes": 2},  # unspecified
+    ]
+    norm = _normalize_interval_recovery(segs)
+    assert norm[1]["reps"] == 5
+    assert _segments_total_min(norm) == 5 * 3 + 5 * 2 == 25
+    d = _segments_to_detail(norm)
+    assert "5×3 min hard" in d and "/ 2 min easy" in d  # equal counts — plain pair
 
 
 def test_parse_run_magnitude():

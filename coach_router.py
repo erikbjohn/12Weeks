@@ -86,8 +86,17 @@ def route_trigger(message, context=None):
     # routing to weekly_planning even when the user's reply has no tag.
     # Without this, "yes" or "looks good" falls to the conversation agent
     # and loses the protocol's per-exercise WHY format.
+    #
+    # RECENCY-BOUND: "mid-flow" means a LIVE sitting. The stickiness is
+    # limited to an assistant message written within the last 2 hours, and
+    # the prose patterns are matched against the message TAIL (the protocol
+    # ends its turns with these questions). Without the bound, a planning
+    # flow abandoned Sunday night rerouted Tuesday's untagged "weighed in at
+    # 210" to the planning agent — and any old reply containing "show
+    # Monday" mid-sentence did the same, indefinitely.
     if agent_name == "conversation" and not trigger:
         try:
+            from datetime import datetime, timedelta, timezone as _tz
             from models import ChatMessage
             from flask_login import current_user
             if getattr(current_user, "is_authenticated", False):
@@ -97,12 +106,18 @@ def route_trigger(message, context=None):
                     .order_by(ChatMessage.id.desc())
                     .first()
                 )
-                if last_asst and last_asst.content:
-                    c = last_asst.content
+                recent = False
+                if last_asst and last_asst.created_at is not None:
+                    created = last_asst.created_at
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=_tz.utc)  # stored UTC
+                    recent = created >= datetime.now(_tz.utc) - timedelta(hours=2)
+                if recent and last_asst.content:
+                    tail = last_asst.content[-300:]
                     if (
-                        "[SHOW_NEXT_DAY]" in c
-                        or re.search(r"show (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|the next day|next day)", c, re.IGNORECASE)
-                        or re.search(r"(?:Anything else for|Anything to swap or adjust|Confirm and I'?ll show|Ready to see (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))", c, re.IGNORECASE)
+                        "[SHOW_NEXT_DAY]" in tail
+                        or re.search(r"show (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|the next day|next day)", tail, re.IGNORECASE)
+                        or re.search(r"(?:Anything else for|Anything to swap or adjust|Confirm and I'?ll show|Ready to see (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))", tail, re.IGNORECASE)
                     ):
                         agent_name = "weekly_planning"
         except Exception:

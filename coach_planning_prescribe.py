@@ -1,14 +1,16 @@
 """Per-exercise weight prescription via the strength-coach agent.
 
-Replaces training_engine.compute_next_targets for the planning path. The
-engine's deterministic rules (first-set bias, rep-drop compensation, etc.)
-kept producing regressions below the athlete's proven capacity. The coach
-agent reads the actual SetLog top sets across the last 4 weeks plus the
-template's sets/reps schema, then prescribes weights that fit the athlete's
-real capability and the phase's intent.
+NOT ON THE LIVE PLANNING PATH — the live path is
+coach_planning_program.generate_week_program (called from app.py's weekly
+generate). This module has no production callers; it survives for scripts/
+tooling only. If you re-wire planning through it, honor the invariant below.
 
-Engine still runs as the FALLBACK when the LLM call fails or returns
-unparseable output — better to have an engine number than nothing.
+COACH-OR-NOTHING: there is NO deterministic-engine fallback. When the LLM
+call fails or returns unparseable output this returns {} and every exercise
+it would have covered stays UNPLANNED — the UI shows "Plan this week". Never
+substitute training_engine numbers (or any static/template value) for a
+missing coach answer; serving engine output dressed as a plan is the exact
+failure the coach-or-nothing rule exists to prevent.
 
 Output: per-(day, exercise) target_weight. Sets/reps come from the template;
 the coach doesn't change session structure.
@@ -82,7 +84,8 @@ def generate_week_prescriptions(
                    weeks_remaining}
 
     Returns: {(day_idx, exercise_name, exercise_order): target_weight}
-    Empty dict on failure — caller falls back to the deterministic engine.
+    Empty dict on failure — the affected exercises stay UNPLANNED (coach-or-
+    nothing; there is NO engine fallback, matching the system prompt below).
     """
     if not template_program:
         return {}

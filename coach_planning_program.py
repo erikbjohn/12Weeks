@@ -344,8 +344,14 @@ def _prev_program_by_day(user_id: int, week: int) -> dict:
         return {}
     try:
         from models import WeeklyPrescription
+        # COACH rows ONLY. Last week can also contain template-seeded or legacy
+        # engine rows; restoring one of those via the volume floor would launder
+        # a static template exercise into the new week as source='coach' —
+        # coach-or-nothing forbids that. And no invented defaults: a fabricated
+        # rest ('90s') would sneak past the persist path's "coach omitted rest"
+        # guard dressed as a coach decision.
         rows = (WeeklyPrescription.query
-                .filter_by(user_id=user_id, week=week - 1)
+                .filter_by(user_id=user_id, week=week - 1, source='coach')
                 .order_by(WeeklyPrescription.day_idx,
                           WeeklyPrescription.exercise_order).all())
     except Exception:
@@ -357,7 +363,7 @@ def _prev_program_by_day(user_id: int, week: int) -> dict:
             "sets": r.sets or 3,
             "reps": r.reps or "8",
             "weight": r.target_weight,
-            "rest": r.rest or "90s",
+            "rest": r.rest,  # the coach's OWN committed rest — never invented
             "why": r.adjustment_reason or "",
         })
     return out

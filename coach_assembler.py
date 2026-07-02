@@ -135,8 +135,23 @@ def _build_chat_history():
 
 @section_builder("bodyweight")
 def _build_bodyweight():
-    from models import BodyWeight
-    rows = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
+    # BLOCK-SCOPED (>= AppState.start_date), matching _build_cut_status: the
+    # formatter labels bw[0]→bw[-1] as "Program total", so an all-time list
+    # made that delta span PRIOR blocks early in a new block and contradict
+    # the deliberately block-scoped <cut_status> pace in the same prompt.
+    from models import BodyWeight, AppState
+    q = BodyWeight.query.filter_by(user_id=current_user.id)
+    state = AppState.query.filter_by(user_id=current_user.id).first()
+    block_start = state.start_date if state and state.start_date else None
+    if block_start is not None:
+        q = q.filter(BodyWeight.log_date >= block_start)
+    rows = q.order_by(BodyWeight.log_date).all()
+    if not rows and block_start is not None:
+        # No weigh-in yet THIS block: surface only the single latest all-time
+        # entry (context for "latest weight"), never a cross-block delta.
+        latest = (BodyWeight.query.filter_by(user_id=current_user.id)
+                  .order_by(BodyWeight.log_date.desc()).first())
+        rows = [latest] if latest else []
     entries = [{"date": e.log_date.isoformat(), "weight": e.weight_lbs} for e in rows]
     return {"bodyweight": entries[-14:]}
 
@@ -382,8 +397,14 @@ def _build_exercise_history():
     # TOP working set so the coach can cite "last bench: 75x4".
     from models import SetLog
     from workout_data import resolve_name
+    # Only PERFORMED sets (done, not skipped): a weight typed into the input
+    # but never completed (blur-save creates the row done=False) is not
+    # history, and citing it invents sessions the athlete never did.
     rows = (SetLog.query
-            .filter(SetLog.user_id == current_user.id, SetLog.weight.isnot(None))
+            .filter(SetLog.user_id == current_user.id,
+                    SetLog.weight.isnot(None),
+                    SetLog.done.is_(True),
+                    SetLog.set_skipped.isnot(True))
             .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
             .limit(500).all())
     sessions = {}   # canonical -> {session_key -> entry}
@@ -427,7 +448,11 @@ def _build_exercise_analysis():
     if rx_list:
         for rx in rx_list:
             name = resolve_name(rx.exercise_name)
-            if name not in analysis and getattr(rx, 'target_weight', None):
+            # `is not None` — target_weight=0 is the valid BODYWEIGHT sentinel
+            # (UI: 0 = "bodyweight; leave input empty"). A truthy check dropped
+            # BW lifts from the analysis entirely, so the coach claimed it had
+            # no number for a lift the card displays with full sets/reps.
+            if name not in analysis and getattr(rx, 'target_weight', None) is not None:
                 analysis[name] = {
                     "target_weight": rx.target_weight,
                     "target_reps": int(rx.reps) if rx.reps and rx.reps.isdigit() else 10,
@@ -486,9 +511,13 @@ def _build_today_sets():
     local_today = _user_today()
     today_idx = local_today.weekday()  # Mon=0, Sun=6
     week = _current_week()
-    # Filter by SCHEDULED day (week + day_idx), not logged_date.
-    # User might log Thursday's workout on Sunday — logged_date is Sunday
-    # but day_idx is 3 (Thursday). We only want TODAY's scheduled sets.
+    # Filter by SCHEDULED day (week + day_idx) AND today's calendar date.
+    # The (week, day_idx) slot is unique to one date only WHILE the program is
+    # live: once the block ends, _current_week() clamps at 12 forever, so a
+    # later Monday would re-find an OLD week-12 Monday session and render it
+    # as "TODAY'S SETS" — contradicting today_status (date-gated the same way
+    # in _build_today_status) in the very same prompt (the 2026-06-29 phantom
+    # "you trained today" class).
     # Don't filter on done=True — /log_set creates rows with done=False unless
     # the client explicitly marks them done, so requiring done=True hides sets
     # the athlete actually entered. The done flag is preserved in each row's
@@ -497,6 +526,7 @@ def _build_today_sets():
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
+        SetLog.logged_date == local_today,
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
     for s in rows:
@@ -645,11 +675,24 @@ def _build_cut_status():
     weekly_intake_est = 0
     weekly_burn_est = 0
     days_logged = 0
+    # Count ONLY days where meals were actually logged as eaten. The old
+    # membership test (`plan.day_idx in [<all 7 weekdays>]`) was a tautology,
+    # so the "deficit" silently assumed full 7-day plan compliance even with
+    # zero meals logged — a fabricated cut signal. Map each eaten day to that
+    # weekday's plan calories (still a plan-based proxy for that day's intake;
+    # MealLog has no per-row macros yet), and estimate burn only for those days.
+    plan_by_idx = {}
     for plan in plan_rows:
-        if plan.day_idx in [(today - _td(days=i)).weekday() for i in range(7)]:
-            weekly_intake_est += plan.daily_calories or 0
-            weekly_burn_est += tdee  # rough — same TDEE per day; differentiation later
-            days_logged += 1
+        plan_by_idx.setdefault(plan.day_idx, plan)
+    for log_date, meals_eaten in sorted(intake_by_day.items()):
+        if not meals_eaten:
+            continue  # nothing actually eaten/logged that day
+        plan = plan_by_idx.get(log_date.weekday())
+        if plan is None:
+            continue  # no plan row for that weekday — no calorie estimate
+        weekly_intake_est += plan.daily_calories or 0
+        weekly_burn_est += tdee  # rough — same TDEE per day; differentiation later
+        days_logged += 1
     weekly_deficit = weekly_burn_est - weekly_intake_est if days_logged else None
 
     # ── Sodium-prep flag for weigh-in ────────────────────────────────────────
@@ -667,6 +710,7 @@ def _build_cut_status():
         "weeks_to_target": weeks_to_target,
         "projected_week_12_weight": proj_at_week_12,
         "weekly_deficit_estimate": weekly_deficit,
+        "deficit_days_logged": days_logged,
         "tdee": tdee,
         "sodium_prep_active": sodium_prep_active,
         "sodium_prep_note": (
@@ -1743,7 +1787,9 @@ def _format_athlete_data(ctx, requires):
         if cs.get("weekly_deficit_estimate") is not None:
             cs_lines.append(
                 f"  est_weekly_deficit: {cs['weekly_deficit_estimate']} cal "
-                f"(intake vs TDEE {cs.get('tdee','?')})"
+                f"over {cs.get('deficit_days_logged', '?')} day(s) with meals "
+                f"logged in the last 7 (plan calories vs TDEE {cs.get('tdee','?')} "
+                f"— NOT a full-week number; days without logs are unknown, not compliant)"
             )
         if cs.get("sodium_prep_active"):
             cs_lines.append(f"  SODIUM_PREP: {cs['sodium_prep_note']}")
@@ -1793,7 +1839,10 @@ def _format_athlete_data(ctx, requires):
             if w.get("exercises"):
                 parts.append("Prescribed exercises:")
                 for ex in w["exercises"]:
-                    tw = f" @ {ex['target_weight']}lb" if ex.get('target_weight') else ""
+                    # target_weight=0 is the BODYWEIGHT sentinel — render it,
+                    # don't drop it with a truthy check.
+                    _twv = ex.get('target_weight')
+                    tw = " @ BW (bodyweight)" if _twv == 0 else (f" @ {_twv}lb" if _twv is not None else "")
                     note = f" — {ex['note']}" if ex.get('note') else ""
                     parts.append(f"  {ex['name']}: {ex['sets']} rest {ex['rest']}{tw}{note}")
 
