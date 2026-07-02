@@ -317,10 +317,18 @@ _TARGET_PHRASE_RE = re.compile(
     + _PRED_NUM, re.IGNORECASE)
 
 
+# Future/goal framing that turns "weighing 185" into a TARGET, not a current-weight
+# claim (e.g. "the plan gets you weighing 185 by week 12"). When present in the
+# immediate context of a current-phrase match, don't flag a predicate mismatch.
+_FUTURE_MARKER_RE = re.compile(
+    r"\b(?:by\s+week|by\s+the\s+end|will\s+weigh|get(?:s|ting)?\s+you|"
+    r"aiming\s+for|on\s+track\s+to|by\s+\w+\s+\d|target|goal)\b", re.IGNORECASE)
+
+
 def _predicate_phrase_patterns():
-    """(regex with a <num> group, predicate keyword(s) that must back it)."""
-    return [(_CURRENT_PHRASE_RE, ("current",)),
-            (_TARGET_PHRASE_RE, ("target", "goal"))]
+    """(regex with a <num> group, predicate keyword(s) that must back it, guard)."""
+    return [(_CURRENT_PHRASE_RE, ("current",), _FUTURE_MARKER_RE),
+            (_TARGET_PHRASE_RE, ("target", "goal"), None)]
 
 
 def _check_predicate_attribution(text: str, cited_claims: list, normalize) -> list:
@@ -328,8 +336,14 @@ def _check_predicate_attribution(text: str, cited_claims: list, normalize) -> li
     backing is a claim of the opposite predicate. Skips numbers that no cited
     claim matches (checks 2/3 already handle those)."""
     out = []
-    for phrase_re, keywords in _predicate_phrase_patterns():
+    for phrase_re, keywords, guard_re in _predicate_phrase_patterns():
         for m in phrase_re.finditer(text):
+            # Skip when future/goal framing sits next to the match — the number is
+            # a target, not a current-state assertion (avoids a false retry).
+            if guard_re is not None:
+                ctx = text[max(0, m.start() - 40): m.end() + 25]
+                if guard_re.search(ctx):
+                    continue
             n = normalize(m.group("num"))
             backing = [c for c in cited_claims if normalize(str(c.value)) == n]
             if not backing:

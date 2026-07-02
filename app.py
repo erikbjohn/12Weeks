@@ -3852,15 +3852,18 @@ def api_set_log():
     ).first()
 
     if existing:
+        prev_done = bool(existing.done)
         existing.weight = weight
         existing.reps = reps
         if done_provided:
             existing.done = done
-        # PRESERVE the original logged_date on update. Re-stamping to today
-        # made a Wednesday edit of Monday's set (a) count as trained-today in
-        # date-keyed checks and (b) split the session in lift_session_history,
-        # whose session key includes logged_date. Only stamp if missing.
-        if existing.logged_date is None:
+        # logged_date policy: stamp today on the first completion (done False->True)
+        # so a set blur-created on an earlier day but actually performed today reads
+        # as trained-today. PRESERVE it on any later edit of an already-done set —
+        # re-stamping every edit made a Wednesday edit of Monday's set count as
+        # trained-today and split the lift_session_history session key.
+        newly_completed = done_provided and done and not prev_done
+        if existing.logged_date is None or newly_completed:
             existing.logged_date = _user_today()
     else:
         existing = SetLog(
@@ -6225,8 +6228,12 @@ def _serialize_weights(user_id=None):
     # entry per exercise per SESSION = that session's top working set, in
     # chronological order; `current` is the most recent session's top set.
     uid = user_id or current_user.id
+    # Performed sets only (done, not skipped) — matches GET /api/weights and
+    # lift_session_history so an export->import round-trip can't launder a
+    # typed-but-never-completed set into a "performed" PR.
     rows = (SetLog.query
-            .filter(SetLog.user_id == uid, SetLog.weight.isnot(None))
+            .filter(SetLog.user_id == uid, SetLog.weight.isnot(None),
+                    SetLog.done.is_(True), SetLog.set_skipped.isnot(True))
             .order_by(SetLog.logged_date, SetLog.id).all())
     result = {}
     sessions = {}  # (name, week, day, date) -> the entry dict in result[name]["history"]
@@ -10567,7 +10574,14 @@ def api_admin_generate_meals():
         try:
             day_macros = compute_day_calories(goal.daily_calories, goal.goal_type or 'cut', cal_compute_type, weight_lbs=weight)
         except Exception:
-            day_macros = {"calories": goal.daily_calories, "protein": goal.protein_grams or 200, "carbs": goal.carb_grams or 150, "fat": goal.fat_grams or 60}
+            # `is None` fallbacks, not truthy — a legitimately-zero macro
+            # (e.g. carbs=0 on an aggressive cut) must not be replaced by 150.
+            day_macros = {
+                "calories": goal.daily_calories,
+                "protein": goal.protein_grams if goal.protein_grams is not None else 200,
+                "carbs": goal.carb_grams if goal.carb_grams is not None else 150,
+                "fat": goal.fat_grams if goal.fat_grams is not None else 60,
+            }
 
         # Check for fast day — override first, then template mealType
         day_meal_type = 'standard'

@@ -1072,7 +1072,15 @@ async function replayOutbox() {
             req.onsuccess = () => resolve(req.result || []);
             req.onerror = () => reject(req.error);
         });
+        const OUTBOX_MAX_AGE_MS = 48 * 60 * 60 * 1000; // drop saves older than 48h
+        const _now = Date.now();
         for (const item of items) {
+            // Discard stale queued POSTs (e.g. accumulated over past sessions):
+            // replaying a months-old set body could overwrite a newer correction.
+            if (item.timestamp && (_now - item.timestamp) > OUTBOX_MAX_AGE_MS) {
+                db.transaction('outbox', 'readwrite').objectStore('outbox').delete(item.id);
+                continue;
+            }
             try {
                 const res = await fetch(item.url, {
                     method: 'POST',
@@ -1738,7 +1746,11 @@ function resolveLoggedReps(rawTyped, rawTarget) {
 function resolvePrefillWeight(setData, fallback) {
   if (setData && setData.weight != null) {
     if (setData.weight > 0) return setData.weight;
-    if (setData.done && setData.weight === 0) return 0;
+    // A logged 0 (failed set / bodyweight) prefills as 0 — but only when the
+    // 0 was real: the set is done, or the user explicitly typed a weight this
+    // session (weightEntered). An undone server row defaulted to 0 with nothing
+    // typed still falls to the suggested weight.
+    if (setData.weight === 0 && (setData.done || setData.weightEntered)) return 0;
   }
   return fallback;
 }
@@ -1755,9 +1767,10 @@ function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   // Nothing meaningful entered — but an explicitly typed 0 IS meaningful (failed set)
   if (weight <= 0 && reps <= 0 && Number.isNaN(repsTyped)) return;
   if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped || 0)) return;
+  const weightEntered = !!(wtInput && wtInput.value.trim() !== '');
   // Update local cache so the value persists across re-renders even before toggleSet
-  if (!_setCache[key]) _setCache[key] = { done: false, weight, reps };
-  else { _setCache[key].weight = weight; _setCache[key].reps = reps; }
+  if (!_setCache[key]) _setCache[key] = { done: false, weight, reps, weightEntered };
+  else { _setCache[key].weight = weight; _setCache[key].reps = reps; _setCache[key].weightEntered = weightEntered; }
   // Send WITHOUT the done flag — backend will preserve the existing done state
   apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps });
 }
@@ -1772,10 +1785,11 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   // the target. A typed 0 is a failed set and is logged as 0 (falsy-zero-safe).
   const repsTyped = repsInput ? parseInt(repsInput.value) : NaN;
   const reps = resolveLoggedReps(repsInput ? repsInput.value : '', repsInput ? repsInput.placeholder : '');
+  const weightEntered = !!(wtInput && wtInput.value.trim() !== '');
 
   if (_setCache[key] && _setCache[key].done) {
     // Un-check
-    _setCache[key] = { done: false, weight, reps };
+    _setCache[key] = { done: false, weight, reps, weightEntered };
     btn.classList.remove('done');
     btn.innerHTML = '';
     btn.closest('.set-row').classList.remove('set-done');
@@ -1790,7 +1804,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   } else {
     // Check — mark set done. Flag obvious typos before persisting.
     if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped || 0)) return;
-    _setCache[key] = { done: true, weight, reps };
+    _setCache[key] = { done: true, weight, reps, weightEntered };
     btn.classList.add('done');
     btn.innerHTML = '&#10003;';
     btn.closest('.set-row').classList.add('set-done');
