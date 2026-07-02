@@ -1373,15 +1373,18 @@ Intensity level: {anger_level_label}
 </non_negotiable_rules>
 
 <markers>
-When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line:
-[SCHEDULE: day_idx=N, change_description]
-[PRESCRIPTION: day_idx=N, exercise=Name, sets=N, reps=N, weight=N, reason=text]
+When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line.
+These formats are EXACT — the app parses them mechanically. A marker in any other shape is
+silently dropped and the change does NOT happen (you will have lied to the athlete):
+[SCHEDULE: day=N, time=3:00 PM, notes=text] — day is 0-indexed (0=Monday); notes optional
+[PRESCRIPTION: week=N, day=N, exercise=Name, sets=N, reps=N, rest=60-90s, weight=N, reason=text] — rest/weight/reason optional; week defaults to the current week if omitted
 [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
-[WEIGHT: exercise=Name, new_weight=N, reason=text]
-[RUN: day_idx=N, type=text, duration=text, reason=text]
-[NUTRITION: change_description]
-[BMR_UPDATE: daily_calories=N, protein=N, carbs=N, fat=N, reason=text]
-[LOCKOUT_WARNING: violation_description]
+[WEIGHT: exercise=Name, new_weight=N, reason=text] — sets the exercise's target weight on this week's card
+[RUN: day=N, duration=40 min, type=zone2, reason=text]
+[NUTRITION: day=N, meal_type=fast_day, reason=text] — change one day's meal plan
+[NUTRITION: daily_calories=N, reason=text] — change the daily calorie target
+[BMR_UPDATE: new_bmr=N, reason=text]
+[LOCKOUT_WARNING: count=N, reason=text]
 [SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
 [SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
 </markers>

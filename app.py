@@ -672,10 +672,12 @@ def _parse_coach_markers(text, user_id, week):
                 ))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SWAP marker failed")
             db.session.rollback()
 
-    # [SCHEDULE: day=X, time=3:00 PM, notes=...]
-    for m in re.finditer(r'\[SCHEDULE:\s*day=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
+    # [SCHEDULE: day=X, time=3:00 PM, notes=...]  (canonical — CORE_PROMPT <markers>)
+    # `day_idx=` accepted as an alias for `day=`.
+    for m in re.finditer(r'\[SCHEDULE:\s*day(?:_idx)?=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
         try:
             day_idx, workout_time = int(m.group(1)), m.group(2).strip()
             notes = m.group(3).strip() if m.group(3) else ''
@@ -687,6 +689,7 @@ def _parse_coach_markers(text, user_id, week):
                 db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, workout_time=workout_time, notes=notes))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SCHEDULE marker failed")
             db.session.rollback()
 
     # [NUTRITION: day=X, meal_type=fast_day, reason=...]
@@ -709,6 +712,7 @@ def _parse_coach_markers(text, user_id, week):
                     db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, skip_day=True, notes='Fast day \u2014 no workout'))
             db.session.commit()
         except Exception:
+            logging.exception("Coach NUTRITION (meal_type) marker failed")
             db.session.rollback()
 
     # [NUTRITION: daily_calories=XXXX, reason=...]
@@ -720,19 +724,65 @@ def _parse_coach_markers(text, user_id, week):
                 goal.daily_calories = new_cals
                 db.session.commit()
         except Exception:
+            logging.exception("Coach NUTRITION (daily_calories) marker failed")
             db.session.rollback()
 
-    # [WEIGHT: exercise=Name, adjustment=+5, reason=...]
-    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*adjustment=([+-]?\d+),\s*reason=([^\]]+)\]', text):
+    # [WEIGHT: exercise=Name, new_weight=N, reason=text]  (canonical — CORE_PROMPT <markers>)
+    # Legacy [WEIGHT: exercise=Name, adjustment=+5, reason=...] still accepted.
+    # Writes to WeeklyPrescription — the card's source of truth. ExerciseLog is
+    # DEAD (Apr 2026): never read a base weight from it or write a row to it.
+    _weight_changes = []  # (exercise, absolute_weight_or_None, adjustment_or_None, reason)
+    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*new_weight=(\d+(?:\.\d+)?)(?:,\s*reason=([^\]]+))?\]', text):
+        _weight_changes.append((m.group(1).strip(), float(m.group(2)), None,
+                                (m.group(3) or '').strip()))
+    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*adjustment=([+-]?\d+(?:\.\d+)?),\s*reason=([^\]]+)\]', text):
+        _weight_changes.append((m.group(1).strip(), None, float(m.group(2)),
+                                m.group(3).strip()))
+    for _wx_exercise, _wx_new, _wx_adj, _wx_reason in _weight_changes:
         try:
-            exercise, adj, reason = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
-            last_log = ExerciseLog.query.filter_by(user_id=user_id, exercise_name=exercise).order_by(ExerciseLog.logged_date.desc()).first()
-            base_weight = last_log.weight if last_log else 0
-            new_weight = base_weight + adj
-            log = ExerciseLog(user_id=user_id, exercise_name=exercise, weight=new_weight, week=week, day_idx=0, rpe=None, logged_date=_user_today())
-            db.session.add(log)
+            exercise = resolve_name(_wx_exercise)
+            rx_rows = WeeklyPrescription.query.filter_by(
+                user_id=user_id, week=week, exercise_name=exercise
+            ).all()
+            if not rx_rows:
+                logging.warning(
+                    "Coach WEIGHT marker dropped: no WeeklyPrescription row for "
+                    "'%s' week=%s (user %s)", exercise, week, user_id,
+                )
+                continue
+            if _wx_new is not None:
+                new_weight = _wx_new
+            else:
+                bases = [r.target_weight for r in rx_rows if r.target_weight is not None]
+                new_weight = (max(bases) if bases else 0) + _wx_adj
+            if new_weight < 0:
+                continue
+            # Same data-layer guard as [PRESCRIPTION]: outside deload weeks the
+            # coach may not set a weight below 95% of the proven top set
+            # (performed sets only — a typed-but-not-done weight proves nothing).
+            if new_weight > 0 and week not in (4, 8):
+                top = db.session.query(db.func.max(SetLog.weight)).filter(
+                    SetLog.user_id == user_id,
+                    SetLog.exercise_name == exercise,
+                    SetLog.weight > 0,
+                    SetLog.done == True,  # noqa: E712
+                    SetLog.set_skipped.isnot(True),  # NULL-safe: legacy rows count
+                ).scalar()
+                if top is not None and new_weight < top * 0.95:
+                    logging.warning(
+                        "WEIGHT guard: rejected coach write %s wk %s @ %s lb "
+                        "(below 95%% of recent top set %s lb)",
+                        exercise, week, new_weight, top,
+                    )
+                    continue
+            for r in rx_rows:
+                r.target_weight = new_weight
+                r.source = 'coach'
+                if _wx_reason:
+                    r.adjustment_reason = _wx_reason
             db.session.commit()
         except Exception:
+            logging.exception("Coach WEIGHT marker failed")
             db.session.rollback()
 
     # [SORENESS: area=shoulders, level=moderate]
@@ -753,6 +803,7 @@ def _parse_coach_markers(text, user_id, week):
             db.session.add(CoachMemory(user_id=user_id, content=f'Athlete reports {level} soreness/tightness in {area}', memory_type='observation', week=week))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SORENESS marker failed")
             db.session.rollback()
 
     # [RUN: day=X, duration=50 min, type=zone2, reason=...]
@@ -760,9 +811,19 @@ def _parse_coach_markers(text, user_id, week):
     # the same reply don't create two concurrent push_week calls on the same week
     # (duplicate scheduled workouts, orphaned workout ids).
     _garmin_weeks_to_push = set()
-    for m in re.finditer(r'\[RUN:\s*day=(\d+),\s*duration=([^,]+),\s*type=([^,]+),\s*reason=([^\]]+)\]', text):
+    # Canonical (CORE_PROMPT <markers>): [RUN: day=N, duration=40 min, type=zone2, reason=text]
+    # Tolerated: `day_idx=` alias, duration/type in either order, missing reason.
+    for m in re.finditer(
+        r'\[RUN:\s*day(?:_idx)?=(\d+),\s*'
+        r'(?:duration=([^,\]]+),\s*type=([^,\]]+)|type=([^,\]]+),\s*duration=([^,\]]+))'
+        r'(?:,\s*reason=([^\]]+))?\]',
+        text,
+    ):
         try:
-            day_idx, duration, run_type, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+            day_idx = int(m.group(1))
+            duration = (m.group(2) or m.group(5)).strip()
+            run_type = (m.group(3) or m.group(4)).strip()
+            reason = (m.group(6) or '').strip()
             existing = RunOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
             if existing:
                 existing.duration = duration
@@ -788,6 +849,7 @@ def _parse_coach_markers(text, user_id, week):
             db.session.commit()
             _garmin_weeks_to_push.add(week)
         except Exception:
+            logging.exception("Coach RUN marker failed")
             db.session.rollback()
     # Re-push all affected weeks to Garmin in a single off-thread serial pass:
     # up to 3 Garmin HTTP calls must not block the SSE worker; the per-user lock
@@ -813,6 +875,7 @@ def _parse_coach_markers(text, user_id, week):
                     pa.actual_bmr = new_bmr
                     db.session.commit()
         except Exception:
+            logging.exception("Coach BMR_UPDATE marker failed")
             db.session.rollback()
 
     # [LOCKOUT_WARNING: count=X, reason=...]
@@ -823,15 +886,23 @@ def _parse_coach_markers(text, user_id, week):
             db.session.add(cm)
             db.session.commit()
         except Exception:
+            logging.exception("Coach LOCKOUT_WARNING marker failed")
             db.session.rollback()
 
-    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110]
-    for m in re.finditer(r'\[PRESCRIPTION:\s*week=(\d+),\s*day=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,]+?)(?:,\s*rest=([^\],]+?))?(?:,\s*weight=([^\]]+))?\]', text):
+    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110, reason=text]
+    # (canonical — CORE_PROMPT <markers>). week defaults to the chat's current
+    # week when omitted; `day_idx=` accepted as an alias; rest/weight/reason optional.
+    for m in re.finditer(r'\[PRESCRIPTION:\s*(?:week=(\d+),\s*)?day(?:_idx)?=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,\]]+?)(?:,\s*rest=([^\],]+?))?(?:,\s*weight=([^,\]]+?))?(?:,\s*reason=([^\]]+))?\]', text):
         try:
-            p_week, p_day, p_exercise = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+            p_week = int(m.group(1)) if m.group(1) else week
+            p_day, p_exercise = int(m.group(2)), m.group(3).strip()
             p_sets, p_reps = int(m.group(4)), m.group(5).strip()
             p_rest = m.group(6).strip() if m.group(6) else '60s'
-            p_weight = float(m.group(7)) if m.group(7) else None
+            p_reason = m.group(8).strip() if m.group(8) else None
+            try:
+                p_weight = float(m.group(7)) if m.group(7) else None
+            except ValueError:
+                p_weight = None  # e.g. weight=BW — leave target unset, keep the rest
             from workout_data import resolve_name
             p_exercise = resolve_name(p_exercise)
 
@@ -867,19 +938,24 @@ def _parse_coach_markers(text, user_id, week):
                 existing.source = 'coach'
                 if p_weight is not None:
                     existing.target_weight = p_weight
+                if p_reason:
+                    existing.adjustment_reason = p_reason
             else:
                 # Find max exercise_order for this day
                 max_order = db.session.query(db.func.max(WeeklyPrescription.exercise_order)).filter_by(
                     user_id=user_id, week=p_week, day_idx=p_day
-                ).scalar() or -1
+                ).scalar()
+                if max_order is None:
+                    max_order = -1
                 db.session.add(WeeklyPrescription(
                     user_id=user_id, week=p_week, day_idx=p_day,
                     exercise_order=max_order + 1, exercise_name=p_exercise,
                     sets=p_sets, reps=p_reps, rest=p_rest, source='coach',
-                    target_weight=p_weight,
+                    target_weight=p_weight, adjustment_reason=p_reason,
                 ))
             db.session.commit()
         except Exception:
+            logging.exception("Coach PRESCRIPTION marker failed")
             db.session.rollback()
 
     # [DAY_SCHEDULE: day=X, lift_name=Upper A - Chest & Back, muscle_groups=chest,back,triceps, is_rest=false]
@@ -899,6 +975,7 @@ def _parse_coach_markers(text, user_id, week):
                 db.session.add(WeeklyDaySchedule(user_id=user_id, week=week, day_idx=day_idx, lift_name=lift_name, muscle_groups=muscle_groups, is_rest=is_rest, source='coach'))
             db.session.commit()
         except Exception:
+            logging.exception("Coach DAY_SCHEDULE marker failed")
             db.session.rollback()
 
 
@@ -7519,7 +7596,8 @@ def api_chat_stream():
                         db.session.add(asst_chat)
                         db.session.commit()
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: failed to save assistant reply")
 
                 # Extract memories from conversation (same as non-streaming endpoint)
                 try:
@@ -7547,20 +7625,29 @@ def api_chat_stream():
                 except Exception:
                     pass
 
-                # Parse structured markers from coach response
+                # Parse structured markers from coach response.
+                # MUST run inside an app context: the generator's finally block
+                # executes after every `with _app.app_context()` above has
+                # closed, and _parse_coach_markers hits the DB — without this,
+                # every marker write raised RuntimeError and was silently
+                # swallowed (coach announced changes that never persisted).
                 try:
-                    _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
+                    with _app.app_context():
+                        _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: coach marker parsing failed")
 
-                # Fire compliance events
+                # Fire compliance events (same context requirement as above)
                 try:
-                    from coach_state import update_anger_level
                     trigger = _route_info.get("trigger")
                     if trigger == "WORKOUT_COMPLETE":
-                        update_anger_level(_current_user_id, "completed_workout")
+                        from coach_state import update_anger_level
+                        with _app.app_context():
+                            update_anger_level(_current_user_id, "completed_workout")
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: compliance event failed")
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
