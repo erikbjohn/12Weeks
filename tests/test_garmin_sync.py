@@ -652,10 +652,23 @@ class WellnessGC(FakeGC):
         return _wellness_payload() if self.default else None
 
 
+def _sync_until_backfilled(gc, uid, today, max_rounds=10):
+    """Run sync_wellness repeatedly until the capped backfill window fills
+    (mirrors production: each 15-min-throttled sync advances the backfill)."""
+    from garmin_sync import sync_wellness
+    res = None
+    for _ in range(max_rounds):
+        res = sync_wellness(gc, uid, today=today)
+        if not res["wellness_backfill_truncated"]:
+            break
+    return res
+
+
 def test_sync_wellness_creates_today_and_backfills(app_ctx):
     app_, db = app_ctx
     from models import GarminWellness
     from garmin_sync import sync_wellness
+    from garmin_sync import MAX_WELLNESS_DAYS_PER_SYNC
     u = _mk_user(db, "well1@test.com")
     today = date(2026, 6, 12)
     res = sync_wellness(WellnessGC(), u.id, today=today)
@@ -665,7 +678,14 @@ def test_sync_wellness_creates_today_and_backfills(app_ctx):
     assert row.hrv_last_night == 52 and row.hrv_weekly_avg == 55
     assert row.body_battery == 58 and row.training_readiness == 71
     assert row.vo2max == 48.0 and row.stress_overall == 31 and row.resting_hr == 47
-    # backfilled the full 14-day window on first sync
+    # BURST CAP: first sync fetches at most today + (cap-1) backfill days —
+    # never the full 14-day window in one shot (~105 Garmin requests, a
+    # rate-limit/lockout trigger) — and flags the remainder as truncated.
+    assert GarminWellness.query.filter_by(user_id=u.id).count() == MAX_WELLNESS_DAYS_PER_SYNC
+    assert res["wellness_backfill_truncated"] is True
+    # subsequent syncs progressively complete the 14-day window
+    final = _sync_until_backfilled(WellnessGC(), u.id, today)
+    assert final["wellness_backfill_truncated"] is False
     assert GarminWellness.query.filter_by(user_id=u.id).count() == 15
 
 
@@ -675,7 +695,7 @@ def test_sync_wellness_refreshes_today_but_not_past(app_ctx):
     from garmin_sync import sync_wellness
     u = _mk_user(db, "well2@test.com")
     today = date(2026, 6, 12)
-    sync_wellness(WellnessGC(), u.id, today=today)
+    _sync_until_backfilled(WellnessGC(), u.id, today)  # fill the whole window
     yesterday = today - timedelta(days=1)
     gc2 = WellnessGC(by_day={
         today.isoformat(): _wellness_payload(bb=23),
@@ -730,7 +750,7 @@ def test_sync_wellness_retries_recent_all_null_days_for_watch_lag(app_ctx):
              "trainingStatus": None, "stress": None, "restingHr": None}
     old_gap = today - timedelta(days=5)
     gc1 = WellnessGC(by_day={(today - timedelta(days=i)).isoformat(): empty for i in range(15)})
-    sync_wellness(gc1, u.id, today=today)
+    _sync_until_backfilled(gc1, u.id, today)  # fill the whole window (all-NULL)
     yesterday = today - timedelta(days=1)
     assert GarminWellness.query.filter_by(user_id=u.id, date=yesterday).first().sleep_seconds is None
     # watch uploads — Garmin now has data for every day
@@ -825,6 +845,137 @@ def test_wellness_fields_handles_real_vo2max_dict_and_type_garbage():
     f4 = wellness_fields({**base, "hrv": {"lastNight": {"weird": 1}, "weeklyAvg": 55},
                           "trainingStatus": None})
     assert f4["hrv_last_night"] is None and f4["hrv_weekly_avg"] == 55
+
+
+# ---------- 2026-07 audit: Garmin rate-limit / lockout hardening ----------
+
+def test_cached_respects_rate_limit_cooldown():
+    # During a 429 cooldown, _cached must NOT fire requests: stale cache if
+    # available, else None. The old code kept hammering Garmin on every page
+    # load / coach message for the whole block — the lockout escalator.
+    import time as _time
+    gc = _connected_client()
+    calls = []
+
+    class CountingApi(_FakeApi):
+        def get_hrv_data(self, day):
+            calls.append(day)
+            return super().get_hrv_data(day)
+
+    gc.api = CountingApi()
+    gc._rate_limited_until = _time.time() + 600
+    assert gc._get_hrv("2026-06-11") is None  # no cache + cooldown → None, no fetch
+    assert calls == []
+    gc._cache["hrv_2026-06-11"] = ({"lastNight": 51}, _time.time() - 99999)  # stale
+    assert gc._get_hrv("2026-06-11") == {"lastNight": 51}  # stale served, no fetch
+    assert calls == []
+    gc._rate_limited_until = 0
+    assert gc._get_hrv("2026-06-12")["lastNight"] == 52  # cooldown over → fetches
+    assert calls == ["2026-06-12"]
+
+
+def test_get_today_summary_uses_given_date_and_same_day_sleep():
+    # get_today_summary must key EVERY metric — including sleep — to the given
+    # user-local date. Sleep used to be fetched for `yesterday` (one night
+    # stale, contradicting the wellness strip's same-day key), and the date
+    # defaulted to server-UTC date.today() (wrong every Pacific evening).
+    gc = _connected_client()
+    seen = []
+
+    class SpyApi(_FakeApi):
+        def get_sleep_data(self, day):
+            seen.append(("sleep", day))
+            return super().get_sleep_data(day)
+
+        def get_hrv_data(self, day):
+            seen.append(("hrv", day))
+            return super().get_hrv_data(day)
+
+    gc.api = SpyApi()
+    s = gc.get_today_summary(today=date(2026, 6, 30))
+    assert s["date"] == "2026-06-30"
+    assert ("sleep", "2026-06-30") in seen  # same-day, not yesterday
+    assert ("hrv", "2026-06-30") in seen
+
+
+def test_try_restore_tokens_cooldown_gate_and_refresh_persistence(app_ctx, monkeypatch):
+    # (a) A rate-limited client must not attempt a live restore (OAuth2
+    #     exchange + profile fetch) — that sustains the block.
+    # (b) A successful restore must persist the garth-refreshed OAuth2 so the
+    #     next restore skips the auth-endpoint exchange entirely.
+    # (c) A 429 during restore must set the cooldown, like login() does.
+    import time as _time
+    app_, db = app_ctx
+    from models import GarminTokens
+    from garmin_client import GarminClient
+    u = _mk_user(db, "tokrefresh@test.com")
+    GarminTokens.query.filter_by(user_id=u.id).delete()
+    db.session.add(GarminTokens(user_id=u.id, token_data="stale-token"))
+    db.session.commit()
+
+    class FakeGarth:
+        def dumps(self):
+            return "refreshed-token"
+
+    class FakeGarmin:
+        def __init__(self, *a, **k):
+            self.garth = FakeGarth()
+
+        def login(self, tokenstore=None):
+            return True
+
+    import garminconnect
+    monkeypatch.setattr(garminconnect, "Garmin", FakeGarmin)
+
+    gc = GarminClient(user_id=u.id)
+    gc._rate_limited_until = _time.time() + 600
+    assert gc.try_restore_tokens(u.id) is False and not gc.connected  # (a)
+    gc._rate_limited_until = 0
+    assert gc.try_restore_tokens(u.id) is True
+    assert GarminTokens.query.filter_by(user_id=u.id).first().token_data == "refreshed-token"  # (b)
+
+    class RateLimitedGarmin(FakeGarmin):
+        def login(self, tokenstore=None):
+            raise Exception("429 Too Many Requests")
+
+    monkeypatch.setattr(garminconnect, "Garmin", RateLimitedGarmin)
+    gc2 = GarminClient(user_id=u.id)
+    assert gc2.try_restore_tokens(u.id) is False
+    assert gc2._rate_limited_until > _time.time()  # (c)
+
+
+def test_morning_briefing_unknown_readiness_never_fabricated(app_ctx, monkeypatch):
+    # No Garmin data → assess_readiness says score=None / unknown. The endpoint
+    # used `score or 70` → GREEN (70/100): a confident recovery verdict backed
+    # by no data. It must report UNKNOWN with a null score instead.
+    app_, db = app_ctx
+    import app as appmod
+    u = _mk_user(db, "briefing-unknown@test.com")
+    _mk_state(db, u.id, date(2026, 6, 1))
+    appmod._garmin_clients.pop(u.id, None)  # no live Garmin session
+    from models import GarminTokens
+    GarminTokens.query.filter_by(user_id=u.id).delete()
+    db.session.commit()
+    monkeypatch.setattr(appmod, "_build_coach_context", lambda: "ctx")
+    seen_msgs = []
+
+    def fake_coach(msg, ctx):
+        seen_msgs.append(msg)
+        return "Briefing text."
+
+    monkeypatch.setattr(appmod, "get_coach_response", fake_coach)
+    client = app_.test_client()
+    with client.session_transaction() as sess:
+        sess["_user_id"] = str(u.id)
+        sess["_fresh"] = True
+    r = client.post("/api/morning-briefing", json={"sleep_quality": 6})
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["status"] == "UNKNOWN"
+    assert d["readiness_score"] is None
+    # the coach trigger must not contain a fabricated GREEN (70/100)
+    assert "GREEN (70/100)" not in seen_msgs[0]
+    assert "UNKNOWN" in seen_msgs[0]
 
 
 def test_status_connected_from_saved_token_without_live_session(app_ctx):

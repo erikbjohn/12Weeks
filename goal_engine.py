@@ -164,7 +164,6 @@ def compute_targets(tdee, goal_type, weight_lbs, age=None, target_weight=None, w
     if goal_type == "cut":
         # Use 1.0g/lb for aggressive cuts, 1.2g/lb for moderate cuts
         protein = round(1.0 * weight_lbs)
-        fat = round(0.3 * weight_lbs)
         # Compute deficit from actual weight loss goal
         if target_weight and target_weight < weight_lbs and weeks > 0:
             weight_to_lose = weight_lbs - target_weight
@@ -174,10 +173,23 @@ def compute_targets(tdee, goal_type, weight_lbs, age=None, target_weight=None, w
         else:
             # Fallback: 35% deficit
             calories = max(int(round(tdee * 0.65)), 1200)
+        # Fit the macros to the calorie budget — the returned macros must
+        # never sum past the returned calories (that put contradictory
+        # numbers on the dashboard: 1375 kcal target with macros totalling
+        # 1501). Protein is the anchor; fat gets up to 0.3 g/lb only if the
+        # deficit budget allows; carbs take the ACTUAL remainder (no 20 g
+        # floor — same fix compute_day_calories already got).
         protein_cal = protein * 4
+        if protein_cal > calories:
+            # Budget can't even fund the protein floor — scale protein to fit.
+            protein = int(calories / 4)
+            protein_cal = protein * 4
+        fat = round(0.3 * weight_lbs)
+        if protein_cal + fat * 9 > calories:
+            fat = int((calories - protein_cal) / 9)
         fat_cal = fat * 9
         remaining_cal = max(calories - protein_cal - fat_cal, 0)
-        carbs = max(int(remaining_cal / 4), 20)
+        carbs = int(remaining_cal / 4)
     elif goal_type == "bulk":
         calories = int(round(tdee + 400))
         protein = round(1.0 * weight_lbs)

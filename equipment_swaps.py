@@ -1,5 +1,95 @@
 """Equipment catalog and exercise swap map for the 12Weeks program."""
 
+# ─── Equipment classes for weight-transfer scaling ─────────────────────────
+# Classified from the exercise catalogs' equipment requirements (authoritative:
+# EXERCISE_SWAPS requires + workout_data.EXERCISES equipment), with a
+# name-keyword fallback for exercises neither catalog knows. Name substrings
+# alone misclassified every dumbbell exercise whose name lacks "dumbbell"/"db "
+# (Goblet Squat, Bulgarian Split Squat, Lateral Raise, Hammer Curl) and every
+# barbell lift whose name lacks "barbell" (Conventional/Romanian Deadlift,
+# Power Clean, Push Press) — those swaps got factor 1.0 and the full barbell
+# weight was prescribed for the dumbbell movement.
+_BAR_EQUIP = {"barbell", "ez_bar"}
+_DB_EQUIP = {"dumbbells", "kettlebells"}
+_STACK_EQUIP = {"cable_machine", "lat_pulldown", "leg_press", "leg_curl_ext",
+                "chest_press_machine", "seated_row_machine", "smith_machine",
+                "ab_machine"}
+
+# (from_class, to_class) → factor to multiply the from-weight by.
+# Same class → 1.0 (equivalent equipment, e.g. Cable Seated Row → Seated Row
+# Machine, per this module's contract). Reverse directions are the inverses,
+# so a DB-RDL history correctly scales UP to a barbell RDL prescription.
+_SWAP_FACTORS = {
+    ("bar", "dumbbell"): 0.7,
+    ("dumbbell", "bar"): 1.43,   # 1 / 0.7
+    ("stack", "dumbbell"): 0.5,
+    ("dumbbell", "stack"): 2.0,  # 1 / 0.5
+    ("stack", "bar"): 0.8,
+    ("bar", "stack"): 1.25,      # 1 / 0.8
+}
+
+_EQUIP_INDEX = None  # lazy: lowercase exercise name → equipment requirement list
+
+
+def _equipment_requirements(name_lower):
+    """Equipment requirement list for an exercise, searching top-level
+    EXERCISE_SWAPS entries, every alternative, and the EXERCISES catalog."""
+    global _EQUIP_INDEX
+    if _EQUIP_INDEX is None:
+        idx = {}
+        for key, data in EXERCISE_SWAPS.items():
+            idx.setdefault(key.lower(), data.get("requires") or [])
+            for alt in data.get("alternatives", []):
+                if alt.get("name"):
+                    idx.setdefault(alt["name"].lower(), alt.get("requires") or [])
+        try:
+            from workout_data import EXERCISES
+            for key, info in EXERCISES.items():
+                idx.setdefault(key.lower(), info.get("equipment") or [])
+        except Exception:
+            pass
+        _EQUIP_INDEX = idx
+    return _EQUIP_INDEX.get(name_lower)
+
+
+def _equipment_class(exercise_name):
+    """Classify an exercise as 'bar', 'dumbbell', 'stack' (cable/machine),
+    'other' (bodyweight/band — no load-transfer model), or None (unknown)."""
+    nl = exercise_name.lower()
+    req = _equipment_requirements(nl)
+    if req is None:
+        try:
+            from workout_data import resolve_name
+            rl = resolve_name(exercise_name).lower()
+            if rl != nl:
+                req = _equipment_requirements(rl)
+        except Exception:
+            pass
+    if req is not None:
+        rs = set(req)
+        if rs & _DB_EQUIP:
+            return "dumbbell"
+        if rs & _BAR_EQUIP:
+            return "bar"
+        if rs & _STACK_EQUIP:
+            return "stack"
+        return "other"
+    # Keyword fallback for names neither catalog knows. Dumbbell markers first
+    # ("Dumbbell Romanian Deadlift" is a DB lift despite "deadlift"), then
+    # stack markers ("Cable Lateral Raise" is a cable despite "lateral raise").
+    if any(k in nl for k in ("dumbbell", "db ", "kettlebell", "kb ", "goblet")):
+        return "dumbbell"
+    if any(k in nl for k in ("cable", "machine", "pulldown", "leg press",
+                             "pec deck", "smith")):
+        return "stack"
+    if any(k in nl for k in ("barbell", "ez-bar", "ez bar", "landmine")):
+        return "bar"
+    if any(k in nl for k in ("band", "trx", "push-up", "pushup", "pull-up",
+                             "pullup", "dip", "plank", "jump", "burpee",
+                             "bodyweight")):
+        return "other"
+    return None
+
 
 def scale_for_swap(from_exercise_name, to_exercise_name):
     """Scale factor for transferring a weight between equipment types.
@@ -7,22 +97,20 @@ def scale_for_swap(from_exercise_name, to_exercise_name):
     A cable pushdown at 60 lb is not a dumbbell overhead extension at 60 lb — cables
     give constant tension, barbells distribute load bilaterally, dumbbells force each
     side to stabilize. Returns 1.0 when the swap is between equivalent equipment or
-    cannot be classified. Mirrored in static/app.js; keep the two in sync.
+    cannot be classified. Models BOTH directions (e.g. dumbbell→barbell scales UP).
+    Mirrored in static/app.js; keep the two in sync.
     """
     if not from_exercise_name or not to_exercise_name:
         return 1.0
-    orig = from_exercise_name.lower()
-    swap = to_exercise_name.lower()
-    if orig == swap:
+    if from_exercise_name.lower() == to_exercise_name.lower():
         return 1.0
-    to_db = 'dumbbell' in swap or 'db ' in swap
-    if ('cable' in orig or 'machine' in orig) and to_db:
-        return 0.5
-    if 'barbell' in orig and to_db:
-        return 0.7
-    if 'cable' in orig or 'machine' in orig:
-        return 0.8
-    return 1.0
+    from_class = _equipment_class(from_exercise_name)
+    to_class = _equipment_class(to_exercise_name)
+    if not from_class or not to_class or from_class == to_class:
+        return 1.0
+    if "other" in (from_class, to_class):
+        return 1.0
+    return _SWAP_FACTORS.get((from_class, to_class), 1.0)
 
 EQUIPMENT_CATALOG = {
     "free_weights": {

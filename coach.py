@@ -53,7 +53,11 @@ def _format_exercise_analysis(analysis):
     indicators = {"up": "PROGRESS", "hold": "HOLD", "deload": "DELOAD", "weak": "CAUTIOUS", "down": "REDUCE"}
     for name, data in sorted(analysis.items()):
         ind = indicators.get(data.get("progression_indicator", "hold"), "HOLD")
-        weight_str = f"{data['target_weight']}lb" if data.get('target_weight') else "TBD"
+        # target_weight=0 is the valid BODYWEIGHT sentinel — render "BW", not
+        # "TBD" (the coach was telling athletes a bodyweight lift's load was
+        # "to be decided" and inventing one). Only a missing value is TBD.
+        _tw = data.get('target_weight')
+        weight_str = "BW (bodyweight)" if _tw == 0 else (f"{_tw}lb" if _tw is not None else "TBD")
         reps = data.get('target_reps', '?')
         sets = data.get('target_sets', '?')
         reason = data.get('adjustment_reason', '')
@@ -75,7 +79,13 @@ def _format_today_sets(sets):
         # Show summary format to prevent LLM from summing reps
         target_wt = set_list[0].get('target_weight') if set_list else None
         target_reps = set_list[0].get('target_reps') if set_list else None
-        target_str = f" (target: {target_wt}lb×{target_reps}/set)" if target_wt else ""
+        # `is not None` — target_weight=0 = bodyweight sentinel, keep the target.
+        if target_wt == 0:
+            target_str = f" (target: BW×{target_reps}/set)"
+        elif target_wt is not None:
+            target_str = f" (target: {target_wt}lb×{target_reps}/set)"
+        else:
+            target_str = ""
         mod = set_list[-1].get('modification_direction', '') if set_list else ''
         marker = '\u2713' if mod == 'as_prescribed' else '\u2191' if mod == 'increased_weight' else '\u2193' if 'decreased' in (mod or '') else ''
         lines.append(f"  {ex_name}: {last_wt}lb, {num_sets} sets, {avg_reps} reps/set{target_str} {marker}")
@@ -198,7 +208,9 @@ def _format_next_week_prescriptions(prescriptions):
         if rx['day_idx'] != current_day:
             current_day = rx['day_idx']
             lines.append(f"\n  {day_names[current_day]}:")
-        weight_str = f" @ {rx['target_weight']}lb" if rx.get('target_weight') else ""
+        # target_weight=0 = bodyweight sentinel — show it, don't drop it.
+        _rxw = rx.get('target_weight')
+        weight_str = " @ BW" if _rxw == 0 else (f" @ {_rxw}lb" if _rxw is not None else "")
         reason_str = f" — {rx['adjustment_reason']}" if rx.get('adjustment_reason') else ""
         lines.append(f"    {rx['exercise']}: {rx['sets']}x{rx['reps']}{weight_str}{reason_str}")
     return "\n".join(lines)
@@ -431,7 +443,14 @@ def _format_week_schedule(schedule, completed):
     for day in schedule:
         idx = day['day_idx']
         name = day.get('day', '?')
-        lift = day.get('liftName', 'Rest')
+        # COACH-OR-NOTHING: an unplanned day has no lift name — never print a
+        # template name (or the literal 'None') for a day the coach never planned.
+        if day.get('unplanned'):
+            lift = "NOT PLANNED (do not name lifts — offer to plan the week)"
+        elif day.get('isRest'):
+            lift = "Rest"
+        else:
+            lift = day.get('liftName') or "Rest"
         done = idx in completed_indices
         marker = "[DONE]" if done else "[    ]"
         lines.append(f"  {marker} {name}: {lift}")

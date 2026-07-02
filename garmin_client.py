@@ -23,8 +23,17 @@ class GarminClient:
         return self._connected and self.api is not None
 
     def try_restore_tokens(self, user_id=None):
-        """Try to restore a session from saved tokens."""
+        """Try to restore a session from saved tokens.
+
+        Respects the 429 cooldown (a restore performs live HTTP — profile
+        fetch and possibly an OAuth2 exchange) and persists any token garth
+        refreshed during login, so subsequent restores skip the OAuth2
+        exchange instead of hitting Garmin's auth endpoint every time."""
         uid = user_id or self._user_id
+        if time.time() < self._rate_limited_until:
+            # Rate-limited: restoring would fire live HTTP at Garmin and
+            # sustain the block. Stay disconnected until the cooldown lapses.
+            return False
         log.info("DEBUG: Garmin token restore for user_id=%s", uid)  # DEBUG: remove after fix confirmed
         try:
             from models import GarminTokens, db
@@ -42,10 +51,35 @@ class GarminClient:
             self._cache = {}
             if uid:
                 self._user_id = uid
+            # Persist the refreshed OAuth2 back to the DB. garth silently
+            # refreshes the ~1h OAuth2 during login(tokenstore=...); without
+            # saving it the stored token stays permanently stale and EVERY
+            # restore repeats a full OAuth2 exchange against Garmin's auth
+            # endpoint — the classic lockout-heuristic pattern.
+            try:
+                new_dump = self.api.garth.dumps()
+                if new_dump and new_dump != tokens.token_data:
+                    tokens.token_data = new_dump
+                    tokens.updated_at = datetime.now(timezone.utc)
+                    db.session.commit()
+                    log.info("Refreshed Garmin tokens persisted (user_id=%s)", uid)
+            except Exception:
+                log.warning("Failed to persist refreshed Garmin tokens (user_id=%s)", uid, exc_info=True)
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
             log.info("Garmin session restored from saved tokens (user_id=%s)", uid)
             return True
         except Exception as e:
-            log.warning("Failed to restore Garmin tokens: %s", e)
+            err = str(e)
+            if "429" in err or "Too Many" in err or "rate" in err.lower():
+                # Garmin rate limit during restore — back off like login() does
+                # so the next caller doesn't immediately re-hammer the auth endpoint.
+                self._rate_limited_until = time.time() + 900
+                log.warning("Garmin rate limited during token restore (user_id=%s)", uid)
+            else:
+                log.warning("Failed to restore Garmin tokens: %s", e)
             self.api = None
             self._connected = False
             return False
@@ -123,13 +157,21 @@ class GarminClient:
             return False, f"Garmin login error: {err[:200]}", False
 
     def _cached(self, key, fetcher):
-        """Return cached value or call fetcher."""
+        """Return cached value or call fetcher. During a 429 cooldown NO
+        request is fired — stale cache (if any) or None is returned, so a
+        rate-limited account isn't hammered by every page load / coach
+        message until the block escalates into a lockout."""
         log.info("DEBUG: Garmin fetch %s (user_id=%s)", key, self._user_id)  # DEBUG: remove after fix confirmed
         now = time.time()
         if key in self._cache:
             val, ts = self._cache[key]
             if now - ts < self.CACHE_TTL:
                 return val
+        if now < self._rate_limited_until:
+            # Cooldown active: serve stale cache if we have it, never fetch.
+            if key in self._cache:
+                return self._cache[key][0]
+            return None
         try:
             val = fetcher()
             self._cache[key] = (val, now)
@@ -146,23 +188,45 @@ class GarminClient:
                 return self._cache[key][0]
             return None
 
-    def get_today_summary(self):
-        """Return a dict with all relevant metrics for today."""
+    def _user_local_today(self):
+        """The user's local calendar date. Server runs UTC — date.today() is
+        already 'tomorrow' every Pacific evening, which made every evening
+        panel/readiness/briefing query a date Garmin has no data for."""
+        try:
+            if self._user_id:
+                from models import User
+                u = User.query.get(self._user_id)
+                tz = getattr(u, "timezone", None) if u else None
+                if tz:
+                    from utils_time import user_local_now
+                    return user_local_now(tz).date()
+        except Exception:
+            pass
+        return date.today()
+
+    def get_today_summary(self, today=None):
+        """Return a dict with all relevant metrics for today (user-local).
+
+        `today` may be a date (preferred — pass the app's _user_today()) or an
+        ISO string; defaults to the user's local date, never server-UTC.
+        Sleep is keyed to the SAME day (the night ending this morning), matching
+        get_wellness_for_day — the old `yesterday` key was one night stale."""
         if not self.connected:
             return None
 
-        today = date.today().isoformat()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        if today is None:
+            today = self._user_local_today()
+        day_iso = today.isoformat() if hasattr(today, "isoformat") else str(today)
 
-        hrv = self._get_hrv(today)
-        sleep = self._get_sleep(yesterday)
-        body_battery = self._get_body_battery(today)
-        training_readiness = self._get_training_readiness(today)
-        training_status = self._get_training_status(today)
-        stress = self._get_stress(today)
+        hrv = self._get_hrv(day_iso)
+        sleep = self._get_sleep(day_iso)
+        body_battery = self._get_body_battery(day_iso)
+        training_readiness = self._get_training_readiness(day_iso)
+        training_status = self._get_training_status(day_iso)
+        stress = self._get_stress(day_iso)
 
         return {
-            "date": today,
+            "date": day_iso,
             "hrv": hrv,
             "sleep": sleep,
             "bodyBattery": body_battery,
@@ -270,8 +334,9 @@ class GarminClient:
         if not self.connected:
             return None
         results = []
+        base = self._user_local_today()
         for i in range(7):
-            day = (date.today() - timedelta(days=i)).isoformat()
+            day = (base - timedelta(days=i)).isoformat()
             hrv = self._get_hrv(day)
             if hrv and hrv.get("lastNight") is not None:
                 results.append({"date": day, "hrv": hrv["lastNight"]})

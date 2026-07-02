@@ -576,8 +576,13 @@ NAME_ALIASES = {
     "Back Squat - 1RM test": "Barbell Back Squat",
     "Deadlift - 1RM test": "Conventional Deadlift",
     "Lat Pulldown - max weight": "Lat Pulldown",
-    "Inverted Row (table edge)": "Inverted Row (table/ledge)",
-    "Inverted Row (table)": "Inverted Row (table/ledge)",
+    # ALL inverted-row variants canonicalize to the catalog's "Inverted Row".
+    # The old target "Inverted Row (table/ledge)" is not movement-key-equal to
+    # "Inverted Row", so BW-template history fragmented away from the coach's
+    # catalog-name prescriptions (progression math restarted from zero).
+    "Inverted Row (table edge)": "Inverted Row",
+    "Inverted Row (table)": "Inverted Row",
+    "Inverted Row (table/ledge)": "Inverted Row",
     "Tricep Dips (chair)": "Tricep Dips (chair/bench)",
     "Tricep Dips (bench)": "Tricep Dips (chair/bench)",
     "DB Bench Press": "DB Bench Press",  # Keep as-is (different from Barbell Bench)
@@ -595,6 +600,15 @@ NAME_ALIASES = {
     "Kettlebell Swing": "KB Swing",
     "Kettlebell Swings": "KB Swing",
     "KB Swings": "KB Swing",
+    # PHASE_TEMPLATES[2]/[3] used to say "Cable Face Pull" while the display
+    # builders and EXERCISES catalog say "Face Pull" — the mismatch broke
+    # name reconciliation (configured sets/reps lookup + catalog video/muscle
+    # metadata silently missed). Templates renamed; alias canonicalizes any
+    # existing DB rows saved under the old name.
+    "Cable Face Pull": "Face Pull",
+    # Template variants of catalog exercises — same movement, same equipment.
+    "DB Hammer Curl": "Hammer Curl",
+    "Diamond Push-Up": "Diamond Push-Ups",
 }
 
 
@@ -653,6 +667,12 @@ EXERCISES = {
         "equipment": ["dip_station"],
         "video": "weighted dips chest tricep form tutorial",
     },
+    "DB Fly": {
+        "muscle_group": "chest",
+        "category": "isolation",
+        "equipment": ["dumbbells", "flat_bench"],
+        "video": "dumbbell fly chest form tutorial",
+    },
     # ─── BACK ──────────────────────────────────────────────
     "Cable Seated Row": {
         "muscle_group": "back",
@@ -690,6 +710,18 @@ EXERCISES = {
         "equipment": ["trx"],
         "video": "ring row form tutorial",
     },
+    "Pull-Ups": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["pull_up_bar"],
+        "video": "pull up proper form tutorial dead hang",
+    },
+    "Weighted Pull-Up": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": ["pull_up_bar"],
+        "video": "weighted pull up form tutorial belt",
+    },
     "DB Shrug": {
         "muscle_group": "traps",
         "category": "isolation",
@@ -721,6 +753,24 @@ EXERCISES = {
         "equipment": ["dumbbells"],
         "video": "dumbbell lateral raise proper form",
     },
+    "Cable Lateral Raise": {
+        "muscle_group": "shoulders",
+        "category": "isolation",
+        "equipment": ["cable_machine"],
+        "video": "cable lateral raise form tutorial constant tension",
+    },
+    "Landmine Press": {
+        "muscle_group": "shoulders",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "landmine press form tutorial shoulder friendly",
+    },
+    "Reverse Pec Deck": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["chest_press_machine"],
+        "video": "reverse pec deck rear delt form tutorial",
+    },
     "Face Pull": {
         "muscle_group": "rear_delts",
         "category": "isolation",
@@ -739,6 +789,12 @@ EXERCISES = {
         "category": "compound",
         "equipment": ["barbell"],
         "video": "barbell back squat proper form tutorial",
+    },
+    "Front Squat": {
+        "muscle_group": "quads",
+        "category": "compound",
+        "equipment": ["barbell"],
+        "video": "front squat form tutorial rack position",
     },
     "Conventional Deadlift": {
         "muscle_group": "posterior_chain",
@@ -926,6 +982,30 @@ EXERCISES = {
         "category": "compound",
         "equipment": [],
         "video": "nordic hamstring curl eccentric form tutorial",
+    },
+    "Single-Leg Romanian Deadlift": {
+        "muscle_group": "hamstrings",
+        "category": "compound",
+        "equipment": ["dumbbells"],
+        "video": "single leg romanian deadlift form tutorial balance",
+    },
+    "Inverted Row (table/ledge)": {
+        "muscle_group": "back",
+        "category": "compound",
+        "equipment": [],
+        "video": "inverted row under table bodyweight tutorial",
+    },
+    "Squat Jump": {
+        "muscle_group": "power",
+        "category": "power",
+        "equipment": [],
+        "video": "squat jump plyometric form tutorial",
+    },
+    "Band Reverse Fly": {
+        "muscle_group": "rear_delts",
+        "category": "isolation",
+        "equipment": ["resistance_band"],
+        "video": "resistance band reverse fly rear delt tutorial",
     },
     "Pike Push-Ups": {
         "muscle_group": "shoulders",
@@ -1115,7 +1195,7 @@ PHASE_TEMPLATES = {
             {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
              "rest": "60s",
              "note": "Constant tension. Lateral delt strength."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s",
              "note": "Postural — mandatory each press/pull day."},
         ],
@@ -1140,7 +1220,7 @@ PHASE_TEMPLATES = {
              "note": "75-82% wave. 45-deg torso, pull to belly button."},
             {"exercise": "Lat Pulldown", "sets": 3, "reps": "10",
              "rest": "60-90s", "note": "Neutral grip. Different angle."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         4: [  # Fri - HEAVY Lower
@@ -1190,7 +1270,7 @@ PHASE_TEMPLATES = {
              "note": "Each side."},
             {"exercise": "Cable Lateral Raise", "sets": 3, "reps": "12",
              "rest": "60s", "note": "Shoulder priority."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         2: [  # Wed - Shoulder/Arms
@@ -1212,7 +1292,7 @@ PHASE_TEMPLATES = {
              "rest": "90s-2 min", "note": "Progress when clean."},
             {"exercise": "Lat Pulldown", "sets": 3, "reps": "10",
              "rest": "60-90s", "note": "Neutral grip."},
-            {"exercise": "Cable Face Pull", "sets": 3, "reps": "15",
+            {"exercise": "Face Pull", "sets": 3, "reps": "15",
              "rest": "45-60s", "note": "Postural."},
         ],
         4: [  # Fri - HEAVY Lower
@@ -1877,13 +1957,14 @@ def get_workouts_for_user(week, has_gym=True):
     if has_gym:
         return get_workouts(week)
 
-    is_deload = week in (4, 8)
-    is_test = week == 12
+    # Deload WEEKS match the gym path's cadence (4, 8, 12) — wk12 is a deload
+    # week, NOT a taper (2026-06-01 rebuild). The old 'test_bw' taper path made
+    # wk12 headers say POWER (HOLD) and meals say heavy_lift while the content
+    # was a taper — three contradicting signals on one card.
+    is_deload = week in (4, 8, 12)
     phase = get_phase(week)
 
-    if is_test:
-        template = PHASE_TEMPLATES.get("test_bw", BW_PHASE_TEMPLATES.get(1, {}))
-    elif is_deload:
+    if is_deload:
         template = PHASE_TEMPLATES.get("deload_bw", BW_PHASE_TEMPLATES.get(1, {}))
     else:
         template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
@@ -1898,6 +1979,17 @@ def get_workouts_for_user(week, has_gym=True):
         5: "Full Body Cleanup" if phase == 1 else ("Full Body / Glute Volume" if phase == 2 else "Full Body (volume cut)"),
         6: "Rest",
     }
+    # Deload labels are phase-neutral (mirrors gym _deload_week names) so a
+    # deload card never carries a POWER/HOLD header over deload content.
+    bw_deload_labels = {
+        0: "Deload BW — Lower",
+        1: "Deload BW — Press + Shoulder",
+        2: "Deload BW — Shoulder/Arms (light)",
+        3: "Deload BW — Pull",
+        4: "Deload BW — Heavy Lower (light)",
+        5: "Deload BW — Full Body Light",
+        6: "Rest",
+    }
 
     days = []
     for day_idx in range(7):
@@ -1905,11 +1997,10 @@ def get_workouts_for_user(week, has_gym=True):
         day_name = day_names[day_idx]
         is_rest = len(exercises) == 0
 
-        label = bw_day_labels.get(day_idx, "Bodyweight")
         if is_deload:
-            label = f"Deload BW - {label}"
-        elif is_test:
-            label = f"Test BW - {label}"
+            label = bw_deload_labels.get(day_idx, "Deload BW")
+        else:
+            label = bw_day_labels.get(day_idx, "Bodyweight")
 
         # Convert template format (exercise/sets/reps) to display format (name/sets)
         display_exercises = []
@@ -2166,7 +2257,7 @@ def _phase2_week():
              "note": "Each side. Heavier P2 progression."},
             {"name": "Cable Lateral Raise", "sets": "3x12", "rest": "60s",
              "note": "Constant tension. Lateral delt strength."},
-            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+            {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural — mandatory each press/pull day."},
         ],
         "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",
@@ -2210,7 +2301,7 @@ def _phase2_week():
              "note": "75-82% wave. 45-deg torso, pull to belly button."},
             {"name": "Lat Pulldown", "sets": "3x10", "rest": "60-90s",
              "note": "Neutral grip. Different angle."},
-            {"name": "Cable Face Pull", "sets": "3x15", "rest": "45-60s",
+            {"name": "Face Pull", "sets": "3x15", "rest": "45-60s",
              "note": "Postural."},
         ],
         "run": {"type": "hiit", "label": "VO2 4x4 intervals", "time": "35 min",

@@ -21,13 +21,41 @@ _TRIVIAL_NUMBERS = {"0", "1", "2", "3"}
 _NUMBER_RE = re.compile(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?\b|\b\d+(?:\.\d+)?\b")
 
 # Match inline arithmetic derivations: "X op Y = Z" where op is - + * / × ÷
+# The operator IS captured (group 2) so validators can CHECK the arithmetic —
+# accepting any "A op B = C" with cited inputs let a fabricated C ship as
+# validated ("207.2 - 185 = 15.0" used to pass).
 _DERIVATION_RE = re.compile(
     r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*"
-    r"[-+*/×÷]\s*"
+    r"([-+*/×÷])\s*"
     r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*"
     r"=\s*"
     r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
 )
+
+
+def _derivation_result_ok(a: str, op: str, b: str, c: str) -> bool:
+    """True iff `a op b` actually equals `c` (allowing c to be a rounded
+    rendering, e.g. 22.2 shown as 22, or 14.8 for 22.2/1.5). Inputs are
+    normalized number strings from _normalize_number."""
+    try:
+        av, bv, cv = float(a), float(b), float(c)
+    except (TypeError, ValueError):
+        return False
+    if op in ("*", "×"):
+        expected = av * bv
+    elif op in ("/", "÷"):
+        if bv == 0:
+            return False
+        expected = av / bv
+    elif op == "+":
+        expected = av + bv
+    elif op == "-":
+        expected = av - bv
+    else:
+        return False
+    # Accept c at its own displayed precision (int → whole, one decimal → 0.1).
+    decimals = len(c.split(".")[1]) if "." in c else 0
+    return abs(round(expected, decimals) - cv) < 1e-9
 
 
 def _normalize_number(s: str) -> str:
@@ -56,11 +84,14 @@ def _verify_response_numbers(response: str, source: str) -> list[str]:
     response_nums = _extract_numbers(response)
 
     # Inline derivations the response itself shows. If the inputs are in
-    # source and the response shows the math, accept the result.
+    # source, the response shows the math, AND the math is actually right,
+    # accept the result. (Without computing it, "207.2 - 185 = 15" whitelisted
+    # a fabricated 15.)
     derived_results: set[str] = set()
     for m in _DERIVATION_RE.finditer(response):
-        a, b, c = (_normalize_number(g) for g in m.groups())
-        if a in src_nums and b in src_nums:
+        a_raw, op, b_raw, c_raw = m.groups()
+        a, b, c = (_normalize_number(g) for g in (a_raw, b_raw, c_raw))
+        if a in src_nums and b in src_nums and _derivation_result_ok(a, op, b, c):
             derived_results.add(c)
 
     unverified = []
@@ -522,4 +553,34 @@ def coach_chat_multiagent(
 
         return rendered_text
 
-    return "(multi-agent: hit max tool-call iterations)"
+    # MAX_TOOL_TURNS exhausted still mid-tool-loop. The old sentinel string
+    # "(multi-agent: hit max tool-call iterations)" was saved as the assistant
+    # ChatMessage and rendered in chat — an internal plumbing leak, the exact
+    # class _reroute_tool_failures exists to prevent. Force ONE text-only turn
+    # (tool_choice=none) so the Doctor synthesizes from the data it already
+    # gathered; only if that also fails, ship an athlete-safe line.
+    try:
+        resp = client.messages.create(
+            model=persona["model"],
+            max_tokens=max_tokens,
+            system=system,
+            messages=convo,
+            tools=doctor_tools,  # history contains tool blocks — must stay defined
+            tool_choice={"type": "none"},
+        )
+        text = "\n".join(
+            b.text for b in resp.content if getattr(b, "type", None) == "text"
+        ).strip()
+        if text:
+            try:
+                import json as _json
+                parsed = _json.loads(text)
+                if isinstance(parsed, dict) and ("lead" in parsed or "reasoning" in parsed):
+                    return _render_json_response(parsed)
+            except Exception:
+                pass
+            return text
+    except Exception:
+        pass
+    return ("I didn't get a complete answer put together on that one. "
+            "Ask me again.")

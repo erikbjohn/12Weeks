@@ -135,17 +135,37 @@ def _build_chat_history():
 
 @section_builder("bodyweight")
 def _build_bodyweight():
-    from models import BodyWeight
-    rows = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
+    # BLOCK-SCOPED (>= AppState.start_date), matching _build_cut_status: the
+    # formatter labels bw[0]→bw[-1] as "Program total", so an all-time list
+    # made that delta span PRIOR blocks early in a new block and contradict
+    # the deliberately block-scoped <cut_status> pace in the same prompt.
+    from models import BodyWeight, AppState
+    q = BodyWeight.query.filter_by(user_id=current_user.id)
+    state = AppState.query.filter_by(user_id=current_user.id).first()
+    block_start = state.start_date if state and state.start_date else None
+    if block_start is not None:
+        q = q.filter(BodyWeight.log_date >= block_start)
+    rows = q.order_by(BodyWeight.log_date).all()
+    if not rows and block_start is not None:
+        # No weigh-in yet THIS block: surface only the single latest all-time
+        # entry (context for "latest weight"), never a cross-block delta.
+        latest = (BodyWeight.query.filter_by(user_id=current_user.id)
+                  .order_by(BodyWeight.log_date.desc()).first())
+        rows = [latest] if latest else []
     entries = [{"date": e.log_date.isoformat(), "weight": e.weight_lbs} for e in rows]
     return {"bodyweight": entries[-14:]}
 
 
 @section_builder("garmin")
 def _build_garmin():
-    from garmin_client import GarminClient
     from overtraining import assess_readiness
-    gc = GarminClient(user_id=current_user.id)
+    # REUSE the app-level per-user client (shared 15-min cache + 429 cooldown).
+    # A brand-new GarminClient per coach message forced a full token restore
+    # (OAuth2 exchange + profile fetch) plus 6 uncached metric requests every
+    # message, and forgot any rate-limit cooldown — the dominant Garmin
+    # lockout driver. Lazy import: app.py imports this module at startup.
+    from app import _get_garmin
+    gc = _get_garmin(current_user.id)
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     garmin_data = gc.get_today_summary() if gc.connected else None
@@ -234,6 +254,27 @@ def _resolve_workout_for_day(week, day_idx):
         day["liftName"] = None  # don't leak the template lift NAME either
         day["lift_unplanned"] = True
 
+    # COACH-OR-NOTHING for the RUN domain too. The dashboard strips the template
+    # run when no WeeklyRunPlan row exists (plan_overlay: run=None, runStatus
+    # 'unplanned'); the coach must see the same — otherwise it narrated "today's
+    # run is Zone 2 easy, 35 min" from the template while the card said no run
+    # was planned. When a real row exists, overlay it (same shape the UI uses).
+    # Mirrors the rx_known_empty pattern: only strip when the query SUCCEEDED
+    # and returned nothing, so a transient DB error can't blank a planned run.
+    try:
+        from models import WeeklyRunPlan
+        rp = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx
+        ).first()
+        if rp and rp.run_type:
+            day["run"] = {"type": rp.run_type, "label": rp.label,
+                          "time": rp.duration, "detail": rp.detail or ""}
+        else:
+            day["run"] = None
+            day["run_unplanned"] = True
+    except Exception:
+        pass
+
     return day
 
 
@@ -316,7 +357,6 @@ def _build_workout_tomorrow():
 @section_builder("week_schedule")
 def _build_week_schedule():
     from models import WeeklyDaySchedule
-    from workout_data import get_workouts
     week = _current_week()
     rows = WeeklyDaySchedule.query.filter_by(
         user_id=current_user.id, week=week
@@ -327,10 +367,22 @@ def _build_week_schedule():
                      "liftName": ds.lift_name or "Rest",
                      "isRest": ds.is_rest or False} for ds in rows]
     else:
-        workouts = get_workouts(week)
-        schedule = [{"day_idx": i, "day": DAY_NAMES[i],
-                     "liftName": w.get("liftName", "Rest"),
-                     "isRest": w.get("isRest", False)} for i, w in enumerate(workouts)]
+        # COACH-OR-NOTHING: no per-user schedule rows (rows are only written by
+        # the planning apply path). The old fallback listed raw PHASE-template
+        # lift names for every day, so the prompt's WEEK SCHEDULE contradicted
+        # the today_status 'NOT PLANNED' block and the dashboard's 'Plan this
+        # week' state. Resolve each day through the same resolver as
+        # workout_today instead — unplanned days carry NO template name.
+        schedule = []
+        for i in range(7):
+            day = _resolve_workout_for_day(week, i) or {}
+            schedule.append({
+                "day_idx": i,
+                "day": DAY_NAMES[i],
+                "liftName": day.get("liftName"),  # None when unplanned
+                "isRest": bool(day.get("isRest")),
+                "unplanned": bool(day.get("lift_unplanned")),
+            })
     return {"week_schedule": schedule}
 
 
@@ -345,8 +397,14 @@ def _build_exercise_history():
     # TOP working set so the coach can cite "last bench: 75x4".
     from models import SetLog
     from workout_data import resolve_name
+    # Only PERFORMED sets (done, not skipped): a weight typed into the input
+    # but never completed (blur-save creates the row done=False) is not
+    # history, and citing it invents sessions the athlete never did.
     rows = (SetLog.query
-            .filter(SetLog.user_id == current_user.id, SetLog.weight.isnot(None))
+            .filter(SetLog.user_id == current_user.id,
+                    SetLog.weight.isnot(None),
+                    SetLog.done.is_(True),
+                    SetLog.set_skipped.isnot(True))
             .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
             .limit(500).all())
     sessions = {}   # canonical -> {session_key -> entry}
@@ -372,12 +430,16 @@ def _build_exercise_history():
 
 @section_builder("exercise_analysis")
 def _build_exercise_analysis():
-    """Read pre-computed analysis from WeeklyPrescription (set by training engine during
-    program generation). Falls back to live compute_next_targets only if no prescriptions exist."""
+    """Read pre-computed analysis from WeeklyPrescription (set by training engine
+    during program generation). COACH-OR-NOTHING: if the week has no prescriptions
+    the analysis is EMPTY — no live engine compute, no reads of the dead
+    ExerciseLog table. The old fallback harvested exercise names from ExerciseLog
+    (frozen since April 2026) and synthesized engine targets for a week the
+    dashboard shows as 'Plan this week', letting the coach quote weights that
+    exist nowhere in the UI."""
     from models import WeeklyPrescription
     from workout_data import resolve_name
     week = _current_week()
-    today_idx = _user_today().weekday()
     analysis = {}
     # Read from pre-generated prescriptions (authoritative)
     rx_list = WeeklyPrescription.query.filter_by(
@@ -386,7 +448,11 @@ def _build_exercise_analysis():
     if rx_list:
         for rx in rx_list:
             name = resolve_name(rx.exercise_name)
-            if name not in analysis and getattr(rx, 'target_weight', None):
+            # `is not None` — target_weight=0 is the valid BODYWEIGHT sentinel
+            # (UI: 0 = "bodyweight; leave input empty"). A truthy check dropped
+            # BW lifts from the analysis entirely, so the coach claimed it had
+            # no number for a lift the card displays with full sets/reps.
+            if name not in analysis and getattr(rx, 'target_weight', None) is not None:
                 analysis[name] = {
                     "target_weight": rx.target_weight,
                     "target_reps": int(rx.reps) if rx.reps and rx.reps.isdigit() else 10,
@@ -395,30 +461,8 @@ def _build_exercise_analysis():
                     "progression_indicator": getattr(rx, 'progression_indicator', 'hold') or 'hold',
                     "coach_alert": None,
                 }
-    # Fallback: if no prescriptions, compute live
-    if not analysis:
-        try:
-            from models import ExerciseLog
-            from training_engine import compute_next_targets
-            rows = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(
-                ExerciseLog.logged_date.desc()
-            ).limit(200).all()
-            names = set(resolve_name(log.exercise_name) for log in rows)
-            for ex_name in names:
-                try:
-                    result = compute_next_targets(current_user.id, ex_name, week, today_idx)
-                    analysis[ex_name] = {
-                        "target_weight": result.get("target_weight"),
-                        "target_reps": result.get("target_reps"),
-                        "target_sets": result.get("target_sets"),
-                        "adjustment_reason": result.get("adjustment_reason", ""),
-                        "progression_indicator": result.get("progression_indicator", "hold"),
-                        "coach_alert": result.get("coach_alert"),
-                    }
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    # No prescriptions -> EMPTY analysis (unplanned week). Never fall back to a
+    # live engine compute seeded from the dead ExerciseLog table.
     return {"exercise_analysis": analysis}
 
 
@@ -467,9 +511,13 @@ def _build_today_sets():
     local_today = _user_today()
     today_idx = local_today.weekday()  # Mon=0, Sun=6
     week = _current_week()
-    # Filter by SCHEDULED day (week + day_idx), not logged_date.
-    # User might log Thursday's workout on Sunday — logged_date is Sunday
-    # but day_idx is 3 (Thursday). We only want TODAY's scheduled sets.
+    # Filter by SCHEDULED day (week + day_idx) AND today's calendar date.
+    # The (week, day_idx) slot is unique to one date only WHILE the program is
+    # live: once the block ends, _current_week() clamps at 12 forever, so a
+    # later Monday would re-find an OLD week-12 Monday session and render it
+    # as "TODAY'S SETS" — contradicting today_status (date-gated the same way
+    # in _build_today_status) in the very same prompt (the 2026-06-29 phantom
+    # "you trained today" class).
     # Don't filter on done=True — /log_set creates rows with done=False unless
     # the client explicitly marks them done, so requiring done=True hides sets
     # the athlete actually entered. The done flag is preserved in each row's
@@ -478,6 +526,7 @@ def _build_today_sets():
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
+        SetLog.logged_date == local_today,
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
     set_data = {}
     for s in rows:
@@ -626,11 +675,24 @@ def _build_cut_status():
     weekly_intake_est = 0
     weekly_burn_est = 0
     days_logged = 0
+    # Count ONLY days where meals were actually logged as eaten. The old
+    # membership test (`plan.day_idx in [<all 7 weekdays>]`) was a tautology,
+    # so the "deficit" silently assumed full 7-day plan compliance even with
+    # zero meals logged — a fabricated cut signal. Map each eaten day to that
+    # weekday's plan calories (still a plan-based proxy for that day's intake;
+    # MealLog has no per-row macros yet), and estimate burn only for those days.
+    plan_by_idx = {}
     for plan in plan_rows:
-        if plan.day_idx in [(today - _td(days=i)).weekday() for i in range(7)]:
-            weekly_intake_est += plan.daily_calories or 0
-            weekly_burn_est += tdee  # rough — same TDEE per day; differentiation later
-            days_logged += 1
+        plan_by_idx.setdefault(plan.day_idx, plan)
+    for log_date, meals_eaten in sorted(intake_by_day.items()):
+        if not meals_eaten:
+            continue  # nothing actually eaten/logged that day
+        plan = plan_by_idx.get(log_date.weekday())
+        if plan is None:
+            continue  # no plan row for that weekday — no calorie estimate
+        weekly_intake_est += plan.daily_calories or 0
+        weekly_burn_est += tdee  # rough — same TDEE per day; differentiation later
+        days_logged += 1
     weekly_deficit = weekly_burn_est - weekly_intake_est if days_logged else None
 
     # ── Sodium-prep flag for weigh-in ────────────────────────────────────────
@@ -648,6 +710,7 @@ def _build_cut_status():
         "weeks_to_target": weeks_to_target,
         "projected_week_12_weight": proj_at_week_12,
         "weekly_deficit_estimate": weekly_deficit,
+        "deficit_days_logged": days_logged,
         "tdee": tdee,
         "sodium_prep_active": sodium_prep_active,
         "sodium_prep_note": (
@@ -701,10 +764,14 @@ def _build_today_status():
     # A binary "any row exists -> DONE" was a lie: Erik had ONE bench set logged
     # for a 5-exercise "Full Body" day and the coach told him "you're done
     # lifting." So we now require a genuinely FINISHED session to say DONE:
-    #   complete  = DayCompletion.done, OR every prescribed exercise has a logged
-    #               set, OR the 6-sets/3-done heuristic (auto-completion lag).
+    #   complete  = today's DayCompletion.done, OR the canonical name-aware
+    #               check (workout_status.workout_state_from_rows): EVERY
+    #               prescribed exercise has its prescribed sets performed.
     #   not_started = zero rows for today's slot.
     #   in_progress = some rows, but not the whole session.
+    # The old 6-sets/3-done heuristic is GONE — it OR'd in "complete" with
+    # exercises still open (6 sets into a 13-set day read DONE), recreating the
+    # exact partial-reads-complete failure this block exists to prevent.
     # MUST also match today's calendar date. The (week, day_idx) slot is unique
     # to one date only WHILE the program is live; once the 12-week block ends,
     # _current_week() clamps at 12 forever, so a later Monday (day_idx 0) would
@@ -731,17 +798,22 @@ def _build_today_status():
     dc = DayCompletion.query.filter_by(
         user_id=current_user.id, week=week, day_idx=today_idx,
     ).first()
-    all_exercises_logged = bool(prescribed_names) and not remaining_exercises
-    heuristic_done = len(slot_sets) >= 6 and sets_done >= 3
+    # Canonical name-aware completion: EVERY prescribed exercise must have its
+    # prescribed sets performed (done, not skipped). Shared with app.py's
+    # auto-complete and coach_rules so the engines can never disagree.
+    from workout_status import workout_state_from_rows
+    all_prescribed_sets_done = (
+        workout_state_from_rows(prescribed_exercises, slot_sets) == "complete"
+    )
     # DATE-GATE the DayCompletion flag: honor dc.done only if it was recorded
     # TODAY. Without this, once the program clamps the week at 12 (block over), a
     # later same-weekday re-finds a stale dc.done from an earlier cycle and reads
     # "complete" even after the athlete logs just ONE set today (slot_sets is then
-    # non-empty so the not_started branch doesn't catch it). all_exercises_logged
-    # and heuristic_done are already date-safe (slot_sets is logged_date==today).
+    # non-empty so the not_started branch doesn't catch it). The name-aware check
+    # is already date-safe (slot_sets is logged_date==today).
     from utils_time import parse_completion_date
     dc_done_today = bool(dc and dc.done and parse_completion_date(dc.completed_at) == today)
-    workout_complete = bool(dc_done_today or all_exercises_logged or heuristic_done)
+    workout_complete = bool(dc_done_today or all_prescribed_sets_done)
 
     if resolved and resolved.get("isRest"):
         workout_state = "rest"
@@ -769,17 +841,14 @@ def _build_today_status():
         user_id=current_user.id, log_date=today,
     ).order_by(RunLog.id.desc()).first()
 
-    # Same fallback as workout_prescribed: when no per-user WeeklyRunPlan
-    # row exists, fall back to the template's run for the day.
+    # COACH-OR-NOTHING: no WeeklyRunPlan row means NO run is prescribed. The old
+    # fallback to the static template's run made the coach say "today's run is
+    # Zone 2 easy, 35 min" while the dashboard card (plan_overlay) showed the
+    # run as unplanned — a direct coach/card contradiction.
     if run_plan and run_plan.run_type:
         run_type = run_plan.run_type
         run_label = run_plan.label
         run_duration = run_plan.duration
-    elif resolved and resolved.get("run"):
-        tr = resolved["run"]
-        run_type = tr.get("type")
-        run_label = tr.get("label")
-        run_duration = tr.get("duration")
     else:
         run_type = None
         run_label = None
@@ -1136,19 +1205,26 @@ def _build_completed_days():
         cdate = parse_completion_date(dc.completed_at)
         if dc.done and cdate and week_monday <= cdate <= local_today and dc.day_idx not in completed:
             completed.append(dc.day_idx)
-    # SetLog by date range. Don't filter on done=True — log_set creates rows
-    # with done=False by default, so requiring done=True undercounts completed
-    # days. Any SetLog row in the week = the athlete trained that day.
+    # SetLog by date range — 3-STATE, not "any row = completed". A single
+    # logged set used to mark the whole day complete here, so the coach saw a
+    # 1-set aborted session as a banked day. A day now counts as completed only
+    # when the canonical name-aware check passes: every prescribed exercise for
+    # the slot has its prescribed sets performed (workout_status).
+    from workout_status import workout_state_from_rows
     week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.logged_date >= week_monday
+        SetLog.logged_date >= week_monday,
+        SetLog.logged_date <= local_today,
     ).all()
+    slot_rows = {}
     for s in week_sets:
-        if s.day_idx not in completed:
-            completed.append(s.day_idx)
-        if s.logged_date and s.logged_date >= week_monday and s.logged_date <= local_today:
-            if s.day_idx not in completed:
-                completed.append(s.day_idx)
+        slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (w, d), rows in slot_rows.items():
+        if d in completed:
+            continue
+        resolved = _resolve_workout_for_day(w, d) or {}
+        if workout_state_from_rows(resolved.get("exercises") or [], rows) == "complete":
+            completed.append(d)
     # Enrich with names
     workouts = get_workouts(week)
     enriched = []
@@ -1373,15 +1449,18 @@ Intensity level: {anger_level_label}
 </non_negotiable_rules>
 
 <markers>
-When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line:
-[SCHEDULE: day_idx=N, change_description]
-[PRESCRIPTION: day_idx=N, exercise=Name, sets=N, reps=N, weight=N, reason=text]
+When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line.
+These formats are EXACT — the app parses them mechanically. A marker in any other shape is
+silently dropped and the change does NOT happen (you will have lied to the athlete):
+[SCHEDULE: day=N, time=3:00 PM, notes=text] — day is 0-indexed (0=Monday); notes optional
+[PRESCRIPTION: week=N, day=N, exercise=Name, sets=N, reps=N, rest=60-90s, weight=N, reason=text] — rest/weight/reason optional; week defaults to the current week if omitted
 [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
-[WEIGHT: exercise=Name, new_weight=N, reason=text]
-[RUN: day_idx=N, type=text, duration=text, reason=text]
-[NUTRITION: change_description]
-[BMR_UPDATE: daily_calories=N, protein=N, carbs=N, fat=N, reason=text]
-[LOCKOUT_WARNING: violation_description]
+[WEIGHT: exercise=Name, new_weight=N, reason=text] — sets the exercise's target weight on this week's card
+[RUN: day=N, duration=40 min, type=zone2, reason=text]
+[NUTRITION: day=N, meal_type=fast_day, reason=text] — change one day's meal plan
+[NUTRITION: daily_calories=N, reason=text] — change the daily calorie target
+[BMR_UPDATE: new_bmr=N, reason=text]
+[LOCKOUT_WARNING: count=N, reason=text]
 [SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
 [SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
 </markers>
@@ -1708,7 +1787,9 @@ def _format_athlete_data(ctx, requires):
         if cs.get("weekly_deficit_estimate") is not None:
             cs_lines.append(
                 f"  est_weekly_deficit: {cs['weekly_deficit_estimate']} cal "
-                f"(intake vs TDEE {cs.get('tdee','?')})"
+                f"over {cs.get('deficit_days_logged', '?')} day(s) with meals "
+                f"logged in the last 7 (plan calories vs TDEE {cs.get('tdee','?')} "
+                f"— NOT a full-week number; days without logs are unknown, not compliant)"
             )
         if cs.get("sodium_prep_active"):
             cs_lines.append(f"  SODIUM_PREP: {cs['sodium_prep_note']}")
@@ -1743,8 +1824,13 @@ def _format_athlete_data(ctx, requires):
         if w.get("isRest"):
             parts.append("Today is a rest day (streak mile only).")
         else:
-            run_info = w.get('run', {})
-            run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+            run_info = w.get('run') or {}
+            if run_info:
+                run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+            else:
+                # Coach-or-nothing: no WeeklyRunPlan row -> the run is NOT
+                # planned. Never quote the template's run.
+                run_tail = " Run: not planned yet."
             if w.get("lift_unplanned") or not w.get("liftName"):
                 # Coach-or-nothing: no plan -> do NOT name a (template) lift.
                 parts.append("Today's lifts are NOT planned yet — plan the week." + run_tail)
@@ -1753,7 +1839,10 @@ def _format_athlete_data(ctx, requires):
             if w.get("exercises"):
                 parts.append("Prescribed exercises:")
                 for ex in w["exercises"]:
-                    tw = f" @ {ex['target_weight']}lb" if ex.get('target_weight') else ""
+                    # target_weight=0 is the BODYWEIGHT sentinel — render it,
+                    # don't drop it with a truthy check.
+                    _twv = ex.get('target_weight')
+                    tw = " @ BW (bodyweight)" if _twv == 0 else (f" @ {_twv}lb" if _twv is not None else "")
                     note = f" — {ex['note']}" if ex.get('note') else ""
                     parts.append(f"  {ex['name']}: {ex['sets']} rest {ex['rest']}{tw}{note}")
 
@@ -1973,7 +2062,10 @@ def _format_full_week_program(week):
             out.append(f"  {DAY_NAMES[d]}: (no data)")
             continue
 
-        lift = day.get("liftName") or ("Rest" if day.get("isRest") else "?")
+        if day.get("lift_unplanned"):
+            lift = "lifts NOT PLANNED (coach-or-nothing — do not invent)"
+        else:
+            lift = day.get("liftName") or ("Rest" if day.get("isRest") else "?")
         out.append(f"  {DAY_NAMES[d]} — {lift}:")
 
         if day.get("isRest"):

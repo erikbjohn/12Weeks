@@ -196,19 +196,24 @@ def _strip_total_math(reason):
 
 
 def _normalize_interval_recovery(segments):
-    """Pair each work segment with the recovery that follows it as N EQUAL
-    rounds: the recovery inherits the work segment's rep count. Without this, a
-    coach that emits 5 work reps but 4 recoveries makes the paired detail
-    ("5×3 min hard / 2 min easy", which reads as 5 rounds → 5 easy) disagree
-    with _segments_total_min (which counted the recovery's own 4 reps). After
-    normalizing, the rendered structure and the headline duration ALWAYS
-    describe the same N rounds and sum to the same number."""
+    """Default a recovery's MISSING rep count to its work segment's reps.
+
+    RESPECTS an explicit recovery rep count: the system prompt itself teaches
+    work reps=4 / recovery reps=3 ("a real 37-min VO2 session — the parts and
+    the total can never disagree"), i.e. recoveries BETWEEN intervals with none
+    after the last rep. Force-overwriting recovery reps to equal work reps
+    silently inflated every such session's stored duration and Garmin workout
+    beyond what the coach prescribed (37 → 40 min). The detail renderer
+    (_segments_to_detail) states the recovery count honestly when it differs
+    from the work count, so structure and headline still always agree — the
+    total is ALWAYS the sum of the segments as prescribed."""
     segs = [dict(s) for s in (segments or [])]
     for i, s in enumerate(segs):
         if (s.get("kind") or "").lower() == "work":
             n = int(s.get("reps") or 1)
             if i + 1 < len(segs) and (segs[i + 1].get("kind") or "").lower() == "recovery":
-                segs[i + 1]["reps"] = n
+                if segs[i + 1].get("reps") in (None, ""):
+                    segs[i + 1]["reps"] = n  # unspecified → one recovery per rep
     return segs
 
 
@@ -234,7 +239,17 @@ def _segments_to_detail(segments) -> str:
             seg = f"{n}×{mins} min hard{hr_txt}"
             nxt = segs[i + 1] if i + 1 < len(segs) else None
             if nxt and (nxt.get("kind") or "").lower() == "recovery":
-                seg += f" / {nxt.get('minutes')} min easy"
+                # State the recovery count HONESTLY when it differs from the
+                # work count — "/ X min easy" alone reads as one easy per rep,
+                # which lied about sessions prescribed with n-1 recoveries
+                # (recovery between intervals, none after the last).
+                r_reps = int(nxt.get("reps") or 1)
+                if r_reps == n:
+                    seg += f" / {nxt.get('minutes')} min easy"
+                elif r_reps == n - 1:
+                    seg += f" / {nxt.get('minutes')} min easy between reps"
+                else:
+                    seg += f" / {r_reps}×{nxt.get('minutes')} min easy"
                 i += 1  # consume the recovery — it's described in this interval
             if note:
                 seg += f" ({note})"
@@ -437,7 +452,10 @@ def generate_week_runs(
         # 7-day floor still applies (Erik runs every day). Returning {} here would
         # bypass _ensure_seven_day_runs entirely.
         log.warning("generate_week_runs failed: %s — applying 7-day floor", e)
-        return _ensure_seven_day_runs({}, week)
+        # Floor the fills against last week too — the failure path must not
+        # ship a same-day, same-type regression either.
+        return _apply_run_regression_floor(
+            _ensure_seven_day_runs({}, week), user_id, week)
 
     out: dict[int, dict] = {}
     for k, v in parsed.items():
@@ -471,15 +489,18 @@ def generate_week_runs(
             "detail": detail,
             "segments": segments,
         }
+    # Hard backstop: Erik runs ALL 7 days — no day may be runless (the generator
+    # historically left Monday blank). Fill any gap with an easy Z2 recovery run.
+    # MUST run BEFORE the regression floor so a backfilled static 28-min Z2 on a
+    # day the coach omitted is itself floored against last week's same-day Z2
+    # (fill-after-floor shipped a 40→28 min same-type regression unchecked).
+    out = _ensure_seven_day_runs(out, week)
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
     out = _apply_run_regression_floor(out, user_id, week)
     # Hard backstop: never let a "baseline / first / no prior history" claim
     # reach an athlete who is mid-program. Prompt adherence is unreliable.
     out = _strip_baseline_confabulation(out, week)
-    # Hard backstop: Erik runs ALL 7 days — no day may be runless (the generator
-    # historically left Monday blank). Fill any gap with an easy Z2 recovery run.
-    out = _ensure_seven_day_runs(out, week)
     return out
 
 

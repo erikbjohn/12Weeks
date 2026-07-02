@@ -67,6 +67,29 @@ If you don't know what week the athlete is in, call get_today_status first to fi
 NEVER fabricate a weight, set count, or workout for a day you haven't looked up. If the answer needs data not in your prompt, the tool exists for a reason."""
 
 
+def _forced_final_text(client, *, model, max_tokens, system, messages, tools) -> str:
+    """One text-only turn (tool_choice=none) after the tool loop exhausted
+    MAX_TOOL_TURNS. The last response was a tool_use — streaming/returning it
+    would ship the model's tool-call preamble ('Let me pull Friday next.') as
+    the coach's final answer. Returns '' if the forced turn fails, so callers
+    can substitute an athlete-safe fallback."""
+    try:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,  # history contains tool blocks — tools must stay defined
+            tool_choice={"type": "none"},
+        )
+        return "\n".join(
+            b.text for b in resp.content if getattr(b, "type", None) == "text"
+        ).strip()
+    except Exception:
+        log.warning("forced final text turn failed after max tool turns", exc_info=True)
+        return ""
+
+
 def _run_loop(
     *,
     user_id: int,
@@ -101,15 +124,24 @@ def _run_loop(
                 "content": [b.model_dump() for b in blocks],
             })
             # Execute every tool_use block, build tool_result message
+            tool_use_blocks = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             tool_results = []
-            for b in blocks:
-                if getattr(b, "type", None) == "tool_use":
-                    result_str = execute_tool(b.name, dict(b.input or {}), user_id)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": b.id,
-                        "content": result_str,
-                    })
+            for b in tool_use_blocks:
+                result_str = execute_tool(b.name, dict(b.input or {}), user_id)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": b.id,
+                    "content": result_str,
+                })
+            # Reroute tool failures to a system directive so the model doesn't
+            # narrate raw plumbing errors ("RuntimeError: Working outside of
+            # application context") to the athlete. Same defense the streaming
+            # twin and the multi-agent path already apply.
+            try:
+                from coach_multi_agent import _reroute_tool_failures
+                tool_results = _reroute_tool_failures(tool_results, tool_use_blocks)
+            except Exception:
+                pass  # If reroute helper unavailable, fall back to raw results
             convo.append({"role": "user", "content": tool_results})
             continue
 
@@ -120,8 +152,13 @@ def _run_loop(
                 text_parts.append(b.text)
         return "\n".join(text_parts).strip()
 
-    # Hit max turns without end_turn — pull whatever text we have
-    return "(coach hit max tool-call iterations; check server logs)"
+    # Hit max turns without end_turn — force ONE text-only answer from the
+    # data gathered so far instead of leaking a plumbing sentinel to chat.
+    text = _forced_final_text(
+        client, model=model, max_tokens=max_tokens,
+        system=full_system, messages=convo, tools=TOOLS,
+    )
+    return text or "I didn't get a complete answer put together on that one. Ask me again."
 
 
 def coach_chat(
@@ -216,6 +253,18 @@ def coach_chat_stream(
             convo.append({"role": "user", "content": tool_results})
             continue
         break  # end_turn
+    else:
+        # Loop exhausted MAX_TOOL_TURNS still in tool_use: `blocks` is the last
+        # tool-call response, whose only text is preamble ("Let me pull Friday
+        # next.") — streaming that would ship a fragment as the coach's final
+        # answer AND persist it to chat history. Force one text-only turn.
+        forced = _forced_final_text(
+            client, model=chosen_model, max_tokens=max_tokens,
+            system=full_system, messages=convo, tools=TOOLS,
+        )
+        yield forced or ("I didn't get a complete answer put together on "
+                         "that one. Ask me again.")
+        return
 
     # Now stream the FINAL response. The tool loop above ran to end_turn;
     # we need to do one more streaming call without tools to get token-level

@@ -180,20 +180,29 @@ def generate_week_meals(
         log.warning("generate_week_meals failed: %s", e)
         return {}
 
+    def _safe_int(value) -> int:
+        """Coerce an LLM macro field to int; 0 on anything non-numeric.
+        A single '1800-2000' or '200g' must not raise and silently discard
+        the ENTIRE week's nutritionist output."""
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
     out: dict[int, dict] = {}
     for k, v in parsed.items():
         try:
             day_idx = int(k)
-        except ValueError:
+        except (TypeError, ValueError):
             continue
         if not isinstance(v, dict):
             continue
         out[day_idx] = {
             "day_type": v.get("day_type") or "normal",
-            "calories": int(v.get("calories") or 0),
-            "protein": int(v.get("protein") or 0),
-            "carbs": int(v.get("carbs") or 0),
-            "fat": int(v.get("fat") or 0),
+            "calories": _safe_int(v.get("calories")),
+            "protein": _safe_int(v.get("protein")),
+            "carbs": _safe_int(v.get("carbs")),
+            "fat": _safe_int(v.get("fat")),
             "rationale": v.get("rationale") or "",
         }
     return out

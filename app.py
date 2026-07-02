@@ -94,8 +94,10 @@ def unauthorized():
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # API key auth — allows CLI/curl access without browser session
-        api_key = request.headers.get('X-Admin-Key') or request.args.get('admin_key')
+        # API key auth — allows CLI/curl access without browser session.
+        # Header ONLY: accepting the key as a query param would leak it into
+        # server/proxy access logs, browser history, and Referer headers.
+        api_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         if api_key and expected_key and api_key == expected_key:
             return f(*args, **kwargs)
@@ -411,32 +413,11 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # Seed WeeklyPrescription for existing users who don't have any
-    try:
-        from workout_data import PHASE_TEMPLATES, get_phase
-        users_with_state = db.session.query(AppState).filter(AppState.start_date.isnot(None)).all()
-        for state in users_with_state:
-            existing = WeeklyPrescription.query.filter_by(user_id=state.user_id, week=1).first()
-            if not existing:
-                phase = get_phase(1)
-                template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
-                for day_idx in range(7):
-                    for order, ex in enumerate(template.get(day_idx, [])):
-                        db.session.add(WeeklyPrescription(
-                            user_id=state.user_id,
-                            week=1,
-                            day_idx=day_idx,
-                            exercise_order=order,
-                            exercise_name=ex['exercise'],
-                            sets=ex['sets'],
-                            reps=ex['reps'],
-                            rest=ex.get('rest', '60s'),
-                            note=ex.get('note', ''),
-                            source='template',
-                        ))
-                db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # NOTE: the startup week-1 template seeder is GONE (coach-or-nothing).
+    # It copied PHASE_TEMPLATES into WeeklyPrescription (source='template') for
+    # any user with a start_date and no week-1 rows, which made an unplanned
+    # week render as a full 'planned' week of static template exercises.
+    # Plans come only from the coach planning flow.
 
     # ONE-SHOT (guarded): backfill target_weight for legacy null-target prescriptions.
     # Runs AT MOST ONCE ever (persisted SystemFlag), not on every worker boot. The
@@ -670,10 +651,12 @@ def _parse_coach_markers(text, user_id, week):
                 ))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SWAP marker failed")
             db.session.rollback()
 
-    # [SCHEDULE: day=X, time=3:00 PM, notes=...]
-    for m in re.finditer(r'\[SCHEDULE:\s*day=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
+    # [SCHEDULE: day=X, time=3:00 PM, notes=...]  (canonical — CORE_PROMPT <markers>)
+    # `day_idx=` accepted as an alias for `day=`.
+    for m in re.finditer(r'\[SCHEDULE:\s*day(?:_idx)?=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
         try:
             day_idx, workout_time = int(m.group(1)), m.group(2).strip()
             notes = m.group(3).strip() if m.group(3) else ''
@@ -685,6 +668,7 @@ def _parse_coach_markers(text, user_id, week):
                 db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, workout_time=workout_time, notes=notes))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SCHEDULE marker failed")
             db.session.rollback()
 
     # [NUTRITION: day=X, meal_type=fast_day, reason=...]
@@ -707,6 +691,7 @@ def _parse_coach_markers(text, user_id, week):
                     db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, skip_day=True, notes='Fast day \u2014 no workout'))
             db.session.commit()
         except Exception:
+            logging.exception("Coach NUTRITION (meal_type) marker failed")
             db.session.rollback()
 
     # [NUTRITION: daily_calories=XXXX, reason=...]
@@ -718,19 +703,65 @@ def _parse_coach_markers(text, user_id, week):
                 goal.daily_calories = new_cals
                 db.session.commit()
         except Exception:
+            logging.exception("Coach NUTRITION (daily_calories) marker failed")
             db.session.rollback()
 
-    # [WEIGHT: exercise=Name, adjustment=+5, reason=...]
-    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*adjustment=([+-]?\d+),\s*reason=([^\]]+)\]', text):
+    # [WEIGHT: exercise=Name, new_weight=N, reason=text]  (canonical — CORE_PROMPT <markers>)
+    # Legacy [WEIGHT: exercise=Name, adjustment=+5, reason=...] still accepted.
+    # Writes to WeeklyPrescription — the card's source of truth. ExerciseLog is
+    # DEAD (Apr 2026): never read a base weight from it or write a row to it.
+    _weight_changes = []  # (exercise, absolute_weight_or_None, adjustment_or_None, reason)
+    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*new_weight=(\d+(?:\.\d+)?)(?:,\s*reason=([^\]]+))?\]', text):
+        _weight_changes.append((m.group(1).strip(), float(m.group(2)), None,
+                                (m.group(3) or '').strip()))
+    for m in re.finditer(r'\[WEIGHT:\s*exercise=([^,]+),\s*adjustment=([+-]?\d+(?:\.\d+)?),\s*reason=([^\]]+)\]', text):
+        _weight_changes.append((m.group(1).strip(), None, float(m.group(2)),
+                                m.group(3).strip()))
+    for _wx_exercise, _wx_new, _wx_adj, _wx_reason in _weight_changes:
         try:
-            exercise, adj, reason = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
-            last_log = ExerciseLog.query.filter_by(user_id=user_id, exercise_name=exercise).order_by(ExerciseLog.logged_date.desc()).first()
-            base_weight = last_log.weight if last_log else 0
-            new_weight = base_weight + adj
-            log = ExerciseLog(user_id=user_id, exercise_name=exercise, weight=new_weight, week=week, day_idx=0, rpe=None, logged_date=_user_today())
-            db.session.add(log)
+            exercise = resolve_name(_wx_exercise)
+            rx_rows = WeeklyPrescription.query.filter_by(
+                user_id=user_id, week=week, exercise_name=exercise
+            ).all()
+            if not rx_rows:
+                logging.warning(
+                    "Coach WEIGHT marker dropped: no WeeklyPrescription row for "
+                    "'%s' week=%s (user %s)", exercise, week, user_id,
+                )
+                continue
+            if _wx_new is not None:
+                new_weight = _wx_new
+            else:
+                bases = [r.target_weight for r in rx_rows if r.target_weight is not None]
+                new_weight = (max(bases) if bases else 0) + _wx_adj
+            if new_weight < 0:
+                continue
+            # Same data-layer guard as [PRESCRIPTION]: outside deload weeks the
+            # coach may not set a weight below 95% of the proven top set
+            # (performed sets only — a typed-but-not-done weight proves nothing).
+            if new_weight > 0 and week not in (4, 8):
+                top = db.session.query(db.func.max(SetLog.weight)).filter(
+                    SetLog.user_id == user_id,
+                    SetLog.exercise_name == exercise,
+                    SetLog.weight > 0,
+                    SetLog.done == True,  # noqa: E712
+                    SetLog.set_skipped.isnot(True),  # NULL-safe: legacy rows count
+                ).scalar()
+                if top is not None and new_weight < top * 0.95:
+                    logging.warning(
+                        "WEIGHT guard: rejected coach write %s wk %s @ %s lb "
+                        "(below 95%% of recent top set %s lb)",
+                        exercise, week, new_weight, top,
+                    )
+                    continue
+            for r in rx_rows:
+                r.target_weight = new_weight
+                r.source = 'coach'
+                if _wx_reason:
+                    r.adjustment_reason = _wx_reason
             db.session.commit()
         except Exception:
+            logging.exception("Coach WEIGHT marker failed")
             db.session.rollback()
 
     # [SORENESS: area=shoulders, level=moderate]
@@ -751,6 +782,7 @@ def _parse_coach_markers(text, user_id, week):
             db.session.add(CoachMemory(user_id=user_id, content=f'Athlete reports {level} soreness/tightness in {area}', memory_type='observation', week=week))
             db.session.commit()
         except Exception:
+            logging.exception("Coach SORENESS marker failed")
             db.session.rollback()
 
     # [RUN: day=X, duration=50 min, type=zone2, reason=...]
@@ -758,9 +790,19 @@ def _parse_coach_markers(text, user_id, week):
     # the same reply don't create two concurrent push_week calls on the same week
     # (duplicate scheduled workouts, orphaned workout ids).
     _garmin_weeks_to_push = set()
-    for m in re.finditer(r'\[RUN:\s*day=(\d+),\s*duration=([^,]+),\s*type=([^,]+),\s*reason=([^\]]+)\]', text):
+    # Canonical (CORE_PROMPT <markers>): [RUN: day=N, duration=40 min, type=zone2, reason=text]
+    # Tolerated: `day_idx=` alias, duration/type in either order, missing reason.
+    for m in re.finditer(
+        r'\[RUN:\s*day(?:_idx)?=(\d+),\s*'
+        r'(?:duration=([^,\]]+),\s*type=([^,\]]+)|type=([^,\]]+),\s*duration=([^,\]]+))'
+        r'(?:,\s*reason=([^\]]+))?\]',
+        text,
+    ):
         try:
-            day_idx, duration, run_type, reason = int(m.group(1)), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+            day_idx = int(m.group(1))
+            duration = (m.group(2) or m.group(5)).strip()
+            run_type = (m.group(3) or m.group(4)).strip()
+            reason = (m.group(6) or '').strip()
             existing = RunOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
             if existing:
                 existing.duration = duration
@@ -786,6 +828,7 @@ def _parse_coach_markers(text, user_id, week):
             db.session.commit()
             _garmin_weeks_to_push.add(week)
         except Exception:
+            logging.exception("Coach RUN marker failed")
             db.session.rollback()
     # Re-push all affected weeks to Garmin in a single off-thread serial pass:
     # up to 3 Garmin HTTP calls must not block the SSE worker; the per-user lock
@@ -811,6 +854,7 @@ def _parse_coach_markers(text, user_id, week):
                     pa.actual_bmr = new_bmr
                     db.session.commit()
         except Exception:
+            logging.exception("Coach BMR_UPDATE marker failed")
             db.session.rollback()
 
     # [LOCKOUT_WARNING: count=X, reason=...]
@@ -821,15 +865,23 @@ def _parse_coach_markers(text, user_id, week):
             db.session.add(cm)
             db.session.commit()
         except Exception:
+            logging.exception("Coach LOCKOUT_WARNING marker failed")
             db.session.rollback()
 
-    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110]
-    for m in re.finditer(r'\[PRESCRIPTION:\s*week=(\d+),\s*day=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,]+?)(?:,\s*rest=([^\],]+?))?(?:,\s*weight=([^\]]+))?\]', text):
+    # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110, reason=text]
+    # (canonical — CORE_PROMPT <markers>). week defaults to the chat's current
+    # week when omitted; `day_idx=` accepted as an alias; rest/weight/reason optional.
+    for m in re.finditer(r'\[PRESCRIPTION:\s*(?:week=(\d+),\s*)?day(?:_idx)?=(\d+),\s*exercise=([^,]+),\s*sets=(\d+),\s*reps=([^,\]]+?)(?:,\s*rest=([^\],]+?))?(?:,\s*weight=([^,\]]+?))?(?:,\s*reason=([^\]]+))?\]', text):
         try:
-            p_week, p_day, p_exercise = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+            p_week = int(m.group(1)) if m.group(1) else week
+            p_day, p_exercise = int(m.group(2)), m.group(3).strip()
             p_sets, p_reps = int(m.group(4)), m.group(5).strip()
             p_rest = m.group(6).strip() if m.group(6) else '60s'
-            p_weight = float(m.group(7)) if m.group(7) else None
+            p_reason = m.group(8).strip() if m.group(8) else None
+            try:
+                p_weight = float(m.group(7)) if m.group(7) else None
+            except ValueError:
+                p_weight = None  # e.g. weight=BW — leave target unset, keep the rest
             from workout_data import resolve_name
             p_exercise = resolve_name(p_exercise)
 
@@ -865,19 +917,24 @@ def _parse_coach_markers(text, user_id, week):
                 existing.source = 'coach'
                 if p_weight is not None:
                     existing.target_weight = p_weight
+                if p_reason:
+                    existing.adjustment_reason = p_reason
             else:
                 # Find max exercise_order for this day
                 max_order = db.session.query(db.func.max(WeeklyPrescription.exercise_order)).filter_by(
                     user_id=user_id, week=p_week, day_idx=p_day
-                ).scalar() or -1
+                ).scalar()
+                if max_order is None:
+                    max_order = -1
                 db.session.add(WeeklyPrescription(
                     user_id=user_id, week=p_week, day_idx=p_day,
                     exercise_order=max_order + 1, exercise_name=p_exercise,
                     sets=p_sets, reps=p_reps, rest=p_rest, source='coach',
-                    target_weight=p_weight,
+                    target_weight=p_weight, adjustment_reason=p_reason,
                 ))
             db.session.commit()
         except Exception:
+            logging.exception("Coach PRESCRIPTION marker failed")
             db.session.rollback()
 
     # [DAY_SCHEDULE: day=X, lift_name=Upper A - Chest & Back, muscle_groups=chest,back,triceps, is_rest=false]
@@ -897,6 +954,7 @@ def _parse_coach_markers(text, user_id, week):
                 db.session.add(WeeklyDaySchedule(user_id=user_id, week=week, day_idx=day_idx, lift_name=lift_name, muscle_groups=muscle_groups, is_rest=is_rest, source='coach'))
             db.session.commit()
         except Exception:
+            logging.exception("Coach DAY_SCHEDULE marker failed")
             db.session.rollback()
 
 
@@ -962,21 +1020,53 @@ def _garmin_push_week_best_effort(user_id, week):
             logging.exception("[GARMIN] best-effort push failed (wk%s)", week)
 
 
+# Age must ONLY be read from explicit age context. The old extractor grabbed
+# ANY standalone 13-80 number in ANY user message (last match wins), so "I can
+# run 15 miles" silently set age=15 → is_minor handling stripped the cut and
+# fasting; "45 minutes" set age=45 and skewed TDEE. Accepted forms: a message
+# that IS a bare 1-2 digit number (the direct answer to "how old are you?"),
+# "45 years old" / "45yo", or "I'm 45" / "age: 45" not followed by a unit.
+_AGE_UNIT_LOOKAHEAD = (r'(?!\s*(?:min(?:ute)?s?|miles?|mi\b|k\b|km\b|lbs?|'
+                       r'pounds?|kgs?|%|percent|weeks?|days?|hours?|hrs?|'
+                       r'reps?|sets?|feet|foot|ft\b|inch(?:es)?|in\b|'
+                       r'cal(?:orie)?s?)\b)')
+_AGE_CONTEXT_RES = [
+    re.compile(r"\b(\d{1,2})\s*(?:years?[\s-]*old|y/?o\b|yrs?[\s-]*old|year[\s-]old)",
+               re.IGNORECASE),
+    re.compile(r"\b(?:i'?m|i\s+am|my\s+age\s+is|age\s*(?:is|:)|turning|turned)\s+(\d{1,2})\b"
+               + _AGE_UNIT_LOOKAHEAD, re.IGNORECASE),
+]
+
+
+def _age_from_message(content):
+    """Return an age (13-80) ONLY when the message states it in age context;
+    otherwise None. Never treat a stray number in free text as the age."""
+    if content is None:
+        return None
+    text = str(content).strip()
+    if re.fullmatch(r"\d{1,2}", text):
+        num = int(text)
+        return num if 13 <= num <= 80 else None
+    for rx in _AGE_CONTEXT_RES:
+        m = rx.search(text)
+        if m:
+            num = int(m.group(1))
+            if 13 <= num <= 80:
+                return num
+    return None
+
+
 def _extract_age_from_intake(user_id):
     """Extract age from psych intake conversation. Returns 30 as default."""
-    import re as _re
     age = 30
     try:
         intake = PsychIntake.query.filter_by(user_id=user_id).first()
         if intake and intake.conversation:
             for msg in intake.conversation:
-                content = msg.get("content", "").lower().strip()
                 if msg.get("role") == "user":
-                    age_match = _re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
     except Exception:
         pass
     return age
@@ -1528,9 +1618,14 @@ def api_regenerate_meals():
         base_calories = goal.daily_calories
         fasting_protocol = goal.fasting_protocol or "16_8"
 
+        # "rest" and "deload" MUST be mapped explicitly — without them a rest
+        # day fell through to "training" calories while the card said
+        # "Rest Day ... Recovery focus" (cut lost its -200, recomp overshot
+        # by 200 kcal/day). Matches the admin generate-meals map.
         _cal_day_type_map = {
             "heavy_lift": "heavy", "long_run": "long_run",
             "moderate": "training", "fast_day": "fast_day",
+            "rest": "rest", "deload": "rest",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
 
@@ -1579,9 +1674,12 @@ def api_regenerate_meals():
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
                 day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+                # targets already day-adjusted by compute_day_calories — don't
+                # let the generator's day-type carb multiplier compound on top.
                 meal_plan = generate_meal_plan(
                     selected_foods=fs.selected_foods, day_type=day_type,
                     targets=day_macros, fasting_protocol=fasting_protocol,
+                    targets_pre_adjusted=True,
                 )
 
             db.session.add(WeeklyMealPlan(
@@ -1623,21 +1721,20 @@ def debug_goal_error():
 
 
 @app.route("/api/debug/override-day-with-actual")
+@admin_required
 def debug_override_day_with_actual():
     """Take the user's logged SetLog rows for (logged_date, day_idx) and write
     them to WeeklyPrescription for (week, day_idx) so the UI shows the actual
     session that was done instead of the template. One-shot recovery for when
     the user's session doesn't match the template for that day.
 
-    Token-gated. Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4
     """
     email = request.args.get("email", "")
     date_str = request.args.get("date", "")
     week = int(request.args.get("week", 0))
     day_idx = int(request.args.get("day_idx", -1))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not date_str or not week or day_idx < 0:
         return jsonify({"error": "email + date + week + day_idx required"}), 400
     try:
@@ -1705,23 +1802,22 @@ def debug_override_day_with_actual():
 
 
 @app.route("/api/debug/realign-session-week")
+@admin_required
 def debug_realign_session_week():
     """Move a logged session from one week to another. Moves SetLog,
     RunLog, WeeklyPrescription, DayCompletion. Optionally resets
     AppState.current_week.
 
-    Token-gated. Query: ?email=...&from_week=6&to_week=5&day_idx=4&date=YYYY-MM-DD&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&from_week=6&to_week=5&day_idx=4&date=YYYY-MM-DD
     Optional: &reset_current_week=1
     """
     email = request.args.get("email", "")
     from_week = int(request.args.get("from_week", 0))
     to_week = int(request.args.get("to_week", 0))
     day_idx = int(request.args.get("day_idx", -1))
-    date_str = request.args.get("date", "")
     reset_cw = request.args.get("reset_current_week") == "1"
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
+    date_str = request.args.get("date", "")
     if not email or not from_week or not to_week or day_idx < 0 or not date_str:
         return jsonify({"error": "email + from_week + to_week + day_idx + date required"}), 400
     try:
@@ -1817,9 +1913,10 @@ def debug_realign_session_week():
 
 
 @app.route("/api/debug/api-workouts-as-user")
+@admin_required
 def debug_api_workouts_as_user():
     """Run api_workouts as if the given user were logged in, return the JSON
-    payload the UI would actually receive. UNAUTH diagnostic.
+    payload the UI would actually receive. Admin-only diagnostic.
     Query: ?email=...&week=6&day_idx=4
     """
     email = request.args.get("email", "erik@placemetry.com")
@@ -1863,6 +1960,7 @@ def debug_api_workouts_as_user():
 
 
 @app.route("/api/debug/today-status")
+@admin_required
 def debug_today_status():
     """Dump the coach's today_status GROUNDING for a user — the exact 3-state
     workout signal (not_started/in_progress/complete) plus the rendered directive
@@ -1891,18 +1989,17 @@ def debug_today_status():
 
 
 @app.route("/api/debug/copy-runplan")
+@admin_required
 def debug_copy_runplan():
     """Copy WeeklyRunPlan rows from one week to another. Used when the run
     engine hasn't generated the next week yet and the user is already there.
 
-    Token-gated. Query: ?email=...&from_week=5&to_week=6&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&from_week=5&to_week=6
     """
     email = request.args.get("email", "")
     from_week = int(request.args.get("from_week", 0))
     to_week = int(request.args.get("to_week", 0))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not from_week or not to_week:
         return jsonify({"error": "email + from_week + to_week required"}), 400
     try:
@@ -1940,6 +2037,7 @@ def debug_copy_runplan():
 
 
 @app.route("/api/debug/full-day-state")
+@admin_required
 def debug_full_day_state():
     """Dump everything stored for a user on a date: SetLog, RunLog,
     WeeklyPrescription, WeeklyRunPlan. Read-only diagnostic.
@@ -2011,8 +2109,9 @@ def debug_full_day_state():
 
 
 @app.route("/api/debug/show-sets")
+@admin_required
 def debug_show_sets():
-    """Dump SetLog rows for a user across recent days. UNAUTH diagnostic.
+    """Dump SetLog rows for a user across recent days. Admin-only diagnostic.
     Query: ?email=...&days=7 (default 7)
     """
     email = request.args.get("email", "erik@placemetry.com")
@@ -2058,20 +2157,19 @@ def debug_show_sets():
 
 
 @app.route("/api/debug/move-sets-day")
+@admin_required
 def debug_move_sets_day():
     """Move all SetLog rows for a user matching (logged_date, from_day_idx)
     to to_day_idx. Used to relocate sets logged under one day to another
     when the template layout changed underneath the user.
 
-    Token-gated. Query: ?email=...&date=YYYY-MM-DD&from=4&to=3&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&date=YYYY-MM-DD&from=4&to=3
     """
     email = request.args.get("email", "")
     date_str = request.args.get("date", "")
     from_day = int(request.args.get("from", -1))
     to_day = int(request.args.get("to", -1))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not date_str or from_day < 0 or to_day < 0:
         return jsonify({"error": "email + date + from + to required"}), 400
     try:
@@ -2110,9 +2208,10 @@ def debug_move_sets_day():
 
 
 @app.route("/api/debug/run-plan")
+@admin_required
 def debug_run_plan():
     """Show user's stored WeeklyRunPlan rows + what coach_rules will resolve.
-    UNAUTH. Diagnostic.
+    Admin-only diagnostic.
     """
     email = request.args.get("email", "erik@placemetry.com")
     week = int(request.args.get("week", 5))
@@ -2149,20 +2248,18 @@ def debug_run_plan():
 
 
 @app.route("/api/debug/clear-stale-prescriptions")
+@admin_required
 def debug_clear_stale_prescriptions():
     """Delete all WeeklyPrescription rows for a user+week so api_workouts
     falls through to the fresh template. Used to recover from program rebuilds
     where stored prescriptions don't match the new template (e.g., Erik's
     week 5 had Push exercises stored on Friday from the old program).
 
-    Token-gated to prevent abuse.
-    Query: ?email=...&week=5&token=swap-cleanup-2026-04-30
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&week=5
     """
     email = request.args.get("email", "")
     week = int(request.args.get("week", 0))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not week:
         return jsonify({"error": "email + week required"}), 400
     try:
@@ -2191,9 +2288,10 @@ def debug_clear_stale_prescriptions():
 
 
 @app.route("/api/debug/program-friday")
+@admin_required
 def debug_program_friday():
     """Inspect what the program says for a user's Friday — template, prescription
-    override, ExerciseSwap, run dict. UNAUTHENTICATED. Diagnostic only."""
+    override, ExerciseSwap, run dict. Admin-only diagnostic."""
     email = request.args.get("email", "erik@placemetry.com")
     week = int(request.args.get("week", 5))
     day_idx = int(request.args.get("day", 4))  # 4 = Friday
@@ -2287,8 +2385,9 @@ def api_coach_flag():
 
 
 @app.route("/api/debug/coach-feedback")
+@admin_required
 def debug_coach_feedback():
-    """Dump recent CoachFeedback rows. UNAUTH diagnostic.
+    """Dump recent CoachFeedback rows. Admin-only diagnostic.
     Query: ?email=...&days=14 (defaults to all users, last 14 days)
     """
     email = request.args.get("email", "")
@@ -2321,9 +2420,10 @@ def debug_coach_feedback():
 
 
 @app.route("/api/debug/coach-error")
+@admin_required
 def debug_coach_error():
     """Run the new coach pipeline against a user and return the response or
-    full traceback on failure. UNAUTHENTICATED — same pattern as /api/debug/health.
+    full traceback on failure. Admin-only (X-Admin-Key header or admin session).
     Useful for diagnosing production coach failures from outside the app.
 
     Query: ?email=erik@placemetry.com&msg=hello
@@ -2337,13 +2437,17 @@ def debug_coach_error():
         if user is None:
             return jsonify({"error": f"user {email!r} not found"}), 404
         from flask_login import login_user
-        login_user(user, force=True)
         from coach_assembler import coach_respond
-        reply = coach_respond(
-            user_id=user.id,
-            agent_name="conversation",
-            user_message=msg,
-        )
+        # Impersonate inside an isolated test_request_context so login_user()
+        # never touches the real caller's session cookie (same pattern as
+        # debug_today_status).
+        with app.test_request_context():
+            login_user(user, force=True)
+            reply = coach_respond(
+                user_id=user.id,
+                agent_name="conversation",
+                user_message=msg,
+            )
         return jsonify({
             "email": email,
             "msg": msg,
@@ -3112,6 +3216,74 @@ def _filter_meals_by_food_selections(days, user_food_ids):
     return filtered_days
 
 
+def _apply_exercise_swap_overlay(days, user_id, week):
+    """Apply user-explicit ExerciseSwap rows to a week's day dicts, AFTER
+    auto_swap_workout, so a manual/coach swap overrides the equipment-driven
+    substitution. Recomputes target_weight, note, and catalog metadata against
+    the SWAP TARGET's actual history rather than letting the slot's original
+    prescription leak through. Shared by /api/workouts and /api/workouts/<week>
+    so the two endpoints can't disagree on a swapped slot."""
+    try:
+        from equipment_swaps import EXERCISE_SWAPS
+        from workout_data import EXERCISES
+        _swap_rows = ExerciseSwap.query.filter_by(
+            user_id=user_id, week=week
+        ).all()
+        _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
+                     for s in _swap_rows}
+        if not _swap_map:
+            return
+        for _day_idx, _day in enumerate(days):
+            for _ex_idx, _ex in enumerate(_day.get("exercises", []) or []):
+                _key = (_day_idx, _ex_idx)
+                if _key not in _swap_map:
+                    continue
+                _swap_target, _orig_recorded = _swap_map[_key]
+                _orig_displayed = _ex.get("name", "")
+                _ex["swapped_from"] = _orig_displayed
+                _ex["name"] = _swap_target
+                # Recompute target_weight via engine using the swap target's
+                # SetLog history, not the original slot's prescription value.
+                try:
+                    _t = compute_next_targets(
+                        user_id, _swap_target, week, _day_idx,
+                        exercise_order=_ex_idx,
+                    )
+                    if _t and _t.get("target_weight"):
+                        _ex["target_weight"] = _t["target_weight"]
+                    else:
+                        _ex.pop("target_weight", None)
+                except Exception:
+                    _ex.pop("target_weight", None)
+                # Pull note from the original's catalog alternative entry.
+                # If the swap was recorded against a different "original"
+                # (e.g. earlier auto-swap renamed the slot), fall back to
+                # the displayed original or the catalog's own note.
+                _alt_note = None
+                for _candidate in (_orig_recorded, _orig_displayed):
+                    if not _candidate:
+                        continue
+                    _entry = EXERCISE_SWAPS.get(_candidate) or {}
+                    for _alt in _entry.get("alternatives", []) or []:
+                        if _alt.get("name") == _swap_target:
+                            _alt_note = _alt.get("note")
+                            break
+                    if _alt_note:
+                        break
+                if _alt_note:
+                    _ex["note"] = _alt_note
+                else:
+                    _ex["note"] = ""
+                # Refresh tracked_metric for the swap target.
+                _info = EXERCISES.get(_swap_target, {})
+                if _info.get("tracked_metric"):
+                    _ex["tracked_metric"] = _info["tracked_metric"]
+                elif _ex.get("tracked_metric"):
+                    del _ex["tracked_metric"]
+    except Exception:
+        pass
+
+
 @app.route("/api/workouts")
 @login_required
 def api_workouts():
@@ -3143,6 +3315,7 @@ def api_workouts():
         # below so the static template never reaches the UI as the user's plan.
         presc_day_set = {rx.day_idx for rx in prescriptions}
         runplan_day_set = set()
+        mealplan_day_set = set()
 
         if prescriptions:
             rx_by_day = {}
@@ -3191,66 +3364,10 @@ def api_workouts():
                         _ex["tracked_metric"] = _info["tracked_metric"]
 
         # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout so a
-        # manual swap overrides the equipment-driven substitution. Recompute
-        # target_weight, note, and catalog metadata against the SWAP TARGET's
-        # actual history rather than letting the slot's original prescription
-        # leak through (which produced 175-lb DB RDL from a Conv DL slot).
-        try:
-            from equipment_swaps import EXERCISE_SWAPS
-            _swap_rows = ExerciseSwap.query.filter_by(
-                user_id=current_user.id, week=week
-            ).all()
-            _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
-                         for s in _swap_rows}
-            for _day_idx, _day in enumerate(days):
-                for _ex_idx, _ex in enumerate(_day.get("exercises", []) or []):
-                    _key = (_day_idx, _ex_idx)
-                    if _key not in _swap_map:
-                        continue
-                    _swap_target, _orig_recorded = _swap_map[_key]
-                    _orig_displayed = _ex.get("name", "")
-                    _ex["swapped_from"] = _orig_displayed
-                    _ex["name"] = _swap_target
-                    # Recompute target_weight via engine using the swap target's
-                    # SetLog history, not the original slot's prescription value.
-                    try:
-                        _t = compute_next_targets(
-                            current_user.id, _swap_target, week, _day_idx,
-                            exercise_order=_ex_idx,
-                        )
-                        if _t and _t.get("target_weight"):
-                            _ex["target_weight"] = _t["target_weight"]
-                        else:
-                            _ex.pop("target_weight", None)
-                    except Exception:
-                        _ex.pop("target_weight", None)
-                    # Pull note from the original's catalog alternative entry.
-                    # If the swap was recorded against a different "original"
-                    # (e.g. earlier auto-swap renamed the slot), fall back to
-                    # the displayed original or the catalog's own note.
-                    _alt_note = None
-                    for _candidate in (_orig_recorded, _orig_displayed):
-                        if not _candidate:
-                            continue
-                        _entry = EXERCISE_SWAPS.get(_candidate) or {}
-                        for _alt in _entry.get("alternatives", []) or []:
-                            if _alt.get("name") == _swap_target:
-                                _alt_note = _alt.get("note")
-                                break
-                        if _alt_note:
-                            break
-                    if _alt_note:
-                        _ex["note"] = _alt_note
-                    else:
-                        _ex["note"] = ""
-                    # Refresh tracked_metric for the swap target.
-                    _info = EXERCISES.get(_swap_target, {})
-                    if _info.get("tracked_metric"):
-                        _ex["tracked_metric"] = _info["tracked_metric"]
-                    elif _ex.get("tracked_metric"):
-                        del _ex["tracked_metric"]
-        except Exception:
-            pass
+        # manual swap overrides the equipment-driven substitution (which
+        # produced 175-lb DB RDL from a Conv DL slot). Shared helper — the
+        # per-week endpoint applies the identical overlay.
+        _apply_exercise_swap_overlay(days, current_user.id, week)
 
         # Check for user-specific meal plans
         try:
@@ -3263,8 +3380,9 @@ def api_workouts():
                     if day_idx < len(days) and meal_data:
                         days[day_idx]["mealPlan"] = meal_data
                         days[day_idx]["mealType"] = meal_data.get("label", "custom")
+                        mealplan_day_set.add(day_idx)
         except Exception:
-            pass  # Fall back to hardcoded meal plans
+            pass  # No coach meals resolved — finalize_day_plan strips the template ones
 
         # Run plan overlay
         try:
@@ -3349,14 +3467,15 @@ def api_workouts():
 
         # FAIL LOUD: strip any leftover template content for domains with no
         # real coach/engine plan so the static skeleton never reaches the UI as
-        # the user's plan. Meals deferred (food-selection filtering owns them).
+        # the user's plan — meals included (a hardcoded has_mealplan=True let
+        # static template meals ship labeled 'planned' on never-planned weeks).
         from plan_overlay import finalize_day_plan
         for _di, _day in enumerate(days):
             finalize_day_plan(
                 _day,
                 has_prescriptions=(_di in presc_day_set),
                 has_runplan=(_di in runplan_day_set),
-                has_mealplan=True,
+                has_mealplan=(_di in mealplan_day_set),
             )
 
         days = _filter_meals_by_food_selections(days, user_food_ids)
@@ -3407,6 +3526,7 @@ def api_week(week):
 
     presc_day_set = {rx.day_idx for rx in prescriptions}
     runplan_day_set = set()
+    mealplan_day_set = set()
 
     if prescriptions:
         rx_by_day = {}
@@ -3439,6 +3559,11 @@ def api_week(week):
         if "exercises" in day:
             day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
 
+    # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout — the same
+    # overlay /api/workouts applies, so the two endpoints can't disagree on a
+    # day that has a manual or coach [SWAP].
+    _apply_exercise_swap_overlay(days, current_user.id, week)
+
     # Check for user-specific meal plans
     try:
         meal_plans = WeeklyMealPlan.query.filter_by(
@@ -3450,8 +3575,9 @@ def api_week(week):
                 if day_idx < len(days) and meal_data:
                     days[day_idx]["mealPlan"] = meal_data
                     days[day_idx]["mealType"] = meal_data.get("label", "custom")
+                    mealplan_day_set.add(day_idx)
     except Exception:
-        pass  # Fall back to hardcoded meal plans
+        pass  # No coach meals resolved — finalize_day_plan strips the template ones
 
     # Run plan overlay
     try:
@@ -3528,14 +3654,14 @@ def api_week(week):
                 _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
 
     # FAIL LOUD: strip leftover template content for unplanned domains (run +
-    # lifts). Mirrors /api/workouts. Meals deferred to food-selection filter.
+    # lifts + meals). Mirrors /api/workouts.
     from plan_overlay import finalize_day_plan
     for _di, _day in enumerate(days):
         finalize_day_plan(
             _day,
             has_prescriptions=(_di in presc_day_set),
             has_runplan=(_di in runplan_day_set),
-            has_mealplan=True,
+            has_mealplan=(_di in mealplan_day_set),
         )
 
     days = _filter_meals_by_food_selections(days, user_food_ids)
@@ -3604,35 +3730,17 @@ def api_state_update():
 @app.route("/api/weights")
 @login_required
 def api_weights():
-    # Merge legacy ExerciseLog with the modern SetLog table.
+    # SetLog only — ExerciseLog is DEAD (no live reads; the old merge
+    # double-counted a session that existed in both tables).
     # Per-exercise history collapses multi-set days into ONE entry per day
     # (max weight × max reps_completed for that day) so e1RM downstream is meaningful.
+    # Only actually-performed sets count: done=True and not skipped.
     result = {}
 
-    # 1. Legacy ExerciseLog entries
-    logs = ExerciseLog.query.filter_by(user_id=current_user.id).order_by(ExerciseLog.logged_date, ExerciseLog.id).all()
-    for log in logs:
-        name = log.exercise_name
-        if name not in result:
-            result[name] = {"current": 0, "history": []}
-        entry = {
-            "weight": log.weight,
-            "reps": log.sets_label,
-            "reps_completed": log.reps_completed,
-            "rpe": log.rpe,
-            "date": log.logged_date.isoformat() if log.logged_date else None,
-            "week": log.week,
-            "day": log.day_idx,
-        }
-        if log.test_weight is not None:
-            entry["testWeight"] = log.test_weight
-            entry["testReps"] = log.test_reps
-            entry["estimated1RM"] = log.estimated_1rm
-        result[name]["history"].append(entry)
-        result[name]["current"] = log.weight
-
-    # 2. Modern SetLog entries — collapse per (exercise, week, day) to the max-weight set
-    set_logs = SetLog.query.filter_by(user_id=current_user.id, done=True).order_by(SetLog.logged_date, SetLog.id).all()
+    set_logs = (SetLog.query
+                .filter_by(user_id=current_user.id, done=True)
+                .filter(SetLog.set_skipped.isnot(True))
+                .order_by(SetLog.logged_date, SetLog.id).all())
     by_day = {}  # (name, week, day) -> {weight, reps}
     for s in set_logs:
         if not s.weight or s.weight <= 0:
@@ -3665,49 +3773,47 @@ def api_weights():
 @app.route("/api/weights", methods=["POST"])
 @login_required
 def api_weights_record():
+    """Persist a session-summary weight to SetLog. ExerciseLog is DEAD — this
+    endpoint must never write it.
+
+    The focus-mode flow already saves every set via /api/sets before this
+    fires, so when any SetLog row exists for (exercise, week, day) this is a
+    no-op (the per-set rows ARE the record; a second summary row would
+    double-count the session). When none exist — the onboarding baseline
+    lifts, which post week=0/day_idx=0 — one performed set is recorded so all
+    SetLog-based history readers see it.
+    """
     from workout_data import resolve_name
     data = request.get_json()
-    data["exercise"] = resolve_name(data["exercise"])
-    weight = data.get("weight", 0)
+    exercise = resolve_name(data["exercise"])
+    weight = data.get("weight")
+    weight = 0 if weight is None else weight
     if weight < 0 or weight > 1500:
         return jsonify({"error": "Invalid weight"}), 400
+    # week/day 0 are valid values — explicit None checks (falsy-zero rule).
+    week = data.get("week")
+    week = 0 if week is None else week
+    day_idx = data.get("day_idx")
+    day_idx = 0 if day_idx is None else day_idx
 
-    # Upsert: update existing entry for same exercise/week/day/user
-    existing = None
-    if data.get("week") is not None and data.get("day_idx") is not None:
-        existing = ExerciseLog.query.filter_by(
-            exercise_name=data["exercise"],
-            week=data.get("week"),
-            day_idx=data.get("day_idx"),
-            user_id=current_user.id,
-        ).first()
-
+    existing = SetLog.query.filter_by(
+        user_id=current_user.id, exercise_name=exercise,
+        week=week, day_idx=day_idx,
+    ).first()
     if existing:
-        existing.weight = weight
-        existing.sets_label = data.get("sets_label")
-        existing.rpe = data.get("rpe")
-        existing.rpe_score = data.get("rpe_score")
-        existing.reps_completed = data.get("reps_completed")
-        existing.logged_date = _user_today()
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": "Save failed"}), 500
-        return jsonify({"ok": True, "id": existing.id, "updated": True})
+        # Session already recorded set-by-set via /api/sets.
+        return jsonify({"ok": True, "already_logged": True})
 
-    log = ExerciseLog(
-        exercise_name=data["exercise"],
-        weight=weight,
-        sets_label=data.get("sets_label"),
-        rpe=data.get("rpe"),
-        rpe_score=data.get("rpe_score"),
-        reps_completed=data.get("reps_completed"),
-        difficulty_notes=data.get("difficulty_notes"),
-        week=data.get("week"),
-        day_idx=data.get("day_idx"),
+    reps = data.get("reps_completed")
+    try:
+        reps = int(reps) if reps is not None else 0
+    except (TypeError, ValueError):
+        reps = 0
+    log = SetLog(
+        user_id=current_user.id, exercise_name=exercise,
+        week=week, day_idx=day_idx, set_number=0,
+        weight=weight, reps=reps, done=True,
         logged_date=_user_today(),
-        user_id=current_user.id,
     )
     db.session.add(log)
     try:
@@ -3746,11 +3852,19 @@ def api_set_log():
     ).first()
 
     if existing:
+        prev_done = bool(existing.done)
         existing.weight = weight
         existing.reps = reps
         if done_provided:
             existing.done = done
-        existing.logged_date = _user_today()
+        # logged_date policy: stamp today on the first completion (done False->True)
+        # so a set blur-created on an earlier day but actually performed today reads
+        # as trained-today. PRESERVE it on any later edit of an already-done set —
+        # re-stamping every edit made a Wednesday edit of Monday's set count as
+        # trained-today and split the lift_session_history session key.
+        newly_completed = done_provided and done and not prev_done
+        if existing.logged_date is None or newly_completed:
+            existing.logged_date = _user_today()
     else:
         existing = SetLog(
             user_id=current_user.id, exercise_name=exercise,
@@ -3779,9 +3893,13 @@ def api_set_log():
             existing.target_weight = targets["target_weight"]
             existing.target_reps = targets.get("target_reps")
 
-        # Compare against PRESCRIPTION, not computed target
-        compare_weight = prescribed_weight or (targets.get("target_weight") if targets else None)
-        if compare_weight and weight and compare_weight > 0:
+        # Compare against PRESCRIPTION, not computed target. `is not None`
+        # (NOT `or`) so a target_weight=0 bodyweight prescription is honored
+        # instead of falling through to an engine weight the user never saw —
+        # which falsely stamped 'decreased_weight' on an athlete who ADDED load.
+        compare_weight = (prescribed_weight if prescribed_weight is not None
+                          else (targets.get("target_weight") if targets else None))
+        if compare_weight is not None and weight is not None and compare_weight >= 0:
             if weight > compare_weight * 1.02:
                 existing.user_modified = True
                 existing.modification_direction = 'increased_weight'
@@ -3800,42 +3918,38 @@ def api_set_log():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
-    # Auto-complete day: if all prescribed exercises have all sets done, mark the day complete.
+    # Auto-complete day — CANONICAL 3-STATE, name-aware. The old check compared
+    # a name-agnostic COUNT of done rows against the day's set total, so extra
+    # sets on one exercise (or stale rows from a replaced plan) substituted for
+    # a skipped movement and a partial day read complete. Now: the day is
+    # complete only when EVERY prescribed exercise has its prescribed sets
+    # performed (workout_status.workout_state_from_rows — the same definition
+    # coach_assembler and coach_rules use). Prescription comes from the
+    # resolver (coach/engine rows + swaps); an UNPLANNED day (no prescription,
+    # coach-or-nothing) never auto-completes from set counts.
     if done_provided and done:
         try:
-            from workout_data import get_workouts
-            phase_workouts = get_workouts(week)
-            if day_idx < len(phase_workouts):
-                day_exercises = phase_workouts[day_idx].get("exercises", [])
-                # Check user prescriptions (override template)
-                user_rx = WeeklyPrescription.query.filter_by(
+            from coach_assembler import _resolve_workout_for_day
+            from workout_status import workout_state_from_rows
+            resolved = _resolve_workout_for_day(week, day_idx) or {}
+            # Date-gate the rows: only sets performed TODAY count toward
+            # today's completion. Without this, once the week clamps at 12 a
+            # fully-logged slot from a prior cycle would complete the day after
+            # ONE new set (the phantom-done class).
+            slot_rows = SetLog.query.filter_by(
+                user_id=current_user.id, week=week, day_idx=day_idx,
+            ).filter(SetLog.logged_date == _user_today()).all()
+            state = workout_state_from_rows(resolved.get("exercises") or [], slot_rows)
+            if state == "complete":
+                dc = DayCompletion.query.filter_by(
                     user_id=current_user.id, week=week, day_idx=day_idx
-                ).all()
-                if user_rx:
-                    total_sets = sum(rx.sets for rx in user_rx)
-                else:
-                    total_sets = 0
-                    for ex in day_exercises:
-                        s = ex.get("sets", 1)
-                        if isinstance(s, int):
-                            total_sets += s
-                        elif isinstance(s, str):
-                            m = __import__('re').match(r'(\d+)', str(s))
-                            total_sets += int(m.group(1)) if m else 1
-
-                if total_sets > 0:
-                    done_count = SetLog.query.filter_by(
-                        user_id=current_user.id, week=week, day_idx=day_idx, done=True
-                    ).count()
-                    if done_count >= total_sets:
-                        dc = DayCompletion.query.filter_by(
-                            user_id=current_user.id, week=week, day_idx=day_idx
-                        ).first()
-                        if not dc:
-                            db.session.add(DayCompletion(
-                                user_id=current_user.id, week=week, day_idx=day_idx, done=True
-                            ))
-                            db.session.commit()
+                ).first()
+                if not dc:
+                    db.session.add(DayCompletion(
+                        user_id=current_user.id, week=week, day_idx=day_idx,
+                        done=True, completed_at=_user_today().isoformat(),
+                    ))
+                    db.session.commit()
         except Exception:
             pass  # Don't fail the set save if auto-complete errors
 
@@ -3874,50 +3988,39 @@ def api_get_sets():
 @app.route("/api/prescription/seed", methods=["POST"])
 @login_required
 def api_prescription_seed():
-    """Seed WeeklyPrescription rows for a week from the phase template."""
-    data = request.get_json()
+    """COACH-OR-NOTHING: this endpoint no longer seeds anything.
+
+    It used to copy PHASE_TEMPLATES into WeeklyPrescription (source='template')
+    for any week with zero rows — and the client called it on every app load —
+    which silently converted a deliberately-unplanned week into a full week of
+    static template exercises rendered as 'planned' (destroying the
+    'Plan this week' empty state). Plans come from the coach planning flow only;
+    an unplanned week STAYS unplanned. Kept as a safe no-op so cached/older
+    clients that still POST here don't 404.
+    """
+    data = request.get_json(silent=True) or {}
     week = data.get("week", _current_week())
-    from workout_data import PHASE_TEMPLATES, BW_PHASE_TEMPLATES, get_phase
-
-    # Don't overwrite existing prescriptions
-    existing = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).first()
-    if existing:
-        return jsonify({"message": "Prescriptions already exist for this week", "count": WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()})
-
-    # Use BW templates for no-gym users
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    has_gym = pa.has_gym if pa else True
-    phase = get_phase(week)
-    if has_gym:
-        template = PHASE_TEMPLATES.get(phase, PHASE_TEMPLATES.get(1, {}))
-    else:
-        template = BW_PHASE_TEMPLATES.get(phase, BW_PHASE_TEMPLATES.get(1, {}))
-    count = 0
-    for day_idx in range(7):
-        for order, ex in enumerate(template.get(day_idx, [])):
-            db.session.add(WeeklyPrescription(
-                user_id=current_user.id,
-                week=week,
-                day_idx=day_idx,
-                exercise_order=order,
-                exercise_name=ex['exercise'],
-                sets=ex['sets'],
-                reps=ex['reps'],
-                rest=ex.get('rest', '60s'),
-                note=ex.get('note', ''),
-                source='template',
-            ))
-            count += 1
-    db.session.commit()
-    return jsonify({"seeded": count, "week": week})
+    count = WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week).count()
+    return jsonify({
+        "seeded": 0,
+        "week": week,
+        "count": count,
+        "message": "Template seeding removed — plans are coach-or-nothing. "
+                   "Use the weekly planning flow to plan this week.",
+    })
 
 
-def _enrich_program_with_whys(user_id, target_week, program, run_summary):
+def _enrich_program_with_whys(user_id, target_week, program, run_summary,
+                              allow_llm=True):
     """Generate per-exercise WHY blurbs via strength-coach agent, persist into
     WeeklyPrescription.adjustment_reason, and overwrite program[i]['reason']
     so the client renders them directly. Best-effort: on failure the existing
     reasons stay in place (and the client falls back to the deterministic
     exerciseWhy mapping).
+
+    allow_llm=False (request-thread callers) keeps the cheap already-enriched
+    sync but skips the Sonnet call entirely — no synchronous LLM work behind
+    the edge timeout.
     """
     from coach_planning_why import generate_week_whys
 
@@ -3934,6 +4037,13 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary):
         # SQL on the row read, but be explicit so the client sees it).
         for ex in program:
             ex["why"] = ex.get("reason")
+        return
+    if not allow_llm:
+        # Request thread: sync what's stored, never call the LLM here. The
+        # client's deterministic exerciseWhy fallback covers short reasons.
+        for ex in program:
+            if ex.get("reason"):
+                ex["why"] = ex.get("reason")
         return
     # Build user_context
     try:
@@ -4171,7 +4281,11 @@ def api_weekly_program_generate_status():
             has_program = WeeklyPrescription.query.filter_by(
                 user_id=current_user.id, week=week, source='coach').first()
             if has_program:
-                out = dict(_weekly_generation_impl(week, False, None, {}) or {})
+                # inline_llm=False: this is a polling GET on the request
+                # thread — it must stay a pure read (no synchronous coach
+                # calls, no LLM billing, no side-effect run inserts).
+                out = dict(_weekly_generation_impl(
+                    week, False, None, {}, inline_llm=False) or {})
                 out["status"] = "done"
                 out["recovered"] = True
                 return jsonify(out)
@@ -4193,7 +4307,10 @@ def api_weekly_program_generate_status():
 def api_generate_weekly_program():
     """Generate personalized weekly program using training engine + deficit plan."""
     data = request.get_json() or {}
-    target_week = data.get("week", _current_week() + 1)
+    try:
+        target_week = int(data.get("week", _current_week() + 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid week"}), 400
     force_regen = bool(data.get("force_regen"))
     # Rest-of-week replan: `preserve_through_day` keeps TODAY and every earlier
     # day fully intact (prescriptions, runs, meals, logged work) and regenerates
@@ -4233,6 +4350,23 @@ def api_generate_weekly_program():
             while preserve_through >= 0 and not _day_has_content(preserve_through):
                 preserve_through -= 1
 
+    # PAST-WEEK LOCK: past weeks are training HISTORY. A stale client tab, a
+    # client bug, or a crafted request posting {"week": 5, "force_regen": true}
+    # during week 10 must never delete and regenerate a locked past week's
+    # prescriptions from CURRENT history (the 2026-04-28 Week-5 overwrite
+    # class). Admin heals go through /api/admin/replan-week instead.
+    if force_regen:
+        try:
+            _cur_wk = _current_week()
+        except Exception:
+            _cur_wk = None
+        if _cur_wk is not None and target_week < _cur_wk:
+            return jsonify({
+                "error": (f"Week {target_week} is in the past — past weeks are "
+                          f"locked and cannot be regenerated."),
+                "week": target_week,
+            }), 409
+
     # The non-regen path is fast (it only reads existing rows) — run it inline.
     # The force_regen path does 30-90s of LLM work; running THAT synchronously
     # made the request outlive the edge/proxy timeout (~25s) and return 502
@@ -4243,14 +4377,22 @@ def api_generate_weekly_program():
     # a quick DB read. Otherwise the coaches WILL run (30-90s); do that in a
     # background thread so the request returns immediately and never 502s on the
     # edge timeout.
+    # A "fast read" must be a PURE read: if the week has lifts/history but NO
+    # run-plan rows, the read branch would fire _fill_missing_week_runs — a
+    # 10-30s running-coach LLM call — on the request thread behind the ~30s
+    # edge timeout (the 502 class the async job pattern exists to prevent).
+    # Route that state to the background job instead; its _GEN_JOBS running
+    # guard also stops two concurrent callers from double-inserting run rows.
     _fast_read = (not force_regen) and bool(
         WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=target_week, source='coach').first()
         or SetLog.query.filter_by(
             user_id=current_user.id, week=target_week, done=True).first()
-    )
+    ) and bool(WeeklyRunPlan.query.filter_by(
+        user_id=current_user.id, week=target_week).first())
     if _fast_read:
-        return jsonify(_weekly_generation_impl(target_week, force_regen, preserve_through, data))
+        return jsonify(_weekly_generation_impl(
+            target_week, force_regen, preserve_through, data, inline_llm=False))
 
     _uid = current_user.id
     _key = (_uid, target_week)
@@ -4325,10 +4467,17 @@ def admin_replan_week():
                     "week": week, "preserve_through_day": preserve})
 
 
-def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
+def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
+                            inline_llm=True):
     """Heavy weekly-program generation: exercise + run + meal coaches, then DB
     writes. Runs in the request thread (non-regen) OR a background thread with a
     login context (force_regen). Uses current_user; never touches `request`.
+
+    inline_llm=False marks a REQUEST-THREAD caller (the fast-read POST path and
+    the generate-status polling GET): the read-only branch must then never make
+    a synchronous LLM call (run gap-fill, why enrichment) — those 10-30s calls
+    behind the ~30s edge timeout are the 502-with-partial-writes class the
+    async job pattern exists to prevent.
     """
     def _future_only(q, model):
         """Restrict a query to regenerated days when preserving today+earlier."""
@@ -4348,15 +4497,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     # running, nutrition) fresh. Use when the user explicitly asks to
     # re-plan with the agents.
     if force_regen:
-        _future_only(WeeklyPrescription.query.filter_by(
-            user_id=current_user.id, week=target_week,
-        ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
-            WeeklyPrescription).delete(synchronize_session=False)
-        _future_only(WeeklyRunPlan.query.filter_by(
-            user_id=current_user.id, week=target_week,
-        ).filter(WeeklyRunPlan.source.in_(('coach', 'engine'))),
-            WeeklyRunPlan).delete(synchronize_session=False)
-        db.session.commit()
+        # DO NOT delete the existing plan here. The old code deleted + COMMITTED
+        # before the coaches ran, so any LLM failure, timeout, or worker death
+        # mid-generation permanently destroyed the week with no recovery path
+        # (the documented "force_regen deletes first" footgun). Generate first;
+        # the old rows are swapped out further down, in the SAME transaction
+        # that inserts the coach's new rows — and only when the coach actually
+        # produced a replacement.
         existing_coach = None
         has_history = None
     else:
@@ -4409,9 +4556,17 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         # running coach — coach-or-nothing, without touching the lift rows.
         run_failures = []
         if not runs:
-            run_summary, run_failures = _fill_missing_week_runs(
-                current_user.id, target_week,
-            )
+            if inline_llm:
+                run_summary, run_failures = _fill_missing_week_runs(
+                    current_user.id, target_week,
+                )
+            else:
+                # Request-thread caller: NEVER run the running coach inline
+                # (10-30s LLM behind the edge timeout). Report the gap; the
+                # async generate path fills it on the next background job.
+                run_summary = []
+                run_failures = [{"domain": "run", "day": None,
+                                 "reason": "runs not planned yet"}]
         else:
             _prev_runs = _prev_run_durations(current_user.id, target_week)
             run_summary = [{
@@ -4423,6 +4578,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             } for r in runs]
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
+            allow_llm=inline_llm,
         )
         # Off-thread: first push of a fresh week is ~14 Garmin HTTP calls and
         # this branch runs on the request thread (hash-skips make reloads cheap).
@@ -4666,6 +4822,23 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                   f"Strength coach designed {_n_lifts} lifts across {_n_days} days; "
                   f"runs and meals set — plate-rounding loads and saving your week…")
 
+    # ATOMIC SWAP (force_regen): only NOW — with the coach's answer in hand —
+    # do we clear the old coach/engine prescriptions, in the SAME transaction
+    # that inserts the new ones (committed together below). If the strength
+    # coach produced nothing (LLM outage, timeout), the existing plan is KEPT
+    # and the failure is surfaced instead of leaving the week empty.
+    if force_regen:
+        if any(_coach_program.get(_d) for _d in range(7)):
+            _future_only(WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=target_week,
+            ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
+                WeeklyPrescription).delete(synchronize_session=False)
+        elif WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=target_week, source='coach').first():
+            coach_failures.append({
+                "domain": "lift", "day": None,
+                "reason": "strength coach returned nothing — existing plan kept"})
+
     for day_idx in range(7):
         if preserve_through is not None and day_idx <= preserve_through:
             continue  # leave today + earlier days untouched
@@ -4856,9 +5029,8 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                         continue
                     c = msg.get("content", "").lower().split()
                     if any(w in c for w in ["female", "f", "woman"]): sex_rec = "female"
-                    import re as _re
-                    am = _re.search(r'\b(\d{1,2})\b', msg.get("content", ""))
-                    if am and 13 <= int(am.group(1)) <= 80: age_rec = int(am.group(1))
+                    _am = _age_from_message(msg.get("content", ""))
+                    if _am is not None: age_rec = _am
 
                 tdee_rec = compute_tdee(current_weight, height_rec, age_rec, sex_rec)
                 new_targets = compute_targets(tdee_rec["tdee"], goal.goal_type or "cut",
@@ -4913,12 +5085,17 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             # Deficit already computed above; keep base_calories from goal
             pass
 
-        # Map DAY_MEAL_TYPES day types to compute_day_calories day types
+        # Map DAY_MEAL_TYPES day types to compute_day_calories day types.
+        # "rest"/"deload" MUST be mapped explicitly — without them a rest day
+        # fell through to "training" calories while the card said "Rest Day ...
+        # Recovery focus" (goal_engine's rest branch was unreachable).
         _cal_day_type_map = {
             "heavy_lift": "heavy",
             "long_run": "long_run",
             "moderate": "training",
             "fast_day": "fast_day",
+            "rest": "rest",
+            "deload": "rest",
         }
         day_types = [_get_day_meal_type(current_user.id, target_week, d) for d in range(7)]
         fasting_protocol = goal.fasting_protocol if goal else "16_8"
@@ -5003,13 +5180,39 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                     current_weight,
                 )
 
-                # Generate personalized meal plan
+                # COACH OWNS THE PRESCRIPTION: when the nutritionist agent
+                # prescribed explicit numbers for this day, they REPLACE the
+                # engine deficit-calculator output. The old code paid for the
+                # LLM call, read only day_type, and threw the per-day
+                # calories/macros (incl. the water-spike calorie HOLD) away.
+                _nv = _nutri_day_overrides.get(day_idx) or {}
+                _nv_cal = _nv.get("calories") or 0
+                _nv_pro = _nv.get("protein") or 0
+                if _nv_cal > 0 and _nv_pro > 0:
+                    day_macros = {
+                        "calories": int(_nv_cal),
+                        "protein": int(_nv_pro),
+                        "carbs": max(int(_nv.get("carbs") or 0), 0),
+                        "fat": max(int(_nv.get("fat") or 0), 0),
+                    }
+
+                # Generate personalized meal plan. Targets are already
+                # day-adjusted (nutritionist or compute_day_calories) — don't
+                # let the generator's day-type carb multiplier compound.
                 meal_plan = generate_meal_plan(
                     selected_foods=user_foods,
                     day_type=day_type,
                     targets=day_macros,
                     fasting_protocol=fasting_protocol,
+                    targets_pre_adjusted=True,
                 )
+                # Surface the nutritionist's rationale on the served card so
+                # the athlete sees WHY the day is fueled this way.
+                if _nv_cal > 0 and _nv.get("rationale"):
+                    _base_note = (meal_plan.get("note") or "").strip()
+                    meal_plan["note"] = (
+                        f"{_base_note} Coach: {str(_nv['rationale']).strip()}".strip()
+                    )
             else:
                 # No food selections yet — skip meal generation
                 continue
@@ -5043,16 +5246,21 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         from workout_data import get_workouts as _get_template_workouts
         template_days = _get_template_workouts(target_week)
 
-        # Delete existing engine-sourced run plans for this week (future days
-        # only when preserving today+earlier).
-        _future_only(WeeklyRunPlan.query.filter_by(
-            user_id=current_user.id, week=target_week
-        ).filter(WeeklyRunPlan.source != 'coach'),
-            WeeklyRunPlan).delete(synchronize_session=False)
-
         # ─── RUNNING COACH: USE PARALLEL RESULT ───
         # Already fired upstream in the ThreadPoolExecutor block. Reuse.
         _coach_runs = _coach_runs_parallel or {}
+
+        # Delete existing engine-sourced run plans for this week (future days
+        # only when preserving today+earlier). ATOMIC SWAP for coach rows on
+        # force_regen: the old coach runs are removed in the SAME transaction
+        # that inserts the new ones (commit below) — and ONLY when the running
+        # coach actually produced runs. A failed running coach keeps the
+        # existing run plan instead of leaving the week runless.
+        _run_del_q = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=target_week)
+        if not (force_regen and _coach_runs):
+            _run_del_q = _run_del_q.filter(WeeklyRunPlan.source != 'coach')
+        _future_only(_run_del_q, WeeklyRunPlan).delete(synchronize_session=False)
 
         for day_idx in range(7):
             if preserve_through is not None and day_idx <= preserve_through:
@@ -5290,24 +5498,38 @@ def api_exercise_targets(exercise_name):
 @app.route("/api/weights/baseline", methods=["POST"])
 @login_required
 def api_weights_baseline():
+    """Record baseline test lifts into SetLog (ExerciseLog is DEAD — this was
+    its last live write path).
+
+    Each baseline is stored as the set that was actually performed —
+    test_weight × test_reps, at week 0 / day 0 — so every SetLog-based
+    history reader (lift_session_history, /api/weights, export) sees it and
+    the Epley e1RM derived downstream equals the client's estimated_1rm.
+    Upserts on (exercise, 0, 0, set 0) so redoing the baseline never
+    duplicates rows.
+    """
     from workout_data import resolve_name
     data = request.get_json()
     for entry in data.get("exercises", []):
-        entry["name"] = resolve_name(entry["name"])
-        log = ExerciseLog(
-            exercise_name=entry["name"],
-            weight=entry["working_weight"],
-            sets_label=f"baseline: {entry['test_weight']}lb x {entry['test_reps']}",
-            rpe="just_right",
-            week=0,
-            day_idx=0,
-            logged_date=_user_today(),
-            test_weight=entry.get("test_weight"),
-            test_reps=entry.get("test_reps"),
-            estimated_1rm=entry.get("estimated_1rm"),
-            user_id=current_user.id,
-        )
-        db.session.add(log)
+        name = resolve_name(entry["name"])
+        test_weight = entry.get("test_weight")
+        weight = test_weight if test_weight is not None else entry.get("working_weight", 0)
+        try:
+            reps = int(entry.get("test_reps")) if entry.get("test_reps") is not None else 0
+        except (TypeError, ValueError):
+            reps = 0
+        row = SetLog.query.filter_by(
+            user_id=current_user.id, exercise_name=name,
+            week=0, day_idx=0, set_number=0,
+        ).first()
+        if row is None:
+            row = SetLog(user_id=current_user.id, exercise_name=name,
+                         week=0, day_idx=0, set_number=0)
+            db.session.add(row)
+        row.weight = weight
+        row.reps = reps
+        row.done = True
+        row.logged_date = _user_today()
     try:
         db.session.commit()
     except Exception as e:
@@ -5333,7 +5555,9 @@ def api_weight_detail(exercise_name):
         if s.weight and s.weight > 0:
             reps = min(s.reps or 10, 15)  # Cap at 15
             e1rm = round(s.weight * (1 + reps / 30))
-            wk = s.week or 1
+            # week 0 = baseline test rows — keep them distinct from week 1
+            # (falsy-zero: `s.week or 1` folded baseline into week 1).
+            wk = s.week if s.week is not None else 1
             if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                 weekly_e1rm[wk] = e1rm
 
@@ -5413,13 +5637,17 @@ def api_weight_detail(exercise_name):
     rating = None
     baseline_1rm = None
 
-    # Baseline from ExerciseLog test entries
+    # Baseline from legacy ExerciseLog test entries (frozen pre-April data),
+    # else from week-0 SetLog rows (where /api/weights/baseline writes now).
     baseline_entries = [l for l in logs if l.test_weight]
     if baseline_entries:
         bl = baseline_entries[0]
         bl_reps = min(bl.test_reps or 10, 15)
         baseline_1rm = round(bl.test_weight * (1 + bl_reps / 30))
+    elif 0 in weekly_e1rm:
+        baseline_1rm = weekly_e1rm[0]
 
+    if baseline_1rm:
         # Population percentile — get age/sex from psych intake
         try:
             pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
@@ -5830,14 +6058,10 @@ def api_measurements_record():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
 
-    # Fix broken unique index: log_date was indexed as UNIQUE (should not be — multiple
-    # users need to submit on the same date). Drop the unique constraint if it exists.
-    try:
-        db.session.execute(text('DROP INDEX IF EXISTS ix_body_measurement_log_date'))
-        db.session.execute(text('CREATE INDEX IF NOT EXISTS ix_body_measurement_log_date ON body_measurement (log_date)'))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # NOTE: the broken-unique-index repair for ix_body_measurement_log_date
+    # runs ONCE at startup (_broken_indexes block, top of this file). It used
+    # to run as DDL inside this handler on every POST — index churn + lock
+    # contention on a hot write path — and was removed 2026-07.
 
     bm = BodyMeasurement.query.filter_by(user_id=current_user.id, log_date=d).first()
     if not bm:
@@ -6004,8 +6228,12 @@ def _serialize_weights(user_id=None):
     # entry per exercise per SESSION = that session's top working set, in
     # chronological order; `current` is the most recent session's top set.
     uid = user_id or current_user.id
+    # Performed sets only (done, not skipped) — matches GET /api/weights and
+    # lift_session_history so an export->import round-trip can't launder a
+    # typed-but-never-completed set into a "performed" PR.
     rows = (SetLog.query
-            .filter(SetLog.user_id == uid, SetLog.weight.isnot(None))
+            .filter(SetLog.user_id == uid, SetLog.weight.isnot(None),
+                    SetLog.done.is_(True), SetLog.set_skipped.isnot(True))
             .order_by(SetLog.logged_date, SetLog.id).all())
     result = {}
     sessions = {}  # (name, week, day, date) -> the entry dict in result[name]["history"]
@@ -6044,20 +6272,54 @@ def api_import():
     """Import data from a backup JSON (from localStorage migration or backup restore)."""
     data = request.get_json()
 
-    # Import weights
+    # Import weights — into SetLog, the live table (/api/export builds the
+    # "weights" block from SetLog; ExerciseLog is DEAD and rows written there
+    # were invisible to every history reader). Each history entry is one
+    # session top set -> one done SetLog row.
     if "weights" in data:
+        import re as _re
+        from workout_data import resolve_name
+        # Next free set_number per (exercise, week, day) so the unique
+        # constraint never trips against existing or just-imported rows.
+        next_set = {}
+        for r in SetLog.query.filter_by(user_id=current_user.id).all():
+            k = (r.exercise_name, r.week, r.day_idx)
+            next_set[k] = max(next_set.get(k, 0), (r.set_number or 0) + 1)
         for name, info in data["weights"].items():
+            cname = resolve_name(name)
             for h in info.get("history", []):
-                log = ExerciseLog(
-                    exercise_name=name, weight=h["weight"],
-                    sets_label=h.get("reps"), rpe=h.get("rpe"),
-                    week=h.get("week", 0), day_idx=h.get("day", 0),
-                    logged_date=date.fromisoformat(h["date"]) if h.get("date") else _user_today(),
-                    test_weight=h.get("testWeight"), test_reps=h.get("testReps"),
-                    estimated_1rm=h.get("estimated1RM"),
-                    user_id=current_user.id,
-                )
-                db.session.add(log)
+                # Legacy baseline entries carry the actually-performed test set.
+                weight = h.get("testWeight") if h.get("testWeight") is not None else h.get("weight")
+                if weight is None:
+                    continue
+                reps = h.get("testReps") if h.get("testReps") is not None else (
+                    h.get("reps_completed") if h.get("reps_completed") is not None else h.get("reps"))
+                try:
+                    reps = int(reps)
+                except (TypeError, ValueError):
+                    m = _re.search(r"(\d+)", str(reps or ""))
+                    reps = int(m.group(1)) if m else 0
+                # week/day 0 are valid (baseline) — explicit None checks.
+                wk = h.get("week")
+                wk = 0 if wk is None else wk
+                di = h.get("day")
+                di = 0 if di is None else di
+                d = date.fromisoformat(h["date"]) if h.get("date") else _user_today()
+                # Skip entries already present (idempotent re-import).
+                dup = SetLog.query.filter_by(
+                    user_id=current_user.id, exercise_name=cname,
+                    week=wk, day_idx=di, weight=weight, logged_date=d,
+                ).first()
+                if dup:
+                    continue
+                k = (cname, wk, di)
+                sn = next_set.get(k, 0)
+                next_set[k] = sn + 1
+                db.session.add(SetLog(
+                    user_id=current_user.id, exercise_name=cname,
+                    week=wk, day_idx=di, set_number=sn,
+                    weight=weight, reps=reps, done=True, logged_date=d,
+                ))
 
     # Import body weight
     if "bodyweight" in data:
@@ -6504,12 +6766,10 @@ def api_stats_projection_inputs():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    # Age detection
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    # Age detection — only from explicit age context
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         return jsonify({
             "current_weight": current_weight,
@@ -6563,11 +6823,9 @@ def api_stats_body_comp():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         # All body measurements
         measurements = [{
@@ -6620,11 +6878,9 @@ def api_stats_strength():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         # All completed sets
         all_sets = SetLog.query.filter_by(user_id=uid, done=True).filter(
@@ -6811,7 +7067,12 @@ def api_morning_checkin():
 def api_morning_checkin_save():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
+    is_missed_marker = bool(data.get("missed"))
     ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
+    if ci and is_missed_marker:
+        # An auto "missed" marker must NEVER overwrite an existing check-in —
+        # the athlete may have completed the real check-in on another device.
+        return jsonify({"ok": True, "ignored": "checkin already exists"})
     if ci:
         ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
         ci.stress_level = data.get("stress_level", ci.stress_level)
@@ -6833,15 +7094,23 @@ def api_morning_checkin_save():
             user_id=current_user.id,
         )
         db.session.add(ci)
-    if "missed" in data:
-        # Need to handle the 'missed' field — store as notes marker for now
-        if data.get("missed"):
-            ci.notes = (ci.notes or '') + ' [MISSED]'
+    if is_missed_marker and '[MISSED]' not in (ci.notes or ''):
+        ci.notes = (ci.notes or '') + ' [MISSED]'
     try:
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    if is_missed_marker:
+        # Register the miss as a compliance event. The client used to POST a
+        # nonexistent /api/compliance/refresh (404) for this; the event now
+        # fires here, once, when the miss row is first created (an existing
+        # row short-circuits above, so this can't double-fire cross-device).
+        try:
+            from coach_state import update_anger_level
+            update_anger_level(current_user.id, "missed_checkin", today=d)
+        except Exception:
+            logging.exception("morning-checkin: missed_checkin compliance event failed")
     return jsonify({"ok": True})
 
 
@@ -6913,6 +7182,9 @@ Conversation:
                 ci.notes = (ci.notes or '') + ' [AI-extracted values]'
                 db.session.commit()
             return jsonify(values)
+        # Model replied with no JSON object (refusal / plain text). Return a
+        # structured error instead of falling off the end (None -> Flask 500).
+        return jsonify({"error": "No JSON object in extraction response"}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -7017,14 +7289,23 @@ def api_psych_intake_message():
             db.session.rollback()
             return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
 
-        # Check for existing pending job — prevent duplicate threads
+        # Check for THIS USER's existing pending intake job — prevent
+        # duplicate threads. Must be scoped by user_id and kind: the job
+        # store is shared, and matching any pending job would hand user B
+        # user A's job_id (cross-user intake hijack).
         for jid, job in _intake_jobs.items():
-            if job.get("status") == "pending":
+            if (job.get("status") == "pending"
+                    and job.get("kind") == "intake"
+                    and job.get("user_id") == current_user.id):
                 return jsonify({"job_id": jid, "status": "pending"})
 
         # Create a job and run Claude in a background thread
         job_id = str(uuid.uuid4())[:8]
-        _intake_jobs[job_id] = {"status": "pending", "result": None}
+        _owner_id = current_user.id
+        _intake_jobs[job_id] = {
+            "status": "pending", "result": None,
+            "kind": "intake", "user_id": _owner_id,
+        }
 
         # Capture values for the thread closure
         _user_msg = user_msg
@@ -7041,6 +7322,7 @@ def api_psych_intake_message():
                     "status": "done",
                     "response_text": response_text,
                     "is_complete": is_complete,
+                    "kind": "intake", "user_id": _owner_id,
                 }
             except Exception as e:
                 import traceback
@@ -7049,6 +7331,7 @@ def api_psych_intake_message():
                     "status": "error",
                     "response_text": "Connection issue. Tap to retry.",
                     "is_complete": False,
+                    "kind": "intake", "user_id": _owner_id,
                 }
 
         thread = threading.Thread(target=run_intake)
@@ -7065,7 +7348,10 @@ def api_psych_intake_message():
 @login_required
 def api_psych_intake_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check: never let one user consume (and delete)
+    # another user's job, or a different job type consume this one.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "intake"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -7156,7 +7442,8 @@ def api_generate_full_profile():
 
     # Run in background thread to avoid Gunicorn timeout
     job_id = str(uuid.uuid4())[:8]
-    _intake_jobs[job_id] = {"status": "pending"}
+    _owner_id = current_user.id
+    _intake_jobs[job_id] = {"status": "pending", "kind": "profile", "user_id": _owner_id}
 
     def run_profile():
         try:
@@ -7168,9 +7455,11 @@ def api_generate_full_profile():
             _intake_jobs[job_id] = {
                 "status": "done" if profile else "error",
                 "profile": profile,
+                "kind": "profile", "user_id": _owner_id,
             }
         except Exception as e:
-            _intake_jobs[job_id] = {"status": "error", "profile": None, "error": str(e)}
+            _intake_jobs[job_id] = {"status": "error", "profile": None, "error": str(e),
+                                    "kind": "profile", "user_id": _owner_id}
 
     thread = threading.Thread(target=run_profile)
     thread.start()
@@ -7181,7 +7470,9 @@ def api_generate_full_profile():
 @login_required
 def api_full_profile_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check — jobs are private to the user who started them.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "profile"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -7492,7 +7783,8 @@ def api_chat_stream():
                         db.session.add(asst_chat)
                         db.session.commit()
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: failed to save assistant reply")
 
                 # Extract memories from conversation (same as non-streaming endpoint)
                 try:
@@ -7520,20 +7812,29 @@ def api_chat_stream():
                 except Exception:
                     pass
 
-                # Parse structured markers from coach response
+                # Parse structured markers from coach response.
+                # MUST run inside an app context: the generator's finally block
+                # executes after every `with _app.app_context()` above has
+                # closed, and _parse_coach_markers hits the DB — without this,
+                # every marker write raised RuntimeError and was silently
+                # swallowed (coach announced changes that never persisted).
                 try:
-                    _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
+                    with _app.app_context():
+                        _parse_coach_markers(full_text, _current_user_id, context.get("week", 1))
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: coach marker parsing failed")
 
-                # Fire compliance events
+                # Fire compliance events (same context requirement as above)
                 try:
-                    from coach_state import update_anger_level
                     trigger = _route_info.get("trigger")
                     if trigger == "WORKOUT_COMPLETE":
-                        update_anger_level(_current_user_id, "completed_workout")
+                        from coach_state import update_anger_level
+                        with _app.app_context():
+                            update_anger_level(_current_user_id, "completed_workout")
                 except Exception:
-                    pass
+                    import logging
+                    logging.exception("Stream: compliance event failed")
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -7660,7 +7961,7 @@ def _build_coach_context():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     if gc.connected:
-        garmin_data = gc.get_today_summary()
+        garmin_data = gc.get_today_summary(today=local_today)
         readiness_data = assess_readiness(garmin_data)
 
     # Current state
@@ -7961,25 +8262,28 @@ def _build_coach_context():
         if dc.done and dc.day_idx not in completed_days:
             completed_days.append(dc.day_idx)
 
-    # Check SetLog by date range AND by any week number (catches ALL mismatches)
-    week_sets = SetLog.query.filter(
+    # Check SetLog by date range AND by any week number (catches ALL mismatches).
+    # 3-STATE, name-aware: a single done set used to mark the whole day as
+    # completed here, so the morning-briefing coach saw a 1-set aborted session
+    # as a banked day ("partial must never read DONE"). A day is completed only
+    # when the canonical check passes for a slot the athlete logged this week:
+    # every prescribed exercise has its prescribed sets performed.
+    from coach_assembler import _resolve_workout_for_day as _resolve_day_for_status
+    from workout_status import workout_state_from_rows as _ws_state
+    _week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.done == True,
-        SetLog.logged_date >= week_monday
+        SetLog.logged_date >= week_monday,
+        SetLog.logged_date <= local_today,
     ).all()
-    for s in week_sets:
-        if s.day_idx not in completed_days:
-            completed_days.append(s.day_idx)
-    # Also check by ALL week numbers user might have used (old stale week values)
-    all_week_sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.done == True,
-    ).all()
-    for s in all_week_sets:
-        # Map logged_date to day_idx if within this calendar week
-        if s.logged_date and s.logged_date >= week_monday and s.logged_date <= local_today:
-            if s.day_idx not in completed_days:
-                completed_days.append(s.day_idx)
+    _slot_rows = {}
+    for s in _week_sets:
+        _slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (_w, _d), _rows in _slot_rows.items():
+        if _d in completed_days:
+            continue
+        _resolved = _resolve_day_for_status(_w, _d) or {}
+        if _ws_state(_resolved.get("exercises") or [], _rows) == "complete":
+            completed_days.append(_d)
 
     # Enrich completed_days with day name and workout name
     completed_days_enriched = []
@@ -8368,7 +8672,7 @@ def garmin_today():
             return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
                             "linked": True, "reconnecting": True}), 503
         return jsonify({"error": "Not connected to Garmin"}), 401
-    summary = gc.get_today_summary()
+    summary = gc.get_today_summary(today=_user_today())
     if summary is None:
         return jsonify({"error": "Failed to fetch Garmin data"}), 500
     return jsonify(summary)
@@ -8382,7 +8686,7 @@ def garmin_readiness():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         return jsonify(assess_readiness(None))
-    summary = gc.get_today_summary()
+    summary = gc.get_today_summary(today=_user_today())
     return jsonify(assess_readiness(summary))
 
 
@@ -8611,7 +8915,10 @@ def api_user_timezone():
 
 # ─── PUSH NOTIFICATIONS ────────────────────────────────────────────────────
 
-_push_subscriptions = []  # In-memory for now; could be stored in DB
+# In-memory for now; could be stored in DB (subscriptions are lost on
+# worker restart/deploy). Keyed by user_id so one user's action can never
+# push to another user's devices.
+_push_subscriptions = {}  # user_id -> [subscription_info, ...]
 
 @app.route("/api/push/vapid-key")
 @login_required
@@ -8629,31 +8936,33 @@ def api_push_subscribe():
     sub = data.get("subscription")
     if not sub:
         return jsonify({"error": "subscription required"}), 400
+    subs = _push_subscriptions.setdefault(current_user.id, [])
     # Deduplicate
-    if sub not in _push_subscriptions:
-        _push_subscriptions.append(sub)
+    if sub not in subs:
+        subs.append(sub)
     return jsonify({"ok": True})
 
 
 @app.route("/api/push/test", methods=["POST"])
 @login_required
 def api_push_test():
-    """Send a test push notification."""
+    """Send a test push notification — ONLY to the current user's devices."""
     vapid_private = os.environ.get("VAPID_PRIVATE_KEY")
     vapid_email = os.environ.get("VAPID_EMAIL", "mailto:test@example.com")
-    if not vapid_private or not _push_subscriptions:
+    subs = _push_subscriptions.get(current_user.id) or []
+    if not vapid_private or not subs:
         return jsonify({"error": "Push not configured or no subscribers"}), 400
     try:
         from pywebpush import webpush
         import json
-        for sub in _push_subscriptions:
+        for sub in subs:
             webpush(
                 subscription_info=sub,
                 data=json.dumps({"title": "12 Weeks", "body": "Time for your morning check-in!", "tag": "morning-checkin"}),
                 vapid_private_key=vapid_private,
                 vapid_claims={"sub": vapid_email},
             )
-        return jsonify({"ok": True, "sent": len(_push_subscriptions)})
+        return jsonify({"ok": True, "sent": len(subs)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -8750,12 +9059,13 @@ def _compute_goal_for_user(user, overrides=None):
                 sex = "male"
             elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                 sex = "female"
-            # Age detection — extract number from text like "I'm 32 years old"
-            age_match = re.search(r'\b(\d{1,2})\b', content)
-            if age_match:
-                num = int(age_match.group(1))
-                if 13 <= num <= 80:
-                    age = num
+            # Age detection — ONLY explicit age context ("I'm 32", "32 years
+            # old", or a bare-number answer). A stray number in free text
+            # ("I can run 15 miles") must never overwrite the age: age<18
+            # silently forced minor handling (no deficit, fasting stripped).
+            _a = _age_from_message(msg.get("content", ""))
+            if _a is not None:
+                age = _a
 
     # BodyWeight is primary, PhysicalAssessment is fallback — NEVER default to 180
     latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
@@ -9281,20 +9591,19 @@ def api_shopping_list():
     s = _get_state()
     week = _current_week()
 
-    # Use ACTUAL meal plans from DB (generated by meal_generator), not templates
+    # Use ACTUAL meal plans from DB (generated by meal_generator), not templates.
+    # COACH-OR-NOTHING: if no coach-generated meals exist for the week, the
+    # grocery list is EMPTY/unplanned — never aggregate the static template
+    # mealPlan foods into a list the user would shop from.
     db_meals = WeeklyMealPlan.query.filter_by(
         user_id=current_user.id, week=week
     ).all()
-    if db_meals:
-        workouts = []
-        for mp in db_meals:
-            if mp.meal_data:
-                workouts.append({"mealPlan": mp.meal_data})
-    else:
-        # Fallback to template if no generated meals exist
-        workouts = get_workouts(week)
-        user_food_ids = _get_user_food_ids()
-        workouts = _filter_meals_by_food_selections(workouts, user_food_ids)
+    workouts = []
+    for mp in db_meals:
+        if mp.meal_data:
+            workouts.append({"mealPlan": mp.meal_data})
+    if not workouts:
+        return jsonify({"week": week, "categories": [], "unplanned": True})
 
     # Map recipe names → raw grocery item + unit normalization
     INGREDIENT_MAP = {
@@ -9509,12 +9818,13 @@ def api_weekly_report_generate():
 
     # Generate narrative in background
     job_id = str(uuid.uuid4())[:8]
-    _intake_jobs[job_id] = {"status": "pending"}
+    _intake_jobs[job_id] = {"status": "pending", "kind": "report", "user_id": _current_user_id}
 
     def run_narrative():
         try:
             narrative = generate_report_narrative(metrics)
-            _intake_jobs[job_id] = {"status": "done", "narrative": narrative}
+            _intake_jobs[job_id] = {"status": "done", "narrative": narrative,
+                                    "kind": "report", "user_id": _current_user_id}
             # Save narrative to DB
             with app.app_context():
                 r = WeeklyReport.query.filter_by(user_id=_current_user_id, week=week).first()
@@ -9522,7 +9832,8 @@ def api_weekly_report_generate():
                     r.narrative = narrative
                     db.session.commit()
         except Exception as e:
-            _intake_jobs[job_id] = {"status": "error", "narrative": None}
+            _intake_jobs[job_id] = {"status": "error", "narrative": None,
+                                    "kind": "report", "user_id": _current_user_id}
 
     thread = threading.Thread(target=run_narrative)
     thread.start()
@@ -9556,7 +9867,9 @@ def api_weekly_report(week):
 @login_required
 def api_weekly_report_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check — jobs are private to the user who started them.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "report"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -9601,10 +9914,18 @@ def api_goal_recalibrate():
                 except ValueError:
                     pass
 
+    # recalibrate_projection requires daily_calories + target_weight in every
+    # branch — omitting them made this endpoint 500 (TypeError on None math)
+    # on ANY weigh-in.
+    if goal.daily_calories is None or goal.target_weight is None:
+        return jsonify({"error": "Goal has no daily_calories/target_weight — recompute the goal first"}), 400
+
     tdee_params = {
         "height_in": pa.height_inches or 70,
         "age": age,
         "sex": sex,
+        "daily_calories": goal.daily_calories,
+        "target_weight": goal.target_weight,
     }
 
     result = recalibrate_projection(
@@ -9637,23 +9958,40 @@ def api_morning_briefing():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
-    garmin_data = gc.get_today_summary() if gc.connected else None
+    garmin_data = gc.get_today_summary(today=_user_today()) if gc.connected else None
     readiness = assess_readiness(garmin_data)
-    score = readiness.get("score") or 70
+    # Honest readiness: assess_readiness returns score=None when there is no
+    # Garmin data. NEVER fabricate a number here — inventing "70 → GREEN" told
+    # the user (and the coach) they were recovered on a day we knew nothing.
+    score = readiness.get("score")
 
-    if score >= 65:
+    if score is None:
+        status = "UNKNOWN"
+    elif score >= 65:
         status = "GREEN"
     elif score >= 40:
         status = "YELLOW"
     else:
         status = "RED"
 
-    # Get today's workout
+    # Get today's workout through the SAME resolver the coach/dashboard use
+    # (prescription overlay + coach-or-nothing strip) — the old raw
+    # get_workouts() read announced static template lift names on days the
+    # card shows as 'Plan this week'.
     s = _get_state()
-    workouts = get_workouts(_current_week())
     today_idx = _user_today().weekday()
-    workout_today = workouts[today_idx] if today_idx < len(workouts) else None
-    workout_name = workout_today.get("liftName", "Rest") if workout_today else "Rest"
+    from coach_assembler import _resolve_workout_for_day
+    workout_today = _resolve_workout_for_day(_current_week(), today_idx)
+    if workout_today is None or workout_today.get("isRest"):
+        workout_name = "Rest"
+        today_line = "Today is a rest day"
+    elif workout_today.get("lift_unplanned"):
+        workout_name = "Not planned yet"
+        today_line = ("Today's lifts are NOT PLANNED yet (coach-or-nothing — "
+                      "do not name or invent a workout; offer to plan the week)")
+    else:
+        workout_name = workout_today.get("liftName") or "Workout"
+        today_line = f"Today is {workout_name}"
 
     # Build checkin summary
     checkin_summary = f"Morning check-in: Sleep {data.get('sleep_quality', 5)}/10, Stress {data.get('stress_level', 5)}/10, Soreness {data.get('soreness', 5)}/10, Mood {data.get('mood', 5)}/10, Motivation {data.get('motivation', 5)}/10, Anxiety {data.get('anxiety', 3)}/10."
@@ -9661,7 +9999,13 @@ def api_morning_briefing():
         checkin_summary += f" Notes: {data['notes']}"
 
     # Use full coach context + special trigger
-    briefing_msg = f"[MORNING_BRIEFING] Status: {status} ({score}/100). Today is {workout_name} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
+    if score is None:
+        status_part = ("Readiness: UNKNOWN — no Garmin recovery data available. "
+                       "Do NOT invent a readiness score or verdict; coach from the "
+                       "self-reported check-in only.")
+    else:
+        status_part = f"Status: {status} ({score}/100)."
+    briefing_msg = f"[MORNING_BRIEFING] {status_part} {today_line} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
     context = _build_coach_context()
     response_text = get_coach_response(briefing_msg, context)
@@ -10230,7 +10574,14 @@ def api_admin_generate_meals():
         try:
             day_macros = compute_day_calories(goal.daily_calories, goal.goal_type or 'cut', cal_compute_type, weight_lbs=weight)
         except Exception:
-            day_macros = {"calories": goal.daily_calories, "protein": goal.protein_grams or 200, "carbs": goal.carb_grams or 150, "fat": goal.fat_grams or 60}
+            # `is None` fallbacks, not truthy — a legitimately-zero macro
+            # (e.g. carbs=0 on an aggressive cut) must not be replaced by 150.
+            day_macros = {
+                "calories": goal.daily_calories,
+                "protein": goal.protein_grams if goal.protein_grams is not None else 200,
+                "carbs": goal.carb_grams if goal.carb_grams is not None else 150,
+                "fat": goal.fat_grams if goal.fat_grams is not None else 60,
+            }
 
         # Check for fast day — override first, then template mealType
         day_meal_type = 'standard'
@@ -10267,6 +10618,7 @@ def api_admin_generate_meals():
                 targets=day_macros,
                 fasting_protocol=fasting_protocol,
                 has_training=_day_has_training(user.id, week, day_idx),
+                targets_pre_adjusted=True,
             )
         except Exception as e:
             continue
@@ -10684,8 +11036,12 @@ def api_admin_reset_assessment():
 
 
 @app.route("/api/test/create-user", methods=["POST"])
+@admin_required
 def api_test_create_user():
-    """Create test user for e2e testing. Only works for test@12weeks.com."""
+    """Create test user for e2e testing. Only works for test@12weeks.com.
+    Admin-only (X-Admin-Key header or admin session): unauthenticated access
+    would let anyone mint a valid login (hardcoded password) + 3 invites,
+    or wipe the test account's data at will."""
     data = request.get_json(silent=True) or {}
     email = data.get("email", "test@12weeks.com")
     if email != "test@12weeks.com":
@@ -10872,7 +11228,7 @@ def api_deficit_plan():
     if not bw:
         return jsonify({"error": "No weight data"}), 400
 
-    current_weight = bw.weight
+    current_weight = bw.weight_lbs  # BodyWeight has no `.weight` — was a live AttributeError/500
     target_weight = goal.target_weight
 
     week = _current_week()

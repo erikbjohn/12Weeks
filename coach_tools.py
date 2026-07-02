@@ -337,10 +337,29 @@ def _tool_get_body_state(user_id: int) -> str:
     }, default=str)
 
 
-def _tool_get_today_status(user_id: int) -> str:
+def _user_local_today(user_id: int):
+    """Today's date in THIS user's local timezone — never server-UTC.
+
+    SetLog.logged_date / RunLog.log_date are written with the user-local date
+    (app._user_today), so querying them with server-UTC date.today() made the
+    coach see an empty/wrong 'today' every evening (on Render, UTC rolls over
+    at ~4-5 PM PT). Tools get a user_id, not a request context, so this
+    resolves the timezone from the User row instead of current_user.
+    """
     from datetime import date as _date
+    try:
+        from models import User
+        from utils_time import user_local_today
+        u = User.query.get(user_id)
+        tz = getattr(u, "timezone", None) if u else None
+        return user_local_today(tz or "UTC")
+    except Exception:
+        return _date.today()
+
+
+def _tool_get_today_status(user_id: int) -> str:
     from models import SetLog, RunLog, DayCompletion
-    today = _date.today()
+    today = _user_local_today(user_id)
     sets_today = SetLog.query.filter_by(
         user_id=user_id, logged_date=today,
     ).all()

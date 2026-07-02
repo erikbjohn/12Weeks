@@ -1,27 +1,22 @@
 /**
- * Regression test for the bodyweight-exercise weight-prefill bug.
+ * Weight-prefill contract tests.
  *
- * Bug: getSuggestedWeight()'s keyword-fallback returns ~25% of bench
- * for any exercise name containing 'raise', 'curl', 'fly', 'extension'.
- * For Erik (bench 140), Hanging Leg Raise prefilled with 35 — even
- * though the prescription says target_weight=0 (bodyweight).
+ * History: getSuggestedWeight() used to carry a static WEIGHT_ESTIMATES table
+ * and keyword-ratio fallbacks (e.g. ~25% of bench for anything named 'raise'/
+ * 'curl'/'fly'/'extension'), silently prefilled into the weight input for any
+ * exercise with no history and no target_weight — checking the set then logged
+ * that invented number into SetLog as performance data. That violated
+ * coach-or-nothing (2026-07-01 audit, finding static/app.js:2088): with no
+ * prescription and no history the input must stay EMPTY.
  *
- * The override at app.js:10295 used `if (ex.target_weight)` which is
- * falsy for 0, so the bogus 35 stuck.
- *
- * Fixed at commit 8b6df42 by switching to `if (ex.target_weight != null)`
- * and mapping target_weight=0 to an empty input.
- *
- * This test pins both behaviors:
- *   1. The estimator returns 35 for Hanging Leg Raise + bench=140 (the
- *      mechanism is still there — it's the override's job to suppress it).
- *   2. (Future: a test for the override resolution itself, once we
- *      extract that logic into a pure function.)
+ * Earlier bug (commit 8b6df42): the override used `if (ex.target_weight)`
+ * which is falsy for 0 (the bodyweight sentinel), so a bogus estimate stuck.
+ * resolveDisplayWeight now uses `!= null` and maps 0 to an empty input.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { loadAppJs } from './load.mjs';
 
-describe('getSuggestedWeight — keyword-fallback estimator', () => {
+describe('getSuggestedWeight — no static estimates without history', () => {
   beforeAll(() => {
     loadAppJs();
     // Seed via the __testHooks setter — `_weightsCache` is let-scoped
@@ -33,23 +28,24 @@ describe('getSuggestedWeight — keyword-fallback estimator', () => {
     });
   });
 
-  it("returns ~35 lb for Hanging Leg Raise when bench=140 (estimator works)", () => {
+  it("returns null for Hanging Leg Raise with no history (no keyword guess)", () => {
     const out = window.getSuggestedWeight('Hanging Leg Raise', 7);
-    expect(out.weight).toBe(35); // 140 * 0.25 = 35
-    expect(out.reason).toBe('estimated');
+    expect(out.weight).toBeNull();
   });
 
-  it("returns null weight for unknown bodyweight exercises (no keyword match)", () => {
+  it("returns null weight for unknown bodyweight exercises", () => {
     const out = window.getSuggestedWeight('Plank', 7);
     expect(out.weight).toBeNull();
   });
 
-  it("Pallof Press would also estimate from bench (press → 50%)", () => {
-    // Documents the same class of bug — the estimator doesn't know
-    // which exercises are bodyweight. resolveDisplayWeight in the
-    // render layer is what protects us.
+  it("returns null for Pallof Press with no history (no bench-ratio guess)", () => {
     const out = window.getSuggestedWeight('Pallof Press', 7);
-    expect(out.weight).toBe(70); // 140 * 0.5 = 70
+    expect(out.weight).toBeNull();
+  });
+
+  it("still suggests from the lift's OWN logged history", () => {
+    const out = window.getSuggestedWeight('Barbell Bench Press', 7);
+    expect(out.weight).toBe(140); // real user data, not a static estimate
   });
 });
 

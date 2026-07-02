@@ -31,8 +31,16 @@ def lift_session_history(user_id, exercise_name, limit_sessions=None,
     except Exception:  # pragma: no cover - fallback if import graph changes
         _movement_key = None
 
+    # Only actually-PERFORMED sets count as history: done == True and not
+    # skipped. A weight typed into the input (blur-save creates the row with
+    # done=False) but never completed is NOT a performed set — counting it
+    # invented top sets / e1RMs the athlete never earned (dashboard charts,
+    # coach get_e1rm, weekly report all read this function).
     rows = (SetLog.query
-            .filter(SetLog.user_id == user_id, SetLog.weight.isnot(None))
+            .filter(SetLog.user_id == user_id,
+                    SetLog.weight.isnot(None),
+                    SetLog.done.is_(True),
+                    SetLog.set_skipped.isnot(True))
             .all())
 
     if by_movement and _movement_key is not None:

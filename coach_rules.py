@@ -131,11 +131,13 @@ def _compute_workout_status(
     """Returns one of: not_started | in_progress | complete | rest.
 
     Rest takes precedence. Otherwise:
-    - complete: DayCompletion.done is True for ANY (week, day_idx) that wrote
-      sets today, OR the user has 3+ sets logged today (heuristic for "session
-      finished" when DayCompletion lags).
+    - complete: DayCompletion.done (date-gated to today) for ANY (week, day_idx)
+      that wrote sets today, OR the canonical name-aware check passes: every
+      prescribed exercise for a slot logged today has its prescribed sets
+      performed (workout_status.workout_state_from_rows). A partial log must
+      NEVER read complete.
     - not_started: zero SetLog rows for today across ALL weeks.
-    - in_progress: at least one SetLog row today but completion not yet flagged.
+    - in_progress: at least one SetLog row today but not a finished session.
 
     NOTE: query is INTENTIONALLY week-agnostic. The UI's `AppState.current_week`
     can drift from the rules engine's start_date computation (Erik's UI showed
@@ -179,12 +181,23 @@ def _compute_workout_status(
         if dc and dc.done and parse_completion_date(dc.completed_at) == today_date:
             return "complete"
 
-    # Heuristic: 6+ sets today and at least 3 marked done = de-facto complete.
-    # Lifts the directive out of "Lift now" once the session is clearly finished
-    # even when the auto-completion flag hasn't been set.
-    done_count = sum(1 for s in sets_today if getattr(s, "done", False))
-    if len(sets_today) >= 6 and done_count >= 3:
-        return "complete"
+    # Canonical name-aware completion (replaces the old "6+ sets / 3 done"
+    # heuristic, which marked a partially-logged session complete — 7 sets into
+    # a 17-set day read DONE and the coach told the athlete to move on). A slot
+    # is complete only when EVERY prescribed exercise has its prescribed sets
+    # performed (workout_status.workout_state_from_rows — same definition as
+    # coach_assembler and app.py's auto-complete). Check each (week, day_idx)
+    # slot the athlete actually logged sets to today, to tolerate UI/engine
+    # week drift.
+    from coach_assembler import _resolve_workout_for_day
+    from workout_status import workout_state_from_rows
+    slot_rows: dict = {}
+    for s in sets_today:
+        slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (w, d), rows in slot_rows.items():
+        resolved = _resolve_workout_for_day(w, d) or {}
+        if workout_state_from_rows(resolved.get("exercises") or [], rows) == "complete":
+            return "complete"
 
     return "in_progress"
 
@@ -213,7 +226,11 @@ def _resolve_run_for_day(week: int, day_idx: int, user_id: Optional[int] = None)
     so the coach must reference the same run, not the raw template. Without
     this, the coach said "Recovery jog" while the UI displayed "Tempo run".
     """
-    # 1. Per-user WeeklyRunPlan override
+    # 1. Per-user WeeklyRunPlan — COACH-OR-NOTHING for real users: when the
+    # query SUCCEEDS and finds no row, the run is NOT planned; never fall back
+    # to the static template's run (the dashboard strips it as 'unplanned').
+    # Only a transient query error falls through to the template path below
+    # (which also serves legacy user_id=None callers/tests).
     if user_id is not None:
         try:
             from models import WeeklyRunPlan
@@ -227,8 +244,9 @@ def _resolve_run_for_day(week: int, day_idx: int, user_id: Optional[int] = None)
                     scheduled_at=None,
                     detail=plan.detail or "",
                 )
+            return None  # known-empty: no coach-planned run for this day
         except Exception:
-            pass  # fall back to template
+            pass  # transient error only — fall through
 
     # 2. Template
     from workout_data import get_workouts
@@ -441,21 +459,32 @@ def _compute_directive(
 ) -> Directive:
     """The 15-rule directive table from the spec. First match wins."""
 
-    # Rule 1 — refusal overrides everything
+    # Rule 1 — refusal overrides everything. Never quote the lift name on an
+    # unplanned day (it's stripped to "" — coach-or-nothing).
     if refusal_required:
-        prescribed = (
-            workout_today.lift_name if workout_today and not workout_today.is_rest
-            else (run_today.label if run_today else "Recovery day")
-        )
+        if (workout_today and not workout_today.is_rest
+                and not getattr(workout_today, "lift_unplanned", False)
+                and workout_today.lift_name):
+            prescribed = workout_today.lift_name
+        elif run_today:
+            prescribed = run_today.label
+        else:
+            prescribed = "Recovery day"
         return Directive(
             text=f"Train as planned. {prescribed}.",
             category="refusal",
         )
 
-    # Rule 2 — workout in progress
+    # Rule 2 — workout in progress. On an unplanned day the lift name is
+    # stripped ("") — don't emit the garbled "Continue. Finish ."
     if workout_today_status == "in_progress" and workout_today:
+        if workout_today.lift_name:
+            return Directive(
+                text=f"Continue. Finish {workout_today.lift_name}.",
+                category="workout_in_progress",
+            )
         return Directive(
-            text=f"Continue. Finish {workout_today.lift_name}.",
+            text="Continue. Finish the session you started.",
             category="workout_in_progress",
         )
 
@@ -530,6 +559,13 @@ def _compute_directive(
         and (workout_today_status == "complete" or run_today_status == "logged")
     ):
         if workout_tomorrow and not workout_tomorrow.is_rest:
+            # Unplanned tomorrow: the lift name is stripped ("") — say so
+            # instead of the garbled "Done. Tomorrow:  at 6 AM."
+            if getattr(workout_tomorrow, "lift_unplanned", False) or not workout_tomorrow.lift_name:
+                return Directive(
+                    text="Done. Tomorrow isn't planned yet — plan the week.",
+                    category="day_done_tomorrow_unplanned",
+                )
             sched = (
                 workout_tomorrow_scheduled_at.strftime("%-I:%M %p")
                 if workout_tomorrow_scheduled_at else "6 AM"
@@ -556,6 +592,13 @@ def _compute_directive(
     # Rule 13 — Sunday evening planning (only if no run pending — rule 7 caught that)
     if now_local.weekday() == 6 and now_local.hour >= 18:  # Sunday 6 PM+
         if workout_tomorrow and not workout_tomorrow.is_rest:
+            # Unplanned Monday (Erik plans week-by-week, so this is the common
+            # Sunday-evening case): prompt to plan, don't emit "Monday:  at 6 AM."
+            if getattr(workout_tomorrow, "lift_unplanned", False) or not workout_tomorrow.lift_name:
+                return Directive(
+                    text="Monday isn't planned yet. Plan the week tonight.",
+                    category="sunday_eve_unplanned",
+                )
             sched = (
                 workout_tomorrow_scheduled_at.strftime("%-I:%M %p")
                 if workout_tomorrow_scheduled_at else "6 AM"
@@ -627,6 +670,8 @@ def _render_prefilled_schedule(
         lines.append("Tomorrow workout: (none)")
     elif workout_tomorrow.is_rest:
         lines.append("Tomorrow workout: REST")
+    elif getattr(workout_tomorrow, "lift_unplanned", False) or not workout_tomorrow.lift_name:
+        lines.append("Tomorrow workout: NOT PLANNED (plan the week)")
     else:
         sched = workout_tomorrow_scheduled_at.strftime("%H:%M") if workout_tomorrow_scheduled_at else "(unscheduled)"
         lines.append(f"Tomorrow workout: {workout_tomorrow.lift_name} at {sched}")

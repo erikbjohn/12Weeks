@@ -134,9 +134,13 @@ def test_history_week_with_no_runs_gets_runs_filled(ctx, monkeypatch):
                                          "duration": "55 min", "detail": "easy"}
                                      for d in range(7)})
 
-    resp = client.post("/api/weekly-program/generate", json={"week": 7})
-    assert resp.status_code == 200, resp.data[:300]
-    assert resp.get_json().get("regenerated") is False  # guard still in effect
+    # A history week with NO run rows is not a pure read anymore: the run
+    # gap-fill is a 10-30s coach LLM call, which must never run inline on the
+    # request thread (edge-timeout 502 class). It now routes through the
+    # async job — poll for the result like the client does.
+    status, body = _generate_and_wait(client, {"week": 7})
+    assert status == 200, body
+    assert body.get("regenerated") is False  # guard still in effect
 
     with app.app_context():
         runs = WeeklyRunPlan.query.filter_by(user_id=uid, week=7).all()

@@ -41,10 +41,11 @@ def _equipment_swap_factor(prior_name: str, current_name: str) -> float:
     weight to the current-equipment prescription.
 
     Example: prior 55 lb dumbbell RDL → current barbell RDL. We expect the
-    barbell version to handle ~1.4-1.5× the dumbbell-per-hand weight (the
-    inverse of equipment_swaps.scale_for_swap which only models the
-    barbell→dumbbell direction at 0.7×). Returns 1.0 when no transition is
-    detected — caller should treat that as 'use weight as-is'."""
+    barbell version to handle ~1.4-1.5× the dumbbell-per-hand weight.
+    equipment_swaps.scale_for_swap now models both directions directly; the
+    rev-inversion below is kept as a belt-and-suspenders fallback. Returns 1.0
+    when no transition is detected — caller should treat that as 'use weight
+    as-is'."""
     if not prior_name or not current_name or prior_name == current_name:
         return 1.0
     try:
@@ -82,7 +83,10 @@ def _get_muscle_group(exercise_name):
         return 'shoulders'
     if any(k in nl for k in ['squat', 'lunge', 'leg press', 'extension']):
         return 'quads'
-    if any(k in nl for k in ['deadlift', 'rdl', 'curl', 'hamstring', 'nordic']):
+    # 'leg curl' / 'hamstring curl' only — a bare 'curl' here swallowed every
+    # bicep-curl variant (Barbell Curl, Preacher Curl) into hamstrings and made
+    # the biceps branch unreachable for names containing 'curl'.
+    if any(k in nl for k in ['deadlift', 'rdl', 'leg curl', 'hamstring', 'nordic']):
         return 'hamstrings'
     if any(k in nl for k in ['bicep', 'curl']) and 'leg' not in nl:
         return 'biceps'
@@ -514,9 +518,15 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     # ─── SIGNAL 5: EXCEEDED REPS ───
     if exceeded_reps:
         new_weight = _round_weight(last_weight + inc)
+        # Beating the rep target bumps WEIGHT — it must not rewrite the
+        # exercise's configured rep scheme (a 3x12 pump row stayed 12 reps,
+        # it doesn't become the phase default 6).
+        configured_reps_s5 = _get_configured_reps(
+            exercise_name, week, day_idx, exercise_order,
+        )
         result = {
             "target_weight": new_weight,
-            "target_reps": {1: 10, 2: 6, 3: 4}.get(phase, 10),
+            "target_reps": configured_reps_s5 or {1: 10, 2: 6, 3: 4}.get(phase, 10),
             "target_sets": target_sets,
             "adjustment_reason": f"Beat rep target — weight +{inc} lb",
             "progression_indicator": "up",
@@ -666,14 +676,19 @@ def compute_muscle_strength(user_id):
         if target_wt and target_wt > 0 and s.weight > 0:
             days_ago = (_today - s.logged_date).days if s.logged_date else 7
             recency_weight = 2.0 if days_ago <= 7 else 1.0
-            groups[mg].append((s.weight / target_wt) * recency_weight)
+            # Keep (weighted score, weight) pairs so the average divides by the
+            # weights that were ACTUALLY applied. The old code divided by
+            # positional weights (first half of an unordered list = 2.0), which
+            # bore no relation to which rows got the 2.0 recency multiplier —
+            # on-target lifts 8-14 days old scored 0.667 ('very_weak').
+            groups[mg].append(((s.weight / target_wt) * recency_weight, recency_weight))
 
     # Compute and upsert
     for mg, scores in groups.items():
         if not scores:
             continue
-        total_weight = sum(2.0 if i < len(scores) // 2 else 1.0 for i in range(len(scores)))
-        avg_score = sum(scores) / total_weight if total_weight > 0 else 1.0
+        total_weight = sum(w for _, w in scores)
+        avg_score = sum(v for v, _ in scores) / total_weight if total_weight > 0 else 1.0
 
         if avg_score > 1.1:
             rel = 'strong'

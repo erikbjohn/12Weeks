@@ -108,7 +108,7 @@ def compute_weekly_metrics(week_num, user_id=None):
             if vals:
                 checkin_avg[field] = round(sum(vals) / len(vals), 1)
 
-    # Adherence (meals logged vs expected)
+    # Meals logged this week (informational)
     q = MealLog.query.filter(
         MealLog.log_date >= week_start,
         MealLog.log_date <= week_end,
@@ -116,12 +116,38 @@ def compute_weekly_metrics(week_num, user_id=None):
     if user_id is not None:
         q = q.filter(MealLog.user_id == user_id)
     meals_logged = q.count()
-    adherence = round((completions / 6) * 100) if completions else 0
+
+    # Planned training days for THIS user's THIS week — the coach designs the
+    # program (including rest days), so the denominator comes from the user's
+    # actual plan, never a hardcoded template value. The old fixed "6" made a
+    # perfectly-executed 5-day week read 83% and a 7-day week read 117%.
+    workouts_total = None
+    if user_id is not None:
+        try:
+            from models import WeeklyDaySchedule, WeeklyPrescription
+            sched = WeeklyDaySchedule.query.filter_by(
+                user_id=user_id, week=week_num
+            ).all()
+            if sched:
+                workouts_total = sum(1 for ds in sched if not ds.is_rest)
+            else:
+                rx_days = {
+                    rx.day_idx for rx in WeeklyPrescription.query.filter_by(
+                        user_id=user_id, week=week_num
+                    ).all()
+                }
+                workouts_total = len(rx_days) if rx_days else None
+        except Exception:
+            workouts_total = None
+    adherence = (
+        round((completions / workouts_total) * 100)
+        if (workouts_total and completions) else (0 if workouts_total else None)
+    )
 
     return {
         "week": week_num,
         "workouts_completed": completions,
-        "workouts_total": 6,
+        "workouts_total": workouts_total,
         "weight_start": weight_start,
         "weight_end": weight_end,
         "weight_change": weight_change,
@@ -148,7 +174,10 @@ def generate_report_narrative(metrics):
 
     # Build the data summary for Claude
     data_lines = [f"Week {metrics['week']} Summary:"]
-    data_lines.append(f"Workouts: {metrics['workouts_completed']}/{metrics['workouts_total']}")
+    if metrics.get("workouts_total") is not None:
+        data_lines.append(f"Workouts: {metrics['workouts_completed']}/{metrics['workouts_total']}")
+    else:
+        data_lines.append(f"Workouts completed: {metrics['workouts_completed']} (week had no coach plan)")
 
     if metrics.get("weight_change") is not None:
         direction = "lost" if metrics["weight_change"] < 0 else "gained"
@@ -168,7 +197,8 @@ def generate_report_narrative(metrics):
         avg = metrics["checkin_avg"]
         data_lines.append(f"Avg mood: {avg.get('mood', '?')}, sleep: {avg.get('sleep_quality', '?')}, motivation: {avg.get('motivation', '?')}")
 
-    data_lines.append(f"Adherence: {metrics['adherence_pct']}%")
+    if metrics.get("adherence_pct") is not None:
+        data_lines.append(f"Adherence: {metrics['adherence_pct']}%")
 
     try:
         full_text = ""

@@ -76,8 +76,16 @@ def prescribe_starting_weight(
     # Estimated 1RMs = best recent Epley estimate per exercise from SetLog (the
     # live table). ExerciseLog.estimated_1rm is dead (table unwritten since April).
     one_rms: dict[str, float] = {}
+    # Only PERFORMED sets (done, not skipped) may anchor a new prescription —
+    # a weight typed into the input but never lifted (blur-save creates the
+    # row with done=False) must not inflate the 1RMs the agent extrapolates
+    # from. Mirrors the recent-peaks query below and training_engine's own
+    # history filter.
     e1rm_rows = (SetLog.query
-                 .filter(SetLog.user_id == user_id, SetLog.weight.isnot(None))
+                 .filter(SetLog.user_id == user_id,
+                         SetLog.weight.isnot(None),
+                         SetLog.done.is_(True),
+                         SetLog.set_skipped.isnot(True))
                  .order_by(SetLog.logged_date.desc())
                  .limit(200).all())
     for s in e1rm_rows:

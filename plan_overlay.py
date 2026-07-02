@@ -26,7 +26,9 @@ def finalize_day_plan(day, *, has_prescriptions, has_runplan, has_mealplan):
 
     SISTER LOGIC: coach_assembler._resolve_workout_for_day applies the SAME
     "no prescription -> strip the template lifts as unplanned" rule for the coach
-    prompt (it sets lift_unplanned + nulls liftName, where this sets liftStatus).
+    prompt (it sets lift_unplanned + nulls liftName, where this sets liftStatus
+    AND nulls liftName — the two must agree, or the dashboard shows a template
+    workout name the coach says was never planned).
     test_coach_unplanned_day.test_coach_and_dashboard_agree_on_lift_planned_state
     pins the two together — keep the planned/unplanned definition identical.
     """
@@ -37,6 +39,9 @@ def finalize_day_plan(day, *, has_prescriptions, has_runplan, has_mealplan):
         day["liftStatus"] = "planned"
     else:
         day["exercises"] = []
+        # Don't leak the static template's workout NAME either — the client
+        # renders liftName in the day grid / today header / detail title.
+        day["liftName"] = None
         day["liftStatus"] = "unplanned"
 
     # ─── RUN ───

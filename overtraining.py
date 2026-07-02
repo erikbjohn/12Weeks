@@ -47,8 +47,11 @@ def assess_readiness(garmin_data):
 
         if weekly and weekly > 0:
             pct_change = ((last - weekly) / weekly) * 100
-            # Normalize: +10% or better = 100, -25% or worse = 0
-            hrv_score = max(0, min(100, 100 + (pct_change * 2.86)))
+            # Normalize: -25% or worse = 0, at/above weekly avg = 100.
+            # Factor 4.0 makes the stated floor real: 100 + (-25 * 4.0) = 0.
+            # (The old 2.86 scored a -25% HRV crash at 28.5/100, inflating the
+            # composite during the exact condition this metric exists to catch.)
+            hrv_score = max(0, min(100, 100 + (pct_change * 4.0)))
             scores["hrv"] = hrv_score
             weights["hrv"] = 0.25
             if pct_change < -25:

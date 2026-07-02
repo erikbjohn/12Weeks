@@ -35,8 +35,11 @@ _EXERCISE_MAP = [
     (re.compile(r"\bbench\s*press\b", re.I),    "Barbell Bench Press"),
     (re.compile(r"\bbench\b", re.I),            "Barbell Bench Press"),
     (re.compile(r"\bsquat\b", re.I),            "Barbell Back Squat"),
-    (re.compile(r"\bdeadlift\b", re.I),         "Conventional Deadlift"),
+    # Romanian BEFORE the bare \bdeadlift\b — the loop breaks on first match,
+    # so listing the substring pattern first sent "romanian deadlift" questions
+    # to Conventional Deadlift history (the wrong lift, pre-fetched as fact).
     (re.compile(r"\b(rdl|romanian\s*deadlift)\b", re.I), "Romanian Deadlift"),
+    (re.compile(r"\bdeadlift\b", re.I),         "Conventional Deadlift"),
     (re.compile(r"\bbent.?over\s*row\b", re.I), "Barbell Bent-Over Row"),
     (re.compile(r"\brow\b", re.I),              "Barbell Bent-Over Row"),
     (re.compile(r"\bpull.?up\b", re.I),         "Weighted Pull-Up"),

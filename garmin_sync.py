@@ -503,6 +503,12 @@ def push_week(gc, user_id, week, today=None):
 
 WELLNESS_BACKFILL_DAYS = 14
 RECENT_RETRY_DAYS = 3  # all-NULL rows within this window stay refresh-eligible
+# Burst cap: each day costs 7 Garmin HTTP requests (get_wellness_for_day), so
+# an uncapped first sync fired today + 14 backfill days = ~105 requests in one
+# unpaced burst — enough to trip Garmin's abuse detection. Cap the days fetched
+# per sync (today + 3 backfill = max 28 requests); the backfill window fills
+# progressively across subsequent (15-min-throttled) syncs instead.
+MAX_WELLNESS_DAYS_PER_SYNC = 4
 
 _WELLNESS_KEYS = ("hrv", "sleep", "bodyBattery", "trainingReadiness",
                   "trainingStatus", "stress", "restingHr")
@@ -581,20 +587,28 @@ def sync_wellness(gc, user_id, today=None):
               "wellness_error": None, "wellness_backfill_truncated": False}
     today = today or date.today()
 
-    # Fix 1: load full rows; skip all-NULL rows inside the retry window so they
-    # get re-fetched once the watch uploads.
+    # Fix 1: load full rows; all-NULL rows inside the retry window stay
+    # refresh-eligible so they get re-fetched once the watch uploads.
     retry_cutoff = today - timedelta(days=RECENT_RETRY_DAYS)
-    existing = {
-        r.date
-        for r in GarminWellness.query.filter(
-            GarminWellness.user_id == user_id,
-            GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
-        ).all()
-        if not (_is_all_null(r) and r.date >= retry_cutoff)
-    }
-    # Fix 5: walrus form computes candidate date once per iteration
-    targets = [today] + [d for i in range(1, WELLNESS_BACKFILL_DAYS + 1)
-                         if (d := today - timedelta(days=i)) not in existing]
+    rows = GarminWellness.query.filter(
+        GarminWellness.user_id == user_id,
+        GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
+    ).all()
+    stored = {r.date for r in rows}
+    retry_eligible = {r.date for r in rows
+                      if _is_all_null(r) and r.date >= retry_cutoff}
+    window = [today - timedelta(days=i) for i in range(1, WELLNESS_BACKFILL_DAYS + 1)]
+    # Never-stored days come BEFORE retry-eligible refreshes: under the burst
+    # cap, retriable recent days would otherwise crowd out the backfill and
+    # the older window days would never be fetched at all.
+    targets = ([today]
+               + [d for d in window if d not in stored]
+               + [d for d in window if d in retry_eligible])
+    # Burst cap: never fire more than MAX_WELLNESS_DAYS_PER_SYNC days' worth of
+    # requests in one sync. Remaining days are picked up by the next sync.
+    if len(targets) > MAX_WELLNESS_DAYS_PER_SYNC:
+        targets = targets[:MAX_WELLNESS_DAYS_PER_SYNC]
+        result["wellness_backfill_truncated"] = True
 
     for d in targets:
         data = gc.get_wellness_for_day(d.isoformat())
