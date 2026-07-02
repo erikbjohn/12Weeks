@@ -715,10 +715,14 @@ def _build_today_status():
     # A binary "any row exists -> DONE" was a lie: Erik had ONE bench set logged
     # for a 5-exercise "Full Body" day and the coach told him "you're done
     # lifting." So we now require a genuinely FINISHED session to say DONE:
-    #   complete  = DayCompletion.done, OR every prescribed exercise has a logged
-    #               set, OR the 6-sets/3-done heuristic (auto-completion lag).
+    #   complete  = today's DayCompletion.done, OR the canonical name-aware
+    #               check (workout_status.workout_state_from_rows): EVERY
+    #               prescribed exercise has its prescribed sets performed.
     #   not_started = zero rows for today's slot.
     #   in_progress = some rows, but not the whole session.
+    # The old 6-sets/3-done heuristic is GONE — it OR'd in "complete" with
+    # exercises still open (6 sets into a 13-set day read DONE), recreating the
+    # exact partial-reads-complete failure this block exists to prevent.
     # MUST also match today's calendar date. The (week, day_idx) slot is unique
     # to one date only WHILE the program is live; once the 12-week block ends,
     # _current_week() clamps at 12 forever, so a later Monday (day_idx 0) would
@@ -745,17 +749,22 @@ def _build_today_status():
     dc = DayCompletion.query.filter_by(
         user_id=current_user.id, week=week, day_idx=today_idx,
     ).first()
-    all_exercises_logged = bool(prescribed_names) and not remaining_exercises
-    heuristic_done = len(slot_sets) >= 6 and sets_done >= 3
+    # Canonical name-aware completion: EVERY prescribed exercise must have its
+    # prescribed sets performed (done, not skipped). Shared with app.py's
+    # auto-complete and coach_rules so the engines can never disagree.
+    from workout_status import workout_state_from_rows
+    all_prescribed_sets_done = (
+        workout_state_from_rows(prescribed_exercises, slot_sets) == "complete"
+    )
     # DATE-GATE the DayCompletion flag: honor dc.done only if it was recorded
     # TODAY. Without this, once the program clamps the week at 12 (block over), a
     # later same-weekday re-finds a stale dc.done from an earlier cycle and reads
     # "complete" even after the athlete logs just ONE set today (slot_sets is then
-    # non-empty so the not_started branch doesn't catch it). all_exercises_logged
-    # and heuristic_done are already date-safe (slot_sets is logged_date==today).
+    # non-empty so the not_started branch doesn't catch it). The name-aware check
+    # is already date-safe (slot_sets is logged_date==today).
     from utils_time import parse_completion_date
     dc_done_today = bool(dc and dc.done and parse_completion_date(dc.completed_at) == today)
-    workout_complete = bool(dc_done_today or all_exercises_logged or heuristic_done)
+    workout_complete = bool(dc_done_today or all_prescribed_sets_done)
 
     if resolved and resolved.get("isRest"):
         workout_state = "rest"
@@ -1147,19 +1156,26 @@ def _build_completed_days():
         cdate = parse_completion_date(dc.completed_at)
         if dc.done and cdate and week_monday <= cdate <= local_today and dc.day_idx not in completed:
             completed.append(dc.day_idx)
-    # SetLog by date range. Don't filter on done=True — log_set creates rows
-    # with done=False by default, so requiring done=True undercounts completed
-    # days. Any SetLog row in the week = the athlete trained that day.
+    # SetLog by date range — 3-STATE, not "any row = completed". A single
+    # logged set used to mark the whole day complete here, so the coach saw a
+    # 1-set aborted session as a banked day. A day now counts as completed only
+    # when the canonical name-aware check passes: every prescribed exercise for
+    # the slot has its prescribed sets performed (workout_status).
+    from workout_status import workout_state_from_rows
     week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.logged_date >= week_monday
+        SetLog.logged_date >= week_monday,
+        SetLog.logged_date <= local_today,
     ).all()
+    slot_rows = {}
     for s in week_sets:
-        if s.day_idx not in completed:
-            completed.append(s.day_idx)
-        if s.logged_date and s.logged_date >= week_monday and s.logged_date <= local_today:
-            if s.day_idx not in completed:
-                completed.append(s.day_idx)
+        slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (w, d), rows in slot_rows.items():
+        if d in completed:
+            continue
+        resolved = _resolve_workout_for_day(w, d) or {}
+        if workout_state_from_rows(resolved.get("exercises") or [], rows) == "complete":
+            completed.append(d)
     # Enrich with names
     workouts = get_workouts(week)
     enriched = []

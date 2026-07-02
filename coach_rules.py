@@ -131,11 +131,13 @@ def _compute_workout_status(
     """Returns one of: not_started | in_progress | complete | rest.
 
     Rest takes precedence. Otherwise:
-    - complete: DayCompletion.done is True for ANY (week, day_idx) that wrote
-      sets today, OR the user has 3+ sets logged today (heuristic for "session
-      finished" when DayCompletion lags).
+    - complete: DayCompletion.done (date-gated to today) for ANY (week, day_idx)
+      that wrote sets today, OR the canonical name-aware check passes: every
+      prescribed exercise for a slot logged today has its prescribed sets
+      performed (workout_status.workout_state_from_rows). A partial log must
+      NEVER read complete.
     - not_started: zero SetLog rows for today across ALL weeks.
-    - in_progress: at least one SetLog row today but completion not yet flagged.
+    - in_progress: at least one SetLog row today but not a finished session.
 
     NOTE: query is INTENTIONALLY week-agnostic. The UI's `AppState.current_week`
     can drift from the rules engine's start_date computation (Erik's UI showed
@@ -179,12 +181,23 @@ def _compute_workout_status(
         if dc and dc.done and parse_completion_date(dc.completed_at) == today_date:
             return "complete"
 
-    # Heuristic: 6+ sets today and at least 3 marked done = de-facto complete.
-    # Lifts the directive out of "Lift now" once the session is clearly finished
-    # even when the auto-completion flag hasn't been set.
-    done_count = sum(1 for s in sets_today if getattr(s, "done", False))
-    if len(sets_today) >= 6 and done_count >= 3:
-        return "complete"
+    # Canonical name-aware completion (replaces the old "6+ sets / 3 done"
+    # heuristic, which marked a partially-logged session complete — 7 sets into
+    # a 17-set day read DONE and the coach told the athlete to move on). A slot
+    # is complete only when EVERY prescribed exercise has its prescribed sets
+    # performed (workout_status.workout_state_from_rows — same definition as
+    # coach_assembler and app.py's auto-complete). Check each (week, day_idx)
+    # slot the athlete actually logged sets to today, to tolerate UI/engine
+    # week drift.
+    from coach_assembler import _resolve_workout_for_day
+    from workout_status import workout_state_from_rows
+    slot_rows: dict = {}
+    for s in sets_today:
+        slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (w, d), rows in slot_rows.items():
+        resolved = _resolve_workout_for_day(w, d) or {}
+        if workout_state_from_rows(resolved.get("exercises") or [], rows) == "complete":
+            return "complete"
 
     return "in_progress"
 

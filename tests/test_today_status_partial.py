@@ -8,9 +8,12 @@ prescribe it." The coach recited it: "Today's Full Body lift is already logged �
 you're done lifting." False — he'd done 1 of ~15 sets, 1 of 5 exercises.
 
 today_status must be three-state: not_started | in_progress | complete. Only a
-genuinely finished session (every prescribed exercise logged, or DayCompletion,
-or the 6-sets/3-done heuristic) may say DONE. A partial log says IN PROGRESS and
-must explicitly tell the model the lift is NOT finished and what's still open.
+genuinely finished session may say DONE: every prescribed exercise has its
+prescribed number of sets PERFORMED (canonical name-aware check in
+workout_status.workout_state_from_rows), or a same-day DayCompletion. The old
+6-sets/3-done heuristic is gone — it marked partials complete. A partial log
+says IN PROGRESS and must explicitly tell the model the lift is NOT finished
+and what's still open.
 """
 from datetime import date
 
@@ -145,7 +148,10 @@ def test_build_today_status_in_progress_on_partial_log(app_ctx, monkeypatch):
         assert names[1] in (ts.get("workout_remaining_exercises") or [])
 
 
-def test_build_today_status_complete_when_all_exercises_logged(app_ctx, monkeypatch):
+def test_build_today_status_complete_when_all_prescribed_sets_done(app_ctx, monkeypatch):
+    # UPDATED for the canonical 3-state contract: "one set logged per exercise"
+    # no longer reads complete — EVERY prescribed exercise needs its prescribed
+    # number of sets performed (here 4 each, per _seed_coach_rx).
     app_, db = app_ctx
     import coach_assembler as ca
     from models import User, SetLog, DayCompletion
@@ -161,13 +167,41 @@ def test_build_today_status_complete_when_all_exercises_logged(app_ctx, monkeypa
         names = [e.get("name") for e in (resolved or {}).get("exercises", []) if e.get("name")]
         SetLog.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
         DayCompletion.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
-        for n in names:  # every prescribed exercise logged
+        for n in names:  # every prescribed exercise: ALL 4 prescribed sets done
+            for sn in range(4):
+                db.session.add(SetLog(user_id=u.id, week=5, day_idx=3,
+                                      exercise_name=n, set_number=sn,
+                                      weight=100, reps=5, done=True, logged_date=today))
+        db.session.commit()
+        ts = ca._build_today_status()["today_status"]
+        assert ts["workout_state"] == "complete", ts
+
+
+def test_build_today_status_in_progress_when_every_exercise_touched_but_sets_short(app_ctx, monkeypatch):
+    # One done set on each prescribed exercise (4 prescribed each) is a PARTIAL
+    # session — the old code called this complete. Must read in_progress.
+    app_, db = app_ctx
+    import coach_assembler as ca
+    from models import User, SetLog, DayCompletion
+    from flask_login import login_user
+    today = date(2026, 4, 30)
+    with app_.test_request_context():
+        u = _login_fresh_user(db, "touched-not-done@test.com")
+        login_user(u, force=True)
+        monkeypatch.setattr(ca, "_current_week", lambda: 5)
+        monkeypatch.setattr(ca, "_user_today", lambda: today)
+        _seed_coach_rx(db, u.id, 5, 3, ["Barbell Bench Press", "Incline DB Press"])
+        resolved = ca._resolve_workout_for_day(5, 3)
+        names = [e.get("name") for e in (resolved or {}).get("exercises", []) if e.get("name")]
+        SetLog.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
+        DayCompletion.query.filter_by(user_id=u.id, week=5, day_idx=3).delete()
+        for n in names:  # only ONE of the 4 prescribed sets per exercise
             db.session.add(SetLog(user_id=u.id, week=5, day_idx=3,
                                   exercise_name=n, set_number=0,
                                   weight=100, reps=5, done=True, logged_date=today))
         db.session.commit()
         ts = ca._build_today_status()["today_status"]
-        assert ts["workout_state"] == "complete", ts
+        assert ts["workout_state"] == "in_progress", ts
 
 
 def test_build_today_status_not_started_when_slot_sets_are_from_an_earlier_date(app_ctx, monkeypatch):

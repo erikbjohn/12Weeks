@@ -3849,42 +3849,38 @@ def api_set_log():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
-    # Auto-complete day: if all prescribed exercises have all sets done, mark the day complete.
+    # Auto-complete day — CANONICAL 3-STATE, name-aware. The old check compared
+    # a name-agnostic COUNT of done rows against the day's set total, so extra
+    # sets on one exercise (or stale rows from a replaced plan) substituted for
+    # a skipped movement and a partial day read complete. Now: the day is
+    # complete only when EVERY prescribed exercise has its prescribed sets
+    # performed (workout_status.workout_state_from_rows — the same definition
+    # coach_assembler and coach_rules use). Prescription comes from the
+    # resolver (coach/engine rows + swaps); an UNPLANNED day (no prescription,
+    # coach-or-nothing) never auto-completes from set counts.
     if done_provided and done:
         try:
-            from workout_data import get_workouts
-            phase_workouts = get_workouts(week)
-            if day_idx < len(phase_workouts):
-                day_exercises = phase_workouts[day_idx].get("exercises", [])
-                # Check user prescriptions (override template)
-                user_rx = WeeklyPrescription.query.filter_by(
+            from coach_assembler import _resolve_workout_for_day
+            from workout_status import workout_state_from_rows
+            resolved = _resolve_workout_for_day(week, day_idx) or {}
+            # Date-gate the rows: only sets performed TODAY count toward
+            # today's completion. Without this, once the week clamps at 12 a
+            # fully-logged slot from a prior cycle would complete the day after
+            # ONE new set (the phantom-done class).
+            slot_rows = SetLog.query.filter_by(
+                user_id=current_user.id, week=week, day_idx=day_idx,
+            ).filter(SetLog.logged_date == _user_today()).all()
+            state = workout_state_from_rows(resolved.get("exercises") or [], slot_rows)
+            if state == "complete":
+                dc = DayCompletion.query.filter_by(
                     user_id=current_user.id, week=week, day_idx=day_idx
-                ).all()
-                if user_rx:
-                    total_sets = sum(rx.sets for rx in user_rx)
-                else:
-                    total_sets = 0
-                    for ex in day_exercises:
-                        s = ex.get("sets", 1)
-                        if isinstance(s, int):
-                            total_sets += s
-                        elif isinstance(s, str):
-                            m = __import__('re').match(r'(\d+)', str(s))
-                            total_sets += int(m.group(1)) if m else 1
-
-                if total_sets > 0:
-                    done_count = SetLog.query.filter_by(
-                        user_id=current_user.id, week=week, day_idx=day_idx, done=True
-                    ).count()
-                    if done_count >= total_sets:
-                        dc = DayCompletion.query.filter_by(
-                            user_id=current_user.id, week=week, day_idx=day_idx
-                        ).first()
-                        if not dc:
-                            db.session.add(DayCompletion(
-                                user_id=current_user.id, week=week, day_idx=day_idx, done=True
-                            ))
-                            db.session.commit()
+                ).first()
+                if not dc:
+                    db.session.add(DayCompletion(
+                        user_id=current_user.id, week=week, day_idx=day_idx,
+                        done=True, completed_at=_user_today().isoformat(),
+                    ))
+                    db.session.commit()
         except Exception:
             pass  # Don't fail the set save if auto-complete errors
 
@@ -8077,25 +8073,28 @@ def _build_coach_context():
         if dc.done and dc.day_idx not in completed_days:
             completed_days.append(dc.day_idx)
 
-    # Check SetLog by date range AND by any week number (catches ALL mismatches)
-    week_sets = SetLog.query.filter(
+    # Check SetLog by date range AND by any week number (catches ALL mismatches).
+    # 3-STATE, name-aware: a single done set used to mark the whole day as
+    # completed here, so the morning-briefing coach saw a 1-set aborted session
+    # as a banked day ("partial must never read DONE"). A day is completed only
+    # when the canonical check passes for a slot the athlete logged this week:
+    # every prescribed exercise has its prescribed sets performed.
+    from coach_assembler import _resolve_workout_for_day as _resolve_day_for_status
+    from workout_status import workout_state_from_rows as _ws_state
+    _week_sets = SetLog.query.filter(
         SetLog.user_id == current_user.id,
-        SetLog.done == True,
-        SetLog.logged_date >= week_monday
+        SetLog.logged_date >= week_monday,
+        SetLog.logged_date <= local_today,
     ).all()
-    for s in week_sets:
-        if s.day_idx not in completed_days:
-            completed_days.append(s.day_idx)
-    # Also check by ALL week numbers user might have used (old stale week values)
-    all_week_sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.done == True,
-    ).all()
-    for s in all_week_sets:
-        # Map logged_date to day_idx if within this calendar week
-        if s.logged_date and s.logged_date >= week_monday and s.logged_date <= local_today:
-            if s.day_idx not in completed_days:
-                completed_days.append(s.day_idx)
+    _slot_rows = {}
+    for s in _week_sets:
+        _slot_rows.setdefault((s.week, s.day_idx), []).append(s)
+    for (_w, _d), _rows in _slot_rows.items():
+        if _d in completed_days:
+            continue
+        _resolved = _resolve_day_for_status(_w, _d) or {}
+        if _ws_state(_resolved.get("exercises") or [], _rows) == "complete":
+            completed_days.append(_d)
 
     # Enrich completed_days with day name and workout name
     completed_days_enriched = []
