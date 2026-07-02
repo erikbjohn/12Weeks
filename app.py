@@ -1020,21 +1020,53 @@ def _garmin_push_week_best_effort(user_id, week):
             logging.exception("[GARMIN] best-effort push failed (wk%s)", week)
 
 
+# Age must ONLY be read from explicit age context. The old extractor grabbed
+# ANY standalone 13-80 number in ANY user message (last match wins), so "I can
+# run 15 miles" silently set age=15 → is_minor handling stripped the cut and
+# fasting; "45 minutes" set age=45 and skewed TDEE. Accepted forms: a message
+# that IS a bare 1-2 digit number (the direct answer to "how old are you?"),
+# "45 years old" / "45yo", or "I'm 45" / "age: 45" not followed by a unit.
+_AGE_UNIT_LOOKAHEAD = (r'(?!\s*(?:min(?:ute)?s?|miles?|mi\b|k\b|km\b|lbs?|'
+                       r'pounds?|kgs?|%|percent|weeks?|days?|hours?|hrs?|'
+                       r'reps?|sets?|feet|foot|ft\b|inch(?:es)?|in\b|'
+                       r'cal(?:orie)?s?)\b)')
+_AGE_CONTEXT_RES = [
+    re.compile(r"\b(\d{1,2})\s*(?:years?[\s-]*old|y/?o\b|yrs?[\s-]*old|year[\s-]old)",
+               re.IGNORECASE),
+    re.compile(r"\b(?:i'?m|i\s+am|my\s+age\s+is|age\s*(?:is|:)|turning|turned)\s+(\d{1,2})\b"
+               + _AGE_UNIT_LOOKAHEAD, re.IGNORECASE),
+]
+
+
+def _age_from_message(content):
+    """Return an age (13-80) ONLY when the message states it in age context;
+    otherwise None. Never treat a stray number in free text as the age."""
+    if content is None:
+        return None
+    text = str(content).strip()
+    if re.fullmatch(r"\d{1,2}", text):
+        num = int(text)
+        return num if 13 <= num <= 80 else None
+    for rx in _AGE_CONTEXT_RES:
+        m = rx.search(text)
+        if m:
+            num = int(m.group(1))
+            if 13 <= num <= 80:
+                return num
+    return None
+
+
 def _extract_age_from_intake(user_id):
     """Extract age from psych intake conversation. Returns 30 as default."""
-    import re as _re
     age = 30
     try:
         intake = PsychIntake.query.filter_by(user_id=user_id).first()
         if intake and intake.conversation:
             for msg in intake.conversation:
-                content = msg.get("content", "").lower().strip()
                 if msg.get("role") == "user":
-                    age_match = _re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
     except Exception:
         pass
     return age
@@ -3941,12 +3973,17 @@ def api_prescription_seed():
     })
 
 
-def _enrich_program_with_whys(user_id, target_week, program, run_summary):
+def _enrich_program_with_whys(user_id, target_week, program, run_summary,
+                              allow_llm=True):
     """Generate per-exercise WHY blurbs via strength-coach agent, persist into
     WeeklyPrescription.adjustment_reason, and overwrite program[i]['reason']
     so the client renders them directly. Best-effort: on failure the existing
     reasons stay in place (and the client falls back to the deterministic
     exerciseWhy mapping).
+
+    allow_llm=False (request-thread callers) keeps the cheap already-enriched
+    sync but skips the Sonnet call entirely — no synchronous LLM work behind
+    the edge timeout.
     """
     from coach_planning_why import generate_week_whys
 
@@ -3963,6 +4000,13 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary):
         # SQL on the row read, but be explicit so the client sees it).
         for ex in program:
             ex["why"] = ex.get("reason")
+        return
+    if not allow_llm:
+        # Request thread: sync what's stored, never call the LLM here. The
+        # client's deterministic exerciseWhy fallback covers short reasons.
+        for ex in program:
+            if ex.get("reason"):
+                ex["why"] = ex.get("reason")
         return
     # Build user_context
     try:
@@ -4200,7 +4244,11 @@ def api_weekly_program_generate_status():
             has_program = WeeklyPrescription.query.filter_by(
                 user_id=current_user.id, week=week, source='coach').first()
             if has_program:
-                out = dict(_weekly_generation_impl(week, False, None, {}) or {})
+                # inline_llm=False: this is a polling GET on the request
+                # thread — it must stay a pure read (no synchronous coach
+                # calls, no LLM billing, no side-effect run inserts).
+                out = dict(_weekly_generation_impl(
+                    week, False, None, {}, inline_llm=False) or {})
                 out["status"] = "done"
                 out["recovered"] = True
                 return jsonify(out)
@@ -4222,7 +4270,10 @@ def api_weekly_program_generate_status():
 def api_generate_weekly_program():
     """Generate personalized weekly program using training engine + deficit plan."""
     data = request.get_json() or {}
-    target_week = data.get("week", _current_week() + 1)
+    try:
+        target_week = int(data.get("week", _current_week() + 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid week"}), 400
     force_regen = bool(data.get("force_regen"))
     # Rest-of-week replan: `preserve_through_day` keeps TODAY and every earlier
     # day fully intact (prescriptions, runs, meals, logged work) and regenerates
@@ -4262,6 +4313,23 @@ def api_generate_weekly_program():
             while preserve_through >= 0 and not _day_has_content(preserve_through):
                 preserve_through -= 1
 
+    # PAST-WEEK LOCK: past weeks are training HISTORY. A stale client tab, a
+    # client bug, or a crafted request posting {"week": 5, "force_regen": true}
+    # during week 10 must never delete and regenerate a locked past week's
+    # prescriptions from CURRENT history (the 2026-04-28 Week-5 overwrite
+    # class). Admin heals go through /api/admin/replan-week instead.
+    if force_regen:
+        try:
+            _cur_wk = _current_week()
+        except Exception:
+            _cur_wk = None
+        if _cur_wk is not None and target_week < _cur_wk:
+            return jsonify({
+                "error": (f"Week {target_week} is in the past — past weeks are "
+                          f"locked and cannot be regenerated."),
+                "week": target_week,
+            }), 409
+
     # The non-regen path is fast (it only reads existing rows) — run it inline.
     # The force_regen path does 30-90s of LLM work; running THAT synchronously
     # made the request outlive the edge/proxy timeout (~25s) and return 502
@@ -4272,14 +4340,22 @@ def api_generate_weekly_program():
     # a quick DB read. Otherwise the coaches WILL run (30-90s); do that in a
     # background thread so the request returns immediately and never 502s on the
     # edge timeout.
+    # A "fast read" must be a PURE read: if the week has lifts/history but NO
+    # run-plan rows, the read branch would fire _fill_missing_week_runs — a
+    # 10-30s running-coach LLM call — on the request thread behind the ~30s
+    # edge timeout (the 502 class the async job pattern exists to prevent).
+    # Route that state to the background job instead; its _GEN_JOBS running
+    # guard also stops two concurrent callers from double-inserting run rows.
     _fast_read = (not force_regen) and bool(
         WeeklyPrescription.query.filter_by(
             user_id=current_user.id, week=target_week, source='coach').first()
         or SetLog.query.filter_by(
             user_id=current_user.id, week=target_week, done=True).first()
-    )
+    ) and bool(WeeklyRunPlan.query.filter_by(
+        user_id=current_user.id, week=target_week).first())
     if _fast_read:
-        return jsonify(_weekly_generation_impl(target_week, force_regen, preserve_through, data))
+        return jsonify(_weekly_generation_impl(
+            target_week, force_regen, preserve_through, data, inline_llm=False))
 
     _uid = current_user.id
     _key = (_uid, target_week)
@@ -4354,10 +4430,17 @@ def admin_replan_week():
                     "week": week, "preserve_through_day": preserve})
 
 
-def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
+def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
+                            inline_llm=True):
     """Heavy weekly-program generation: exercise + run + meal coaches, then DB
     writes. Runs in the request thread (non-regen) OR a background thread with a
     login context (force_regen). Uses current_user; never touches `request`.
+
+    inline_llm=False marks a REQUEST-THREAD caller (the fast-read POST path and
+    the generate-status polling GET): the read-only branch must then never make
+    a synchronous LLM call (run gap-fill, why enrichment) — those 10-30s calls
+    behind the ~30s edge timeout are the 502-with-partial-writes class the
+    async job pattern exists to prevent.
     """
     def _future_only(q, model):
         """Restrict a query to regenerated days when preserving today+earlier."""
@@ -4377,15 +4460,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
     # running, nutrition) fresh. Use when the user explicitly asks to
     # re-plan with the agents.
     if force_regen:
-        _future_only(WeeklyPrescription.query.filter_by(
-            user_id=current_user.id, week=target_week,
-        ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
-            WeeklyPrescription).delete(synchronize_session=False)
-        _future_only(WeeklyRunPlan.query.filter_by(
-            user_id=current_user.id, week=target_week,
-        ).filter(WeeklyRunPlan.source.in_(('coach', 'engine'))),
-            WeeklyRunPlan).delete(synchronize_session=False)
-        db.session.commit()
+        # DO NOT delete the existing plan here. The old code deleted + COMMITTED
+        # before the coaches ran, so any LLM failure, timeout, or worker death
+        # mid-generation permanently destroyed the week with no recovery path
+        # (the documented "force_regen deletes first" footgun). Generate first;
+        # the old rows are swapped out further down, in the SAME transaction
+        # that inserts the coach's new rows — and only when the coach actually
+        # produced a replacement.
         existing_coach = None
         has_history = None
     else:
@@ -4438,9 +4519,17 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         # running coach — coach-or-nothing, without touching the lift rows.
         run_failures = []
         if not runs:
-            run_summary, run_failures = _fill_missing_week_runs(
-                current_user.id, target_week,
-            )
+            if inline_llm:
+                run_summary, run_failures = _fill_missing_week_runs(
+                    current_user.id, target_week,
+                )
+            else:
+                # Request-thread caller: NEVER run the running coach inline
+                # (10-30s LLM behind the edge timeout). Report the gap; the
+                # async generate path fills it on the next background job.
+                run_summary = []
+                run_failures = [{"domain": "run", "day": None,
+                                 "reason": "runs not planned yet"}]
         else:
             _prev_runs = _prev_run_durations(current_user.id, target_week)
             run_summary = [{
@@ -4452,6 +4541,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
             } for r in runs]
         _enrich_program_with_whys(
             current_user.id, target_week, program, run_summary,
+            allow_llm=inline_llm,
         )
         # Off-thread: first push of a fresh week is ~14 Garmin HTTP calls and
         # this branch runs on the request thread (hash-skips make reloads cheap).
@@ -4695,6 +4785,23 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                   f"Strength coach designed {_n_lifts} lifts across {_n_days} days; "
                   f"runs and meals set — plate-rounding loads and saving your week…")
 
+    # ATOMIC SWAP (force_regen): only NOW — with the coach's answer in hand —
+    # do we clear the old coach/engine prescriptions, in the SAME transaction
+    # that inserts the new ones (committed together below). If the strength
+    # coach produced nothing (LLM outage, timeout), the existing plan is KEPT
+    # and the failure is surfaced instead of leaving the week empty.
+    if force_regen:
+        if any(_coach_program.get(_d) for _d in range(7)):
+            _future_only(WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=target_week,
+            ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
+                WeeklyPrescription).delete(synchronize_session=False)
+        elif WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=target_week, source='coach').first():
+            coach_failures.append({
+                "domain": "lift", "day": None,
+                "reason": "strength coach returned nothing — existing plan kept"})
+
     for day_idx in range(7):
         if preserve_through is not None and day_idx <= preserve_through:
             continue  # leave today + earlier days untouched
@@ -4885,9 +4992,8 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
                         continue
                     c = msg.get("content", "").lower().split()
                     if any(w in c for w in ["female", "f", "woman"]): sex_rec = "female"
-                    import re as _re
-                    am = _re.search(r'\b(\d{1,2})\b', msg.get("content", ""))
-                    if am and 13 <= int(am.group(1)) <= 80: age_rec = int(am.group(1))
+                    _am = _age_from_message(msg.get("content", ""))
+                    if _am is not None: age_rec = _am
 
                 tdee_rec = compute_tdee(current_weight, height_rec, age_rec, sex_rec)
                 new_targets = compute_targets(tdee_rec["tdee"], goal.goal_type or "cut",
@@ -5072,16 +5178,21 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data):
         from workout_data import get_workouts as _get_template_workouts
         template_days = _get_template_workouts(target_week)
 
-        # Delete existing engine-sourced run plans for this week (future days
-        # only when preserving today+earlier).
-        _future_only(WeeklyRunPlan.query.filter_by(
-            user_id=current_user.id, week=target_week
-        ).filter(WeeklyRunPlan.source != 'coach'),
-            WeeklyRunPlan).delete(synchronize_session=False)
-
         # ─── RUNNING COACH: USE PARALLEL RESULT ───
         # Already fired upstream in the ThreadPoolExecutor block. Reuse.
         _coach_runs = _coach_runs_parallel or {}
+
+        # Delete existing engine-sourced run plans for this week (future days
+        # only when preserving today+earlier). ATOMIC SWAP for coach rows on
+        # force_regen: the old coach runs are removed in the SAME transaction
+        # that inserts the new ones (commit below) — and ONLY when the running
+        # coach actually produced runs. A failed running coach keeps the
+        # existing run plan instead of leaving the week runless.
+        _run_del_q = WeeklyRunPlan.query.filter_by(
+            user_id=current_user.id, week=target_week)
+        if not (force_regen and _coach_runs):
+            _run_del_q = _run_del_q.filter(WeeklyRunPlan.source != 'coach')
+        _future_only(_run_del_q, WeeklyRunPlan).delete(synchronize_session=False)
 
         for day_idx in range(7):
             if preserve_through is not None and day_idx <= preserve_through:
@@ -6587,12 +6698,10 @@ def api_stats_projection_inputs():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    # Age detection
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    # Age detection — only from explicit age context
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         return jsonify({
             "current_weight": current_weight,
@@ -6646,11 +6755,9 @@ def api_stats_body_comp():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         # All body measurements
         measurements = [{
@@ -6703,11 +6810,9 @@ def api_stats_strength():
                         sex = "male"
                     elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                         sex = "female"
-                    age_match = re.search(r'\b(\d{1,2})\b', content)
-                    if age_match:
-                        num = int(age_match.group(1))
-                        if 13 <= num <= 80:
-                            age = num
+                    _a = _age_from_message(msg.get("content", ""))
+                    if _a is not None:
+                        age = _a
 
         # All completed sets
         all_sets = SetLog.query.filter_by(user_id=uid, done=True).filter(
@@ -8870,12 +8975,13 @@ def _compute_goal_for_user(user, overrides=None):
                 sex = "male"
             elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
                 sex = "female"
-            # Age detection — extract number from text like "I'm 32 years old"
-            age_match = re.search(r'\b(\d{1,2})\b', content)
-            if age_match:
-                num = int(age_match.group(1))
-                if 13 <= num <= 80:
-                    age = num
+            # Age detection — ONLY explicit age context ("I'm 32", "32 years
+            # old", or a bare-number answer). A stray number in free text
+            # ("I can run 15 miles") must never overwrite the age: age<18
+            # silently forced minor handling (no deficit, fasting stripped).
+            _a = _age_from_message(msg.get("content", ""))
+            if _a is not None:
+                age = _a
 
     # BodyWeight is primary, PhysicalAssessment is fallback — NEVER default to 180
     latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()

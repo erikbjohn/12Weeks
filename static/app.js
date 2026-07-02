@@ -1184,6 +1184,15 @@ function loadMealData() {
 
 function saveMealData(data) {
   const key = getMealDateKey();
+  // NEVER save a day whose server state hasn't loaded yet: loadMealData()
+  // returns a fresh {} while the fetch is in flight, and /api/meals REPLACES
+  // the whole row — POSTing an object built from that empty {} would
+  // wholesale-erase everything actually logged on that date. Kick the load
+  // and drop this save; the re-render on fetch completion shows the truth.
+  if (!Object.prototype.hasOwnProperty.call(_mealsCache, key)) {
+    ensureMealDataLoaded(key);
+    return;
+  }
   _mealsCache[key] = data;
   // Build per-meal timing: { mealIdx: { scheduled: "2:30pm", actual: "2026-04-01T18:30:00Z" } }
   if (!data.mealTiming) data.mealTiming = {};
@@ -1395,9 +1404,14 @@ function renderMealInner(dayData) {
   }
   if (!plan) return '';
 
-  // Determine if we're viewing today's meals
+  // Determine if we're viewing today's meals. Must match BOTH the weekday AND
+  // the actual program week — gating on weekday alone made every past/future
+  // week's same weekday fully editable (tapping a checkbox there could clobber
+  // that historical day's saved meal log).
   const todayMonIdx = _userTodayMonIdx();  // user-tz "today", not device-local
-  const isViewingToday = currentDay === todayMonIdx;
+  const actualWeek = getActualProgramWeek();
+  const isViewingToday = currentDay === todayMonIdx &&
+      (actualWeek == null || currentWeek === actualWeek);
 
   // Fast day based on meal type (no toggle — it's the plan)
   const isSundayFast = dayData.mealType && dayData.mealType.toLowerCase().includes('fast');
@@ -4182,7 +4196,11 @@ function showStartDatePicker() {
     const nextMon = new Date(thisMon); nextMon.setDate(thisMon.getDate() + 7);
 
     const fmt = (d) => d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    const iso = (d) => d.toISOString().slice(0, 10);
+    // LOCAL calendar date — never toISOString(), which converts to UTC and,
+    // for any user west of UTC choosing in the evening, serializes the Monday
+    // shown on screen as TUESDAY (then "start today" hits the pre-start
+    // lockout and every week/day/meal-date calc shifts a day).
+    const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 
     const thisMonLabel = daysUntilThisMon === 0 ? 'Today (Monday)' : 'This Monday \u2014 ' + fmt(thisMon);
 
@@ -5414,6 +5432,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function saveState() {
+  // Called from setWeek/setPhase — i.e. NAVIGATION. With a start_date the
+  // server derives the real program week itself; overwriting cache + DB with
+  // the VIEWED week here made getActualProgramWeek() (and everything capped
+  // by it, like the weight-summary e1RM walk) follow whatever week the user
+  // happened to be browsing. Only legacy users with no start_date persist
+  // current_week manually — for them it IS the program week.
+  if (_stateCache && _stateCache.start_date) return;
   _stateCache.current_week = currentWeek;
   apiPost('/api/state', { current_week: currentWeek });
 }
@@ -7094,16 +7119,20 @@ function setDay(d) {
 // User's actual program week — computed from start_date, NOT the week the user is viewing.
 // Returns the week number (1-12) or null if state not loaded.
 function getActualProgramWeek() {
-  // Prefer the SERVER's current_week — it's computed in the user's stored
-  // timezone (_user_today). Computing from device-local new Date() drifted at
-  // the midnight boundary / across timezones, putting the header a week off.
+  // With a start_date, derive the week from it using the SERVER's user-tz
+  // date (user_date) — no device-local midnight drift, and immune to a
+  // polluted AppState.current_week (navigation used to save the VIEWED week
+  // there, which made this function follow whatever week was being browsed).
+  if (_stateCache && _stateCache.start_date) {
+    const originDate = (_stateCache.user_date || _stateCache.server_date);
+    const nowDt = originDate ? new Date(originDate + 'T00:00:00') : new Date();
+    const startDt = new Date(_stateCache.start_date + 'T00:00:00');
+    const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
+    return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+  }
+  // Legacy no-start_date users: the persisted current_week IS the program week.
   if (_stateCache && _stateCache.current_week) return _stateCache.current_week;
-  if (!_stateCache || !_stateCache.start_date) return null;
-  const originDate = (_stateCache.user_date || _stateCache.server_date);
-  const nowDt = originDate ? new Date(originDate + 'T00:00:00') : new Date();
-  const startDt = new Date(_stateCache.start_date + 'T00:00:00');
-  const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
-  return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+  return null;
 }
 
 // The user's "today" weekday (Mon=0..Sun=6) from the SERVER's user-timezone
@@ -10477,8 +10506,15 @@ function _parseHiitDetail(detail, totalTime) {
     // the coach's text. No fabricated defaults.
     if (!work || !rest || !rounds) return null;
 
-    // Cooldown always matches warmup
-    return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: warmup };
+    // Cooldown: the coach's text is canonical. Parse "3 min cooldown" when
+    // present — overwriting it with the warmup duration made the timer's
+    // phases contradict the card text and break the phase-sum-equals-label
+    // invariant. Only when the detail names no cooldown do we mirror warmup.
+    var cooldown = warmup;
+    var cooldownMatch = detail.match(/(\d+)\s*min\s*cool/i);
+    if (cooldownMatch) cooldown = parseInt(cooldownMatch[1]) * 60;
+
+    return { rounds: rounds, work: work, rest: rest, warmup: warmup, cooldown: cooldown };
 }
 
 function _playBeep(freq, duration) {
@@ -11826,7 +11862,11 @@ async function enterExerciseFocus(exIdx) {
       const targetRes = await fetch('/api/targets/' + encodeURIComponent(displayName));
       if (targetRes.ok) {
           const targets = await targetRes.json();
-          if (!ex.target_weight) {
+          // target_weight === 0 is the BODYWEIGHT sentinel — a coach
+          // prescription, NOT "no weight set". `!ex.target_weight` treated 0
+          // as missing and overwrote the BW movement with an engine load the
+          // coach never prescribed (falsy-zero + silent engine fallback).
+          if (ex.target_weight == null) {
               // Coach set NO weight — fall back to the engine's full suggestion.
               if (targets.target_weight) {
                   _focusWeightVal = roundWeight(targets.target_weight, displayName);

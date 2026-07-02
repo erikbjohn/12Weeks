@@ -9,11 +9,16 @@ Routes incoming messages to the appropriate agent based on:
 
 import re
 
-# Crisis patterns — always checked first, highest priority
+# Crisis patterns — always checked first, highest priority.
+# These must be SPECIFIC to self-harm language. Broad phrases like "end my ..."
+# false-positived on everyday fitness talk ("end my cut at 190?", "end my run
+# early") and routed routine questions to the crisis agent, which answers with
+# a mental-health script and no workout context. Likewise "hurt my self" must
+# not match "hurt my self esteem" / "self-esteem".
 CRISIS_PATTERNS = [
-    re.compile(r'\b(suicid|kill\s*my\s*self|end\s*(my|it\s*all))\b', re.IGNORECASE),
+    re.compile(r'\b(suicid\w*|kill\s*my\s*self|end\s*my\s*(?:own\s*)?life|end\s*it\s*all)\b', re.IGNORECASE),
     re.compile(r'\b(want\s*to\s*die|no\s*reason\s*to\s*live|better\s*off\s*dead)\b', re.IGNORECASE),
-    re.compile(r'\b(self.harm|hurt\s*my\s*self|not\s*worth\s*living)\b', re.IGNORECASE),
+    re.compile(r'\b(self.harm|hurt\s*my\s*self(?!\s*[-\s]?esteem)|not\s*worth\s*living)\b', re.IGNORECASE),
 ]
 
 # Trigger tag extraction
