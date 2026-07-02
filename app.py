@@ -94,8 +94,10 @@ def unauthorized():
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # API key auth — allows CLI/curl access without browser session
-        api_key = request.headers.get('X-Admin-Key') or request.args.get('admin_key')
+        # API key auth — allows CLI/curl access without browser session.
+        # Header ONLY: accepting the key as a query param would leak it into
+        # server/proxy access logs, browser history, and Referer headers.
+        api_key = request.headers.get('X-Admin-Key')
         expected_key = os.environ.get('ADMIN_API_KEY')
         if api_key and expected_key and api_key == expected_key:
             return f(*args, **kwargs)
@@ -1623,21 +1625,20 @@ def debug_goal_error():
 
 
 @app.route("/api/debug/override-day-with-actual")
+@admin_required
 def debug_override_day_with_actual():
     """Take the user's logged SetLog rows for (logged_date, day_idx) and write
     them to WeeklyPrescription for (week, day_idx) so the UI shows the actual
     session that was done instead of the template. One-shot recovery for when
     the user's session doesn't match the template for that day.
 
-    Token-gated. Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&date=YYYY-MM-DD&week=6&day_idx=4
     """
     email = request.args.get("email", "")
     date_str = request.args.get("date", "")
     week = int(request.args.get("week", 0))
     day_idx = int(request.args.get("day_idx", -1))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not date_str or not week or day_idx < 0:
         return jsonify({"error": "email + date + week + day_idx required"}), 400
     try:
@@ -1705,23 +1706,22 @@ def debug_override_day_with_actual():
 
 
 @app.route("/api/debug/realign-session-week")
+@admin_required
 def debug_realign_session_week():
     """Move a logged session from one week to another. Moves SetLog,
     RunLog, WeeklyPrescription, DayCompletion. Optionally resets
     AppState.current_week.
 
-    Token-gated. Query: ?email=...&from_week=6&to_week=5&day_idx=4&date=YYYY-MM-DD&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&from_week=6&to_week=5&day_idx=4&date=YYYY-MM-DD
     Optional: &reset_current_week=1
     """
     email = request.args.get("email", "")
     from_week = int(request.args.get("from_week", 0))
     to_week = int(request.args.get("to_week", 0))
     day_idx = int(request.args.get("day_idx", -1))
-    date_str = request.args.get("date", "")
     reset_cw = request.args.get("reset_current_week") == "1"
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
+    date_str = request.args.get("date", "")
     if not email or not from_week or not to_week or day_idx < 0 or not date_str:
         return jsonify({"error": "email + from_week + to_week + day_idx + date required"}), 400
     try:
@@ -1817,9 +1817,10 @@ def debug_realign_session_week():
 
 
 @app.route("/api/debug/api-workouts-as-user")
+@admin_required
 def debug_api_workouts_as_user():
     """Run api_workouts as if the given user were logged in, return the JSON
-    payload the UI would actually receive. UNAUTH diagnostic.
+    payload the UI would actually receive. Admin-only diagnostic.
     Query: ?email=...&week=6&day_idx=4
     """
     email = request.args.get("email", "erik@placemetry.com")
@@ -1863,6 +1864,7 @@ def debug_api_workouts_as_user():
 
 
 @app.route("/api/debug/today-status")
+@admin_required
 def debug_today_status():
     """Dump the coach's today_status GROUNDING for a user — the exact 3-state
     workout signal (not_started/in_progress/complete) plus the rendered directive
@@ -1891,18 +1893,17 @@ def debug_today_status():
 
 
 @app.route("/api/debug/copy-runplan")
+@admin_required
 def debug_copy_runplan():
     """Copy WeeklyRunPlan rows from one week to another. Used when the run
     engine hasn't generated the next week yet and the user is already there.
 
-    Token-gated. Query: ?email=...&from_week=5&to_week=6&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&from_week=5&to_week=6
     """
     email = request.args.get("email", "")
     from_week = int(request.args.get("from_week", 0))
     to_week = int(request.args.get("to_week", 0))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not from_week or not to_week:
         return jsonify({"error": "email + from_week + to_week required"}), 400
     try:
@@ -1940,6 +1941,7 @@ def debug_copy_runplan():
 
 
 @app.route("/api/debug/full-day-state")
+@admin_required
 def debug_full_day_state():
     """Dump everything stored for a user on a date: SetLog, RunLog,
     WeeklyPrescription, WeeklyRunPlan. Read-only diagnostic.
@@ -2011,8 +2013,9 @@ def debug_full_day_state():
 
 
 @app.route("/api/debug/show-sets")
+@admin_required
 def debug_show_sets():
-    """Dump SetLog rows for a user across recent days. UNAUTH diagnostic.
+    """Dump SetLog rows for a user across recent days. Admin-only diagnostic.
     Query: ?email=...&days=7 (default 7)
     """
     email = request.args.get("email", "erik@placemetry.com")
@@ -2058,20 +2061,19 @@ def debug_show_sets():
 
 
 @app.route("/api/debug/move-sets-day")
+@admin_required
 def debug_move_sets_day():
     """Move all SetLog rows for a user matching (logged_date, from_day_idx)
     to to_day_idx. Used to relocate sets logged under one day to another
     when the template layout changed underneath the user.
 
-    Token-gated. Query: ?email=...&date=YYYY-MM-DD&from=4&to=3&token=...
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&date=YYYY-MM-DD&from=4&to=3
     """
     email = request.args.get("email", "")
     date_str = request.args.get("date", "")
     from_day = int(request.args.get("from", -1))
     to_day = int(request.args.get("to", -1))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not date_str or from_day < 0 or to_day < 0:
         return jsonify({"error": "email + date + from + to required"}), 400
     try:
@@ -2110,9 +2112,10 @@ def debug_move_sets_day():
 
 
 @app.route("/api/debug/run-plan")
+@admin_required
 def debug_run_plan():
     """Show user's stored WeeklyRunPlan rows + what coach_rules will resolve.
-    UNAUTH. Diagnostic.
+    Admin-only diagnostic.
     """
     email = request.args.get("email", "erik@placemetry.com")
     week = int(request.args.get("week", 5))
@@ -2149,20 +2152,18 @@ def debug_run_plan():
 
 
 @app.route("/api/debug/clear-stale-prescriptions")
+@admin_required
 def debug_clear_stale_prescriptions():
     """Delete all WeeklyPrescription rows for a user+week so api_workouts
     falls through to the fresh template. Used to recover from program rebuilds
     where stored prescriptions don't match the new template (e.g., Erik's
     week 5 had Push exercises stored on Friday from the old program).
 
-    Token-gated to prevent abuse.
-    Query: ?email=...&week=5&token=swap-cleanup-2026-04-30
+    Admin-only (X-Admin-Key header or admin session).
+    Query: ?email=...&week=5
     """
     email = request.args.get("email", "")
     week = int(request.args.get("week", 0))
-    token = request.args.get("token", "")
-    if token != "swap-cleanup-2026-04-30":
-        return jsonify({"error": "bad token"}), 403
     if not email or not week:
         return jsonify({"error": "email + week required"}), 400
     try:
@@ -2191,9 +2192,10 @@ def debug_clear_stale_prescriptions():
 
 
 @app.route("/api/debug/program-friday")
+@admin_required
 def debug_program_friday():
     """Inspect what the program says for a user's Friday — template, prescription
-    override, ExerciseSwap, run dict. UNAUTHENTICATED. Diagnostic only."""
+    override, ExerciseSwap, run dict. Admin-only diagnostic."""
     email = request.args.get("email", "erik@placemetry.com")
     week = int(request.args.get("week", 5))
     day_idx = int(request.args.get("day", 4))  # 4 = Friday
@@ -2287,8 +2289,9 @@ def api_coach_flag():
 
 
 @app.route("/api/debug/coach-feedback")
+@admin_required
 def debug_coach_feedback():
-    """Dump recent CoachFeedback rows. UNAUTH diagnostic.
+    """Dump recent CoachFeedback rows. Admin-only diagnostic.
     Query: ?email=...&days=14 (defaults to all users, last 14 days)
     """
     email = request.args.get("email", "")
@@ -2321,9 +2324,10 @@ def debug_coach_feedback():
 
 
 @app.route("/api/debug/coach-error")
+@admin_required
 def debug_coach_error():
     """Run the new coach pipeline against a user and return the response or
-    full traceback on failure. UNAUTHENTICATED — same pattern as /api/debug/health.
+    full traceback on failure. Admin-only (X-Admin-Key header or admin session).
     Useful for diagnosing production coach failures from outside the app.
 
     Query: ?email=erik@placemetry.com&msg=hello
@@ -2337,13 +2341,17 @@ def debug_coach_error():
         if user is None:
             return jsonify({"error": f"user {email!r} not found"}), 404
         from flask_login import login_user
-        login_user(user, force=True)
         from coach_assembler import coach_respond
-        reply = coach_respond(
-            user_id=user.id,
-            agent_name="conversation",
-            user_message=msg,
-        )
+        # Impersonate inside an isolated test_request_context so login_user()
+        # never touches the real caller's session cookie (same pattern as
+        # debug_today_status).
+        with app.test_request_context():
+            login_user(user, force=True)
+            reply = coach_respond(
+                user_id=user.id,
+                agent_name="conversation",
+                user_message=msg,
+            )
         return jsonify({
             "email": email,
             "msg": msg,
@@ -7017,14 +7025,23 @@ def api_psych_intake_message():
             db.session.rollback()
             return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
 
-        # Check for existing pending job — prevent duplicate threads
+        # Check for THIS USER's existing pending intake job — prevent
+        # duplicate threads. Must be scoped by user_id and kind: the job
+        # store is shared, and matching any pending job would hand user B
+        # user A's job_id (cross-user intake hijack).
         for jid, job in _intake_jobs.items():
-            if job.get("status") == "pending":
+            if (job.get("status") == "pending"
+                    and job.get("kind") == "intake"
+                    and job.get("user_id") == current_user.id):
                 return jsonify({"job_id": jid, "status": "pending"})
 
         # Create a job and run Claude in a background thread
         job_id = str(uuid.uuid4())[:8]
-        _intake_jobs[job_id] = {"status": "pending", "result": None}
+        _owner_id = current_user.id
+        _intake_jobs[job_id] = {
+            "status": "pending", "result": None,
+            "kind": "intake", "user_id": _owner_id,
+        }
 
         # Capture values for the thread closure
         _user_msg = user_msg
@@ -7041,6 +7058,7 @@ def api_psych_intake_message():
                     "status": "done",
                     "response_text": response_text,
                     "is_complete": is_complete,
+                    "kind": "intake", "user_id": _owner_id,
                 }
             except Exception as e:
                 import traceback
@@ -7049,6 +7067,7 @@ def api_psych_intake_message():
                     "status": "error",
                     "response_text": "Connection issue. Tap to retry.",
                     "is_complete": False,
+                    "kind": "intake", "user_id": _owner_id,
                 }
 
         thread = threading.Thread(target=run_intake)
@@ -7065,7 +7084,10 @@ def api_psych_intake_message():
 @login_required
 def api_psych_intake_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check: never let one user consume (and delete)
+    # another user's job, or a different job type consume this one.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "intake"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -7156,7 +7178,8 @@ def api_generate_full_profile():
 
     # Run in background thread to avoid Gunicorn timeout
     job_id = str(uuid.uuid4())[:8]
-    _intake_jobs[job_id] = {"status": "pending"}
+    _owner_id = current_user.id
+    _intake_jobs[job_id] = {"status": "pending", "kind": "profile", "user_id": _owner_id}
 
     def run_profile():
         try:
@@ -7168,9 +7191,11 @@ def api_generate_full_profile():
             _intake_jobs[job_id] = {
                 "status": "done" if profile else "error",
                 "profile": profile,
+                "kind": "profile", "user_id": _owner_id,
             }
         except Exception as e:
-            _intake_jobs[job_id] = {"status": "error", "profile": None, "error": str(e)}
+            _intake_jobs[job_id] = {"status": "error", "profile": None, "error": str(e),
+                                    "kind": "profile", "user_id": _owner_id}
 
     thread = threading.Thread(target=run_profile)
     thread.start()
@@ -7181,7 +7206,9 @@ def api_generate_full_profile():
 @login_required
 def api_full_profile_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check — jobs are private to the user who started them.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "profile"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -8611,7 +8638,10 @@ def api_user_timezone():
 
 # ─── PUSH NOTIFICATIONS ────────────────────────────────────────────────────
 
-_push_subscriptions = []  # In-memory for now; could be stored in DB
+# In-memory for now; could be stored in DB (subscriptions are lost on
+# worker restart/deploy). Keyed by user_id so one user's action can never
+# push to another user's devices.
+_push_subscriptions = {}  # user_id -> [subscription_info, ...]
 
 @app.route("/api/push/vapid-key")
 @login_required
@@ -8629,31 +8659,33 @@ def api_push_subscribe():
     sub = data.get("subscription")
     if not sub:
         return jsonify({"error": "subscription required"}), 400
+    subs = _push_subscriptions.setdefault(current_user.id, [])
     # Deduplicate
-    if sub not in _push_subscriptions:
-        _push_subscriptions.append(sub)
+    if sub not in subs:
+        subs.append(sub)
     return jsonify({"ok": True})
 
 
 @app.route("/api/push/test", methods=["POST"])
 @login_required
 def api_push_test():
-    """Send a test push notification."""
+    """Send a test push notification — ONLY to the current user's devices."""
     vapid_private = os.environ.get("VAPID_PRIVATE_KEY")
     vapid_email = os.environ.get("VAPID_EMAIL", "mailto:test@example.com")
-    if not vapid_private or not _push_subscriptions:
+    subs = _push_subscriptions.get(current_user.id) or []
+    if not vapid_private or not subs:
         return jsonify({"error": "Push not configured or no subscribers"}), 400
     try:
         from pywebpush import webpush
         import json
-        for sub in _push_subscriptions:
+        for sub in subs:
             webpush(
                 subscription_info=sub,
                 data=json.dumps({"title": "12 Weeks", "body": "Time for your morning check-in!", "tag": "morning-checkin"}),
                 vapid_private_key=vapid_private,
                 vapid_claims={"sub": vapid_email},
             )
-        return jsonify({"ok": True, "sent": len(_push_subscriptions)})
+        return jsonify({"ok": True, "sent": len(subs)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -9509,12 +9541,13 @@ def api_weekly_report_generate():
 
     # Generate narrative in background
     job_id = str(uuid.uuid4())[:8]
-    _intake_jobs[job_id] = {"status": "pending"}
+    _intake_jobs[job_id] = {"status": "pending", "kind": "report", "user_id": _current_user_id}
 
     def run_narrative():
         try:
             narrative = generate_report_narrative(metrics)
-            _intake_jobs[job_id] = {"status": "done", "narrative": narrative}
+            _intake_jobs[job_id] = {"status": "done", "narrative": narrative,
+                                    "kind": "report", "user_id": _current_user_id}
             # Save narrative to DB
             with app.app_context():
                 r = WeeklyReport.query.filter_by(user_id=_current_user_id, week=week).first()
@@ -9522,7 +9555,8 @@ def api_weekly_report_generate():
                     r.narrative = narrative
                     db.session.commit()
         except Exception as e:
-            _intake_jobs[job_id] = {"status": "error", "narrative": None}
+            _intake_jobs[job_id] = {"status": "error", "narrative": None,
+                                    "kind": "report", "user_id": _current_user_id}
 
     thread = threading.Thread(target=run_narrative)
     thread.start()
@@ -9556,7 +9590,9 @@ def api_weekly_report(week):
 @login_required
 def api_weekly_report_result(job_id):
     job = _intake_jobs.get(job_id)
-    if not job:
+    # Ownership + kind check — jobs are private to the user who started them.
+    if (not job or job.get("user_id") != current_user.id
+            or job.get("kind") != "report"):
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})
@@ -10684,8 +10720,12 @@ def api_admin_reset_assessment():
 
 
 @app.route("/api/test/create-user", methods=["POST"])
+@admin_required
 def api_test_create_user():
-    """Create test user for e2e testing. Only works for test@12weeks.com."""
+    """Create test user for e2e testing. Only works for test@12weeks.com.
+    Admin-only (X-Admin-Key header or admin session): unauthenticated access
+    would let anyone mint a valid login (hardcoded password) + 3 invites,
+    or wipe the test account's data at will."""
     data = request.get_json(silent=True) or {}
     email = data.get("email", "test@12weeks.com")
     if email != "test@12weeks.com":
