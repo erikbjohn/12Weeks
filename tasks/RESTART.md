@@ -1,3 +1,17 @@
+# Restart / Session Handoff — 2026-07-02
+
+## Latest session (2026-07-02) — whole-app audit → 106 fixes → deployed
+Merge `90de477` is **live on prod** (`one2weeks-9ewf.onrender.com`, Render
+auto-deploys on push to main). Full audit report: `docs/whole-app-audit-2026-07-01.md`.
+
+- Whole-app audit (Fable, 114 agents, adversarially verified) → **106 confirmed findings**, all fixed by theme with **141 new regression tests** + 6 post-review residuals + a coach-error UX pass.
+- Suite: **509 pytest passed / 0 failed, 20 vitest passed.**
+- Highlights: authenticated all `/api/debug/*` + `/api/test/create-user`; coach markers round-trip (prompt↔parser) and write WeeklyPrescription; ExerciseLog fully dead (SetLog only); canonical name-aware 3-state completion in new `workout_status.py`; generate-first atomic regen + past-week lock; equipment-class swap scaling + budget-fitted macros; Garmin lockout fix (shared client + cooldown gates + capped wellness bursts); `friendlyCoachError()` replaces raw 401/JSON in all 14 coach touchpoints.
+- **BREAKING:** `/api/debug/*` and `/api/test/create-user` now require the `X-Admin-Key` header (matching `ADMIN_API_KEY`) or an admin session. The old `?admin_key=` param and hardcoded `swap-cleanup-2026-04-30` token no longer authenticate. Update curl workflows and `scripts/preview_coach_*.py`.
+- Walkthrough: onboarding→week-1→weekly-generation driven live with a stubbed coach; end-of-program/new-phase states confirmed. No new product bugs found.
+
+---
+
 # Restart / Session Handoff — 2026-06-09
 
 Everything below is **live on prod** (`one2weeks-9ewf.onrender.com`, commit
@@ -37,7 +51,6 @@ Model: Opus 4.8 (`coach.py` CLAUDE_OPUS, `coach_with_tools.py`).
 1. Coach chat on a partial/finished day — should NOT say "you're done lifting" mid-session.
 2. A lift card where you out-lifted plan — header should match your logged weight (no "145 vs 155" split).
 3. **Week 11 Monday** — shows your easy run, no "⚠ Run not planned".
-4. **Week 12** — shows "⚠ Your coach hasn't planned these lifts yet · Plan this week", not a pre-baked plan.
 
 ## Open / not done (deliberately)
 - **Run engine 7-day rule** — wk11's missing Monday was patched as data, but the
