@@ -1121,6 +1121,20 @@ function todayStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function friendlyCoachError(raw) {
+  // Never show the user a raw API error (401/JSON/request_id/x-api-key). Map it
+  // to a calm, retryable message; keep the detail in the console for debugging.
+  try { console.warn('Coach error:', raw); } catch (e) {}
+  var r = String(raw || '').toLowerCase();
+  if (r.indexOf('401') !== -1 || r.indexOf('auth') !== -1 || r.indexOf('api-key') !== -1 || r.indexOf('api key') !== -1) {
+    return "⚠️ Erik's coaching service is briefly unavailable. Your training and logs are safe — tap Send to try again in a moment.";
+  }
+  if (r.indexOf('timeout') !== -1 || r.indexOf('timed out') !== -1 || r.indexOf('network') !== -1 || r.indexOf('failed to fetch') !== -1 || r.indexOf('abort') !== -1 || r.indexOf('econn') !== -1 || r.indexOf('503') !== -1 || r.indexOf('502') !== -1 || r.indexOf('529') !== -1 || r.indexOf('overloaded') !== -1) {
+    return "⚠️ Connection hiccup reaching Erik. Your training and logs are safe — tap Send to retry.";
+  }
+  return "⚠️ Erik couldn't respond just now. Your training and logs are safe — tap Send to try again.";
+}
+
 function stripCoachMarkers(text) {
   // Strip ALL [TAG: ...] and [TAG] markers from coach output
   // Also strip timestamp prefixes like [Apr 07 03:32 PM] or (sent Apr 07 8:32 AM)
@@ -6003,7 +6017,7 @@ async function _startSundayReviewStream(trigger) {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             bubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -6152,7 +6166,7 @@ async function _startMcChat() {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             bubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -6233,7 +6247,7 @@ async function sendMcChat() {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             bubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -6445,7 +6459,7 @@ async function sendMorningCoachReply() {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             if (streamBubble) streamBubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -6876,7 +6890,7 @@ async function sendChatMessage(inputId, containerId) {
                     if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
                         const errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        fullText += '\n\n' + friendlyCoachError(errMsg);
                         if (streamBubble) {
                             streamBubble.innerHTML = renderCoachMarkdown(fullText);
                             if (container) container.scrollTop = container.scrollHeight;
@@ -7871,7 +7885,7 @@ async function _fetchRunCoachOpener(triggerMsg) {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -7940,7 +7954,7 @@ async function sendRunCoachMsg() {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             typingBubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -9355,7 +9369,11 @@ async function triggerMorningPopup() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: triggerMsg }),
         });
-        const data = await res.json();
+        // Coach unreachable (500/redirect/HTML) — skip the greeting popup
+        // silently rather than throwing on a non-JSON body. The popup is a
+        // nicety; its failure must never surface or break the dashboard.
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
         if (data.response) {
             // Greeting only. Never mark the check-in done or write scores
             // here — the real check-in (with athlete-entered numbers) is the
@@ -9397,7 +9415,11 @@ async function triggerEndOfDayPopup() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: triggerMsg }),
         });
-        const data = await res.json();
+        // Coach unreachable (500/redirect/HTML) — skip the greeting popup
+        // silently rather than throwing on a non-JSON body. The popup is a
+        // nicety; its failure must never surface or break the dashboard.
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
         if (data.response) {
             showCoachPopup(data.response);
         }
@@ -10056,7 +10078,7 @@ async function launchWeeklyPlanning(weekOverride) {
                     if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
                         var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        fullText += '\n\n' + friendlyCoachError(errMsg);
                         if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                         stop = true; break;
                     }
@@ -10124,7 +10146,7 @@ async function _fetchInlineCoachOpener() {
                     if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
                         var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        fullText += '\n\n' + friendlyCoachError(errMsg);
                         if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
                         stop = true; break;
                     }
@@ -10255,7 +10277,7 @@ async function sendInlineCoachMsg() {
                     if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
                         var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        fullText += '\n\n' + friendlyCoachError(errMsg);
                         typingBubble.innerHTML = renderCoachMarkdown(fullText);
                         stop = true; break;
                     }
@@ -10338,7 +10360,7 @@ async function sendInlineCoachMsg() {
                                         if (dd === '[DONE]') { fbStop = true; break; }
                                         if (dd.startsWith('[ERROR')) {
                                             var fbErr = dd.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                                            _fbFull += '\n\n[Coach error: ' + fbErr + ']';
+                                            _fbFull += '\n\n' + friendlyCoachError(fbErr);
                                             _fbBubble.innerHTML = renderCoachMarkdown(_fbFull);
                                             fbStop = true; break;
                                         }
@@ -10389,7 +10411,7 @@ async function _refreshCoachAccordionMsg() {
                     if (data === '[DONE]') { stop = true; break; }
                     if (data.startsWith('[ERROR')) {
                         var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-                        fullText += '\n\n[Coach error: ' + errMsg + ']';
+                        fullText += '\n\n' + friendlyCoachError(errMsg);
                         el.textContent = fullText;
                         stop = true; break;
                     }
@@ -11878,7 +11900,7 @@ async function _fetchLiftCoachOpener(triggerMsg) {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             if (bubble) bubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
@@ -11947,7 +11969,7 @@ async function sendLiftCoachMsg() {
           if (data === '[DONE]') { stop = true; break; }
           if (data.startsWith('[ERROR')) {
             var errMsg = data.replace(/^\[ERROR:?\s*/, '').replace(/\]$/, '').trim();
-            fullText += '\n\n[Coach error: ' + errMsg + ']';
+            fullText += '\n\n' + friendlyCoachError(errMsg);
             typingBubble.innerHTML = renderCoachMarkdown(fullText);
             stop = true; break;
           }
