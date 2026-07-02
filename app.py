@@ -7060,7 +7060,12 @@ def api_morning_checkin():
 def api_morning_checkin_save():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
+    is_missed_marker = bool(data.get("missed"))
     ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
+    if ci and is_missed_marker:
+        # An auto "missed" marker must NEVER overwrite an existing check-in —
+        # the athlete may have completed the real check-in on another device.
+        return jsonify({"ok": True, "ignored": "checkin already exists"})
     if ci:
         ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
         ci.stress_level = data.get("stress_level", ci.stress_level)
@@ -7082,15 +7087,23 @@ def api_morning_checkin_save():
             user_id=current_user.id,
         )
         db.session.add(ci)
-    if "missed" in data:
-        # Need to handle the 'missed' field — store as notes marker for now
-        if data.get("missed"):
-            ci.notes = (ci.notes or '') + ' [MISSED]'
+    if is_missed_marker and '[MISSED]' not in (ci.notes or ''):
+        ci.notes = (ci.notes or '') + ' [MISSED]'
     try:
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
+    if is_missed_marker:
+        # Register the miss as a compliance event. The client used to POST a
+        # nonexistent /api/compliance/refresh (404) for this; the event now
+        # fires here, once, when the miss row is first created (an existing
+        # row short-circuits above, so this can't double-fire cross-device).
+        try:
+            from coach_state import update_anger_level
+            update_anger_level(current_user.id, "missed_checkin", today=d)
+        except Exception:
+            logging.exception("morning-checkin: missed_checkin compliance event failed")
     return jsonify({"ok": True})
 
 

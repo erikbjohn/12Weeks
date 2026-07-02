@@ -1022,30 +1022,90 @@ function apiPost(url, body) {
       })
     ).catch(e2 => {
       console.error('POST failed (attempt 2):', url, e2);
-      showToast('Save failed. Check your connection.', 'error');
-      // Queue for background sync if available
-      if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        queueForSync(url, body);
-      }
+      showToast('Save failed — queued. Will retry when back online.', 'error');
+      queueForSync(url, body);
     });
   });
 }
 
+// ─── OFFLINE OUTBOX ─────────────────────────────────────────────────────────
+// Failed POSTs are queued in IndexedDB and replayed FROM THE PAGE. This used
+// to hand off to a service-worker 'sync' event — but index.html deliberately
+// unregisters every service worker (stale-asset protection) and nothing ever
+// registers sw.js, so queued sets sat in the outbox forever and workout data
+// was silently lost. The page itself now replays the queue on reconnect and
+// at startup.
+
+function _openOutboxDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open('12weeks-sync', 1);
+        req.onupgradeneeded = () => { req.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true }); };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
 async function queueForSync(url, body) {
     try {
-        const db = await new Promise((resolve, reject) => {
-            const req = indexedDB.open('12weeks-sync', 1);
-            req.onupgradeneeded = () => { req.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true }); };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        });
+        const db = await _openOutboxDB();
         const tx = db.transaction('outbox', 'readwrite');
         tx.objectStore('outbox').add({ url, body: JSON.stringify(body), timestamp: Date.now() });
-        const reg = await navigator.serviceWorker.ready;
-        await reg.sync.register('sync-posts');
+        // Retry shortly even without an 'online' event — connectivity can be
+        // flaky (rooftop gym) rather than cleanly offline.
+        setTimeout(replayOutbox, 30000);
     } catch (e) {
         console.warn('Failed to queue for sync:', e);
     }
+}
+
+let _outboxReplaying = false;
+
+async function replayOutbox() {
+    if (_outboxReplaying) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    _outboxReplaying = true;
+    let replayed = 0;
+    try {
+        const db = await _openOutboxDB();
+        const items = await new Promise((resolve, reject) => {
+            const req = db.transaction('outbox', 'readonly').objectStore('outbox').getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        for (const item of items) {
+            try {
+                const res = await fetch(item.url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: item.body,
+                    credentials: 'same-origin',
+                });
+                if (res.ok) {
+                    db.transaction('outbox', 'readwrite').objectStore('outbox').delete(item.id);
+                    replayed++;
+                } else if (res.status === 401) {
+                    break; // Session expired — keep the queue, retry after re-auth
+                } else {
+                    break; // Server error — retry later
+                }
+            } catch (e) {
+                break; // Still offline — retry later
+            }
+        }
+    } catch (e) {
+        console.warn('Outbox replay failed:', e);
+    } finally {
+        _outboxReplaying = false;
+    }
+    if (replayed > 0 && typeof showToast === 'function') {
+        showToast(replayed + ' queued save' + (replayed === 1 ? '' : 's') + ' synced.');
+    }
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('online', () => { replayOutbox(); });
+    // Drain anything left over from a previous session once the app settles.
+    setTimeout(() => { replayOutbox().catch(() => {}); }, 5000);
 }
 
 function todayStr() {
@@ -1660,6 +1720,29 @@ function _confirmSetIfSuspicious(exName, weight, reps, repsTyped) {
   return confirm(warnings.join('\n\n') + '\n\nOK to save anyway, Cancel to fix.');
 }
 
+// Canonical reps resolution for set logging (falsy-zero-safe).
+// A typed 0 (failed set) is REAL data and must be logged as 0 — never
+// silently replaced by the target. Only an EMPTY reps field falls back
+// to the target/placeholder reps ("hit the target" convention).
+function resolveLoggedReps(rawTyped, rawTarget) {
+  const typed = parseInt(rawTyped);
+  if (!Number.isNaN(typed)) return typed;
+  return parseInt(rawTarget) || 0;
+}
+
+// Canonical weight prefill (falsy-zero-safe). A logged weight of 0 on a
+// DONE set is real data (did it bodyweight) and must display as 0, not be
+// replaced by the carried suggestion — re-toggling would re-save the
+// suggestion over the logged 0. An undone cached 0 just means "nothing
+// typed yet" and falls back to the carry value.
+function resolvePrefillWeight(setData, fallback) {
+  if (setData && setData.weight != null) {
+    if (setData.weight > 0) return setData.weight;
+    if (setData.done && setData.weight === 0) return 0;
+  }
+  return fallback;
+}
+
 function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
   // If toggleSet is mid-flight, let it own the save — don't double-write
@@ -1667,11 +1750,11 @@ function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
-  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
-  const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
-  const reps = repsTyped || repsTarget;
-  if (weight <= 0 && reps <= 0) return;
-  if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped)) return;
+  const repsTyped = repsInput ? parseInt(repsInput.value) : NaN; // NaN = field empty
+  const reps = resolveLoggedReps(repsInput ? repsInput.value : '', repsInput ? repsInput.placeholder : '');
+  // Nothing meaningful entered — but an explicitly typed 0 IS meaningful (failed set)
+  if (weight <= 0 && reps <= 0 && Number.isNaN(repsTyped)) return;
+  if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped || 0)) return;
   // Update local cache so the value persists across re-renders even before toggleSet
   if (!_setCache[key]) _setCache[key] = { done: false, weight, reps };
   else { _setCache[key].weight = weight; _setCache[key].reps = reps; }
@@ -1685,10 +1768,10 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
-  // If user didn't type reps, use the target reps (placeholder) — they hit the target
-  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
-  const repsTarget = repsInput ? parseInt(repsInput.placeholder) || 0 : 0;
-  const reps = repsTyped || repsTarget;
+  // If the reps field is EMPTY, use the target reps (placeholder) — they hit
+  // the target. A typed 0 is a failed set and is logged as 0 (falsy-zero-safe).
+  const repsTyped = repsInput ? parseInt(repsInput.value) : NaN;
+  const reps = resolveLoggedReps(repsInput ? repsInput.value : '', repsInput ? repsInput.placeholder : '');
 
   if (_setCache[key] && _setCache[key].done) {
     // Un-check
@@ -1706,7 +1789,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     }
   } else {
     // Check — mark set done. Flag obvious typos before persisting.
-    if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped)) return;
+    if (!_confirmSetIfSuspicious(exName, weight, reps, repsTyped || 0)) return;
     _setCache[key] = { done: true, weight, reps };
     btn.classList.add('done');
     btn.innerHTML = '&#10003;';
@@ -6497,8 +6580,9 @@ async function triggerWeeklyPlanning() {
   const planKey = '12w_weekly_plan_' + todayStr();
   if (localStorage.getItem(planKey)) return;
 
-  // Send the weekly planning trigger to Coach
-  const weekNum = currentWeek;
+  // Send the weekly planning trigger to Coach — keyed to the ACTUAL program
+  // week (from start_date), not whatever week happens to be on screen.
+  const weekNum = getActualProgramWeek() || currentWeek;
   const nextWeek = Math.min(weekNum + 1, 12);
 
   // Include bodyweight progression deltas if a retest landed this week
@@ -6736,6 +6820,10 @@ async function sendChatMessage(inputId, containerId) {
         msgContainer.scrollTop = msgContainer.scrollHeight;
     }
 
+    // Declared OUTSIDE the try so the catch can show the partial streamed
+    // text + an error marker instead of leaving the message unanswered.
+    let fullText = '';
+    let streamBubble = null;
     try {
         const _chatAbort = new AbortController();
         const _chatTimeout = setTimeout(() => _chatAbort.abort(), 60000); // 60s timeout
@@ -6750,7 +6838,7 @@ async function sendChatMessage(inputId, containerId) {
         const typingEl = document.getElementById('chat-typing-' + containerId);
         if (typingEl) typingEl.remove();
 
-        const streamBubble = document.createElement('div');
+        streamBubble = document.createElement('div');
         streamBubble.className = 'chat-bubble coach';
         streamBubble.id = 'stream-bubble-' + containerId;
         if (container) {
@@ -6758,7 +6846,6 @@ async function sendChatMessage(inputId, containerId) {
             container.scrollTop = container.scrollHeight;
         }
 
-        let fullText = '';
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
 
@@ -6802,7 +6889,25 @@ async function sendChatMessage(inputId, containerId) {
         const typingEl = document.getElementById('chat-typing-' + containerId);
         if (typingEl) typingEl.remove();
         const errMsg = e.name === 'AbortError' ? 'Response took too long. Try again.' : 'Connection error. Try again.';
-        _chatHistory.push({ role: 'coach', text: errMsg, time: new Date().toISOString() });
+        if (fullText.trim() && streamBubble) {
+            // Stream died mid-response: keep the partial text on screen AND in
+            // history (so they agree), with a visible error marker.
+            const interrupted = fullText + '\n\n[' + errMsg + ']';
+            streamBubble.innerHTML = renderCoachMarkdown(interrupted);
+            _chatHistory.push({ role: 'coach', text: interrupted, time: new Date().toISOString() });
+        } else {
+            // Nothing streamed: render an error bubble so the user's message
+            // doesn't just sit there visually unanswered.
+            if (streamBubble) streamBubble.remove();
+            _chatHistory.push({ role: 'coach', text: errMsg, time: new Date().toISOString() });
+            if (container) {
+                const errBubble = document.createElement('div');
+                errBubble.className = 'chat-bubble coach';
+                errBubble.innerHTML = renderCoachMarkdown(errMsg);
+                container.appendChild(errBubble);
+                container.scrollTop = container.scrollHeight;
+            }
+        }
     }
 
     // Don't re-render history — messages were appended during streaming
@@ -8105,6 +8210,10 @@ function _renderNewDashboardInner(apiData, overlay) {
   html += '</div>';
 
   overlay.innerHTML = html;
+  // Fresh DOM = fresh "Loading Lab data..." placeholder, so the lazy-load
+  // latch must reset too — otherwise reopening Progress leaves the Lab tab
+  // stuck on the placeholder forever (the fetch is skipped as "already done").
+  _spLabLoaded = false;
 }
 
 /* ── HERO CARD ── */
@@ -8516,8 +8625,11 @@ function _spSwitchTab(tab, btn) {
       var mount = document.getElementById('sp-lab-content');
       if (mount) mount.innerHTML = _spRenderLab(_spLabData);
     }).catch(function(e) {
+      // Reset the latch so the next click retries instead of freezing the
+      // error state until a full page reload.
+      _spLabLoaded = false;
       var mount = document.getElementById('sp-lab-content');
-      if (mount) mount.innerHTML = '<div style="padding:2rem;color:#ef4444">Failed to load Lab data</div>';
+      if (mount) mount.innerHTML = '<div style="padding:2rem;color:#ef4444">Failed to load Lab data — tap the Lab tab to retry</div>';
     });
   }
 }
@@ -9183,6 +9295,9 @@ async function triggerMorningPopup() {
     if (hour >= 12 && !hasPopupFired('morning') && !_morningCheckinDone) {
         markPopupFired('morning');
         _morningCheckinDone = true; // Don't gate after noon
+        // Server records the miss AND fires the missed_checkin compliance
+        // event in the same POST (a client call to /api/compliance/refresh
+        // used to live here — that route never existed and 404'd silently).
         apiPost('/api/morning-checkin', {
             date: todayStr(),
             sleep_quality: 0, stress_level: 0, soreness: 0,
@@ -9190,11 +9305,15 @@ async function triggerMorningPopup() {
             notes: '[MISSED] Morning check-in not completed before noon',
             missed: true,
         });
-        // Recompute compliance
-        fetch('/api/compliance/refresh', { method: 'POST' }).catch(() => {});
         return;
     }
     if (hasPopupFired('morning')) return;
+    // The popup is a greeting, NOT a check-in. Before the real morning
+    // check-in is done, stay silent — showMorningCheckinOverlay owns the
+    // morning conversation. (This function used to auto-POST fabricated
+    // 5/10 scores and mark the check-in complete, bypassing the lock with
+    // data the athlete never entered.)
+    if (!_morningCheckinDone) return;
     const today = todayStr();
     const todayCoachMsgs = _chatHistory.filter(m =>
         (m.role === 'coach' || m.role === 'assistant') &&
@@ -9224,15 +9343,10 @@ async function triggerMorningPopup() {
         });
         const data = await res.json();
         if (data.response) {
+            // Greeting only. Never mark the check-in done or write scores
+            // here — the real check-in (with athlete-entered numbers) is the
+            // only thing allowed to complete /api/morning-checkin.
             showCoachPopup(data.response);
-            _morningCheckinDone = true;
-            // Save morning checkin completion
-            apiPost('/api/morning-checkin', {
-                date: todayStr(),
-                sleep_quality: 5, stress_level: 5, soreness: 5,
-                mood: 5, motivation: 5, anxiety: 5,
-                notes: 'Auto-completed via morning popup'
-            });
         }
     } catch(e) {
         console.error('Morning popup failed:', e);
@@ -9574,7 +9688,9 @@ function buildCoachContent(d) {
     // Check if next week has meal plans — meals are only generated during planning.
     var _cDow = new Date().getDay(); // 0=Sun, 1=Mon
     var _isSunOrMon = _cDow === 0 || _cDow === 1;
-    var _nextWk = currentWeek + 1;
+    // Key off the ACTUAL program week (from start_date), never the week being
+    // browsed — browsing week 11 on Sunday must not offer "Plan Week 12".
+    var _nextWk = (getActualProgramWeek() || currentWeek) + 1;
     var _nextWkData = workoutData && workoutData[String(_nextWk)];
     var _nextWkPlanned = false;
     if (_nextWkData && _nextWkData.days) {
@@ -9583,7 +9699,9 @@ function buildCoachContent(d) {
       }
     }
     if (_isSunOrMon && !_nextWkPlanned && _nextWk <= 12) {
-      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="launchWeeklyPlanning()">Plan Week ' + _nextWk + '</button>';
+      // Pass the week explicitly so the button label and the generated week
+      // can never diverge.
+      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="launchWeeklyPlanning(' + _nextWk + ')">Plan Week ' + _nextWk + '</button>';
     }
     html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
     '</div>';
@@ -9594,8 +9712,13 @@ async function launchWeeklyPlanning(weekOverride) {
     // Manually trigger the weekly planning flow
     var container = document.getElementById('coach-inline-chat');
     if (!container) return;
-    var targetWeek = weekOverride || currentWeek + 1;
-    var isReplan = targetWeek === currentWeek;
+    // Default target is the week after the ACTUAL program week — never derived
+    // from the week being browsed (that pre-baked future weeks Erik hadn't
+    // planned). Explicit weekOverride (e.g. "Plan this week" on the viewed
+    // week) still wins.
+    var _actualWk = getActualProgramWeek() || currentWeek;
+    var targetWeek = weekOverride || _actualWk + 1;
+    var isReplan = targetWeek === _actualWk;
     container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)"><div class="chat-typing"><span></span><span></span><span></span></div><div style="margin-top:8px">' + (isReplan ? 'Re-generating this week\'s program...' : 'Generating next week\'s program...') + '</div></div>';
 
     var nextWeek = targetWeek;
@@ -10991,9 +11114,9 @@ async function renderDetail() {
       if (!setDone && firstUndoneSet < 0) firstUndoneSet = s;
       const setWeight = isBodyweightPrescription
         ? ''  // BW: empty regardless of cache
-        : (setData && setData.weight ? setData.weight : carryWeight);
-      const setReps = setData && setData.reps ? setData.reps : '';
-      if (!isBodyweightPrescription && setData && setData.weight) carryWeight = setData.weight;
+        : resolvePrefillWeight(setData, carryWeight);  // logged 0 on a done set is real (bodyweight)
+      const setReps = setData && setData.reps != null && setData.reps !== '' && !(setData.reps === 0 && !setData.done) ? setData.reps : '';
+      if (!isBodyweightPrescription) carryWeight = resolvePrefillWeight(setData, carryWeight);
 
       if (isTimedEx && setCount > 1) {
         // Multi-set timed exercise = ONE interval (HIIT-style) cycle: WORK / REST
@@ -11942,9 +12065,10 @@ async function enterExerciseFocus(exIdx) {
   const isWarmupEx = ex._isWarmup;
   if (!isWarmupEx) {
     // Carry forward from earlier completed sets in this session
+    // (falsy-zero-safe: a done set logged at 0 lb carries 0, not the target)
     for (let s = 0; s < (_focusSetCount || 4); s++) {
       const sd = _setCache[`${currentWeek}_${currentDay}_${_focusRealExIdx}_${s}`];
-      if (sd && sd.weight) _focusWeightVal = sd.weight;
+      _focusWeightVal = resolvePrefillWeight(sd, _focusWeightVal);
     }
   }
 
@@ -12009,7 +12133,7 @@ function renderExerciseFocus() {
     // Get saved weight for this set (if previously entered)
     const setKey = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${_focusSetIdx}`;
     const setData = _setCache && _setCache[setKey];
-    const wt = setData && setData.weight ? setData.weight : _focusWeightVal;
+    const wt = resolvePrefillWeight(setData, _focusWeightVal);  // logged 0 on a done set is real
     const rp = setData && setData.reps ? setData.reps : '';
 
     el.innerHTML = `
@@ -12042,8 +12166,9 @@ function logFocusSet() {
   const wtInput = document.getElementById('focus-wt');
   const repsInput = document.getElementById('focus-reps');
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
-  const repsTyped = repsInput ? parseInt(repsInput.value) : 0;
-  const reps = repsTyped || parseInt(_focusTargetReps) || 0;
+  // Empty reps field = hit the target; a typed 0 is a FAILED set and must be
+  // logged as 0, not silently upgraded to the target (falsy-zero-safe).
+  const reps = resolveLoggedReps(repsInput ? repsInput.value : '', _focusTargetReps);
 
   const key = `${currentWeek}_${currentDay}_${_focusRealExIdx}_${_focusSetIdx}`;
   _setCache[key] = { done: true, weight, reps };

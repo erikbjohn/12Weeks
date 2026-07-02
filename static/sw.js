@@ -75,58 +75,12 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Background sync for offline POST requests
-self.addEventListener('sync', (e) => {
-  if (e.tag === 'sync-posts') {
-    e.waitUntil(replayQueuedPosts());
-  }
-});
-
-async function replayQueuedPosts() {
-  const db = await openSyncDB();
-  const tx = db.transaction('outbox', 'readwrite');
-  const store = tx.objectStore('outbox');
-  const all = await storeGetAll(store);
-
-  for (const item of all) {
-    try {
-      const res = await fetch(item.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: item.body,
-        credentials: 'same-origin',
-      });
-      if (res.ok) {
-        store.delete(item.id);
-      } else if (res.status === 401) {
-        break; // Session expired, stop retrying until re-auth
-      } else {
-        break; // Server error, retry later
-      }
-    } catch (e) {
-      break; // Network error, retry later
-    }
-  }
-}
-
-function openSyncDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('12weeks-sync', 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function storeGetAll(store) {
-  return new Promise((resolve, reject) => {
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
+// NOTE: the offline POST outbox is replayed by the PAGE (app.js
+// replayOutbox), not here. This worker is never registered — index.html
+// deliberately unregisters all service workers to prevent stale assets —
+// so a 'sync'-event replay was dead code and queued sets were lost. Do not
+// re-add a SW-side replay without removing the page-side one (both deleting
+// from the same outbox can double-POST).
 
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────
 self.addEventListener('push', (e) => {
