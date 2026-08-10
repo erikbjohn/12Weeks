@@ -40,6 +40,7 @@ from models import (
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
+    PeptideDose,
 )
 
 app = Flask(__name__)
@@ -4465,6 +4466,314 @@ def admin_replan_week():
     threading.Thread(target=_bg, daemon=True).start()
     return jsonify({"ok": True, "started": True, "email": email,
                     "week": week, "preserve_through_day": preserve})
+
+
+def _user_today_for(user):
+    """Resolve "today" in the TARGET user's local timezone — never the
+    server's UTC date. The admin import endpoint has no logged-in
+    current_user in the right timezone, so "today" for immutability
+    decisions must always come from the target user's own User.timezone
+    column via utils_time.user_local_today (never date.today())."""
+    from utils_time import user_local_today
+    return user_local_today(user.timezone)
+
+
+def _reconcile_meal_rail(user, changed_dates):
+    """STUB (Task 10 fills this in): given the target user and the dates
+    whose fasted (a dose scheduled at/after 21:00) status changed during
+    this import, regenerate the affected unlogged, non-past days' meal
+    plans (reusing /api/meals/regenerate's logged-meal/past-day protection)
+    and return the list of day identifiers actually regenerated. For now
+    this is a no-op that always reports nothing regenerated — the import
+    endpoint still computes and passes `changed_dates` correctly so this
+    stub only needs its body filled in later."""
+    return []
+
+
+@app.route("/api/admin/import-protocol", methods=["POST"])
+@admin_required
+def admin_import_protocol():
+    """Admin CSV import for a user's peptide-protocol dose schedule
+    (models.PeptideDose). Query param `email` (required) selects the
+    target user; JSON body optional: {"csv_path": "peptide_protocol.csv",
+    "force_past": false}.
+
+    Full binding contract: docs/superpowers/specs/2026-08-10-peptide-
+    protocol-integration-design.md §1. Summary of what's enforced here:
+
+    1. VALIDATE FIRST: the whole CSV is rejected (400, nothing written) if
+       it contains a duplicate (Date, Compound) pair.
+    2. "Today" is the TARGET user's local date (User.timezone via
+       utils_time.user_local_today through `_user_today_for`), never the
+       server's UTC date.
+    3. Upsert key is (user_id, date, compound) — `time` is a payload field,
+       not part of the key, so a doctor's time edit is a plain update that
+       inherently preserves taken_at.
+       - Rows dated before today are NEVER inserted, updated, or deleted —
+         unless the caller passes force_past=true, in which case the
+         change is applied and logged in `skipped` (reused here as a diff
+         log, not only a "nothing happened" list).
+       - On a row with taken_at set, dose_mg is NEVER updated (skipped +
+         reported) — UNCONDITIONALLY; force_past does not override this,
+         only the past-date lock. Metadata (time, event_type,
+         syringe_units, site, notes) may still update in place, preserving
+         taken_at.
+    4. Delete pass: a DB row absent from the CSV is deleted only if its
+       date is in the future, or it's today's row and untaken. A CHECKED
+       today row dropped from the CSV is kept and annotated
+       " [removed from protocol]" instead of being deleted.
+    5. Whole-file integrity: before committing, the importer reconstructs
+       the exact (date, compound) key set it expects to exist and asserts
+       it against the actual DB state; any mismatch raises and rolls back
+       the entire transaction (500).
+
+    Everything happens in one db.session transaction.
+    """
+    email = (request.args.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    csv_path = data.get("csv_path") or "peptide_protocol.csv"
+    force_past = bool(data.get("force_past", False))
+
+    if not os.path.isabs(csv_path):
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), csv_path)
+    if not os.path.exists(csv_path):
+        return jsonify({"error": f"CSV not found: {csv_path}"}), 400
+
+    import csv as _csv
+    from collections import Counter
+
+    def _none_if_dash(v):
+        v = (v or "").strip()
+        return None if v in ("", "-") else v
+
+    parsed_rows = []
+    seen_keys = set()
+    dup_keys = set()
+    try:
+        with open(csv_path, newline="") as f:
+            reader = _csv.DictReader(f)
+            for raw in reader:
+                row_date = datetime.strptime(raw["Date"].strip(), "%Y-%m-%d").date()
+                compound = raw["Compound"].strip()
+                key = (row_date, compound)
+                if key in seen_keys:
+                    dup_keys.add(key)
+                seen_keys.add(key)
+                parsed_rows.append({
+                    "date": row_date,
+                    "time": raw["Time"].strip(),
+                    "event_type": raw["Event_Type"].strip(),
+                    "compound": compound,
+                    "dose_mg": float(raw["Dose_mg"]),
+                    "syringe_units": _none_if_dash(raw.get("Syringe_Units")),
+                    "site": _none_if_dash(raw.get("Site")),
+                    "notes": (raw.get("Notes") or "").strip() or None,
+                })
+    except Exception as e:
+        return jsonify({"error": f"failed to parse CSV: {e}"}), 400
+
+    if dup_keys:
+        return jsonify({
+            "error": "duplicate (Date, Compound) rows in CSV — nothing written",
+            "duplicates": sorted(
+                [{"date": d.isoformat(), "compound": c} for d, c in dup_keys],
+                key=lambda x: (x["date"], x["compound"]),
+            ),
+        }), 400
+
+    today = _user_today_for(user)
+
+    existing_rows = PeptideDose.query.filter_by(user_id=user.id).all()
+    existing = {(r.date, r.compound): r for r in existing_rows}
+    csv_keys = {(r["date"], r["compound"]) for r in parsed_rows}
+    # Pre-mutation snapshot of every existing row's time, for the meal-rail
+    # fasted-status diff below — existing_row objects mutate in place as we
+    # process the CSV, so this has to be captured before any writes happen.
+    before_time_by_key = {k: v.time for k, v in existing.items()}
+    csv_time_by_key = {(r["date"], r["compound"]): r["time"] for r in parsed_rows}
+
+    # Bookkeeping for the post-write integrity check: the exact (date,
+    # compound) key set we expect to exist once every row below has been
+    # processed.
+    expected_keys = set(existing.keys())
+
+    imported = 0
+    updated = 0
+    deleted = 0
+    skipped = []
+
+    metadata_fields = ("time", "event_type", "syringe_units", "site", "notes")
+
+    try:
+        for r in parsed_rows:
+            key = (r["date"], r["compound"])
+            is_past = r["date"] < today
+            existing_row = existing.get(key)
+
+            if existing_row is None:
+                if is_past and not force_past:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "row", "db_value": None,
+                        "csv_value": "insert blocked (past date)",
+                    })
+                    continue
+                new_row = PeptideDose(
+                    user_id=user.id, date=r["date"], time=r["time"],
+                    event_type=r["event_type"], compound=r["compound"],
+                    dose_mg=r["dose_mg"], syringe_units=r["syringe_units"],
+                    site=r["site"], notes=r["notes"], taken_at=None,
+                )
+                db.session.add(new_row)
+                expected_keys.add(key)
+                imported += 1
+                if is_past and force_past:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "row", "db_value": None,
+                        "csv_value": "inserted (force_past)",
+                    })
+                continue
+
+            # Existing row present — decide what may update.
+            if is_past and not force_past:
+                for field in ("dose_mg",) + metadata_fields:
+                    db_val = getattr(existing_row, field)
+                    csv_val = r[field]
+                    if db_val != csv_val:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": field, "db_value": db_val, "csv_value": csv_val,
+                        })
+                continue
+
+            taken = existing_row.taken_at is not None
+            row_touched = False
+
+            # dose_mg is immutable once taken — UNCONDITIONALLY. force_past
+            # overrides the past-date lock only, never this rule: the record
+            # of what was actually injected is never rewritten by a bulk
+            # CSV import.
+            if existing_row.dose_mg != r["dose_mg"]:
+                if taken:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "dose_mg", "db_value": existing_row.dose_mg,
+                        "csv_value": r["dose_mg"],
+                    })
+                else:
+                    if is_past and force_past:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": "dose_mg", "db_value": existing_row.dose_mg,
+                            "csv_value": r["dose_mg"],
+                        })
+                    existing_row.dose_mg = r["dose_mg"]
+                    row_touched = True
+
+            for field in metadata_fields:
+                db_val = getattr(existing_row, field)
+                csv_val = r[field]
+                if db_val != csv_val:
+                    if is_past and force_past:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": field, "db_value": db_val, "csv_value": csv_val,
+                        })
+                    setattr(existing_row, field, csv_val)
+                    row_touched = True
+
+            if row_touched:
+                updated += 1
+
+        # Deletion pass — DB rows absent from the CSV.
+        for key, row in existing.items():
+            if key in csv_keys:
+                continue
+            d, c = key
+            if d > today:
+                db.session.delete(row)
+                expected_keys.discard(key)
+                deleted += 1
+            elif d == today:
+                if row.taken_at is None:
+                    db.session.delete(row)
+                    expected_keys.discard(key)
+                    deleted += 1
+                else:
+                    marker = "[removed from protocol]"
+                    if marker not in (row.notes or ""):
+                        row.notes = ((row.notes or "").rstrip() + " " + marker).strip()
+                        updated += 1
+            # d < today and absent from the CSV: never touched — the CSV
+            # simply doesn't cover it, and past rows are never deleted.
+
+        db.session.flush()
+
+        # ── Whole-file integrity check ──────────────────────────────────
+        actual_keys = {
+            (row.date, row.compound)
+            for row in PeptideDose.query.filter_by(user_id=user.id).all()
+        }
+        if actual_keys != expected_keys:
+            missing = sorted(expected_keys - actual_keys)
+            extra = sorted(actual_keys - expected_keys)
+            raise RuntimeError(
+                f"protocol import integrity check failed for user {user.id}: "
+                f"missing={missing} extra={extra}"
+            )
+        expected_compound_counts = Counter(c for _, c in expected_keys)
+        actual_compound_counts = Counter(c for _, c in actual_keys)
+        if expected_compound_counts != actual_compound_counts:
+            raise RuntimeError(
+                f"protocol import per-compound count mismatch for user {user.id}: "
+                f"expected={dict(expected_compound_counts)} actual={dict(actual_compound_counts)}"
+            )
+
+        # ── Meal-rail reconciliation: which dates' fasted (>=21:00 dose)
+        # status flipped between before and after this import.
+        def _fasted_dates(time_by_key):
+            out = set()
+            for (d, _c), t in time_by_key.items():
+                if t >= "21:00":
+                    out.add(d)
+            return out
+
+        after_time_by_key = {}
+        for k in expected_keys:
+            if k in existing:
+                after_time_by_key[k] = existing[k].time
+            else:
+                after_time_by_key[k] = csv_time_by_key[k]
+
+        before_fasted = _fasted_dates(before_time_by_key)
+        after_fasted = _fasted_dates(after_time_by_key)
+        changed_dates = sorted(before_fasted ^ after_fasted)
+
+        meal_days_regenerated = _reconcile_meal_rail(user, changed_dates)
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        import logging
+        logging.exception("protocol import failed for user %s", user.id)
+        return jsonify({"error": f"protocol import failed: {e}"}), 500
+
+    return jsonify({
+        "imported": imported,
+        "updated": updated,
+        "deleted": deleted,
+        "skipped": skipped,
+        "meal_days_regenerated": meal_days_regenerated,
+        "row_count": len(parsed_rows),
+        "per_compound": dict(Counter(r["compound"] for r in parsed_rows)),
+    })
 
 
 def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
