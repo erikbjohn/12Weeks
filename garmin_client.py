@@ -17,6 +17,7 @@ class GarminClient:
         self._mfa_client_state = None
         self._rate_limited_until = 0
         self._user_id = user_id
+        self.last_restore_error = None
 
     @property
     def connected(self):
@@ -33,6 +34,7 @@ class GarminClient:
         if time.time() < self._rate_limited_until:
             # Rate-limited: restoring would fire live HTTP at Garmin and
             # sustain the block. Stay disconnected until the cooldown lapses.
+            # Do NOT overwrite last_restore_error — keep the original failure reason.
             return False
         log.info("DEBUG: Garmin token restore for user_id=%s", uid)  # DEBUG: remove after fix confirmed
         try:
@@ -49,6 +51,7 @@ class GarminClient:
             self.api.login(tokenstore=tokens.token_data)
             self._connected = True
             self._cache = {}
+            self.last_restore_error = None  # Clear on success
             if uid:
                 self._user_id = uid
             # Persist the refreshed OAuth2 back to the DB. garth silently
@@ -73,6 +76,8 @@ class GarminClient:
             return True
         except Exception as e:
             err = str(e)
+            # Capture the error for diagnostic reporting
+            self.last_restore_error = f"{type(e).__name__}: {e}"[:200]
             if "429" in err or "Too Many" in err or "rate" in err.lower():
                 # Garmin rate limit during restore — back off like login() does
                 # so the next caller doesn't immediately re-hammer the auth endpoint.
