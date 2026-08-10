@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spec Review — Peptide Protocol Integration (2026-08-10)</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #111418;
+    --muted: #3d4652;
+    --border: #c9d1d9;
+    --blocker: #a4161a;
+    --blocker-bg: #fdeaea;
+    --major: #9a5b00;
+    --major-bg: #fdf3e3;
+    --minor: #1b4f8a;
+    --minor-bg: #e9f1fa;
+    --good: #1e6f3e;
+    --good-bg: #e8f5ec;
+    --card: #f6f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 20px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 .4rem; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.55rem; margin: 3rem 0 1rem; padding-bottom: .35rem; border-bottom: 3px solid var(--border); }
+  h3 { font-size: 1.2rem; margin: 1.8rem 0 .5rem; }
+  p { margin: .6rem 0 1rem; }
+  .statrow { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.5rem 0 0; }
+  .stat {
+    background: var(--card); border: 2px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.4rem; min-width: 10rem; flex: 1;
+  }
+  .stat .num { font-size: 2.2rem; font-weight: 700; display: block; }
+  .stat .lbl { color: var(--muted); font-size: .95rem; }
+  .badge {
+    display: inline-block; font-size: .85rem; font-weight: 700; letter-spacing: .04em;
+    padding: .15rem .6rem; border-radius: 6px; vertical-align: middle; text-transform: uppercase;
+  }
+  .b-blocker { background: var(--blocker-bg); color: var(--blocker); border: 2px solid var(--blocker); }
+  .b-major   { background: var(--major-bg);   color: var(--major);   border: 2px solid var(--major); }
+  .b-minor   { background: var(--minor-bg);   color: var(--minor);   border: 2px solid var(--minor); }
+  .b-good    { background: var(--good-bg);    color: var(--good);    border: 2px solid var(--good); }
+  .finding {
+    border: 2px solid var(--border); border-left-width: 8px; border-radius: 10px;
+    padding: 1.1rem 1.4rem; margin: 1.2rem 0; background: #fff;
+  }
+  .finding.blocker { border-left-color: var(--blocker); background: var(--blocker-bg); }
+  .finding.major   { border-left-color: var(--major);   background: var(--major-bg); }
+  .finding.minor   { border-left-color: var(--minor);   background: var(--minor-bg); }
+  .finding.good    { border-left-color: var(--good);    background: var(--good-bg); }
+  .finding h3 { margin: 0 0 .5rem; font-size: 1.25rem; }
+  .fix { margin-top: .8rem; padding-top: .8rem; border-top: 2px dashed rgba(0,0,0,.18); }
+  .fix strong { color: var(--good); }
+  code {
+    background: #eceff3; border: 1px solid var(--border); border-radius: 5px;
+    padding: .08rem .35rem; font-size: .88em;
+    font-family: "SF Mono", SFMono-Regular, Consolas, Menlo, monospace;
+  }
+  ul { padding-left: 1.5rem; }
+  li { margin: .5rem 0; }
+  .decision {
+    background: var(--card); border: 2px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.4rem; margin: 1rem 0;
+  }
+  .decision .pick { font-weight: 700; }
+  .tablewrap { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .95em; }
+  th, td { border: 2px solid var(--border); padding: .6rem .8rem; text-align: left; }
+  th { background: var(--card); }
+  footer { margin-top: 4rem; color: var(--muted); font-size: .95rem; border-top: 2px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Spec Review — Peptide Protocol Integration &amp; Block 3 Recomp</h1>
+<div class="subtitle">Multi-agent review of <code>docs/superpowers/specs/2026-08-10-peptide-protocol-integration-design.md</code> · run 2026-08-10 · every finding independently verified against the actual code and CSV before appearing here</div>
+
+<div class="statrow">
+  <div class="stat"><span class="num">55</span><span class="lbl">agents (7 reviewers + 48 adversarial verifiers)</span></div>
+  <div class="stat"><span class="num">48</span><span class="lbl">findings confirmed</span></div>
+  <div class="stat"><span class="num">0</span><span class="lbl">findings refuted</span></div>
+  <div class="stat"><span class="num">3 + 6</span><span class="lbl">blocker clusters + major clusters after dedup</span></div>
+</div>
+
+<h2>Bottom line</h2>
+<p>The spec's <em>shape</em> is right — protocol as first-class data, coach awareness, meal rail, dual-line recomp goal. But <strong>as written it is not safely implementable</strong>. Three parts would corrupt data or fail silently in production, and six more would produce wrong behavior or leave implementers guessing. Everything below was reproduced by an independent verifier reading the real code; nothing here is speculative.</p>
+
+<h2><span class="badge b-blocker">Blockers</span> — would corrupt data or break silently</h2>
+
+<div class="finding blocker">
+  <h3>1. The block 2→3 transition would corrupt your training history</h3>
+  <p>The spec says: re-stamp block-2 weeks 1–7 with <code>week += 12</code> → weeks 13–19, "same playbook as last time." But <strong>block-1 history already lives at weeks 13–24</strong> from the last transition. The += 12 rams block-2 into block-1's rows:</p>
+  <ul>
+    <li>Tables with unique constraints (<code>set_log</code>, <code>run_log</code> — you ran every day of both blocks, so <em>every</em> slot collides — <code>day_completion</code>, <code>weekly_checkin</code>…) <strong>abort mid-migration</strong>.</li>
+    <li>Plan tables without constraints <strong>silently merge two blocks</strong> under the same week numbers.</li>
+    <li>Result: a half-restamped database. And the rollback ("week −= 12 on the 22 tables") is then <strong>unexecutable</strong> — there is no block column, so merged rows are indistinguishable; the unscoped −= 12 would also drag block-1 into weeks 1–12 and decrement <code>coach_memory</code>, which was never shifted.</li>
+  </ul>
+  <p>The "same playbook" was only safe last time because weeks 13–24 were <em>empty</em>. The spec never re-checks that precondition.</p>
+  <div class="fix"><strong>Fix:</strong> cascade oldest-first, all inside one DB transaction: block-1 weeks 13–24 → 25–36 <em>first</em>, then block-2 → 13–18. Rollback becomes the exact scoped inverse, newest-first. Record per-week row histograms (not raw counts — counts don't change under an UPDATE, so they can't detect a botched re-stamp).</div>
+</div>
+
+<div class="finding blocker">
+  <h3>2. Today is day 0 of both blocks — today's data gets filed as ancient history</h3>
+  <p>2026-08-10 is day 0 of block-2 week 7 <em>and</em> day 0 of block-3 week 1. Anything already logged today — your Garmin morning run auto-pulls into <code>run_log</code> — carries week=7 and would be shipped off as "week 19" history. Block-3 Monday then <strong>permanently shows no run</strong> (Garmin sync won't re-import it; it's idempotent by activity id), and the spec's own verification step "today = not_started" would <em>pass while lying</em>. There is also a live-write race between the re-stamp step and the AppState update: the app still computes "week 7" in between and can write orphan rows that resurface inside block-3's real week 7 in late September.</p>
+  <div class="fix"><strong>Fix:</strong> re-stamp only the <em>completed</em> weeks 1–6; in the same transaction, re-home today's week-7 rows to block-3 week 1 day 0; set AppState (start_date, current_week) in that same atomic commit; then run one forced Garmin sync and verify today's run sits on block-3's card.</div>
+</div>
+
+<div class="finding blocker">
+  <h3>3. Every taken 10&nbsp;pm Tesamorelin dose would read "missed"</h3>
+  <p>The repo stores datetimes in UTC. 22:00 Pacific = 05:00 UTC <em>the next day</em>. The spec's "a check-off only counts for its own date" gate, implemented naively (the codebase default), fails for <strong>all 28 Tesamorelin doses from Oct 5 on</strong>: nightly false "missed" flags, permanently wrong adherence % in the coach's context. And §2 gives no way at all to check off <em>yesterday's</em> dose the next morning. Bonus trap: DST ends 02:00 on Sun <strong>Nov 1 — the final protocol day, which itself has a 22:00 dose</strong>.</p>
+  <div class="fix"><strong>Fix:</strong> the dose row's own <code>date</code> column is the sole authority for which day a dose counts toward; <code>taken_at</code> (UTC) is audit trail only. Write-gate check-offs to user-local today/yesterday. Make the "missed: X" line tappable ("mark taken", capped at 1 day back). Test 22:05 local check-off, next-morning retro check-off, and the Nov 1 DST night explicitly.</div>
+</div>
+
+<h2><span class="badge b-major">Majors</span> — wrong behavior, or two implementers build different apps</h2>
+
+<div class="finding major">
+  <h3>4. "Block goal = recomp" would silently kill the entire cut-coaching machinery</h3>
+  <p><code>cut_status</code> returns <code>None</code> unless <code>goal_type == "cut"</code>. Setting the goal to "recomp" (a valid value) disarms: rule 21 (coach runs the cut), the gluten/water guard, the pace judgment against the curve, deficit calorie math (recomp = flat TDEE−100), and coach-prescribed fast days (silently remapped to rest days). That is a literal repeat of the block-1 failure — coach goes scale-silent.</p>
+  <div class="fix"><strong>Fix:</strong> <code>goal_type</code> stays <code>"cut"</code>, target 195. "Recomp" is the block's framing, expressed through the new lift-decline detector (#7) and the waist signal. Add a served-state assertion that <code>cut_status</code> is non-null on day 1 — it fails loudly if anyone ever writes "recomp".</div>
+</div>
+
+<div class="finding major">
+  <h3>5. The weight curve has ~7 consumers; the spec named 2 — and two live endpoints would destroy it</h3>
+  <p>Served today: a literal straight-line <code>linear_plan</code> on the dashboard, an <code>on_pace</code> badge judged linearly, <code>cut_status</code>'s own linear regression, <code>weekly_report</code> judging against stored <code>weight_projection</code>, and a client-side curve computed in JavaScript. Worse: <code>POST /api/goal/recalibrate</code> and the admin regenerate-projection endpoint <strong>overwrite the stored projection with a linear/calorie-model curve</strong> — one authenticated call silently destroys the piecewise curve (and recalibrate tightens calories from <em>raw, non-de-spiked</em> weight — bypassing the gluten guard).</p>
+  <div class="fix"><strong>Fix:</strong> one canonical <code>curve(date)</code> function + one tolerance constant in <code>goal_engine</code>; piecewise targets stored once in <code>TrainingGoal.weight_projection</code>; every consumer enumerated and switched; <code>/api/goal/recalibrate</code> retired (it has zero client callers and weekly generation already recalibrates through the de-spiked path); admin regenerate rewritten; client-side curve computation removed.</div>
+</div>
+
+<div class="finding major">
+  <h3>6. The curve math doesn't land on 195</h3>
+  <p>2×1.25 + 4×2.0 + 6×2.5 = <strong>25.5 lb → 194.5</strong>, while the spec's headline says 195. Also unpinned: the anchor (hardcoded 220 vs your actual day-0 weigh-in — the known anchor-drift bug class), daily interpolation vs weekly steps, boundary-day semantics, and what counts as an "escalation" (the Sep 10 jump from 3&nbsp;mg weekly to 3&nbsp;mg twice-weekly <em>doubles</em> weekly exposure but is neither a curve boundary nor a defined escalation).</p>
+  <div class="fix"><strong>Fix:</strong> weeks 1–2 @ 1.25, weeks 3–6 @ 2.0, weeks 7–11 @ 2.5, week 12 @ 2.0 → exactly 25.0 lb, lands on 195.0, and the softer final week matches the week-12 deload. Publish the 12-row weekly target table in the spec as the single authority. Anchor = day-0 weigh-in (220 as seed), endpoint-preserving re-anchor exactly once. "Escalation" = any scheduled increase in weekly mg exposure, <em>derived from the imported dose rows</em>, never a hardcoded date list.</div>
+</div>
+
+<div class="finding major">
+  <h3>7. The recomp tripwire is advisory-only in disguise</h3>
+  <p>"Sustained lift-performance decline" names no metric, window, threshold, or code artifact — it's left to LLM judgment, which the always-codify rule exists to ban.</p>
+  <div class="fix"><strong>Fix:</strong> a code-enforced detector (new <code>lift_trend</code> reader on SetLog via the shared history reader): flag fires when e1RM is down ≥5% on ≥2 of 5 key lifts for 2 consecutive non-deload weeks, OR weekly tonnage down ≥10% for 2 consecutive non-deload weeks. Emitted into coach context and the weekly report exactly like <code>water_spike_suspected</code>; the coach reacts to the computed flag, never to its own impression.</div>
+</div>
+
+<div class="finding major">
+  <h3>8. Import semantics lose data at the edges</h3>
+  <p>Under the spec's <code>(date, time, compound)</code> key, a dose-<em>time</em> edit is a delete+insert — destroying the <code>taken_at</code> of an already-taken dose. "Today" is neither past nor future in the delete rule (both readings break the doctor-edits-CSV-midday case). And re-import can silently rewrite the historical record of doses already injected.</p>
+  <div class="fix"><strong>Fix:</strong> key on <code>(date, compound)</code> — verified unique across all 292 CSV rows, with an import guard enforcing it — so a time edit is a plain update. Import never touches any row with <code>taken_at</code> set, never inserts/updates/deletes past-dated rows, and reports skipped divergences explicitly instead of silently diverging.</div>
+</div>
+
+<div class="finding major">
+  <h3>9. Four "specified but not buildable" items</h3>
+  <ul>
+    <li><strong>Meal rail:</strong> <code>meal_generator</code> is DB-free and dateless — the rail must live in the app.py weekly-generation callers, passed in as a window-end override. Two concrete violators found: the "none" fasting protocol ends at <em>9:00&nbsp;pm</em>, and a protein-supplement meal is hardcoded at 8:00&nbsp;pm. Plans generated <em>before</em> the import would serve post-8pm dinners contradicting the protocol card → re-import must reconcile the current week's plan.</li>
+    <li><strong>Missed-dose rules:</strong> if the doctor's rule says "take it late," the date-gate makes that unrecordable — dose stays "missed" forever, adherence and vial counts corrupt. Needs a per-compound machine-readable late window + a "taken late" action on the missed line.</li>
+    <li><strong>Vial inventory:</strong> vials hold <strong>mg, not doses</strong>. A 4&nbsp;mg retatrutide draw consumes twice a 2&nbsp;mg one, so the spec's dose-count model overstates supply exactly when frequency also doubles — running you out of the compound driving the cut. Model in mg; compute run-out by walking the actual future schedule.</li>
+    <li><strong>Prod verification:</strong> §6's checks (meals, protocol card, projection) aren't reachable with the existing <code>?email=</code> debug endpoints. Add one allowlisted, GET-only <code>serve-as-user</code> admin endpoint and map every §6 check to the endpoint that proves it. Also: the checklist says "today's 4 doses" — today has <strong>5</strong>.</li>
+  </ul>
+</div>
+
+<h2><span class="badge b-good">Already fixed</span> — the spec is fighting a ghost</h2>
+
+<div class="finding good">
+  <h3>10. The week-12 retest lock was fixed six weeks ago</h3>
+  <p>§7 schedules fixing the "week-12 retest locks the whole app" bug. It was removed on <strong>2026-06-29</strong> (commit <code>71a2a93</code>: <code>RETEST_WEEKS = ()</code>, regression-pinned by <code>tests/test_no_retest_gate.py</code>). The coach-narrates-template bug was fixed the same day (<code>3671d58</code>). A stale memory index seeded the error; the memory has been corrected. §7 becomes a one-line served-state check (<code>due_and_pending == false</code>), not a work item.</p>
+</div>
+
+<h2><span class="badge b-minor">Minors</span> — real, small, all get spec edits</h2>
+
+<div class="finding minor">
+  <ul>
+    <li><strong>GHK-Cu cadence is wrong in the spec table:</strong> it's fixed Wed/Fri/Sun 3×/week, not "~every other day." Rule added: cadence text anywhere (coach, card) must be <em>derived from dose rows</em>, never from prose — so the doctor editing the CSV can't create a contradiction.</li>
+    <li><strong>Garmin "watch" is a build, not a read:</strong> no coach-path code reads <code>GarminWellness</code> today, and live sync E2E with you is still unproven. Needs: extend the coach's Garmin block + weekly report, define empty-data behavior ("no synced data for N days" — never silence), store a pre-protocol RHR/HRV baseline so a drug-induced rise can't be absorbed by a rolling window, and verify data actually exists on day 0.</li>
+    <li><strong>Gluten guard loses sensitivity under the steeper slope:</strong> at 2.5&nbsp;lb/wk, a real 5–6&nbsp;lb spike over a 7–10-day gap nets below the 3&nbsp;lb trigger floor. Make the band slope-aware using the same curve function, and consolidate the two duplicated detector copies into one shared module.</li>
+    <li><strong>Lab reminders:</strong> "AppState-adjacent config" doesn't exist. New tiny <code>LabReminder</code> table (label, due_date, completed_at); baseline due 2026-08-10, week-8 panel due 2026-09-28; coach mentions only while incomplete and due.</li>
+    <li><strong>10&nbsp;pm dose vs the coach's after-10pm scold:</strong> rule 6 tells the coach to call out any post-10pm interaction; from Oct 5 the protocol <em>requires</em> a 22:00 check-off. Codified carve-out: protocol interactions within the dose window get "Dose done. Screens off." — everything else still gets the callout.</li>
+    <li><strong>Deploy sequencing:</strong> all block-3 code deploys <em>before</em> the data ops (step 0), then a deploy freeze until week-1 generation completes — the generation job is an in-process daemon thread; a mid-flow deploy kills it half-written (the exact Planning-Display-Recovery failure).</li>
+    <li><strong>Rollback completeness:</strong> rollback must also remove regenerated week-1 plan rows and imported <code>PeptideDose</code>/<code>PeptideVial</code>/<code>LabReminder</code> rows, snapshot and restore the full <code>TrainingGoal</code> row (the 195 target and curve live there, not in AppState), and <em>park</em> — never delete — any real block-3 training already logged.</li>
+    <li><strong>Check-off toggle:</strong> un-check semantics defined (server round-trip nulls <code>taken_at</code>; missed line and adherence recompute at read time; vial counts are derivations, never stored counters).</li>
+    <li><strong>Import user targeting:</strong> the CSV has no user column — the import endpoint takes an explicit <code>email</code> parameter.</li>
+  </ul>
+</div>
+
+<h2>Decisions locked in (flag now if you disagree)</h2>
+
+<div class="decision"><span class="pick">Re-stamp scheme:</span> cascade oldest-first (block-1 → 25–36, then block-2 → 13–18) in one transaction. Preserves "previous block = 13–24 … older blocks higher" ordering logic and keeps every reader working.</div>
+<div class="decision"><span class="pick">goal_type:</span> stays <code>"cut"</code>. Recomp lives in the lift-decline detector + waist signal, not in the goal enum.</div>
+<div class="decision"><span class="pick">Curve:</span> 1.25 / 1.25 / 2.0×4 / 2.5×5 / 2.0 — sums to exactly 25.0, lands on 195.0, soft final deload week.</div>
+<div class="decision"><span class="pick">Import key:</span> <code>(date, compound)</code> with time as an updatable field; rows with <code>taken_at</code> set are immutable to import.</div>
+<div class="decision"><span class="pick">/api/goal/recalibrate:</span> retired (orphan endpoint, no client callers, bypasses the gluten guard, destroys the curve).</div>
+
+<h2>The corrected weekly target table (single source of truth)</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Week</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>11</th><th>12</th></tr>
+  <tr><th>Loss (lb/wk)</th><td>1.25</td><td>1.25</td><td>2.0</td><td>2.0</td><td>2.0</td><td>2.0</td><td>2.5</td><td>2.5</td><td>2.5</td><td>2.5</td><td>2.5</td><td>2.0</td></tr>
+  <tr><th>Target (end of week)</th><td>218.75</td><td>217.5</td><td>215.5</td><td>213.5</td><td>211.5</td><td>209.5</td><td>207.0</td><td>204.5</td><td>202.0</td><td>199.5</td><td>197.0</td><td><strong>195.0</strong></td></tr>
+</table>
+</div>
+<p>Keyed to the retatrutide ramp: 2&nbsp;mg weeks 1–2, 3&nbsp;mg weeks 3–6 (twice-weekly from Sep 10 — <em>not</em> a curve boundary, by design), 4&nbsp;mg twice-weekly from week 7 (Sep 21). Week 12 softens for the deload.</p>
+
+<footer>
+Review run: 55 agents, 48/48 findings confirmed by independent adversarial verification, 0 refuted · full evidence preserved in the workflow output · generated 2026-08-10
+</footer>
+
+</main>
+</body>
+</html>
