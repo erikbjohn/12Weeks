@@ -2047,6 +2047,123 @@ def debug_today_status():
                         "traceback": traceback.format_exc()[-2000:]}), 500
 
 
+@app.route("/api/debug/serve-as-user", methods=["GET"])
+@admin_required
+def debug_serve_as_user():
+    """Impersonate a user and call an allowlisted API path, returning the exact
+    JSON payload that user would receive. Admin-only diagnostic.
+
+    Allowlist: /api/workouts, /api/meals, /api/progress, /api/stats/projection-inputs,
+               /api/protocol/today, /api/garmin/wellness, /api/bodyweight-retest/status
+    Query: ?email=...&path=/api/workouts (path must start with an allowlisted prefix)
+    Response: {"email", "path", "status_code", "payload"}
+    """
+    email = request.args.get("email", "")
+    path = request.args.get("path", "")
+    if not email or not path:
+        return jsonify({"error": "email and path required"}), 400
+
+    allowlist = {
+        "/api/workouts",
+        "/api/meals",
+        "/api/progress",
+        "/api/stats/projection-inputs",
+        "/api/protocol/today",
+        "/api/garmin/wellness",
+        "/api/bodyweight-retest/status",
+    }
+
+    # Check if path starts with an allowlisted prefix
+    path_allowed = any(path.startswith(prefix) for prefix in allowlist)
+    if not path_allowed:
+        return jsonify({"error": "path not allowlisted"}), 403
+
+    try:
+        from models import User
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+
+        # Impersonate user via test_client session
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["_user_id"] = str(u.id)
+                sess["_fresh"] = True
+            r = c.get(path)
+            payload = r.get_json() if r.is_json else None
+            status_code = r.status_code
+
+        return jsonify({
+            "email": email,
+            "path": path,
+            "status_code": status_code,
+            "payload": payload,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
+@app.route("/api/debug/coach-context", methods=["GET"])
+@admin_required
+def debug_coach_context():
+    """Assemble and return the coach's context blocks (cut_status, protocol_status,
+    lift_trend, garmin, today_status) by calling section builders under an impersonated
+    request context. NO LLM calls. Admin-only diagnostic.
+
+    Query: ?email=...
+    Response: {"email", "context": {key: payload-or-error}}
+    Each builder wrapped in try/except so a builder failure yields {"error": "..."} for
+    that key, others still present, HTTP 200 overall.
+    """
+    email = request.args.get("email", "")
+    if not email:
+        return jsonify({"error": "email required"}), 400
+
+    try:
+        from models import User
+        from flask_login import login_user
+        from coach_assembler import _SECTION_BUILDERS
+
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+
+        context = {}
+        builder_names = ["cut_status", "protocol_status", "lift_trend", "garmin", "today_status"]
+
+        # Call each builder under impersonated request context
+        with app.test_request_context():
+            login_user(u, force=True)
+            for name in builder_names:
+                builder = _SECTION_BUILDERS.get(name)
+                if not builder:
+                    context[name] = {"error": f"builder {name!r} not found"}
+                    continue
+                try:
+                    result = builder()
+                    # Builder returns {key: value}; extract just the value
+                    context[name] = result.get(name)
+                except Exception as e:
+                    import traceback
+                    context[name] = {
+                        "error": str(e),
+                        "traceback": traceback.format_exc()[-500:]
+                    }
+
+        return jsonify({
+            "email": email,
+            "context": context,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
 @app.route("/api/debug/copy-runplan")
 @admin_required
 def debug_copy_runplan():
