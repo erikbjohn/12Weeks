@@ -61,6 +61,111 @@ DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 # ---------------------------------------------------------------------------
+# Wellness trend aggregation — pure, DB-row-in / dict-out. Shared by the
+# coach's "garmin" section builder AND weekly_report.compute_weekly_metrics
+# (window override) so there is exactly ONE definition of "RHR 7d avg" etc.
+# ---------------------------------------------------------------------------
+
+# Garmin sync was REPAIRED 2026-08-10 (see project_garmin_sync memory) — no
+# wellness rows exist before that date. A pre-protocol baseline is therefore
+# impossible; "baseline" instead means the first BASELINE_WINDOW_DAYS calendar
+# days on/after this fixed anchor, gated on having a real sample in that span.
+BASELINE_ANCHOR = date(2026, 8, 10)
+BASELINE_WINDOW_DAYS = 14
+BASELINE_MIN_DAYS = 7
+
+# All nullable metric columns on GarminWellness (excludes id/user_id/date/
+# raw_json/pulled_at) — mirrors garmin_sync._METRIC_COLS. Used only to decide
+# whether a row counts as "has data" (an all-NULL row means "checked, nothing
+# there", not a sync miss).
+_WELLNESS_METRIC_COLS = (
+    "sleep_seconds", "sleep_score", "hrv_last_night", "hrv_weekly_avg",
+    "hrv_status", "body_battery", "training_readiness", "training_status",
+    "vo2max", "stress_overall", "resting_hr",
+)
+
+
+def _mean1(values):
+    """Mean of the non-None values, rounded to 1dp, or None if none present."""
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 1)
+
+
+def _wellness_has_data(row):
+    return any(getattr(row, c, None) is not None for c in _WELLNESS_METRIC_COLS)
+
+
+def wellness_trends(rows, today, window=None):
+    """Pure RHR/HRV/sleep-score trend summary over GarminWellness rows.
+
+    rows: any iterable of GarminWellness-like objects (order doesn't matter —
+        every stat is computed by filtering on `.date`, never by position).
+    today: date anchor for the default "last 7 days" / "last 28 days"
+        windows. Ignored (but still required) when `window` is given.
+    window: optional (start_date, end_date) INCLUSIVE override for the "7d"
+        window — weekly_report uses this to report a specific past week
+        instead of the trailing 7 days from today. The "28d" window always
+        trails the 7d window's END date (not `today`), so a past-week report
+        and a live coach read stay internally consistent.
+
+    "dark" fires when fewer than 4 of the 7 days in the (possibly overridden)
+    window have ANY synced metric — sparse data the coach must not narrate
+    around (rule 20 confabulation guard). `dark_line` is the exact sentence
+    to surface verbatim in that case; None when not dark.
+
+    "baseline" is NOT relative to `today`/`window` — see BASELINE_ANCHOR
+    above. It is only populated when at least BASELINE_MIN_DAYS of the
+    BASELINE_WINDOW_DAYS-day baseline span actually have data; otherwise
+    None (sample too thin to call it a baseline).
+    """
+    if window is not None:
+        win_start, win_end = window
+    else:
+        win_end = today
+        win_start = today - timedelta(days=6)
+    win28_start = win_end - timedelta(days=27)
+
+    def _in_range(lo, hi):
+        return [r for r in rows if r.date is not None and lo <= r.date <= hi]
+
+    rows_7d = _in_range(win_start, win_end)
+    rows_28d = _in_range(win28_start, win_end)
+
+    days_with_data_7d = sum(1 for r in rows_7d if _wellness_has_data(r))
+    dark = days_with_data_7d < 4
+
+    result = {
+        "rhr_7d": _mean1(r.resting_hr for r in rows_7d),
+        "rhr_28d": _mean1(r.resting_hr for r in rows_28d),
+        "hrv_7d": _mean1(r.hrv_last_night for r in rows_7d),
+        "hrv_28d": _mean1(r.hrv_last_night for r in rows_28d),
+        "sleep_score_7d": _mean1(r.sleep_score for r in rows_7d),
+        "days_with_data_7d": days_with_data_7d,
+        "dark": dark,
+        "dark_line": (
+            f"Garmin wellness: no synced data for {7 - days_with_data_7d} of last 7 days"
+            if dark else None
+        ),
+    }
+
+    baseline_end = BASELINE_ANCHOR + timedelta(days=BASELINE_WINDOW_DAYS - 1)
+    rows_baseline = _in_range(BASELINE_ANCHOR, baseline_end)
+    baseline_days = sum(1 for r in rows_baseline if _wellness_has_data(r))
+    if baseline_days >= BASELINE_MIN_DAYS:
+        result["baseline"] = {
+            "rhr": _mean1(r.resting_hr for r in rows_baseline),
+            "hrv": _mean1(r.hrv_last_night for r in rows_baseline),
+            "since": BASELINE_ANCHOR.isoformat(),
+        }
+    else:
+        result["baseline"] = None
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Section builders — one per agent.requires key
 # ---------------------------------------------------------------------------
 
@@ -170,7 +275,16 @@ def _build_garmin():
         gc.try_restore_tokens(current_user.id)
     garmin_data = gc.get_today_summary() if gc.connected else None
     readiness = assess_readiness(garmin_data) if garmin_data else None
-    return {"garmin": garmin_data, "readiness": readiness}
+
+    # Wellness trend: DB-only read, ZERO Garmin API calls — works even when
+    # the live client above is disconnected/rate-limited. ALWAYS included
+    # (even all-None/dark): omitting this block on sparse data is exactly
+    # the silence that let the coach invent a rationale before (rule 20).
+    from models import GarminWellness
+    wellness_rows = GarminWellness.query.filter_by(user_id=current_user.id).all()
+    wellness = wellness_trends(wellness_rows, _user_today())
+
+    return {"garmin": garmin_data, "readiness": readiness, "wellness": wellness}
 
 
 def _resolve_workout_for_day(week, day_idx):
@@ -2028,6 +2142,28 @@ def _format_athlete_data(ctx, requires):
         if r.get("flags"):
             readiness_line += f" Flags: {', '.join(r['flags'])}."
         parts.append(readiness_line)
+
+    # Wellness trend (RHR/HRV/sleep) — DB-derived, always present whenever
+    # the garmin section ran (see _build_garmin). Dark case renders the
+    # dark_line verbatim; lit case is numbers ONLY. Interpretation
+    # ("your HRV is trending down", sustained-shift framing) is the coach's
+    # job, not this formatter's — same bounded-attribution discipline as
+    # rule 22 (cite the numbers, don't editorialize a mechanism here).
+    w = ctx.get("wellness")
+    if w:
+        if w.get("dark"):
+            parts.append(w["dark_line"])
+        else:
+            def _n(v):
+                return "?" if v is None else v
+            rhr_frag = f"RHR 7d avg {_n(w['rhr_7d'])} (28d {_n(w['rhr_28d'])}"
+            if w.get("baseline"):
+                rhr_frag += f"; baseline {_n(w['baseline']['rhr'])} since {w['baseline']['since']}"
+            rhr_frag += ")"
+            hrv_frag = f"HRV 7d {_n(w['hrv_7d'])} (28d {_n(w['hrv_28d'])})"
+            sleep_frag = f"sleep score 7d {_n(w['sleep_score_7d'])}"
+            data_frag = f"data {w['days_with_data_7d']}/7 days"
+            parts.append("wellness: " + " · ".join([rhr_frag, hrv_frag, sleep_frag, data_frag]))
 
     # Check-ins
     if "checkins" in requires:

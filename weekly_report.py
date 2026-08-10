@@ -23,8 +23,9 @@ def compute_weekly_metrics(week_num, user_id=None):
     """Compute all metrics for a given week. Returns dict."""
     from models import (
         db, DayCompletion, ExerciseLog, BodyWeight,
-        MorningCheckIn, MealLog, TrainingGoal,
+        MorningCheckIn, MealLog, TrainingGoal, AppState, GarminWellness,
     )
+    from coach_assembler import wellness_trends
 
     today = date.today()
     # Approximate week boundaries (week_num weeks ago from program start)
@@ -144,6 +145,24 @@ def compute_weekly_metrics(week_num, user_id=None):
         if (workouts_total and completions) else (0 if workouts_total else None)
     )
 
+    # Wellness (RHR/HRV/sleep) for THIS report week — anchored on
+    # AppState.start_date so "week N" always maps to the same calendar week
+    # the coach/UI show, never "today" (a report for week 3 run in week 9
+    # must still describe week 3's dates). Reuses the SAME wellness_trends
+    # definition coach_assembler uses for the live coach read (one shared
+    # definition, never a second parallel calculation).
+    wellness_window = None
+    if user_id is not None:
+        state = AppState.query.filter_by(user_id=user_id).first()
+        if state and state.start_date:
+            week_monday = state.start_date + timedelta(days=(week_num - 1) * 7)
+            wellness_window = (week_monday, week_monday + timedelta(days=6))
+    wellness_rows = (
+        GarminWellness.query.filter_by(user_id=user_id).all()
+        if user_id is not None else []
+    )
+    wellness = wellness_trends(wellness_rows, today, window=wellness_window)
+
     return {
         "week": week_num,
         "workouts_completed": completions,
@@ -157,6 +176,7 @@ def compute_weekly_metrics(week_num, user_id=None):
         "checkin_avg": checkin_avg,
         "adherence_pct": adherence,
         "meals_logged": meals_logged,
+        "wellness": wellness,
     }
 
 
