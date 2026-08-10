@@ -1,0 +1,342 @@
+"""protocol.py — pure peptide-protocol derivations.
+
+Covers: compounds reference shape, adherence counting (incl. date-authority /
+DST-irrelevance), escalation-date derivation from the real CSV, vial mg-walk
+(single + multi-vial attribution, expiry-beats-mg, mid-vial dose step-down),
+missed-dose action classification, and fasted-dose-time lookup.
+"""
+import csv
+from datetime import date, datetime, timezone
+from types import SimpleNamespace as Row
+
+
+def _csv_rows():
+    out = []
+    with open("peptide_protocol.csv") as f:
+        for r in csv.DictReader(f):
+            y, m, d = map(int, r["Date"].split("-"))
+            out.append(Row(date=date(y, m, d), time=r["Time"], compound=r["Compound"],
+                           dose_mg=float(r["Dose_mg"]), taken_at=None))
+    return out
+
+
+# ── PROTOCOL_COMPOUNDS shape ─────────────────────────────────────────────
+
+def test_protocol_compounds_has_all_seven_with_required_keys():
+    from protocol import PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
+    expected = {"Enclomiphene", "BPC-157", "KPV", "Retatrutide", "TB-500",
+                "GHK-Cu", "Tesamorelin"}
+    assert set(PROTOCOL_COMPOUNDS.keys()) == expected
+    for name, c in PROTOCOL_COMPOUNDS.items():
+        assert set(c.keys()) == {"what", "mechanism", "effects", "watch_fors",
+                                  "missed_dose_rule", "late_window_hours"}
+        assert isinstance(c["what"], str) and c["what"]
+        assert isinstance(c["mechanism"], str) and c["mechanism"]
+        assert isinstance(c["effects"], list) and c["effects"]
+        assert isinstance(c["watch_fors"], list) and c["watch_fors"]
+        assert c["missed_dose_rule"] == CONFIRM_WITH_DOCTOR
+        assert c["late_window_hours"] is None
+
+
+def test_protocol_compounds_carries_no_schedule_text():
+    from protocol import PROTOCOL_COMPOUNDS
+    banned = ("mg", "twice", "weekly", "daily", "am", "pm", "cadence",
+              "schedule", "monday", "thursday")
+    for name, c in PROTOCOL_COMPOUNDS.items():
+        blob = " ".join([c["what"], c["mechanism"]] + c["effects"] + c["watch_fors"]).lower()
+        for word in banned:
+            assert word not in blob.split(), f"{name}: schedule-ish word {word!r} leaked into reference text"
+
+
+# ── escalation_dates: ground truth from the real CSV ─────────────────────
+
+def test_escalation_dates_derived_from_csv():
+    from protocol import escalation_dates
+    dates = escalation_dates([r for r in _csv_rows() if r.compound == "Retatrutide"])
+    assert dates == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
+
+
+def test_escalation_dates_defensively_filters_to_retatrutide():
+    """Passing the FULL mixed-compound CSV must yield the same 3 dates —
+    the function must not assume the caller pre-filtered."""
+    from protocol import escalation_dates
+    dates = escalation_dates(_csv_rows())
+    assert dates == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
+
+
+def test_escalation_dates_order_independent():
+    from protocol import escalation_dates
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    import random
+    shuffled = rows[:]
+    random.Random(7).shuffle(shuffled)
+    assert escalation_dates(shuffled) == escalation_dates(rows)
+
+
+def test_next_escalation_before_first_boundary():
+    from protocol import next_escalation
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    n = next_escalation(rows, today=date(2026, 8, 1))
+    assert n == {"date": date(2026, 8, 24), "weekly_mg_before": 2.0, "weekly_mg_after": 3.0}
+
+
+def test_next_escalation_between_boundaries():
+    from protocol import next_escalation
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    n = next_escalation(rows, today=date(2026, 8, 25))
+    assert n == {"date": date(2026, 9, 10), "weekly_mg_before": 3.0, "weekly_mg_after": 6.0}
+
+
+def test_next_escalation_on_boundary_date_is_inclusive():
+    from protocol import next_escalation
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    n = next_escalation(rows, today=date(2026, 9, 21))
+    assert n == {"date": date(2026, 9, 21), "weekly_mg_before": 6.0, "weekly_mg_after": 8.0}
+
+
+def test_next_escalation_after_last_boundary_is_none():
+    from protocol import next_escalation
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    assert next_escalation(rows, today=date(2026, 9, 22)) is None
+
+
+def test_escalation_window_true_when_boundary_within_days():
+    from protocol import escalation_window
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    assert escalation_window(rows, today=date(2026, 8, 20), days=7) is True
+
+
+def test_escalation_window_false_when_no_boundary_within_days():
+    from protocol import escalation_window
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    assert escalation_window(rows, today=date(2026, 8, 25), days=7) is False
+
+
+# ── adherence_7d ───────────────────────────────────────────────────────
+
+def test_adherence_taken_at_next_day_utc_still_counts_for_own_date():
+    from protocol import adherence_7d
+    # 22:05 Pacific on Oct 5 == 05:05 UTC Oct 6 — must count as taken ON Oct 5
+    row = Row(date=date(2026, 10, 5), time="22:00", compound="Tesamorelin",
+              dose_mg=2.0, taken_at=datetime(2026, 10, 6, 5, 5, tzinfo=timezone.utc))
+    a = adherence_7d([row], today=date(2026, 10, 6))
+    assert a["taken"] == 1 and a["missed"] == []
+
+
+def test_adherence_counts_taken_late_missed_and_pct():
+    from protocol import adherence_7d
+    today = date(2026, 9, 5)
+    rows = [
+        # taken on time
+        Row(date=date(2026, 9, 1), time="07:00", compound="Enclomiphene", dose_mg=6.25,
+            taken_at=datetime(2026, 9, 1, 15, 0, tzinfo=timezone.utc)),
+        # taken but late (taken_at date > row date)
+        Row(date=date(2026, 9, 2), time="07:00", compound="Enclomiphene", dose_mg=6.25,
+            taken_at=datetime(2026, 9, 3, 4, 0, tzinfo=timezone.utc)),
+        # missed (untaken, in the past)
+        Row(date=date(2026, 9, 3), time="07:00", compound="Enclomiphene", dose_mg=6.25,
+            taken_at=None),
+        # scheduled today, untaken — NOT missed yet
+        Row(date=date(2026, 9, 5), time="07:00", compound="Enclomiphene", dose_mg=6.25,
+            taken_at=None),
+    ]
+    a = adherence_7d(rows, today=today)
+    assert a["scheduled"] == 4
+    assert a["taken"] == 2
+    assert a["late"] == 1
+    assert a["missed"] == [{"date": date(2026, 9, 3), "compound": "Enclomiphene"}]
+    assert a["pct"] == 50.0
+
+
+def test_adherence_pct_none_when_nothing_scheduled():
+    from protocol import adherence_7d
+    a = adherence_7d([], today=date(2026, 9, 5))
+    assert a["pct"] is None
+    assert a["scheduled"] == 0
+    assert a["taken"] == 0
+    assert a["late"] == 0
+    assert a["missed"] == []
+
+
+def test_adherence_ignores_rows_outside_the_7day_window():
+    from protocol import adherence_7d
+    today = date(2026, 9, 5)
+    rows = [
+        Row(date=date(2026, 8, 29), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None),  # 7 days back, outside [today-6, today]
+        Row(date=date(2026, 8, 30), time="07:00", compound="BPC-157", dose_mg=0.25,
+            taken_at=datetime(2026, 8, 30, 15, 0, tzinfo=timezone.utc)),  # today-6, inside
+    ]
+    a = adherence_7d(rows, today=today)
+    assert a["scheduled"] == 1
+    assert a["taken"] == 1
+
+
+def test_adherence_window_spanning_us_dst_fallback_nov1_uses_dates_only():
+    """Sun 2026-11-01 is the US DST fall-back date. adherence_7d must produce
+    the same counts it would for any other week because it NEVER converts
+    taken_at to local time or does any tz arithmetic — it only ever compares
+    plain `date` objects (row.date, and taken_at.date() for late-subclassing).
+    This test proves DST is a non-event for this module."""
+    from protocol import adherence_7d
+    today = date(2026, 11, 1)  # window = Oct26..Nov1, straddles the DST boundary
+    rows = [
+        Row(date=date(2026, 10, 26), time="07:00", compound="Enclomiphene", dose_mg=6.25,
+            taken_at=datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)),
+        Row(date=date(2026, 10, 31), time="22:00", compound="Tesamorelin", dose_mg=2.0,
+            taken_at=None),  # missed
+        Row(date=date(2026, 11, 1), time="22:00", compound="Tesamorelin", dose_mg=2.0,
+            taken_at=None),  # scheduled today, not missed yet
+    ]
+    a = adherence_7d(rows, today=today)
+    assert a["scheduled"] == 3
+    assert a["taken"] == 1
+    assert a["missed"] == [{"date": date(2026, 10, 31), "compound": "Tesamorelin"}]
+
+
+# ── vial_status: mg walk ─────────────────────────────────────────────────
+
+def test_vial_walk_across_escalations():
+    from protocol import vial_status
+    vial = Row(compound="Retatrutide", total_mg=20.0,
+               reconstituted_on=date(2026, 8, 10), expiry_days=90)
+    doses = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    for r in doses[:2]:  # Aug 10 + Aug 17 taken (2mg each -> 4mg used)
+        r.taken_at = datetime(r.date.year, r.date.month, r.date.day, 14, tzinfo=timezone.utc)
+    s = vial_status([vial], doses, today=date(2026, 8, 18))[0]
+    assert s["compound"] == "Retatrutide"
+    assert s["mg_remaining"] == 16.0
+    # walk: Aug24 3, Aug31 3, Sep7 3, Sep10 3 = 12 -> covered; Sep14 3 -> 15 <= 16 covered; Sep17 3 -> 18 > 16 NOT covered
+    assert s["doses_left"] == 5
+    assert s["runout_date"] == date(2026, 9, 17)
+    assert s["reorder_by"] == date(2026, 9, 10)  # runout - 7 lead days
+    assert s["reorder_flag"] is False  # today (Aug18) < reorder_by
+
+
+def test_vial_walk_tb500_dose_step_down_mid_vial():
+    """TB-500 steps 2.5mg (loading) -> 2.0mg (maintenance) at Sep 7. The walk
+    must use each row's OWN dose_mg, not assume a constant per-dose amount —
+    with total_mg=22.0 and 10mg already used, a naive constant-2.5mg walker
+    would runout at Sep 7 (doses_left=4); the correct per-row walk covers
+    through Sep 7 (2.0mg) and runs out at Sep 14 (doses_left=5)."""
+    from protocol import vial_status
+    rows = [r for r in _csv_rows() if r.compound == "TB-500"]
+    for r in rows:
+        if r.date in (date(2026, 8, 10), date(2026, 8, 13), date(2026, 8, 17), date(2026, 8, 20)):
+            r.taken_at = datetime(r.date.year, r.date.month, r.date.day, 14, tzinfo=timezone.utc)
+    vial = Row(compound="TB-500", total_mg=22.0, reconstituted_on=date(2026, 8, 10), expiry_days=90)
+    s = vial_status([vial], rows, today=date(2026, 8, 21))[0]
+    assert s["mg_remaining"] == 12.0
+    assert s["doses_left"] == 5
+    assert s["runout_date"] == date(2026, 9, 14)
+
+
+def test_vial_walk_bpc157_expiry_beats_mg():
+    """Generous mg (100mg vs ~21mg total protocol usage) but a short 14-day
+    expiry — the vial expires long before it would ever run dry on mg."""
+    from protocol import vial_status
+    rows = [r for r in _csv_rows() if r.compound == "BPC-157"]
+    vial = Row(compound="BPC-157", total_mg=100.0, reconstituted_on=date(2026, 8, 10), expiry_days=14)
+    s = vial_status([vial], rows, today=date(2026, 8, 10))[0]
+    assert s["runout_date"] == date(2026, 8, 24)  # expiry, not mg exhaustion
+    assert s["doses_left"] == 14  # BPC-157 doses strictly before Aug 24
+    assert s["reorder_by"] == date(2026, 8, 17)
+    assert s["reorder_flag"] is False
+
+
+def test_vial_walk_multi_vial_attribution_no_cross_contamination():
+    """Two KPV vials: doses before the 2nd vial's reconstituted_on attribute
+    to vial 1 only; doses on/after attribute to vial 2 only. Vial 1's future
+    list must be EMPTY (all its window doses are in the past relative to
+    vial 2's start) — a bug that fails to bound vial 1's window would instead
+    walk vial 2's future doses as vial 1's own."""
+    from protocol import vial_status
+    rows = [r for r in _csv_rows() if r.compound == "KPV"]
+    v2_start = date(2026, 9, 16)
+    for r in rows:
+        if r.date < v2_start:
+            r.taken_at = datetime(r.date.year, r.date.month, r.date.day, 14, tzinfo=timezone.utc)
+    vial1 = Row(compound="KPV", total_mg=20.0, reconstituted_on=date(2026, 8, 10), expiry_days=90)
+    vial2 = Row(compound="KPV", total_mg=6.0, reconstituted_on=v2_start, expiry_days=90)
+    results = vial_status([vial1, vial2], rows, today=v2_start, lead_time_days=7)
+    assert len(results) == 2
+    s1, s2 = results[0], results[1]  # vial_status preserves input vial order
+    assert s1["mg_remaining"] == 4.0  # 20 - 16mg used (16 doses x 1mg before Sep16)
+    assert s1["doses_left"] == 0      # nothing left in vial 1's own window
+    assert s2["mg_remaining"] == 6.0  # nothing taken yet from vial 2
+    assert s2["doses_left"] == 6
+    assert s2["runout_date"] == date(2026, 9, 30)
+
+
+# ── missed_line: action classification ────────────────────────────────
+
+def test_missed_line_yesterday_is_retro_mark_regardless_of_window():
+    from protocol import missed_line
+    today = date(2026, 9, 10)
+    rows = [Row(date=date(2026, 9, 9), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
+    out = missed_line(rows, today)
+    assert out == [{"date": date(2026, 9, 9), "compound": "BPC-157",
+                     "rule": "confirm with your doctor", "action": "retro_mark"}]
+
+
+def test_missed_line_older_with_default_null_window_is_none():
+    from protocol import missed_line
+    today = date(2026, 9, 10)
+    rows = [Row(date=date(2026, 9, 7), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
+    out = missed_line(rows, today)
+    assert out[0]["action"] == "none"
+
+
+def test_missed_line_older_within_override_window_is_taken_late():
+    from protocol import missed_line
+    today = date(2026, 9, 1)
+    rows = [Row(date=date(2026, 8, 29), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
+    custom_rules = {"BPC-157": {"missed_dose_rule": "confirm with your doctor", "late_window_hours": 96}}
+    out = missed_line(rows, today, rules=custom_rules)
+    assert out[0]["action"] == "taken_late"
+
+
+def test_missed_line_older_outside_override_window_is_none():
+    from protocol import missed_line
+    today = date(2026, 9, 1)
+    rows = [Row(date=date(2026, 8, 20), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
+    custom_rules = {"BPC-157": {"missed_dose_rule": "confirm with your doctor", "late_window_hours": 96}}
+    out = missed_line(rows, today, rules=custom_rules)
+    assert out[0]["action"] == "none"
+
+
+def test_missed_line_excludes_taken_and_not_yet_due_rows():
+    from protocol import missed_line
+    today = date(2026, 9, 10)
+    rows = [
+        Row(date=date(2026, 9, 9), time="07:00", compound="BPC-157", dose_mg=0.25,
+            taken_at=datetime(2026, 9, 9, 14, 0, tzinfo=timezone.utc)),  # taken, excluded
+        Row(date=date(2026, 9, 10), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None),  # today, not due yet
+    ]
+    out = missed_line(rows, today)
+    assert out == []
+
+
+# ── fasted_dose_time ──────────────────────────────────────────────────
+
+def test_fasted_dose_time_from_real_csv():
+    from protocol import fasted_dose_time
+    rows = _csv_rows()
+    assert fasted_dose_time(rows, date(2026, 10, 5)) == "22:00"
+
+
+def test_fasted_dose_time_none_when_nothing_at_or_after_21():
+    from protocol import fasted_dose_time
+    rows = _csv_rows()
+    assert fasted_dose_time(rows, date(2026, 8, 10)) is None  # only 07:00 doses that day
+
+
+def test_fasted_dose_time_boundary_exactly_21_00_counts():
+    from protocol import fasted_dose_time
+    rows = [Row(date=date(2026, 9, 1), time="21:00", compound="Tesamorelin", dose_mg=2.0, taken_at=None)]
+    assert fasted_dose_time(rows, date(2026, 9, 1)) == "21:00"
+
+
+def test_fasted_dose_time_20_59_does_not_count():
+    from protocol import fasted_dose_time
+    rows = [Row(date=date(2026, 9, 1), time="20:59", compound="Tesamorelin", dose_mg=2.0, taken_at=None)]
+    assert fasted_dose_time(rows, date(2026, 9, 1)) is None
