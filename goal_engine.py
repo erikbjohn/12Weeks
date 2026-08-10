@@ -824,3 +824,44 @@ def adjust_workout(base_workout, goal_type, constraints=None):
             workout["exercises"] = exercises
 
     return workout
+
+
+# ── Block-3 piecewise curve (spec §5) — THE single authority ────────────────
+# Keyed to the retatrutide ramp. Week 12 softens to 2.0 (deload) so the sum is
+# exactly 25.0 and week 12 == target 195.0. The Sep-10 frequency doubling is
+# deliberately NOT a boundary — do not add a week-5 rate.
+BLOCK3_WEEKLY_RATES = {1: 1.25, 2: 1.25, 3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0,
+                       7: 2.5, 8: 2.5, 9: 2.5, 10: 2.5, 11: 2.5, 12: 2.0}
+CURVE_TOLERANCE_LB = 1.5
+
+
+def build_block3_projection(anchor_weight, start_date):
+    """12 end-of-week targets [{"week", "projected"}] — the stored
+    TrainingGoal.weight_projection shape weekly_report/app.js already read."""
+    out, w = [], anchor_weight
+    for week in range(1, 13):
+        w -= BLOCK3_WEEKLY_RATES[week]
+        out.append({"week": week, "projected": round(w, 2)})
+    return out
+
+
+def curve_value(anchor_weight, start_date, on_date):
+    """Piecewise-linear DAILY interpolation. A week-N-day-1 date accrues at
+    week N's rate. Clamped to the 84-day block."""
+    days = (on_date - start_date).days
+    days = max(0, min(days, 84))
+    w = anchor_weight
+    for d in range(0, days + 1):
+        week = min(12, d // 7 + 1)
+        w -= BLOCK3_WEEKLY_RATES[week] / 7.0
+    return round(w, 4)
+
+
+def pace_status(weight, anchor_weight, start_date, on_date):
+    """3-state judgment vs curve_value with the ONE tolerance."""
+    target = curve_value(anchor_weight, start_date, on_date)
+    if weight > target + CURVE_TOLERANCE_LB:
+        return "behind"
+    if weight < target - CURVE_TOLERANCE_LB:
+        return "ahead"
+    return "on_pace"
