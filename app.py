@@ -10413,6 +10413,13 @@ def api_weekly_report(week):
     report = WeeklyReport.query.filter_by(user_id=current_user.id, week=week).first()
     if not report:
         return jsonify({"error": "No report for this week"}), 404
+    # Wellness has no WeeklyReport column (no schema migration for this) —
+    # recomputed at read-time via the SAME shared path compute_weekly_metrics
+    # uses (weekly_report.compute_week_wellness). GarminWellness rows are
+    # immutable per-date (write-once/refresh-in-place, never deleted), so
+    # this recompute is stable across repeated GETs, not a live-drifting value.
+    from weekly_report import compute_week_wellness
+    wellness = compute_week_wellness(report.week, current_user.id)
     return jsonify({
         "week": report.week,
         "workouts_completed": report.workouts_completed,
@@ -10425,6 +10432,7 @@ def api_weekly_report(week):
         "checkin_avg": report.checkin_avg,
         "adherence_pct": report.adherence_pct,
         "narrative": report.narrative,
+        "wellness": wellness,
     })
 
 @app.route("/api/weekly-report/result/<job_id>")

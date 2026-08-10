@@ -36,10 +36,11 @@ def _app_do(app_, fn):
 
 
 def _fresh_user(app_, db, email):
-    """Create (or reset) a user + wipe their GarminWellness/AppState rows.
-    Returns the user id (plain int, not a detached ORM object)."""
+    """Create (or reset) a user + wipe their GarminWellness/AppState/
+    WeeklyReport rows. Returns the user id (plain int, not a detached ORM
+    object)."""
     def _do():
-        from models import User, GarminWellness, AppState
+        from models import User, GarminWellness, AppState, WeeklyReport
         u = User.query.filter_by(email=email).first()
         if not u:
             u = User(email=email, timezone="America/Los_Angeles")
@@ -47,6 +48,7 @@ def _fresh_user(app_, db, email):
             db.session.commit()
         GarminWellness.query.filter_by(user_id=u.id).delete()
         AppState.query.filter_by(user_id=u.id).delete()
+        WeeklyReport.query.filter_by(user_id=u.id).delete()
         db.session.commit()
         return u.id
     return _app_do(app_, _do)
@@ -58,6 +60,14 @@ def _add_rows(app_, db, rows):
             db.session.add(r)
         db.session.commit()
     _app_do(app_, _do)
+
+
+def _client_for(app_, uid):
+    client = app_.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = str(uid)
+        s["_fresh"] = True
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +162,21 @@ class TestWellnessTrendsPure:
         assert out["rhr_7d"] == 58.0     # only the second row has resting_hr
         assert out["hrv_7d"] == 62.0     # only the first row has hrv_last_night
         assert out["days_with_data_7d"] == 2
+
+    def test_four_days_in_window_clears_dark(self):
+        """Exact dark-boundary pin: 4 of 7 days with data is the minimum that
+        clears dark (< 4 stays dark, per test_three_rows_in_window_dark_with_n_equals_4)."""
+        from coach_assembler import wellness_trends
+        from models import GarminWellness
+        today = date(2026, 8, 19)
+        rows = [
+            GarminWellness(user_id=1, date=today - timedelta(days=i), resting_hr=55 + i)
+            for i in range(4)
+        ]
+        out = wellness_trends(rows, today)
+        assert out["days_with_data_7d"] == 4
+        assert out["dark"] is False
+        assert out["dark_line"] is None
 
     def test_baseline_none_when_under_min_days(self):
         """Only 5 days of data in the 14-day baseline span (< BASELINE_MIN_DAYS
@@ -333,4 +358,140 @@ class TestBuildGarminDbOnly:
         assert w["dark"] is False
         assert w["days_with_data_7d"] == 7
         assert w["rhr_7d"] == 52.0
-        assert w["hrv_7d"] == 61.0
+
+    def test_wellness_query_failure_degrades_to_dark_not_a_dropped_section(self, app_ctx, monkeypatch):
+        """Fix round 1, minor #3: a GarminWellness query failure must not
+        discard the whole garmin section (garmin_data/readiness are unrelated
+        to this DB read) — it degrades to a dark wellness block instead."""
+        from models import GarminWellness, User
+        app_, db = app_ctx
+        uid = _fresh_user(app_, db, "wellness-query-boom@test.com")
+
+        import app as appmod
+        monkeypatch.setattr(appmod, "_get_garmin", lambda uid=None: _StubGarmin())
+
+        class _RaisingQuery:
+            def filter_by(self, **kwargs):
+                raise RuntimeError("simulated DB failure")
+
+        # Reading the CURRENT `query` value (what monkeypatch.setattr does
+        # internally, to restore it after the test) requires an app context
+        # — flask-sqlalchemy's query descriptor binds to the active session.
+        with app_.app_context():
+            monkeypatch.setattr(GarminWellness, "query", _RaisingQuery())
+
+        from coach_assembler import _build_garmin
+        from flask_login import login_user
+        with app_.test_request_context():
+            u = User.query.get(uid)
+            login_user(u, force=True)
+            out = _build_garmin()
+
+        assert "wellness" in out
+        assert out["wellness"]["dark"] is True
+        assert out["wellness"]["dark_line"] == "Garmin wellness: no synced data for 7 of last 7 days"
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 — weekly-report wellness must actually reach the user:
+# generate_report_narrative's prompt, and GET /api/weekly-report/<week>.
+# ---------------------------------------------------------------------------
+
+class TestNarrativeDataLinesWellness:
+    def test_lit_week_narrative_includes_numbers_line(self):
+        from weekly_report import _build_narrative_data_lines
+        from coach_assembler import wellness_trends
+        from models import GarminWellness
+        today = date(2026, 12, 1)  # outside the fixed baseline span
+        rows = [
+            GarminWellness(user_id=1, date=today - timedelta(days=i),
+                            resting_hr=50, hrv_last_night=60, sleep_score=80)
+            for i in range(7)
+        ]
+        metrics = {"week": 4, "workouts_completed": 5,
+                   "wellness": wellness_trends(rows, today)}
+        lines = _build_narrative_data_lines(metrics)
+        joined = "\n".join(lines)
+        assert "wellness: RHR 7d avg 50.0 (28d 50.0)" in joined
+        assert "HRV 7d 60.0 (28d 60.0)" in joined
+        assert "sleep score 7d 80.0" in joined
+        assert "data 7/7 days" in joined
+
+    def test_dark_week_narrative_includes_dark_line_verbatim(self):
+        from weekly_report import _build_narrative_data_lines
+        from coach_assembler import wellness_trends
+        metrics = {"week": 5, "workouts_completed": 0,
+                   "wellness": wellness_trends([], date(2026, 8, 19))}
+        lines = _build_narrative_data_lines(metrics)
+        assert "Garmin wellness: no synced data for 7 of last 7 days" in lines
+
+    def test_missing_wellness_key_does_not_crash(self):
+        """Older/partial metrics dicts (no 'wellness' key at all) must not
+        break narrative building — just no wellness line."""
+        from weekly_report import _build_narrative_data_lines
+        lines = _build_narrative_data_lines({"week": 1, "workouts_completed": 3})
+        assert not any("wellness" in l.lower() for l in lines)
+
+
+class TestGenerateEndpointIncludesWellness:
+    def test_generate_response_metrics_include_wellness(self, app_ctx):
+        app_, db = app_ctx
+        uid = _fresh_user(app_, db, "wellness-generate-endpoint@test.com")
+        client = _client_for(app_, uid)
+        resp = client.post("/api/weekly-report/generate")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "wellness" in body["metrics"]
+
+
+class TestGetEndpointIncludesWellness:
+    def test_get_endpoint_returns_correct_week_window_wellness(self, app_ctx):
+        from models import AppState, GarminWellness, WeeklyReport
+        app_, db = app_ctx
+        uid = _fresh_user(app_, db, "wellness-get-endpoint@test.com")
+        block_start = date(2026, 7, 27)  # Monday; week 3 Monday == BASELINE_ANCHOR
+        week_num = 3
+        week_monday = block_start + timedelta(days=(week_num - 1) * 7)
+        assert week_monday == date(2026, 8, 10)
+
+        rows = [
+            AppState(user_id=uid, start_date=block_start),
+            WeeklyReport(user_id=uid, week=week_num, report_date=week_monday),
+        ]
+        rows += [
+            GarminWellness(user_id=uid, date=week_monday + timedelta(days=i),
+                            resting_hr=50 + i, hrv_last_night=60 + i, sleep_score=80)
+            for i in range(7)
+        ]
+        _add_rows(app_, db, rows)
+
+        client = _client_for(app_, uid)
+        resp = client.get(f"/api/weekly-report/{week_num}")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "wellness" in body
+        w = body["wellness"]
+        assert w["dark"] is False
+        assert w["days_with_data_7d"] == 7
+        assert w["rhr_7d"] == round(sum(50 + i for i in range(7)) / 7, 1)
+        assert w["hrv_7d"] == round(sum(60 + i for i in range(7)) / 7, 1)
+        assert w["baseline"] is not None
+        assert w["baseline"]["since"] == "2026-08-10"
+
+    def test_get_endpoint_wellness_dark_for_report_with_no_garmin_rows(self, app_ctx):
+        from models import AppState, WeeklyReport
+        app_, db = app_ctx
+        uid = _fresh_user(app_, db, "wellness-get-endpoint-dark@test.com")
+        block_start = date(2026, 7, 27)
+        week_num = 3
+        _add_rows(app_, db, [
+            AppState(user_id=uid, start_date=block_start),
+            WeeklyReport(user_id=uid, week=week_num,
+                         report_date=block_start + timedelta(days=14)),
+        ])
+        client = _client_for(app_, uid)
+        resp = client.get(f"/api/weekly-report/{week_num}")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["wellness"]["dark"] is True
+        assert body["wellness"]["dark_line"] == "Garmin wellness: no synced data for 7 of last 7 days"

@@ -165,6 +165,36 @@ def wellness_trends(rows, today, window=None):
     return result
 
 
+def format_wellness_line(w):
+    """One-line, numbers-only rendering of a wellness_trends() dict — the
+    dark_line verbatim when dark, else
+    'wellness: RHR 7d avg X (28d Y[; baseline Z since D]) · HRV 7d X (28d Y)
+    · sleep score 7d X · data N/7 days'. Returns None when `w` is falsy.
+
+    SHARED by the coach prompt injection (_format_athlete_data) and the
+    weekly-report narrative prompt (weekly_report.generate_report_narrative)
+    — one definition of "what the wellness line looks like", never a second
+    copy that could drift. Numbers only — interpretation is the caller's
+    (coach or narrative model), never this formatter's.
+    """
+    if not w:
+        return None
+    if w.get("dark"):
+        return w["dark_line"]
+
+    def _n(v):
+        return "?" if v is None else v
+
+    rhr_frag = f"RHR 7d avg {_n(w['rhr_7d'])} (28d {_n(w['rhr_28d'])}"
+    if w.get("baseline"):
+        rhr_frag += f"; baseline {_n(w['baseline']['rhr'])} since {w['baseline']['since']}"
+    rhr_frag += ")"
+    hrv_frag = f"HRV 7d {_n(w['hrv_7d'])} (28d {_n(w['hrv_28d'])})"
+    sleep_frag = f"sleep score 7d {_n(w['sleep_score_7d'])}"
+    data_frag = f"data {w['days_with_data_7d']}/7 days"
+    return "wellness: " + " · ".join([rhr_frag, hrv_frag, sleep_frag, data_frag])
+
+
 # ---------------------------------------------------------------------------
 # Section builders — one per agent.requires key
 # ---------------------------------------------------------------------------
@@ -280,9 +310,18 @@ def _build_garmin():
     # the live client above is disconnected/rate-limited. ALWAYS included
     # (even all-None/dark): omitting this block on sparse data is exactly
     # the silence that let the coach invent a rationale before (rule 20).
-    from models import GarminWellness
-    wellness_rows = GarminWellness.query.filter_by(user_id=current_user.id).all()
-    wellness = wellness_trends(wellness_rows, _user_today())
+    # Isolated in its own try/except (mirrors the build_claims pattern in
+    # _format_athlete_data, ~line 1962) so a wellness QUERY failure degrades
+    # to a dark wellness block instead of discarding the whole garmin
+    # section — including the live garmin_data/readiness already fetched
+    # above, which have nothing to do with this DB read.
+    try:
+        from models import GarminWellness
+        wellness_rows = GarminWellness.query.filter_by(user_id=current_user.id).all()
+        wellness = wellness_trends(wellness_rows, _user_today())
+    except Exception:
+        log.warning("Wellness DB read failed; degrading to dark wellness block", exc_info=True)
+        wellness = wellness_trends([], _user_today())
 
     return {"garmin": garmin_data, "readiness": readiness, "wellness": wellness}
 
@@ -2149,21 +2188,9 @@ def _format_athlete_data(ctx, requires):
     # ("your HRV is trending down", sustained-shift framing) is the coach's
     # job, not this formatter's — same bounded-attribution discipline as
     # rule 22 (cite the numbers, don't editorialize a mechanism here).
-    w = ctx.get("wellness")
-    if w:
-        if w.get("dark"):
-            parts.append(w["dark_line"])
-        else:
-            def _n(v):
-                return "?" if v is None else v
-            rhr_frag = f"RHR 7d avg {_n(w['rhr_7d'])} (28d {_n(w['rhr_28d'])}"
-            if w.get("baseline"):
-                rhr_frag += f"; baseline {_n(w['baseline']['rhr'])} since {w['baseline']['since']}"
-            rhr_frag += ")"
-            hrv_frag = f"HRV 7d {_n(w['hrv_7d'])} (28d {_n(w['hrv_28d'])})"
-            sleep_frag = f"sleep score 7d {_n(w['sleep_score_7d'])}"
-            data_frag = f"data {w['days_with_data_7d']}/7 days"
-            parts.append("wellness: " + " · ".join([rhr_frag, hrv_frag, sleep_frag, data_frag]))
+    wellness_line = format_wellness_line(ctx.get("wellness"))
+    if wellness_line:
+        parts.append(wellness_line)
 
     # Check-ins
     if "checkins" in requires:
