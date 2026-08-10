@@ -846,12 +846,15 @@ def build_block3_projection(anchor_weight, start_date):
 
 
 def curve_value(anchor_weight, start_date, on_date):
-    """Piecewise-linear DAILY interpolation. A week-N-day-1 date accrues at
-    week N's rate. Clamped to the 84-day block."""
-    days = (on_date - start_date).days
-    days = max(0, min(days, 84))
+    """Piecewise-linear DAILY interpolation, morning-weigh-in convention:
+    curve(D) is the target at the MORNING of D — loss accrued over the
+    elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
+    curve(start) == anchor exactly; 195.0 is reached at start+84 days (the
+    morning after the block's final day) and clamps thereafter."""
+    elapsed = (on_date - start_date).days
+    elapsed = max(0, min(elapsed, 84))
     w = anchor_weight
-    for d in range(0, days + 1):
+    for d in range(elapsed):
         week = min(12, d // 7 + 1)
         w -= BLOCK3_WEEKLY_RATES[week] / 7.0
     return round(w, 4)

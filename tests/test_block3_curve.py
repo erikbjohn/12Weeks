@@ -23,16 +23,26 @@ def test_slope_table_pins_no_week5_boundary():
 
 def test_curve_value_pinned_boundaries():
     from goal_engine import curve_value
-    assert curve_value(ANCHOR, START, date(2026, 8, 23)) == pytest.approx(217.5)
-    # Aug 24 = week-3 day 1: accrues at the NEW 2.0/7 rate (NOT 1.25/7)
-    assert curve_value(ANCHOR, START, date(2026, 8, 24)) == pytest.approx(217.5 - 2.0 / 7)
-    assert curve_value(ANCHOR, START, date(2026, 9, 20)) == pytest.approx(209.5)
-    assert curve_value(ANCHOR, START, date(2026, 9, 21)) == pytest.approx(209.5 - 2.5 / 7)
-    assert curve_value(ANCHOR, START, date(2026, 11, 1)) == pytest.approx(195.0)
+    # Morning-weigh-in convention: curve(D) = target at the MORNING of D
+    # (loss accrued over elapsed days BEFORE D). Day 0 = the anchor exactly.
+    assert curve_value(ANCHOR, START, START) == pytest.approx(220.0)
+    assert curve_value(ANCHOR, START, date(2026, 8, 23)) == pytest.approx(220.0 - 13 * 1.25 / 7)
+    # Week-2 target lands the morning AFTER week 2 completes:
+    assert curve_value(ANCHOR, START, date(2026, 8, 24)) == pytest.approx(217.5)
+    # Aug 25 accrues at the NEW 2.0/7 rate (NOT 1.25/7)
+    assert curve_value(ANCHOR, START, date(2026, 8, 25)) == pytest.approx(217.5 - 2.0 / 7)
+    assert curve_value(ANCHOR, START, date(2026, 9, 21)) == pytest.approx(209.5)
+    assert curve_value(ANCHOR, START, date(2026, 9, 22)) == pytest.approx(209.5 - 2.5 / 7)
+    # Final day's loss is in progress on the Nov 1 morning; 195.0 is reached
+    # at the Nov 2 morning (completion of Nov 1) and clamps thereafter.
+    assert curve_value(ANCHOR, START, date(2026, 11, 1)) == pytest.approx(195.0 + 2.0 / 7)
+    assert curve_value(ANCHOR, START, date(2026, 11, 2)) == pytest.approx(195.0)
+    assert curve_value(ANCHOR, START, date(2026, 12, 25)) == pytest.approx(195.0)
+    assert curve_value(ANCHOR, START, date(2026, 8, 1)) == pytest.approx(220.0)  # pre-block clamp
 
 def test_curve_continuous_at_phase_boundaries():
     from goal_engine import curve_value
-    for boundary in (date(2026, 8, 24), date(2026, 9, 21)):
+    for boundary in (date(2026, 8, 25), date(2026, 9, 22)):
         before = curve_value(ANCHOR, START, boundary.replace(day=boundary.day - 1))
         after = curve_value(ANCHOR, START, boundary)
         assert abs(before - after) < 0.5  # one day's accrual, no jump
