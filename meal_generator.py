@@ -167,11 +167,19 @@ def _pick_from(selections, category, index):
     return valid[index % len(valid)]
 
 
-def _compute_meal_times(protocol, num_meals):
-    """Generate evenly spaced meal times within the eating window."""
+def _compute_meal_times(protocol, num_meals, end_override_min=None):
+    """Generate evenly spaced meal times within the eating window.
+
+    end_override_min: optional minutes-since-midnight cap on the window end
+    (e.g. a fasted-dose meal-timing rail). When set, the window end used for
+    the spacing math becomes min(protocol end, end_override_min), so every
+    computed meal time — including the LAST one — lands at or before it.
+    """
     proto = _FASTING_PROTOCOLS[protocol]
     start_min = _parse_time_minutes(proto["start"])
     end_min = _parse_time_minutes(proto["end"])
+    if end_override_min is not None:
+        end_min = min(end_min, end_override_min)
 
     if num_meals == 1:
         return [proto["start"]]
@@ -210,6 +218,11 @@ def _format_time(total_minutes):
     if display_h == 0:
         display_h = 12
     return f"{display_h}:{m:02d}{suffix}"
+
+
+def _min_time_str(a, b):
+    """Return whichever of two 'H:MMam/pm' strings is EARLIER in the day."""
+    return a if _parse_time_minutes(a) <= _parse_time_minutes(b) else b
 
 
 def _sum_macros(foods_list):
@@ -331,7 +344,8 @@ def _generate_meal_name(position, protein_key, carb_key):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8",
-                       has_training=False, targets_pre_adjusted=False):
+                       has_training=False, targets_pre_adjusted=False,
+                       eating_window_end_override=None, fasting_note=None):
     """Generate a single-day meal plan matching the workout_data.py MEAL_PLANS format.
 
     Parameters:
@@ -348,6 +362,22 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             Skips the _DAY_MODIFIERS carb multiplier so day-type adjustments
             don't COMPOUND (goal_engine's +100 heavy-day carbs then got x1.5-2.0
             here, blowing the card ~600 kcal past its own displayed target).
+        eating_window_end_override: optional "H:MMam/pm" string (e.g. "7:30pm").
+            When set, the eating window used to space the day's meals is
+            clamped to min(fasting-protocol end, override) — this caps the
+            LAST meal of the day (not just the one named "Dinner"; under the
+            "none" protocol that's a 9:00pm snack) so a nightly fasted dose
+            (e.g. 22:00 Tesamorelin needing 2h fasted) always has a clean
+            window after the last bite. The hardcoded 8:00pm protein-
+            supplement meal is clamped the same way. meal_generator stays
+            DB-free/dateless — callers with a date resolve this from
+            PeptideDose rows and pass the result in. None (the default)
+            reproduces the exact pre-existing behavior — no rail, no crash.
+        fasting_note: optional string appended to the plan's "note" field
+            (e.g. "Tesamorelin at 10pm requires 2h fasted — last meal ends
+            by 8pm") explaining WHY the window was clamped, so the served
+            card carries its own rationale instead of just a silently
+            earlier last-meal time.
 
     Returns:
         dict matching MEAL_PLANS structure in workout_data.py:
@@ -392,6 +422,12 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
                     })
                     target_cal = shake["cal"] + 5
                     target_protein = shake["protein"]
+        _fast_note = ("Fasted training day — water, black coffee, electrolytes only; "
+                     "train in the fasted state, no food until you break the fast."
+                     if has_training else
+                     "Water, black coffee, electrolytes. Rest and recover.")
+        if fasting_note:
+            _fast_note = f"{_fast_note} {fasting_note}".strip()
         return {
             "label": "Fast Day",
             "targetCal": target_cal,
@@ -401,10 +437,7 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
             # A fast day can still carry a prescribed run/lift (fasted training —
             # e.g. the Sunday long fasted run, or a fasted lift day). Don't tell
             # the athlete to "rest and recover" when there's training on the card.
-            "note": ("Fasted training day — water, black coffee, electrolytes only; "
-                     "train in the fasted state, no food until you break the fast."
-                     if has_training else
-                     "Water, black coffee, electrolytes. Rest and recover."),
+            "note": _fast_note,
             "meals": meals,
         }
 
@@ -527,7 +560,9 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
     # Determine number of eating meals
     num_eating_meals = proto["meals"]
     splits = _MEAL_SPLITS.get(num_eating_meals, _MEAL_SPLITS[3])
-    meal_times = _compute_meal_times(fasting_protocol, num_eating_meals)
+    _end_override_min = (_parse_time_minutes(eating_window_end_override)
+                         if eating_window_end_override else None)
+    meal_times = _compute_meal_times(fasting_protocol, num_eating_meals, _end_override_min)
 
     # ── Build each eating meal ────────────────────────────────────────────────
     # Filter out shake proteins from main meal rotation
@@ -615,12 +650,17 @@ def generate_meal_plan(selected_foods, day_type, targets, fasting_protocol="16_8
                 supp_food = scaled
                 break
         if supp_food:
+            _supp_time = ("8:00pm" if not eating_window_end_override
+                         else _min_time_str("8:00pm", eating_window_end_override))
             meals.append({
-                "time": "8:00pm",
+                "time": _supp_time,
                 "name": f"Protein Supplement (closes {shortfall}g gap)",
                 "optional": False,
                 "foods": [supp_food],
             })
+
+    if fasting_note:
+        note = f"{note} {fasting_note}".strip() if note else fasting_note
 
     return {
         "label": label,

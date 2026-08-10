@@ -1692,6 +1692,7 @@ def api_regenerate_meals():
             if day_date in protected_dates:
                 continue  # Logged meals or past day — preserve history
             day_type = day_types[day_idx]
+            _fasted_override, _fasted_note = _fasted_window_override(current_user.id, day_date)
             if day_type == 'fast_day':
                 # Use user's selected foods with fast-day calorie target
                 cal_day_type = _cal_day_type_map.get(day_type, "rest")
@@ -1700,6 +1701,7 @@ def api_regenerate_meals():
                     selected_foods=fs.selected_foods, day_type='fast_day',
                     targets=day_macros, fasting_protocol=fasting_protocol,
                     has_training=_day_has_training(current_user.id, target_week, day_idx),
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
@@ -1710,6 +1712,7 @@ def api_regenerate_meals():
                     selected_foods=fs.selected_foods, day_type=day_type,
                     targets=day_macros, fasting_protocol=fasting_protocol,
                     targets_pre_adjusted=True,
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
 
             db.session.add(WeeklyMealPlan(
@@ -4507,16 +4510,135 @@ def _user_today_for(user):
     return user_local_today(user.timezone)
 
 
+def _fasted_window_override(user_id, day_date):
+    """Meal-timing rail: when a fasted dose (scheduled >=21:00, same
+    definition as protocol.fasted_dose_time/the "fasting_bound" card field)
+    lands on day_date, the eating window must close early enough to leave
+    2+ hours fasted before it. Returns (override, note) — an "H:MMam/pm"
+    window-end cap and a human-readable reason to surface on the card.
+
+    Both come back None when there's no fasted dose for this date (no
+    PeptideDose rows imported yet, or nothing scheduled late that day) —
+    generation then proceeds with NO rail, never a hardcoded fallback
+    (no-static rule).
+
+    The note names whichever compound(s) actually triggered the rail —
+    read from the row itself, never a hardcoded "Tesamorelin" — so it
+    stays correct if the doctor's protocol changes which compound carries
+    the late dose.
+    """
+    rows = PeptideDose.query.filter_by(user_id=user_id, date=day_date).all()
+    dose_time = fasted_dose_time(rows, day_date)
+    if not dose_time:
+        return None, None
+
+    compounds = sorted({r.compound for r in rows if r.time == dose_time})
+    who = " + ".join(compounds) if compounds else "Tonight's dose"
+    hh, mm = dose_time.split(":")
+    hh = int(hh)
+    suffix = "am" if hh < 12 else "pm"
+    h12 = hh % 12 or 12
+    friendly_time = f"{h12}{suffix}" if mm == "00" else f"{h12}:{mm}{suffix}"
+
+    note = f"{who} at {friendly_time} requires 2h fasted — last meal ends by 8pm"
+    return "7:30pm", note
+
+
 def _reconcile_meal_rail(user, changed_dates):
-    """STUB (Task 10 fills this in): given the target user and the dates
-    whose fasted (a dose scheduled at/after 21:00) status changed during
-    this import, regenerate the affected unlogged, non-past days' meal
-    plans (reusing /api/meals/regenerate's logged-meal/past-day protection)
-    and return the list of day identifiers actually regenerated. For now
-    this is a no-op that always reports nothing regenerated — the import
-    endpoint still computes and passes `changed_dates` correctly so this
-    stub only needs its body filled in later."""
-    return []
+    """Given the target user and the dates whose fasted (a dose scheduled
+    at/after 21:00) status changed during this import, regenerate the
+    affected unlogged, non-past days' meal plans that fall in the user's
+    CURRENT week (the only week /api/meals/regenerate ever touches) —
+    reusing that endpoint's logged-meal/past-day protection — and return
+    the list of day_idx values actually regenerated, for the import
+    report.
+
+    Runs on the target user, never current_user (this is called from the
+    admin import endpoint) — mirrors _user_today_for's reasoning. Does NOT
+    commit; the caller (admin_import_protocol) commits everything — the
+    PeptideDose writes and this reconciliation — in one transaction.
+    """
+    if not changed_dates:
+        return []
+
+    today = _user_today_for(user)
+    week_monday = today - timedelta(days=today.weekday())
+    week_end = week_monday + timedelta(days=6)
+    relevant = sorted(d for d in changed_dates if week_monday <= d <= week_end)
+    if not relevant:
+        return []
+
+    state = AppState.query.filter_by(user_id=user.id).first()
+    if not state or not state.start_date:
+        return []  # no program anchor — nothing to regenerate against
+    diff_days = (today - state.start_date).days
+    current_week = min(12, max(1, diff_days // 7 + 1))
+
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    fs = UserFoodSelections.query.filter_by(user_id=user.id).first()
+    if not goal or not fs or not fs.selected_foods:
+        # No goal/food selections yet — nothing to regenerate FROM. No
+        # hardcoded fallback plan ships in their place (no-static rule).
+        return []
+
+    from meal_generator import generate_meal_plan
+    from goal_engine import compute_day_calories
+
+    bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
+    current_weight = bw.weight_lbs if bw else 200
+    base_calories = goal.daily_calories
+    fasting_protocol = goal.fasting_protocol or "16_8"
+    _cal_day_type_map = {
+        "heavy_lift": "heavy", "long_run": "long_run",
+        "moderate": "training", "fast_day": "fast_day",
+        "rest": "rest", "deload": "rest",
+    }
+
+    regenerated_day_idxs = []
+    for d in relevant:
+        day_idx = (d - week_monday).days
+
+        mlog = MealLog.query.filter_by(user_id=user.id, log_date=d).first()
+        if mlog and (mlog.eaten or []):
+            continue  # logged meals — history, never overwritten
+        if d < today:
+            continue  # past day with no log — still history
+
+        day_type = _get_day_meal_type(user.id, current_week, day_idx)
+        override, note = _fasted_window_override(user.id, d)
+
+        if day_type == 'fast_day':
+            cal_day_type = _cal_day_type_map.get(day_type, "rest")
+            day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+            meal_plan = generate_meal_plan(
+                selected_foods=fs.selected_foods, day_type='fast_day',
+                targets=day_macros, fasting_protocol=fasting_protocol,
+                has_training=_day_has_training(user.id, current_week, day_idx),
+                eating_window_end_override=override, fasting_note=note,
+            )
+        else:
+            cal_day_type = _cal_day_type_map.get(day_type, "training")
+            day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+            meal_plan = generate_meal_plan(
+                selected_foods=fs.selected_foods, day_type=day_type,
+                targets=day_macros, fasting_protocol=fasting_protocol,
+                targets_pre_adjusted=True,
+                eating_window_end_override=override, fasting_note=note,
+            )
+
+        WeeklyMealPlan.query.filter_by(
+            user_id=user.id, week=current_week, day_idx=day_idx,
+        ).delete()
+        db.session.add(WeeklyMealPlan(
+            user_id=user.id, week=current_week, day_idx=day_idx,
+            meal_data=meal_plan,
+            daily_calories=meal_plan.get('targetCal', 0),
+            daily_protein=meal_plan.get('targetProtein', 0),
+            day_type=day_type, source='generator',
+        ))
+        regenerated_day_idxs.append(day_idx)
+
+    return regenerated_day_idxs
 
 
 class _ProtocolImportIntegrityError(Exception):
@@ -5723,10 +5845,26 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         ).filter(WeeklyMealPlan.source != 'coach'),
             WeeklyMealPlan).delete(synchronize_session=False)
 
+        # Map (target_week, day_idx) -> calendar date via AppState.start_date —
+        # the SAME idiom /api/admin/generate-meals uses. NOT the calendar
+        # "today's Monday" idiom /api/meals/regenerate uses: this function
+        # regularly generates a FUTURE week ("Plan Next Week" defaults
+        # target_week to _current_week()+1), so a date must be derived from
+        # target_week itself, never from today's calendar week.
+        _meal_state = AppState.query.filter_by(user_id=current_user.id).first()
+
         for day_idx in range(7):
             if preserve_through is not None and day_idx <= preserve_through:
                 continue  # leave today + earlier days untouched
             day_type = day_types[day_idx]
+            _day_date = (
+                _meal_state.start_date + timedelta(days=(target_week - 1) * 7 + day_idx)
+                if _meal_state and _meal_state.start_date else None
+            )
+            _fasted_override, _fasted_note = (
+                _fasted_window_override(current_user.id, _day_date)
+                if _day_date is not None else (None, None)
+            )
 
             if day_type == 'fast_day':
                 # Use user's selected foods with fast-day calorie target
@@ -5750,6 +5888,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                         targets=day_macros,
                         fasting_protocol=fasting_protocol,
                         has_training=_has_tr,
+                        eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                     )
                 else:
                     meal_plan = MEAL_PLANS.get('fast_day', {})  # fallback only if no selections
@@ -5788,6 +5927,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                     targets=day_macros,
                     fasting_protocol=fasting_protocol,
                     targets_pre_adjusted=True,
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
                 # Surface the nutritionist's rationale on the served card so
                 # the athlete sees WHY the day is fueled this way.
@@ -11199,6 +11339,25 @@ def api_admin_generate_meals():
         if day_meal_type == 'fast_day':
             day_macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
 
+        # Don't overwrite days the athlete has already logged meals for.
+        # Mirror the protection in /api/meals/regenerate so admin tools can't
+        # silently rewrite history either. Computed BEFORE generate_meal_plan
+        # (not just before the save) so the same _day_date also resolves the
+        # fasted-dose meal-timing rail below.
+        from datetime import timedelta as _timedelta, date as _date
+        from models import AppState as _AppState
+        _state = _AppState.query.filter_by(user_id=user.id).first()
+        _day_date = (_state.start_date + _timedelta(days=(week - 1) * 7 + day_idx)
+                    if _state and _state.start_date else None)
+        if _day_date is not None:
+            _mlog = MealLog.query.filter_by(user_id=user.id, log_date=_day_date).first()
+            if _mlog and (_mlog.eaten or []):
+                continue
+
+        _fasted_override, _fasted_note = (
+            _fasted_window_override(user.id, _day_date) if _day_date is not None else (None, None)
+        )
+
         try:
             meal_plan = generate_meal_plan(
                 selected_foods=fs.selected_foods,
@@ -11207,21 +11366,10 @@ def api_admin_generate_meals():
                 fasting_protocol=fasting_protocol,
                 has_training=_day_has_training(user.id, week, day_idx),
                 targets_pre_adjusted=True,
+                eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
             )
         except Exception as e:
             continue
-
-        # Don't overwrite days the athlete has already logged meals for.
-        # Mirror the protection in /api/meals/regenerate so admin tools can't
-        # silently rewrite history either.
-        from datetime import timedelta as _timedelta, date as _date
-        from models import AppState as _AppState
-        _state = _AppState.query.filter_by(user_id=user.id).first()
-        if _state and _state.start_date:
-            _day_date = _state.start_date + _timedelta(days=(week - 1) * 7 + day_idx)
-            _mlog = MealLog.query.filter_by(user_id=user.id, log_date=_day_date).first()
-            if _mlog and (_mlog.eaten or []):
-                continue
 
         # Save
         save_day_type = day_meal_type if day_meal_type != 'standard' else cal_day_type
