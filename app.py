@@ -4490,6 +4490,13 @@ def _reconcile_meal_rail(user, changed_dates):
     return []
 
 
+class _ProtocolImportIntegrityError(Exception):
+    """Raised when the post-write (date, compound) key set for a protocol
+    import doesn't match what the importer expected to write. Caught
+    separately from generic exceptions so it maps to 400 (a CSV/DB state
+    problem the caller can act on), not 500 (an unexpected server fault)."""
+
+
 @app.route("/api/admin/import-protocol", methods=["POST"])
 @admin_required
 def admin_import_protocol():
@@ -4509,23 +4516,36 @@ def admin_import_protocol():
     3. Upsert key is (user_id, date, compound) — `time` is a payload field,
        not part of the key, so a doctor's time edit is a plain update that
        inherently preserves taken_at.
-       - Rows dated before today are NEVER inserted, updated, or deleted —
-         unless the caller passes force_past=true, in which case the
-         change is applied and logged in `skipped` (reused here as a diff
-         log, not only a "nothing happened" list).
+       - Rows dated before today are NEVER inserted or updated — unless the
+         caller passes force_past=true, in which case the change is
+         applied and logged in `skipped` (reused here as a diff log, not
+         only a "nothing happened" list).
        - On a row with taken_at set, dose_mg is NEVER updated (skipped +
          reported) — UNCONDITIONALLY; force_past does not override this,
          only the past-date lock. Metadata (time, event_type,
          syringe_units, site, notes) may still update in place, preserving
          taken_at.
-    4. Delete pass: a DB row absent from the CSV is deleted only if its
-       date is in the future, or it's today's row and untaken. A CHECKED
-       today row dropped from the CSV is kept and annotated
-       " [removed from protocol]" instead of being deleted.
+    4. Delete pass: a DB row absent from the CSV is deleted only if it is
+       untaken AND (its date is in the future, OR it's today's row, OR
+       it's a past row with force_past=true — the last case is also
+       logged in `skipped`). A row with taken_at set is NEVER deleted,
+       regardless of its date or force_past — it is kept and annotated
+       " [removed from protocol]" instead, and the divergence is logged in
+       `skipped`. A past, untaken row absent from the CSV without
+       force_past is also left untouched but IS reported in `skipped` (a
+       silent no-op here would hide real CSV/DB drift).
     5. Whole-file integrity: before committing, the importer reconstructs
        the exact (date, compound) key set it expects to exist and asserts
-       it against the actual DB state; any mismatch raises and rolls back
-       the entire transaction (500).
+       it against the actual DB state; any mismatch raises
+       `_ProtocolImportIntegrityError` and rolls back the entire
+       transaction, returned as 400 (the CSV/DB state is presumed to be
+       the callable-fixable problem here, not a server fault). Any other
+       unexpected exception rolls back and returns 500.
+
+    Every `skipped` entry is {date, compound, field, db_value, csv_value,
+    reason} — db_value/csv_value are always real field values (or null for
+    whole-row divergences with no single field), never free text; `reason`
+    carries the human-readable explanation.
 
     Everything happens in one db.session transaction.
     """
@@ -4620,8 +4640,8 @@ def admin_import_protocol():
                 if is_past and not force_past:
                     skipped.append({
                         "date": r["date"].isoformat(), "compound": r["compound"],
-                        "field": "row", "db_value": None,
-                        "csv_value": "insert blocked (past date)",
+                        "field": "row", "db_value": None, "csv_value": None,
+                        "reason": "insert blocked: row is past-dated (force_past=false)",
                     })
                     continue
                 new_row = PeptideDose(
@@ -4636,8 +4656,8 @@ def admin_import_protocol():
                 if is_past and force_past:
                     skipped.append({
                         "date": r["date"].isoformat(), "compound": r["compound"],
-                        "field": "row", "db_value": None,
-                        "csv_value": "inserted (force_past)",
+                        "field": "row", "db_value": None, "csv_value": None,
+                        "reason": "inserted via force_past (row was past-dated)",
                     })
                 continue
 
@@ -4650,6 +4670,7 @@ def admin_import_protocol():
                         skipped.append({
                             "date": r["date"].isoformat(), "compound": r["compound"],
                             "field": field, "db_value": db_val, "csv_value": csv_val,
+                            "reason": "update blocked: row is past-dated (force_past=false)",
                         })
                 continue
 
@@ -4666,6 +4687,7 @@ def admin_import_protocol():
                         "date": r["date"].isoformat(), "compound": r["compound"],
                         "field": "dose_mg", "db_value": existing_row.dose_mg,
                         "csv_value": r["dose_mg"],
+                        "reason": "dose_mg is immutable once taken; update skipped",
                     })
                 else:
                     if is_past and force_past:
@@ -4673,6 +4695,7 @@ def admin_import_protocol():
                             "date": r["date"].isoformat(), "compound": r["compound"],
                             "field": "dose_mg", "db_value": existing_row.dose_mg,
                             "csv_value": r["dose_mg"],
+                            "reason": "updated via force_past (row was past-dated)",
                         })
                     existing_row.dose_mg = r["dose_mg"]
                     row_touched = True
@@ -4685,6 +4708,7 @@ def admin_import_protocol():
                         skipped.append({
                             "date": r["date"].isoformat(), "compound": r["compound"],
                             "field": field, "db_value": db_val, "csv_value": csv_val,
+                            "reason": "updated via force_past (row was past-dated)",
                         })
                     setattr(existing_row, field, csv_val)
                     row_touched = True
@@ -4692,31 +4716,56 @@ def admin_import_protocol():
             if row_touched:
                 updated += 1
 
-        # Deletion pass — DB rows absent from the CSV.
+        # Deletion pass — DB rows absent from the CSV. A row with taken_at
+        # set is NEVER deleted, regardless of date or force_past — it is
+        # kept and annotated instead (mirrors across past/today/future
+        # uniformly; this is the fix for the bug where a future-dated taken
+        # row was deleted because the old code only guarded today's rows).
+        marker = "[removed from protocol]"
         for key, row in existing.items():
             if key in csv_keys:
                 continue
             d, c = key
-            if d > today:
+            taken = row.taken_at is not None
+
+            if taken:
+                if marker not in (row.notes or ""):
+                    row.notes = ((row.notes or "").rstrip() + " " + marker).strip()
+                    updated += 1
+                    skipped.append({
+                        "date": d.isoformat(), "compound": c, "field": "row",
+                        "db_value": None, "csv_value": None,
+                        "reason": "taken row removed from protocol CSV; kept and annotated, never deleted",
+                    })
+                continue
+
+            if d >= today:
                 db.session.delete(row)
                 expected_keys.discard(key)
                 deleted += 1
-            elif d == today:
-                if row.taken_at is None:
-                    db.session.delete(row)
-                    expected_keys.discard(key)
-                    deleted += 1
-                else:
-                    marker = "[removed from protocol]"
-                    if marker not in (row.notes or ""):
-                        row.notes = ((row.notes or "").rstrip() + " " + marker).strip()
-                        updated += 1
-            # d < today and absent from the CSV: never touched — the CSV
-            # simply doesn't cover it, and past rows are never deleted.
+            elif force_past:
+                db.session.delete(row)
+                expected_keys.discard(key)
+                deleted += 1
+                skipped.append({
+                    "date": d.isoformat(), "compound": c, "field": "row",
+                    "db_value": None, "csv_value": None,
+                    "reason": "deleted via force_past (past-dated, untaken, absent from CSV)",
+                })
+            else:
+                skipped.append({
+                    "date": d.isoformat(), "compound": c, "field": "row",
+                    "db_value": None, "csv_value": None,
+                    "reason": "past-dated row absent from CSV; not deleted (force_past=false)",
+                })
 
         db.session.flush()
 
         # ── Whole-file integrity check ──────────────────────────────────
+        # Per-compound counts are intentionally NOT re-checked separately —
+        # they're derived from the same key set, so a set-equality pass
+        # already implies compound-count equality; a second check would be
+        # dead code that can never fire independently of the first.
         actual_keys = {
             (row.date, row.compound)
             for row in PeptideDose.query.filter_by(user_id=user.id).all()
@@ -4724,16 +4773,9 @@ def admin_import_protocol():
         if actual_keys != expected_keys:
             missing = sorted(expected_keys - actual_keys)
             extra = sorted(actual_keys - expected_keys)
-            raise RuntimeError(
+            raise _ProtocolImportIntegrityError(
                 f"protocol import integrity check failed for user {user.id}: "
                 f"missing={missing} extra={extra}"
-            )
-        expected_compound_counts = Counter(c for _, c in expected_keys)
-        actual_compound_counts = Counter(c for _, c in actual_keys)
-        if expected_compound_counts != actual_compound_counts:
-            raise RuntimeError(
-                f"protocol import per-compound count mismatch for user {user.id}: "
-                f"expected={dict(expected_compound_counts)} actual={dict(actual_compound_counts)}"
             )
 
         # ── Meal-rail reconciliation: which dates' fasted (>=21:00 dose)
@@ -4759,6 +4801,11 @@ def admin_import_protocol():
         meal_days_regenerated = _reconcile_meal_rail(user, changed_dates)
 
         db.session.commit()
+    except _ProtocolImportIntegrityError as e:
+        db.session.rollback()
+        import logging
+        logging.error("protocol import integrity check failed for user %s: %s", user.id, e)
+        return jsonify({"error": f"protocol import integrity check failed: {e}"}), 400
     except Exception as e:
         db.session.rollback()
         import logging

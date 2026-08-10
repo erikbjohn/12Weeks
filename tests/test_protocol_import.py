@@ -250,6 +250,7 @@ def test_dose_mg_change_on_taken_row_is_skipped_and_reported(app_ctx, monkeypatc
     assert entry["field"] == "dose_mg"
     assert entry["db_value"] == 0.25
     assert entry["csv_value"] == 0.5
+    assert entry["reason"]  # human-readable explanation present (non-empty string)
 
     db.session.expire_all()
     row = _get_row(db, u.id, date(2026, 8, 20), "BPC-157")
@@ -289,6 +290,12 @@ def test_removing_today_dose_unchecked_deleted_checked_kept_and_annotated(app_ct
     body2 = r2.get_json()
     assert body2["deleted"] == 1  # only the unchecked BPC-157 row
     assert body2["updated"] == 1  # the checked KPV row gets its notes annotated
+
+    kpv_skips = [s for s in body2["skipped"] if s["compound"] == "KPV" and s["date"] == "2026-08-20"]
+    assert len(kpv_skips) == 1  # the annotate-instead-of-delete divergence is reported
+    assert kpv_skips[0]["db_value"] is None
+    assert kpv_skips[0]["csv_value"] is None
+    assert kpv_skips[0]["reason"]
 
     from models import PeptideDose
     bpc = _get_row(db, u.id, date(2026, 8, 20), "BPC-157")
@@ -349,6 +356,18 @@ def test_past_rows_immutable_unless_force_past(app_ctx, monkeypatch, tmp_path):
     body3 = r3.get_json()
     assert body3["updated"] == 1  # the dose_mg correction on 08-19
     assert body3["imported"] == 1  # the new 08-18 row
+
+    # force_past still LOGS what it changed in `skipped`, with real values
+    # (not free text) plus a human-readable `reason`.
+    by_key = {(s["date"], s["compound"], s["field"]): s for s in body3["skipped"]}
+    dose_entry = by_key[("2026-08-19", "BPC-157", "dose_mg")]
+    assert dose_entry["db_value"] == 0.25
+    assert dose_entry["csv_value"] == 0.5
+    assert dose_entry["reason"]
+    row_entry = by_key[("2026-08-18", "TB-500", "row")]
+    assert row_entry["db_value"] is None
+    assert row_entry["csv_value"] is None
+    assert row_entry["reason"]
 
     db.session.expire_all()
     corrected = _get_row(db, u.id, date(2026, 8, 19), "BPC-157")
@@ -417,6 +436,109 @@ def test_taken_row_never_deleted_across_metadata_dose_and_removal_attempts(app_c
     assert survivor is not None
     assert survivor.id == row_id
     assert survivor.taken_at is not None
+
+
+# ── FIX ROUND 1: future-dated taken row is never deleted (CRITICAL) ────────
+# The original delete pass only guarded the `date == today` branch against
+# taken_at; a `date > today` row with taken_at set was deleted outright.
+# This is a direct regression test for that bug.
+
+def test_future_taken_row_never_deleted_kept_annotated_and_reported(app_ctx, monkeypatch, tmp_path):
+    app_, db = app_ctx
+    u = _fresh_user(app_, db, "import-futuretaken@test.com")
+    _set_today(monkeypatch, date(2026, 8, 20))
+    client = _client(app_, monkeypatch)
+
+    csv_path = str(tmp_path / "protocol.csv")
+    _write_csv(csv_path, [
+        _row("2026-08-24", "07:00", "Injection", "Retatrutide", "3", "30u", "Abdomen", "future, escalation dose"),
+    ])
+    r1 = _post_import(client, u.email, csv_path=csv_path)
+    assert r1.status_code == 200, r1.get_data(as_text=True)
+    assert r1.get_json()["imported"] == 1
+
+    future_row = _get_row(db, u.id, date(2026, 8, 24), "Retatrutide")
+    # A future-dated dose can legitimately already be marked taken (e.g. an
+    # early/ahead-of-schedule injection logged by the user).
+    future_row.taken_at = datetime(2026, 8, 24, 6, 0, 0)
+    db.session.commit()
+    future_id = future_row.id
+
+    # New CSV drops the future row entirely.
+    _write_csv(csv_path, [
+        _row("2026-08-25", "07:00", "Oral", "Enclomiphene", "6.25", "-", "-", "unrelated"),
+    ])
+    r2 = _post_import(client, u.email, csv_path=csv_path)
+    assert r2.status_code == 200, r2.get_data(as_text=True)
+    body2 = r2.get_json()
+    assert body2["deleted"] == 0  # the taken future row must NOT be deleted
+    assert body2["updated"] == 1  # it gets annotated instead
+
+    reta_skips = [s for s in body2["skipped"] if s["compound"] == "Retatrutide" and s["date"] == "2026-08-24"]
+    assert len(reta_skips) == 1
+    assert reta_skips[0]["db_value"] is None
+    assert reta_skips[0]["csv_value"] is None
+    assert reta_skips[0]["reason"]
+
+    db.session.expire_all()
+    survivor = _get_row(db, u.id, date(2026, 8, 24), "Retatrutide")
+    assert survivor is not None
+    assert survivor.id == future_id
+    assert survivor.taken_at is not None
+    assert "[removed from protocol]" in survivor.notes
+
+
+# ── FIX ROUND 1: force_past vs. deletion of past, untaken, CSV-absent rows ──
+# Ruling: force_past=true ALSO unlocks deletion of past-dated UNTAKEN rows
+# absent from the CSV (logged in skipped); without force_past, such a row is
+# left untouched but now REPORTED in skipped (previously a silent no-op).
+
+def test_past_untaken_row_absent_from_csv_reported_then_deleted_with_force_past(app_ctx, monkeypatch, tmp_path):
+    app_, db = app_ctx
+    u = _fresh_user(app_, db, "import-pastabsent@test.com")
+    client = _client(app_, monkeypatch)
+
+    csv_path = str(tmp_path / "protocol.csv")
+
+    # Day 1: import a row while it's still today-or-future — it lands, untaken.
+    _set_today(monkeypatch, date(2026, 8, 19))
+    _write_csv(csv_path, [_row("2026-08-19", "07:00", "Injection", "KPV", "1", "10u", "Love handle", "n")])
+    r1 = _post_import(client, u.email, csv_path=csv_path)
+    assert r1.status_code == 200, r1.get_data(as_text=True)
+    assert r1.get_json()["imported"] == 1
+
+    # Time passes: "today" is now 2026-08-20 — the row is now in the past.
+    _set_today(monkeypatch, date(2026, 8, 20))
+
+    # v2: the doctor's CSV no longer lists 2026-08-19 KPV at all.
+    _write_csv(csv_path, [_row("2026-08-25", "07:00", "Oral", "Enclomiphene", "6.25", "-", "-", "unrelated")])
+
+    # Without force_past: left untouched, but now reported.
+    r2 = _post_import(client, u.email, csv_path=csv_path)
+    assert r2.status_code == 200, r2.get_data(as_text=True)
+    body2 = r2.get_json()
+    assert body2["deleted"] == 0
+    kpv_skips = [s for s in body2["skipped"] if s["compound"] == "KPV" and s["date"] == "2026-08-19"]
+    assert len(kpv_skips) == 1
+    assert kpv_skips[0]["db_value"] is None
+    assert kpv_skips[0]["csv_value"] is None
+    assert kpv_skips[0]["reason"]
+
+    from models import PeptideDose
+    # 2026-08-19 KPV (untouched) + the unrelated 2026-08-25 row just imported.
+    assert PeptideDose.query.filter_by(user_id=u.id).count() == 2
+    assert PeptideDose.query.filter_by(user_id=u.id, date=date(2026, 8, 19), compound="KPV").first() is not None
+
+    # With force_past=true: actually deleted, and logged.
+    r3 = _post_import(client, u.email, csv_path=csv_path, force_past=True)
+    assert r3.status_code == 200, r3.get_data(as_text=True)
+    body3 = r3.get_json()
+    assert body3["deleted"] == 1
+    kpv_skips3 = [s for s in body3["skipped"] if s["compound"] == "KPV" and s["date"] == "2026-08-19"]
+    assert len(kpv_skips3) == 1
+    assert kpv_skips3[0]["reason"]
+
+    assert PeptideDose.query.filter_by(user_id=u.id, date=date(2026, 8, 19), compound="KPV").first() is None
 
 
 # ── (j) whole-file integrity, documentation test ────────────────────────────
