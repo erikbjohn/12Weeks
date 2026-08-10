@@ -4,8 +4,9 @@ runner in this repo, so every field/behavior buildProtocolContent reads off
 GET /api/protocol/today is asserted here on the server side instead:
 
   (a) exactly 5 doses for a seeded 2026-08-10 user, each carrying every
-      field the renderer reads (id/time/event_type/compound/dose_mg/
-      syringe_units/site/notes/taken).
+      field the renderer reads (id/time/compound/dose_mg/syringe_units/
+      site/notes/taken) plus `event_type`, asserted here as part of the
+      served contract even though buildProtocolContent doesn't read it.
   (b) the payload never leaks PROTOCOL_COMPOUNDS reference content
       (watch_fors/mechanism) — card boundary rule.
   (c) fasting_bound is null on a plain 2026-08-10 day and "20:00" when a
@@ -90,7 +91,9 @@ def _add_dose(app_, db, user_id, d, time_s, event_type, compound, dose_mg,
     return _app_do(app_, _do)
 
 
-# ── (a) exactly 5 doses, every field buildProtocolContent reads ─────────────
+# ── (a) exactly 5 doses, the full served contract per dose ──────────────────
+# (event_type is part of the contract but NOT read by buildProtocolContent;
+# everything else in this set is.)
 
 DOSE_UI_FIELDS = {
     "id", "time", "event_type", "compound", "dose_mg",

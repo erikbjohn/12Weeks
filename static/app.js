@@ -10606,7 +10606,7 @@ let _doseSaving = {};  // dose id -> true while a toggle/late POST is in flight
 
 function _fmtDoseTime(hhmm) {
   var parts = (hhmm || '').split(':');
-  if (parts.length !== 2) return hhmm || '';
+  if (parts.length !== 2) return escapeHtml(hhmm || '');
   var h = parseInt(parts[0], 10);
   var ampm = h >= 12 ? 'PM' : 'AM';
   h = h % 12; if (h === 0) h = 12;
@@ -10646,7 +10646,7 @@ function _doseRowHtml(dose) {
 
 function _missedRowHtml(m) {
   var actionHtml = '';
-  var btnStyle = 'padding:8px 14px;font-size:13px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text);cursor:pointer;flex-shrink:0';
+  var btnStyle = 'min-height:44px;padding:12px 18px;font-size:15px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text);cursor:pointer;flex-shrink:0';
   if (m.action === 'retro_mark' && m.id != null) {
     actionHtml = '<button class="protocol-action-btn" style="' + btnStyle + '" onclick="toggleDose(' + m.id + ', false)">Mark taken</button>';
   } else if (m.action === 'taken_late' && m.id != null) {
