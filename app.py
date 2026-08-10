@@ -40,8 +40,9 @@ from models import (
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
-    PeptideDose,
+    PeptideDose, PeptideVial, LabReminder,
 )
+from protocol import missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -1081,6 +1082,15 @@ def _user_today():
         return user_local_now(tz).date()
     except Exception:
         return date.today()
+
+
+def _utcnow():
+    """Module-level now-provider (UTC, tz-aware). Every write path that
+    stamps a wall-clock "now" (taken_at, completed_at, the /late real-clock
+    gate) MUST call this instead of `datetime.now(timezone.utc)` directly,
+    so tests can freeze it via `monkeypatch.setattr(appmod, "_utcnow", ...)`
+    without patching the stdlib datetime module itself."""
+    return datetime.now(timezone.utc)
 
 # Block-2 CLIMBING weekly working-set target. Block 1 ran a FLAT 81 and the
 # coach obeyed "more is not better" at the low end, so volume tapered 163->48.
@@ -4821,6 +4831,188 @@ def admin_import_protocol():
         "row_count": len(parsed_rows),
         "per_compound": dict(Counter(r["compound"] for r in parsed_rows)),
     })
+
+
+# ── User-facing protocol API ─────────────────────────────────────────────
+#
+# Thin endpoints over protocol.py's pure derivations — no gating logic
+# lives here beyond the write-gates documented per-endpoint below. "Today"
+# always comes from `_user_today()` (current_user's timezone), never the
+# server's UTC date. Every stamped "now" comes from `_utcnow()` so tests
+# can freeze it.
+
+@app.route("/api/protocol/today", methods=["GET"])
+@login_required
+def protocol_today():
+    """Today's peptide-protocol snapshot for the logged-in user: every dose
+    scheduled on the user-local date (orals included), the missed-dose
+    action list, per-vial inventory projection, whether today carries a
+    fasted (>=21:00) dose, and any lab reminders due within 7 days.
+
+    NEVER includes PROTOCOL_COMPOUNDS reference content (mechanism,
+    effects, watch_fors) — this is a schedule/adherence payload only.
+    """
+    today = _user_today()
+    all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+    today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
+    vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
+    labs = LabReminder.query.filter_by(user_id=current_user.id).all()
+
+    labs_due = [
+        {"id": l.id, "label": l.label, "due_date": l.due_date.isoformat()}
+        for l in labs
+        if l.completed_at is None and l.due_date <= today + timedelta(days=7)
+    ]
+
+    missed = [
+        {"date": m["date"].isoformat(), "compound": m["compound"],
+         "rule": m["rule"], "action": m["action"]}
+        for m in missed_line(all_rows, today)
+    ]
+    vials_out = [
+        {"compound": v["compound"], "mg_remaining": v["mg_remaining"],
+         "doses_left": v["doses_left"], "runout_date": v["runout_date"].isoformat(),
+         "reorder_by": v["reorder_by"].isoformat(), "reorder_flag": v["reorder_flag"]}
+        for v in vial_status(vials, all_rows, today)
+    ]
+
+    return jsonify({
+        "date": today.isoformat(),
+        "doses": [
+            {
+                "id": r.id, "time": r.time, "event_type": r.event_type,
+                "compound": r.compound, "dose_mg": r.dose_mg,
+                "syringe_units": r.syringe_units, "site": r.site,
+                "notes": r.notes, "taken": r.taken_at is not None,
+            }
+            for r in today_rows
+        ],
+        "missed": missed,
+        "vials": vials_out,
+        "fasting_bound": "20:00" if fasted_dose_time(all_rows, today) else None,
+        "labs_due": labs_due,
+    })
+
+
+@app.route("/api/protocol/dose/<int:dose_id>/toggle", methods=["POST"])
+@login_required
+def protocol_dose_toggle(dose_id):
+    """UNGATED taken/untaken toggle for today's or yesterday's dose — this
+    is the retro-mark path (recording reality), never doctor-gated. Any
+    other date is rejected (400); a dose that isn't this user's 404s."""
+    dose = PeptideDose.query.get(dose_id)
+    if dose is None or dose.user_id != current_user.id:
+        return jsonify({"error": "dose not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    taken = bool(data.get("taken"))
+
+    today = _user_today()
+    yesterday = today - timedelta(days=1)
+    if dose.date not in (today, yesterday):
+        return jsonify({"error": "dose must be dated today or yesterday; use /late for older doses"}), 400
+
+    dose.taken_at = _utcnow() if taken else None
+    db.session.commit()
+    return jsonify({"taken": dose.taken_at is not None})
+
+
+@app.route("/api/protocol/dose/<int:dose_id>/late", methods=["POST"])
+@login_required
+def protocol_dose_late(dose_id):
+    """DOCTOR-GATED taken-late path for doses OLDER than yesterday (use
+    /toggle for today/yesterday). 403 with exactly CONFIRM_WITH_DOCTOR while
+    the compound's late_window_hours is null (the ship default for every
+    compound). When a doctor-confirmed window exists, the gate is computed
+    from REAL CLOCK TIME — not protocol.missed_line's midnight-floor
+    heuristic, which is display-only: scheduled_dt is the user-local
+    datetime of (dose.date + dose.time) converted to UTC via
+    zoneinfo(user.timezone), and the window closes at
+    scheduled_dt + late_window_hours."""
+    dose = PeptideDose.query.get(dose_id)
+    if dose is None or dose.user_id != current_user.id:
+        return jsonify({"error": "dose not found"}), 404
+
+    today = _user_today()
+    yesterday = today - timedelta(days=1)
+    if dose.date >= yesterday:
+        return jsonify({"error": "dose is not old enough for /late; use /toggle instead"}), 400
+
+    rule = PROTOCOL_COMPOUNDS.get(dose.compound, {})
+    late_window_hours = rule.get("late_window_hours")
+    if late_window_hours is None:
+        return jsonify({"error": CONFIRM_WITH_DOCTOR}), 403
+
+    from utils_time import ZoneInfo
+    tz = ZoneInfo(current_user.timezone or "UTC")
+    naive_local = datetime.combine(dose.date, datetime.strptime(dose.time, "%H:%M").time())
+    scheduled_utc = naive_local.replace(tzinfo=tz).astimezone(timezone.utc)
+    allowed_until = scheduled_utc + timedelta(hours=late_window_hours)
+
+    now = _utcnow()
+    if now > allowed_until:
+        return jsonify({"error": "late window expired"}), 400
+
+    dose.taken_at = now
+    db.session.commit()
+    return jsonify({"taken": True, "late": True})
+
+
+@app.route("/api/admin/add-vial", methods=["POST"])
+@admin_required
+def admin_add_vial():
+    """Create a PeptideVial for the target user. Body: {email, compound,
+    total_mg, reconstituted_on "YYYY-MM-DD", expiry_days, notes?}."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    compound = data.get("compound")
+    total_mg = data.get("total_mg")
+    reconstituted_on = data.get("reconstituted_on")
+    expiry_days = data.get("expiry_days")
+    if not compound or total_mg is None or not reconstituted_on or expiry_days is None:
+        return jsonify({"error": "compound, total_mg, reconstituted_on, expiry_days required"}), 400
+
+    try:
+        recon_date = datetime.strptime(reconstituted_on, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return jsonify({"error": "reconstituted_on must be YYYY-MM-DD"}), 400
+
+    vial = PeptideVial(
+        user_id=user.id, compound=compound, total_mg=float(total_mg),
+        reconstituted_on=recon_date, expiry_days=int(expiry_days),
+        notes=data.get("notes"),
+    )
+    db.session.add(vial)
+    db.session.commit()
+    return jsonify({"id": vial.id})
+
+
+@app.route("/api/admin/complete-lab-reminder", methods=["POST"])
+@admin_required
+def admin_complete_lab_reminder():
+    """Stamp a LabReminder's completed_at (UTC). Body: {email, reminder_id}."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    reminder_id = data.get("reminder_id")
+    reminder = LabReminder.query.filter_by(id=reminder_id, user_id=user.id).first()
+    if not reminder:
+        return jsonify({"error": "lab reminder not found"}), 404
+
+    reminder.completed_at = _utcnow()
+    db.session.commit()
+    return jsonify({"id": reminder.id, "completed_at": reminder.completed_at.isoformat()})
 
 
 def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
