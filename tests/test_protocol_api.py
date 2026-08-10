@@ -406,6 +406,54 @@ def test_late_404s_on_another_users_dose(app_ctx, monkeypatch):
     assert r.status_code == 404
 
 
+def test_late_day_boundary_crossing_dose_uses_correct_utc_conversion(app_ctx, monkeypatch):
+    """Pins the highest-risk case for the naive-local->UTC conversion: a
+    22:00 America/Los_Angeles (PDT, UTC-7) dose whose scheduled UTC instant
+    lands on the NEXT calendar day (2026-08-05 22:00 PDT == 2026-08-06 05:00
+    UTC). All other /late tests use 07:00 doses, which don't cross midnight
+    UTC and so can't distinguish a correct zoneinfo conversion from a naive
+    one that treats the local wall-clock string as if it were already UTC.
+
+    With late_window_hours=96, the CORRECT window is
+    [2026-08-06 05:00 UTC, 2026-08-10 05:00 UTC]. A NAIVE (no-tz-conversion)
+    implementation would instead compute
+    [2026-08-05 22:00 UTC, 2026-08-09 22:00 UTC] -- a window that closes 7
+    hours earlier.
+
+    Assertion 1: frozen now = 2026-08-10 04:00 UTC sits inside the correct
+    window but OUTSIDE the naive one, so success here only happens if the
+    conversion is done correctly.
+    Assertion 2 (same dose, clock advanced): frozen now = 2026-08-10 06:00
+    UTC is just past the CORRECT window's end -> 400, confirming the gate
+    actually closes and isn't just always-open."""
+    import protocol
+    app_, db = app_ctx
+    uid = _make_user(app_, db, "late-boundary@test.com")
+    today = date(2026, 8, 10)
+    _set_today(monkeypatch, today)
+    monkeypatch.setitem(protocol.PROTOCOL_COMPOUNDS["Tesamorelin"], "late_window_hours", 96)
+
+    dose_id = _add_dose(app_, db, uid, date(2026, 8, 5), "22:00", "Injection", "Tesamorelin", 2)
+    client = _client_for(app_, uid)
+
+    # Inside the CORRECT window (2026-08-06 05:00 UTC + 96h = 2026-08-10
+    # 05:00 UTC), but past the NAIVE window's end (2026-08-05 22:00 UTC +
+    # 96h = 2026-08-09 22:00 UTC) -- discriminates correct vs. naive.
+    _set_now(monkeypatch, datetime(2026, 8, 10, 4, 0, tzinfo=timezone.utc))
+    r1 = client.post(f"/api/protocol/dose/{dose_id}/late")
+    assert r1.status_code == 200, r1.get_data(as_text=True)
+    assert r1.get_json() == {"taken": True, "late": True}
+    taken_at = _dose_taken_at(app_, dose_id)
+    assert taken_at.replace(tzinfo=timezone.utc) == datetime(2026, 8, 10, 4, 0, tzinfo=timezone.utc)
+
+    # Clock advances past the CORRECT window's end (05:00 UTC) -> 400. The
+    # window check runs independent of taken_at, so re-posting the same
+    # dose still exercises the boundary itself.
+    _set_now(monkeypatch, datetime(2026, 8, 10, 6, 0, tzinfo=timezone.utc))
+    r2 = client.post(f"/api/protocol/dose/{dose_id}/late")
+    assert r2.status_code == 400
+
+
 # ── (g) fasting_bound: "20:00" iff a >=21:00 dose exists today, else None ───
 
 def test_fasting_bound_present_when_late_dose_scheduled(app_ctx, monkeypatch):
