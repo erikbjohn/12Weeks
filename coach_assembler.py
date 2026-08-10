@@ -750,7 +750,7 @@ def _build_protocol_status():
     from protocol import (
         adherence_7d, escalation_window as _escalation_window,
         next_escalation as _next_escalation, vial_status, missed_line,
-        PROTOCOL_COMPOUNDS,
+        current_dose_mg, PROTOCOL_COMPOUNDS,
     )
     today = _user_today()
 
@@ -764,11 +764,11 @@ def _build_protocol_status():
         for r in today_rows
     ]
 
-    reta_rows = sorted(
-        (r for r in all_rows if r.compound == "Retatrutide" and r.date <= today),
-        key=lambda r: r.date,
-    )
-    current_retatrutide_mg = reta_rows[-1].dose_mg if reta_rows else None
+    # Held doses (dose_mg <= 0) are excluded — a hold means "no dose today",
+    # not a new dose LEVEL. Delegated to protocol.current_dose_mg so a held
+    # row on the most recent scheduled date doesn't read as "current dose
+    # is 0mg" (that reported 0.0 for a real athlete before this fix).
+    current_retatrutide_mg = current_dose_mg(all_rows, today, "Retatrutide")
 
     window_start = today - timedelta(days=6)
     next_esc = _next_escalation(all_rows, window_start)

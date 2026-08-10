@@ -238,6 +238,23 @@ def test_summary_lists_todays_doses_and_current_retatrutide_mg(app_ctx, monkeypa
     assert ps["current_retatrutide_mg"] == 2
 
 
+def test_current_retatrutide_mg_survives_a_held_dose_fix_round_1(app_ctx, monkeypatch):
+    """Fix round 1 repro (reviewer, reproduced live): 3mg on 9/7, escalate
+    to 4mg on 9/21, HOLD (dose_mg=0) on 9/28, today=9/29. Before the fix
+    this reported 0.0 (the held row) instead of 4.0 (the actual current
+    dose) — the builder computed it ad hoc instead of delegating to
+    protocol.current_dose_mg, which excludes held rows."""
+    app_, db = app_ctx
+    uid = _make_user(app_, db, "esc-heldfix@test.com")
+    _add_dose(app_, db, uid, date(2026, 9, 7), "07:00", "Injection", "Retatrutide", 3)
+    _add_dose(app_, db, uid, date(2026, 9, 21), "07:00", "Injection", "Retatrutide", 4)
+    _add_dose(app_, db, uid, date(2026, 9, 28), "07:00", "Injection", "Retatrutide", 0)
+
+    ps = _protocol_status_as(app_, uid, date(2026, 9, 29), monkeypatch)
+
+    assert ps["current_retatrutide_mg"] == 4.0
+
+
 # ── vial reorder flags + labs due ────────────────────────────────────────────
 
 def test_vial_flags_only_include_reorder_flagged(app_ctx, monkeypatch):
@@ -299,7 +316,29 @@ def test_execute_tool_returns_real_seeded_rows(app_ctx, monkeypatch):
     taken_row = next(d for d in result["dose_history"] if d["date"] == str(today - timedelta(days=1)))
     assert taken_row["taken"] is True
     assert result["adherence_7d"]["scheduled"] == 2
-    assert "2026-09-21" in result["escalation_dates_next_14d"] or result["escalation_dates_next_14d"] == []
+    # today=Aug 10; the Sep 21 escalation is ~42 days out, well past the
+    # 14-day horizon -> real pin (not a trivial always-true "or []").
+    assert result["escalation_dates_next_14d"] == []
+
+
+def test_execute_tool_escalation_dates_next_14d_includes_upcoming_step(app_ctx, monkeypatch):
+    """Same seeded escalation as above, but 'today' is moved to within 14
+    days of it -> the date must actually appear (pins the True branch that
+    the far-future test above can't exercise)."""
+    app_, db = app_ctx
+    uid = _make_user(app_, db, "esc-tool-upcoming@test.com")
+    _add_dose(app_, db, uid, date(2026, 9, 7), "07:00", "Injection", "Retatrutide", 3)
+    _add_dose(app_, db, uid, date(2026, 9, 21), "07:00", "Injection", "Retatrutide", 4)
+    today = date(2026, 9, 10)  # 11 days before the Sep 21 escalation
+
+    import coach_tools as ct
+    monkeypatch.setattr(ct, "_user_local_today", lambda user_id: today)
+    with app_.app_context():
+        result_json = ct.execute_tool("get_protocol_status", {"days": 7}, uid)
+    result = json.loads(result_json)
+
+    assert "error" not in result
+    assert "2026-09-21" in result["escalation_dates_next_14d"]
 
 
 def test_tool_schema_and_dispatch_registered():

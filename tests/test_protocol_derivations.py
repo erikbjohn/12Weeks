@@ -167,6 +167,74 @@ def test_escalation_dates_frequency_step_not_flagged_on_dose_reduction():
     assert escalation_dates(rows) == []
 
 
+# ── current_dose_mg: held-dose-safe "what's the current dose" lookup ──────
+
+def test_current_dose_mg_excludes_held_dose_reports_prior_real_dose():
+    """3mg -> 4mg step, then a HELD (0mg) row after it -> current dose is
+    still 4.0, not 0.0. This is the exact bug this helper exists to fix:
+    the caller must never read a hold as a new (zero) dose level."""
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="Retatrutide", dose_mg=3.0, taken_at=None),
+        Row(date=date(2026, 9, 21), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+        Row(date=date(2026, 9, 28), time="07:00", compound="Retatrutide", dose_mg=0.0, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 9, 29)) == 4.0
+
+
+def test_current_dose_mg_all_held_since_returns_prior_real_dose():
+    """Multiple consecutive holds after the last real dose must still
+    resolve to that last real dose, however many holds intervene."""
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="Retatrutide", dose_mg=3.0, taken_at=None),
+        Row(date=date(2026, 9, 21), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+        Row(date=date(2026, 9, 28), time="07:00", compound="Retatrutide", dose_mg=0.0, taken_at=None),
+        Row(date=date(2026, 10, 5), time="07:00", compound="Retatrutide", dose_mg=0.0, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 10, 6)) == 4.0
+
+
+def test_current_dose_mg_no_rows_for_compound_returns_none():
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 9, 8)) is None
+    assert current_dose_mg([], date(2026, 9, 8)) is None
+
+
+def test_current_dose_mg_ignores_rows_after_today():
+    """A future dose row must not leak into 'current' — only date <= today
+    counts."""
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="Retatrutide", dose_mg=3.0, taken_at=None),
+        Row(date=date(2026, 9, 21), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 9, 14)) == 3.0
+
+
+def test_current_dose_mg_only_a_held_row_ever_returns_none():
+    """If the ONLY row for a compound on/before today is a hold, there is
+    no real dose to report — None, not 0.0."""
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="Retatrutide", dose_mg=0.0, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 9, 8)) is None
+
+
+def test_current_dose_mg_defaults_to_retatrutide_and_respects_compound_arg():
+    from protocol import current_dose_mg
+    rows = [
+        Row(date=date(2026, 9, 7), time="07:00", compound="Retatrutide", dose_mg=3.0, taken_at=None),
+        Row(date=date(2026, 9, 7), time="07:00", compound="TB-500", dose_mg=2.5, taken_at=None),
+    ]
+    assert current_dose_mg(rows, date(2026, 9, 8)) == 3.0
+    assert current_dose_mg(rows, date(2026, 9, 8), compound="TB-500") == 2.5
+
+
 # ── adherence_7d ───────────────────────────────────────────────────────
 
 def test_adherence_taken_at_next_day_utc_still_counts_for_own_date():

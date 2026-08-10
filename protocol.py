@@ -289,6 +289,23 @@ def next_escalation(dose_rows: list, today) -> Optional[dict]:
     return None
 
 
+# ── Current dose lookup ──────────────────────────────────────────────────
+
+def current_dose_mg(dose_rows: list, today, compound: str = "Retatrutide") -> Optional[float]:
+    """The athlete's current per-dose amount for `compound`: the dose_mg of
+    the latest SCHEDULED row with date <= today, excluding HELD rows
+    (dose_mg <= 0). A held dose means "no dose today", not a new (zero)
+    dose level — the current dose is whatever the last non-held row set it
+    to, however many holds have happened since. Returns None if there is
+    no such row (never dosed on/before today, or every row on/before today
+    is held)."""
+    candidates = sorted(
+        (r for r in dose_rows if r.compound == compound and r.date <= today and r.dose_mg > 0),
+        key=lambda r: r.date,
+    )
+    return candidates[-1].dose_mg if candidates else None
+
+
 # ── Adherence ─────────────────────────────────────────────────────────
 
 def adherence_7d(dose_rows: list, today) -> dict:
