@@ -14,7 +14,7 @@ AGENTS = {
             "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
             "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
             "food_safety", "fasting", "user_rules",
-            "today_sets", "today_status", "cut_status", "protocol_status",
+            "today_sets", "today_status", "cut_status", "protocol_status", "lift_trend",
             "completed_days", "overrides", "exercise_deltas",
         ],
     },
@@ -28,7 +28,7 @@ AGENTS = {
             # The cut is coached at the morning moment — react to the scale, run the
             # gluten guard (CORE_PROMPT rule 21). Block 1's coach never saw cut_status
             # here, so it never coached the cut.
-            "cut_status", "protocol_status", "goal",
+            "cut_status", "protocol_status", "goal", "lift_trend",
         ],
     },
     "morning_briefing": {
@@ -87,7 +87,7 @@ AGENTS = {
             "fasting", "user_rules", "today_status",
             # See the cut at the meals moment too — adherence vs the deficit, and
             # the gluten guard so a water spike doesn't read as a blown day.
-            "cut_status", "protocol_status", "bodyweight",
+            "cut_status", "protocol_status", "bodyweight", "lift_trend",
         ],
     },
     "end_of_day": {
@@ -119,7 +119,7 @@ AGENTS = {
         "requires": [
             "base", "goal", "cut_status", "protocol_status", "bodyweight",
             "meals_today", "weekly_meals", "food_safety",
-            "fasting", "today_status",
+            "fasting", "today_status", "lift_trend",
             # NOTE: workout_today + week_schedule were tried in round 5
             # to give the nutritionist visibility into today's prescribed
             # session. That regressed pass rate from 80% to 57% because
@@ -139,6 +139,16 @@ AGENTS = {
             "workout_today", "workout_tomorrow", "today_sets",
             "exercise_history", "exercise_analysis", "equipment",
             "session_analysis",
+            # The dedicated lifting specialist agent — the recomp lift-decline
+            # tripwire (Task 11) belongs here even more than the 4 cut-adjacent
+            # agents above: this is the agent literally reasoning over
+            # exercise_history/exercise_analysis/today_sets to judge lifting
+            # performance, so it must see the codified decline signal rather
+            # than eyeball a trend itself. running_coach (running-specific) and
+            # workout_feedback/weekly_planning/weekly_review (general, not
+            # strength-specific despite also requiring workout_today) are left
+            # out — out of scope for this task, add explicitly if needed later.
+            "lift_trend",
         ],
     },
     "running_coach": {

@@ -957,6 +957,23 @@ def _build_protocol_status():
     }}
 
 
+@section_builder("lift_trend")
+def _build_lift_trend():
+    """Codified lift-decline detector (recomp goal "Line 2" tripwire) —
+    ALL math delegates to lift_trend.lift_decline (pure, DB-only, no
+    request context), the SAME function weekly_report.compute_weekly_metrics
+    calls, so the coach and the weekly report can never disagree about
+    whether a decline is real. Never left to LLM judgment.
+
+    Unlike cut_status/protocol_status this block is never None — it's not
+    gated on a goal type, and lift_decline() itself degrades gracefully
+    (never trips) when there isn't enough lifting history yet.
+    """
+    from lift_trend import lift_decline
+    week = _current_week()
+    return {"lift_trend": lift_decline(current_user.id, week)}
+
+
 @section_builder("today_status")
 def _build_today_status():
     """One-glance signal of what's done vs pending TODAY. Prevents the coach
@@ -2095,6 +2112,37 @@ def _format_athlete_data(ctx, requires):
             "say exactly that and nothing more."
         )
         parts.append("\n".join(ps_lines))
+
+    # Lift-decline tripwire (recomp "Line 2") — codified, never LLM
+    # judgment. Always present (not gated on goal type, unlike
+    # cut_status/protocol_status): either the full suspected block with
+    # per-lift deltas + tonnage + weeks compared, or a brief one-liner
+    # confirming the detector ran and found nothing.
+    lt = ctx.get("lift_trend")
+    if lt:
+        if lt.get("lift_decline_suspected"):
+            lt_lines = ["<lift_trend>"]
+            lt_lines.append(f"  LIFT_DECLINE_SUSPECTED: {lt.get('details', '')}")
+            for name, pct in (lt.get("e1rm_deltas") or {}).items():
+                if pct is not None:
+                    lt_lines.append(f"  e1rm_delta: {name} {pct}%")
+            if lt.get("tonnage_delta_pct") is not None:
+                lt_lines.append(f"  tonnage_delta_pct: {lt['tonnage_delta_pct']}%")
+            lt_lines.append(f"  weeks_compared: {lt.get('weeks_compared')}")
+            lt_lines.append("</lift_trend>")
+            lt_lines.append(
+                "Use lift_trend as the source of truth for a lift decline — never "
+                "eyeball a trend yourself. When LIFT_DECLINE_SUSPECTED is present, "
+                "surface it explicitly with the numbers (rule 22e: name the "
+                "cut-speed vs training-volume trade-off out loud)."
+            )
+            parts.append("\n".join(lt_lines))
+        else:
+            weeks_compared = lt.get("weeks_compared") or []
+            recent = weeks_compared[-2:] if len(weeks_compared) >= 2 else weeks_compared
+            refs = weeks_compared[:-2] if len(weeks_compared) >= 2 else []
+            recent_label = "/".join(str(w) for w in recent) if recent else "?"
+            parts.append(f"lift_trend: no decline (weeks {recent_label} vs best of {refs})")
 
     # Today's status — explicit state signal so the coach doesn't tell the
     # athlete to "get the run done" after it was logged, OR (the inverse bug)

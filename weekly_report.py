@@ -179,6 +179,12 @@ def compute_weekly_metrics(week_num, user_id=None):
     # (the shared path also used by GET /api/weekly-report/<week>).
     wellness = compute_week_wellness(week_num, user_id, today=today)
 
+    # Codified lift-decline detector (recomp "Line 2" tripwire) — the SAME
+    # function the coach context (<lift_trend>) calls, so the two surfaces
+    # can never disagree about whether a decline is real.
+    from lift_trend import lift_decline
+    lift_trend_result = lift_decline(user_id, week_num)
+
     return {
         "week": week_num,
         "workouts_completed": completions,
@@ -193,6 +199,7 @@ def compute_weekly_metrics(week_num, user_id=None):
         "adherence_pct": adherence,
         "meals_logged": meals_logged,
         "wellness": wellness,
+        "lift_trend": lift_trend_result,
     }
 
 
