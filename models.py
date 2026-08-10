@@ -726,3 +726,49 @@ class SystemFlag(db.Model):
     key = db.Column(db.String(120), unique=True, nullable=False, index=True)
     value = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PeptideDose(db.Model):
+    """One scheduled dose event from the doctor's protocol CSV.
+
+    The row's own `date` is the SOLE authority for which day the dose counts
+    toward — adherence reads NEVER derive the day from taken_at (22:00 local is
+    next-day UTC). taken_at is audit trail only."""
+    __tablename__ = "peptide_dose"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    time = db.Column(db.String(5), nullable=False)          # "HH:MM" — payload, NOT part of the key
+    event_type = db.Column(db.String(12), nullable=False)   # "Oral" | "Injection"
+    compound = db.Column(db.String(40), nullable=False)
+    dose_mg = db.Column(db.Float, nullable=False)
+    syringe_units = db.Column(db.String(10), nullable=True)
+    site = db.Column(db.String(40), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    taken_at = db.Column(db.DateTime, nullable=True)
+    __table_args__ = (db.UniqueConstraint("user_id", "date", "compound"),)
+
+
+class PeptideVial(db.Model):
+    """Reconstituted vial inventory in MG (dose size changes mid-vial, so dose
+    counts are meaningless). Attribution is window-based: a dose belongs to the
+    compound's vial with the greatest reconstituted_on <= dose.date."""
+    __tablename__ = "peptide_vial"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    compound = db.Column(db.String(40), nullable=False)
+    total_mg = db.Column(db.Float, nullable=False)
+    reconstituted_on = db.Column(db.Date, nullable=False)
+    expiry_days = db.Column(db.Integer, nullable=False, default=28)
+    notes = db.Column(db.Text, nullable=True)
+
+
+class LabReminder(db.Model):
+    """Lab-work reminder. Coach mentions it while completed_at IS NULL and
+    due_date <= today+7; completing it stops mentions permanently."""
+    __tablename__ = "lab_reminder"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    label = db.Column(db.Text, nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
