@@ -8185,6 +8185,11 @@ function _renderNewDashboardInner(apiData, overlay) {
   var training = d.training || {};
   var lifts = d.lifts || _weightsCache || {};
   var projections = d.projections || {};
+  // Block 3: the server renders the canonical curve (linear_plan already IS
+  // the curve rows under this flag). The client must never recompute a
+  // parallel projection while this is set — see the _projectWeightCurve
+  // call sites in the Lab tab below.
+  window._projectionMode = projections.projection_mode || null;
   var startDate = projections.start_date || (_stateCache ? _stateCache.start_date : null) || null;
   var targetWeight = bwData.target_weight || null;
   var psychHighlights = d.psych_highlights || {};
@@ -8719,7 +8724,11 @@ function _spWeightProjection(data) {
   // Projection chart placeholder
   h += '<div id="sp-proj-chart" style="margin:16px 0">';
   // Render initial chart
-  if (typeof _projectWeightCurve === 'function') {
+  if (window._projectionMode === 'piecewise_block3') {
+    // Block 3: render the SERVED curve, never a recomputed parallel one.
+    var proj = (data.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; });
+    h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
+  } else if (typeof _projectWeightCurve === 'function') {
     var proj = _projectWeightCurve(curW, targetW, tdee, cal, 12 - curWeek + 1, heightIn, age, sex, curWeek - 1);
     h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
   } else {
@@ -8772,7 +8781,13 @@ function _spUpdateProjection() {
 
   // Recompute weight projection with new TDEE.
   var proj = null;
-  if (typeof _projectWeightCurve === 'function') {
+  if (window._projectionMode === 'piecewise_block3') {
+    // Block 3: the sliders can't change a coach-managed curve — render the
+    // SERVED curve, never a recomputed parallel one.
+    proj = (d.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; });
+    var chartEl = document.getElementById('sp-proj-chart');
+    if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
+  } else if (typeof _projectWeightCurve === 'function') {
     proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex, curWeek - 1);
     var chartEl = document.getElementById('sp-proj-chart');
     if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
@@ -9118,7 +9133,11 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
 
   if (typeof _computeTargets === 'function') {
     var targets = _computeTargets(tdee, goalType, curW, targetW, weeksLeft);
-    var proj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
+    // Block 3: the scenario sliders can't change a coach-managed curve --
+    // render the SERVED curve, never a recomputed parallel one.
+    var proj = window._projectionMode === 'piecewise_block3'
+      ? (_spLabData.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; })
+      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
     var endWeight = proj.length > 0 ? proj[proj.length - 1].projected.toFixed(1) : '?';
     var deficit = tdee - targets.calories;
 
@@ -9139,7 +9158,9 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
     h += '<div class="sp-compare" style="margin-top:12px">';
     h += '<div class="sp-compare-card"><div class="sp-compare-title">Current Plan</div>';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--text)">' + origCal + ' cal/day</div>';
-    var origProj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
+    var origProj = window._projectionMode === 'piecewise_block3'
+      ? (_spLabData.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; })
+      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
     var origEnd = origProj.length > 0 ? origProj[origProj.length - 1].projected.toFixed(1) : '?';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">W12: ' + origEnd + ' lb</div>';
     h += '</div>';

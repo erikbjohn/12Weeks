@@ -54,6 +54,40 @@ def detect_water_spike(rows, expected_weekly_loss=0.0):
     return latest.weight_lbs, False
 
 
+def _block3_mode():
+    """True iff the block-3 piecewise curve is the live projection authority
+    (SystemFlag key="projection_mode", value="piecewise_block3"). THE single
+    flag lookup — app.py and coach_assembler.py both import this (never
+    re-implement the query) so the two surfaces can't drift on what "block 3
+    mode" means, the same discipline detect_water_spike enforces for the
+    spike rule itself."""
+    from models import SystemFlag
+    flag = SystemFlag.query.filter_by(key="projection_mode").first()
+    return bool(flag and flag.value == "piecewise_block3")
+
+
+def _block3_anchor_and_start(user_id):
+    """(anchor_weight, start_date) for rebuilding the block-3 curve, or
+    (None, None)/partial-None when either half is missing.
+
+    anchor_weight comes from SystemFlag(key="block3_anchor", value=<float
+    as str>) — written once by the block-3 transition (Task 15) alongside
+    the projection_mode flag, rather than re-derived from
+    TrainingGoal.weight_projection[0] every call. start_date is
+    AppState.start_date for user_id (per-user; SystemFlag is global)."""
+    from models import SystemFlag, AppState
+    flag = SystemFlag.query.filter_by(key="block3_anchor").first()
+    anchor = None
+    if flag and flag.value:
+        try:
+            anchor = float(flag.value)
+        except (TypeError, ValueError):
+            anchor = None
+    state = AppState.query.filter_by(user_id=user_id).first()
+    start = state.start_date if state and state.start_date else None
+    return anchor, start
+
+
 def expected_weekly_loss_for(user_id, week):
     """The slope-adjustment rate to feed into detect_water_spike, gated
     behind the `projection_mode` SystemFlag (set once block 3's piecewise
@@ -64,9 +98,7 @@ def expected_weekly_loss_for(user_id, week):
     user_id is accepted for a future per-user rollout but the flag is
     currently global; it is not yet used to scope the lookup.
     """
-    from models import SystemFlag
-    flag = SystemFlag.query.filter_by(key="projection_mode").first()
-    if not flag or flag.value != "piecewise_block3":
+    if not _block3_mode():
         return 0.0
     import goal_engine
     return goal_engine.BLOCK3_WEEKLY_RATES.get(week, 0.0)

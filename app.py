@@ -1127,6 +1127,22 @@ def _target_weekly_sets(week):
     return _BLOCK_WEEKLY_SETS.get(int(week), 84)
 
 
+def _block3_mode():
+    """True iff the block-3 piecewise curve is the live projection authority.
+    Thin wrapper — cut_guard owns the SystemFlag lookup (it already needed
+    it for expected_weekly_loss_for) so app.py and coach_assembler.py can't
+    drift on what "block 3 mode" means."""
+    import cut_guard
+    return cut_guard._block3_mode()
+
+
+def _block3_anchor_and_start(user_id):
+    """(anchor_weight, start_date) for rebuilding the block-3 curve — see
+    cut_guard._block3_anchor_and_start for the SystemFlag/AppState detail."""
+    import cut_guard
+    return cut_guard._block3_anchor_and_start(user_id)
+
+
 def _despiked_current_weight(user_id):
     """Weight to anchor cut math on, ignoring a suspected GLUTEN/WATER spike.
 
@@ -5707,7 +5723,22 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             current_weight = despiked if despiked is not None else bw.weight_lbs
             target_weight_val = goal.target_weight
             weeks_remaining = max(1, 12 - target_week + 1)
-            required_weekly = (current_weight - target_weight_val) / weeks_remaining
+            _b3_anchor, _b3_start = (
+                _block3_anchor_and_start(current_user.id) if _block3_mode() else (None, None)
+            )
+            if _b3_anchor is not None and _b3_start is not None:
+                # Block-3 mode: required_weekly is the CURVE's own next-week
+                # delta (today -> today+7), not a straight-line recompute off
+                # current weight — the curve is the single authority every
+                # other surface reads (dashboard on_pace, cut_status.on_curve).
+                from goal_engine import curve_value as _curve_value
+                _b3_today = _user_today()
+                required_weekly = (
+                    _curve_value(_b3_anchor, _b3_start, _b3_today)
+                    - _curve_value(_b3_anchor, _b3_start, _b3_today + timedelta(days=7))
+                )
+            else:
+                required_weekly = (current_weight - target_weight_val) / weeks_remaining
             if required_weekly > 0:
                 deficit = {
                     "current_weight": current_weight,
@@ -7279,10 +7310,17 @@ def api_progress_dashboard():
     start_date = state.start_date if state and state.start_date else None
     weeks_remaining = max(0, 12 - current_week)
 
-    # Linear plan: straight line from start_weight to target_weight across 12 weeks.
-    # This is the "where you need to be" reference line the dashboard draws.
+    # Linear plan: the "where you need to be" reference line the dashboard
+    # draws. Block-3 mode: emit the stored curve rows under the SAME client
+    # key ({"week", "planned_weight"}) so the chart code (app.js
+    # _pdWeightChart) works unchanged. Legacy: straight line from
+    # start_weight to target_weight across 12 weeks.
+    projection_mode = "piecewise_block3" if _block3_mode() else None
     linear_plan = []
-    if start_weight is not None and target_weight is not None:
+    if projection_mode and goal and goal.weight_projection:
+        linear_plan = [{"week": row["week"], "planned_weight": row["projected"]}
+                       for row in goal.weight_projection]
+    elif start_weight is not None and target_weight is not None:
         for w in range(1, 13):
             frac = (w - 1) / 11.0 if 11 else 0
             linear_plan.append({
@@ -7319,7 +7357,20 @@ def api_progress_dashboard():
     # current-week linear-plan milestone disagreed with the projection, so the
     # badge could say ON PACE while the projection landed well above goal.
     on_pace = None
-    if projected_final_weight is not None and target_weight is not None:
+    if projection_mode:
+        # Block-3 mode: judge pace against the CURVE for today, not the
+        # extrapolated-to-week-12 projection — that's what curve_value/
+        # pace_status are for, and it's the same judgment cut_status.on_curve
+        # makes (both read the despiked weight so the two badges can't
+        # disagree — the no-UI-contradiction pin).
+        from goal_engine import pace_status
+        anchor, block3_start = _block3_anchor_and_start(uid)
+        if anchor is not None and block3_start is not None:
+            despiked_wt, _spiked = _despiked_current_weight(uid)
+            weight_for_pace = despiked_wt if despiked_wt is not None else current_weight
+            if weight_for_pace is not None:
+                on_pace = pace_status(weight_for_pace, anchor, block3_start, today) != "behind"
+    elif projected_final_weight is not None and target_weight is not None:
         tol = 1.5  # lb tolerance so tiny rounding differences don't flip the badge
         if start_weight is not None and target_weight < start_weight:
             on_pace = projected_final_weight <= target_weight + tol  # cut
@@ -7432,6 +7483,7 @@ def api_progress_dashboard():
             "weeks_remaining": weeks_remaining,
             "current_week": current_week,
             "on_pace": on_pace,
+            "projection_mode": projection_mode,
         },
         "psych_highlights": psych_highlights,
     })
@@ -9972,7 +10024,25 @@ def _compute_goal_for_user(user, overrides=None):
     goal.calorie_by_day_type = cal_by_day
     goal.fasting_protocol = fasting["protocol"]
     goal.electrolyte_supplementation = fasting["electrolytes"]
-    goal.weight_projection = projection
+    # Block-3 mode: weight_projection is curve-managed (the transition writes
+    # it once from build_block3_projection; recalibrate/regenerate own any
+    # rebuild). Recomputing the goal here must never clobber the curve with
+    # this legacy metabolic re-simulation — unless the caller explicitly asks
+    # for it via override_projection_mode (e.g. an admin re-anchor).
+    import cut_guard
+    _preserve_curve = (
+        cut_guard._block3_mode()
+        and existing_goal is not None
+        and existing_goal.weight_projection
+        and not overrides.get("override_projection_mode")
+    )
+    if _preserve_curve:
+        logging.info(
+            "[block3] preserving curve weight_projection for user %s "
+            "(projection_mode=piecewise_block3, no override_projection_mode)",
+            user.id)
+    else:
+        goal.weight_projection = projection
     db.session.commit()
 
     daily_deficit = tdee_info["tdee"] - targets["calories"]
@@ -9995,7 +10065,9 @@ def _compute_goal_for_user(user, overrides=None):
         "fasting_protocol": fasting["protocol"],
         "electrolytes": fasting["electrolytes"],
         "phase_plan": phase_plan,
-        "weight_projection": projection,
+        # Reflect what's actually STORED (preserved curve or freshly
+        # computed), never the discarded legacy re-simulation.
+        "weight_projection": goal.weight_projection,
         "calorie_by_day_type": cal_by_day,
     }, 200
 
@@ -10606,68 +10678,12 @@ def api_weekly_report_result(job_id):
 @app.route("/api/goal/recalibrate", methods=["POST"])
 @login_required
 def api_goal_recalibrate():
-    from goal_engine import recalibrate_projection, compute_tdee
-
-    data = request.get_json()
-    actual_weight = data.get("weight")
-    week = data.get("week")
-
-    if not actual_weight or not week:
-        return jsonify({"error": "weight and week required"}), 400
-
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if not goal or not pa:
-        return jsonify({"error": "Goal not computed yet"}), 400
-
-    # Extract age/sex for TDEE recalc
-    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
-    sex = "male"
-    age = 30
-    if intake and intake.conversation:
-        for msg in intake.conversation:
-            content = msg.get("content", "").lower().strip()
-            if msg.get("role") == "user":
-                if content in ("male", "female", "m", "f"):
-                    sex = "female" if content in ("female", "f") else "male"
-                try:
-                    num = int(content)
-                    if 15 <= num <= 80:
-                        age = num
-                except ValueError:
-                    pass
-
-    # recalibrate_projection requires daily_calories + target_weight in every
-    # branch — omitting them made this endpoint 500 (TypeError on None math)
-    # on ANY weigh-in.
-    if goal.daily_calories is None or goal.target_weight is None:
-        return jsonify({"error": "Goal has no daily_calories/target_weight — recompute the goal first"}), 400
-
-    tdee_params = {
-        "height_in": pa.height_inches or 70,
-        "age": age,
-        "sex": sex,
-        "daily_calories": goal.daily_calories,
-        "target_weight": goal.target_weight,
-    }
-
-    result = recalibrate_projection(
-        actual_weight, week,
-        goal.weight_projection or [],
-        tdee_params
-    )
-
-    # Update goal — recalc TDEE at new weight
-    goal.weight_projection = result["updated_projection"]
-    goal.daily_calories = result["new_daily_calories"]
-    try:
-        new_tdee = compute_tdee(actual_weight, pa.height_inches or 70, age, sex)
-        goal.tdee = new_tdee["tdee"]
-    except Exception:
-        pass
-    db.session.commit()
-
-    return jsonify(result)
+    """RETIRED. Projection is curve-managed (goal_engine.build_block3_projection
+    / curve_value / pace_status) — recalibrating off a single weigh-in via the
+    old metabolic re-simulation would fight the canonical curve every writer
+    now preserves (see _compute_goal_for_user's block-3 guard). No replacement
+    endpoint: the coach reacts to pace via cut_status.on_curve instead."""
+    return jsonify({"error": "retired — projection is curve-managed"}), 410
 
 
 # ─── MORNING BRIEFING ─────────────────────────────────────────────────────
@@ -11217,8 +11233,15 @@ def api_admin_debug_regenerate_projection():
 
     Admin-only. Used when the original projection was anchored on an intermediate
     weigh-in (e.g., post-water-weight) instead of the true Mar 30 baseline.
+
+    Block-3 mode (SystemFlag projection_mode=piecewise_block3): rebuilds from
+    the CANONICAL curve (goal_engine.build_block3_projection) using the
+    stored block3_anchor SystemFlag + AppState.start_date — the request's
+    starting_weight is ignored (the curve has exactly one authority) so this
+    endpoint can't silently fork the projection away from what every other
+    surface reads.
     """
-    from goal_engine import project_weight_curve
+    from goal_engine import project_weight_curve, build_block3_projection
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     starting_weight = data.get("starting_weight")
@@ -11230,19 +11253,26 @@ def api_admin_debug_regenerate_projection():
     goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     if not goal:
         return jsonify({"error": "no training_goal for user"}), 404
-    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
-    height = pa.height_inches if pa and pa.height_inches else 70
-    age = pa.age if pa and getattr(pa, "age", None) else 40
-    sex = pa.sex if pa and getattr(pa, "sex", None) else "male"
     before = goal.weight_projection
-    projection = project_weight_curve(
-        starting_weight=float(starting_weight),
-        target_weight=goal.target_weight,
-        tdee=goal.tdee or 2500,
-        daily_calories=goal.daily_calories or 2000,
-        weeks=12,
-        height_in=height, age=age, sex=sex,
-    )
+
+    if _block3_mode():
+        anchor, block3_start = _block3_anchor_and_start(user.id)
+        if anchor is None or block3_start is None:
+            return jsonify({"error": "block3 mode is on but anchor/start_date is missing"}), 400
+        projection = build_block3_projection(anchor, block3_start)
+    else:
+        pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+        height = pa.height_inches if pa and pa.height_inches else 70
+        age = pa.age if pa and getattr(pa, "age", None) else 40
+        sex = pa.sex if pa and getattr(pa, "sex", None) else "male"
+        projection = project_weight_curve(
+            starting_weight=float(starting_weight),
+            target_weight=goal.target_weight,
+            tdee=goal.tdee or 2500,
+            daily_calories=goal.daily_calories or 2000,
+            weeks=12,
+            height_in=height, age=age, sex=sex,
+        )
     goal.weight_projection = projection
     db.session.commit()
     return jsonify({
@@ -11948,128 +11978,13 @@ def api_session_summary(week, day_idx):
 @app.route("/api/deficit-plan", methods=["POST"])
 @login_required
 def api_deficit_plan():
-    """Calculate deficit gap and recommend interventions to hit target weight."""
-    from math import ceil
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    if not goal or not goal.target_weight:
-        return jsonify({"error": "No target weight set"}), 400
-
-    # Current weight from latest bodyweight entry
-    bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-    if not bw:
-        return jsonify({"error": "No weight data"}), 400
-
-    current_weight = bw.weight_lbs  # BodyWeight has no `.weight` — was a live AttributeError/500
-    target_weight = goal.target_weight
-
-    week = _current_week()
-    weeks_remaining = max(1, 12 - week + 1)
-    required_weekly_loss = (current_weight - target_weight) / weeks_remaining
-
-    if required_weekly_loss <= 0:
-        return jsonify({"on_pace": True, "message": "Already at or below target"})
-
-    # BMR -- use actual if available, otherwise Mifflin-St Jeor
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if pa and pa.actual_bmr:
-        bmr = pa.actual_bmr
-    elif pa and pa.bodyweight_lbs and pa.height_inches:
-        # Mifflin-St Jeor (male): 10 x kg + 6.25 x cm - 5 x age - 5
-        weight_kg = pa.bodyweight_lbs * 0.453592
-        height_cm = pa.height_inches * 2.54
-        age = _extract_age_from_intake(current_user.id)
-        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 5
-    else:
-        bmr = current_weight * 10  # rough fallback
-
-    # Current daily calories
-    daily_cals = goal.daily_calories or 2000
-
-    # Exercise burn estimate (from this week's SetLog)
-    local_today = _user_today()
-    week_start = local_today - timedelta(days=local_today.weekday())
-    sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.logged_date >= week_start,
-        SetLog.done == True
-    ).all()
-    # Rough estimate: ~7 cal per completed set (conservative average for compound lifts)
-    # 100 sets/week x 7 = 700 cal/week, consistent with research (150-250 kcal/hour)
-    exercise_burn = len(sets) * 7
-    exercise_burn = max(exercise_burn, 200)  # floor at 200 cal/week from lifting
-
-    # Run burn estimate
-    runs = RunLog.query.filter(
-        RunLog.user_id == current_user.id,
-        RunLog.log_date >= week_start
-    ).all()
-    run_burn = sum((r.distance_miles or 0) * current_weight * 0.63 for r in runs)
-
-    # Weekly budget
-    eating_days = 5  # Mon-Fri (Sat-Sun could be fast)
-    weekly_intake = daily_cals * eating_days
-    weekly_expenditure = (bmr * 7) + exercise_burn + run_burn
-    current_deficit = weekly_expenditure - weekly_intake
-    required_deficit = required_weekly_loss * 3500
-    gap = required_deficit - current_deficit
-
-    if gap <= 0:
-        return jsonify({
-            "on_pace": True,
-            "current_weight": current_weight,
-            "target_weight": target_weight,
-            "weeks_remaining": weeks_remaining,
-            "current_deficit": round(current_deficit),
-            "required_deficit": round(required_deficit),
-            "bmr": round(bmr),
-        })
-
-    recommendations = {"add_saturday_fast": True}
-    remaining_gap = gap
-
-    # 1. Saturday fast
-    fast_savings = bmr
-    remaining_gap -= fast_savings
-
-    # 2. Reduce daily calories
-    protein_floor = target_weight  # 1g/lb target weight in protein = ~4 cal/g
-    cal_floor = max(bmr, protein_floor * 4 + 400)  # protein + minimum fat/carb
-    max_reduction = max(0, daily_cals - cal_floor)
-    cal_reduction = min(remaining_gap / eating_days, max_reduction) if remaining_gap > 0 else 0
-    remaining_gap -= cal_reduction * eating_days
-    recommendations["cal_reduction_per_day"] = round(cal_reduction)
-    recommendations["new_daily_calories"] = round(daily_cals - cal_reduction)
-
-    # 3. Increase run duration
-    if remaining_gap > 0:
-        extra_min = remaining_gap / 50  # ~10 cal/min x 5 days
-        remaining_gap -= extra_min * 50
-        recommendations["extra_run_minutes"] = round(extra_min)
-
-    # 4. Tempo swaps
-    if remaining_gap > 0:
-        avg_run_burn = (run_burn / max(len(runs), 1))
-        tempo_swaps = min(3, ceil(remaining_gap / max(avg_run_burn * 0.3, 50)))
-        remaining_gap -= tempo_swaps * max(avg_run_burn * 0.3, 50)
-        recommendations["tempo_swap_days"] = tempo_swaps
-
-    if remaining_gap > 0:
-        recommendations["shortfall"] = round(remaining_gap)
-
-    recommendations["protein_floor_grams"] = round(target_weight)
-
-    return jsonify({
-        "on_pace": False,
-        "current_weight": current_weight,
-        "target_weight": target_weight,
-        "weeks_remaining": weeks_remaining,
-        "required_weekly_loss": round(required_weekly_loss, 1),
-        "current_deficit": round(current_deficit),
-        "required_deficit": round(required_deficit),
-        "gap": round(gap),
-        "bmr": round(bmr),
-        "recommendations": recommendations,
-    })
+    """RETIRED. Projection is curve-managed (goal_engine.build_block3_projection
+    / curve_value / pace_status) — the ad-hoc deficit-gap recommender computed
+    its own required_weekly_loss off a straight-line target, which now
+    disagrees with the curve every other surface reads. No replacement
+    endpoint: the coach reacts via cut_status.on_curve / weekly-gen's
+    curve-derived required_weekly instead."""
+    return jsonify({"error": "retired — projection is curve-managed"}), 410
 
 
 @app.route("/api/bmr-recalculate", methods=["POST"])

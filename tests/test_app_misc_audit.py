@@ -13,7 +13,8 @@ Covers:
 - /api/workouts/<week> applies the same ExerciseSwap overlay as /api/workouts.
 - /api/morning-checkin/extract returns a structured error (not a Flask 500
   from returning None) when the model reply contains no JSON.
-- /api/deficit-plan reads BodyWeight.weight_lbs (bw.weight was AttributeError).
+- /api/deficit-plan is RETIRED (block-3: projection is curve-managed —
+  see tests/test_projection_surfaces.py) — 410 for every caller now.
 """
 import datetime
 
@@ -197,9 +198,13 @@ def test_extract_checkin_no_json_returns_structured_error(app_ctx, monkeypatch):
     assert "error" in (r.get_json() or {})
 
 
-# ── deficit-plan reads weight_lbs ───────────────────────────────────────────
+# ── deficit-plan is retired (curve-managed projection) ──────────────────────
 
-def test_deficit_plan_reads_weight_lbs(app_ctx):
+def test_deficit_plan_is_retired(app_ctx):
+    """Superseded by block-3: projection is curve-managed, so the ad-hoc
+    deficit-gap recommender (which computed its own straight-line
+    required_weekly_loss) is retired in favor of the canonical curve every
+    other surface reads. See tests/test_projection_surfaces.py fates 9/12."""
     app_, db = app_ctx
     from models import BodyWeight, TrainingGoal
     u, client = _login(app_, db)
@@ -210,8 +215,5 @@ def test_deficit_plan_reads_weight_lbs(app_ctx):
                               log_date=datetime.date.today()))
     db.session.commit()
     r = client.post("/api/deficit-plan", json={})
-    # bw.weight raised AttributeError -> 500 for every user with weight data.
-    assert r.status_code == 200, r.get_data(as_text=True)
-    body = r.get_json()
-    if not body.get("on_pace"):
-        assert body.get("current_weight") == 212
+    assert r.status_code == 410, r.get_data(as_text=True)
+    assert "error" in (r.get_json() or {})

@@ -849,6 +849,25 @@ def _build_cut_status():
     weekday = today.weekday()  # Mon=0
     sodium_prep_active = weekday in (4, 5)  # Fri / Sat
 
+    # ── Block-3 curve fields ─────────────────────────────────────────────
+    # Same judgment the dashboard's on_pace badge makes (goal_engine.curve_value
+    # / pace_status, on the DESPIKED weight) so the two surfaces can never
+    # disagree — the no-UI-contradiction pin. cut_guard owns the SystemFlag
+    # lookup; this module must not import app.py.
+    import cut_guard
+    curve_target_today = None
+    on_curve = None
+    if cut_guard._block3_mode():
+        _anchor, _block3_start = cut_guard._block3_anchor_and_start(current_user.id)
+        if _anchor is not None and _block3_start is not None:
+            from goal_engine import curve_value, pace_status
+            _expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
+            _curve_weight, _ = cut_guard.detect_water_spike(
+                list(reversed(bws))[:3], _expected_loss)
+            if _curve_weight is not None:
+                curve_target_today = curve_value(_anchor, _block3_start, today)
+                on_curve = pace_status(_curve_weight, _anchor, _block3_start, today)
+
     return {"cut_status": {
         "current_weight": current_weight,
         "target_weight": target_weight,
@@ -868,6 +887,8 @@ def _build_cut_status():
             "Plain water, no soy/cured/processed. Drops 2-3 lb water by Sun morning."
             if sodium_prep_active else None
         ),
+        "curve_target_today": curve_target_today,
+        "on_curve": on_curve,
     }}
 
 
