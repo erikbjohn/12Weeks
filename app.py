@@ -4849,6 +4849,11 @@ def protocol_today():
     action list, per-vial inventory projection, whether today carries a
     fasted (>=21:00) dose, and any lab reminders due within 7 days.
 
+    Each `missed` entry also carries an `id` (the underlying PeptideDose row
+    id) so the UI can call /toggle or /late on it directly — added at this
+    layer, not in protocol.missed_line() itself (that function's return
+    shape is pinned by tests/test_protocol_derivations.py).
+
     NEVER includes PROTOCOL_COMPOUNDS reference content (mechanism,
     effects, watch_fors) — this is a schedule/adherence payload only.
     """
@@ -4864,8 +4869,19 @@ def protocol_today():
         if l.completed_at is None and l.due_date <= today + timedelta(days=7)
     ]
 
+    # missed_line() (protocol.py) returns date/compound/rule/action only —
+    # its return shape is locked by tests/test_protocol_derivations.py exact-
+    # dict-equality assertions, so we don't add fields there. The UI's
+    # "mark taken"/"taken late" buttons need a dose id to act on, so we
+    # attach one here from the same untaken rows missed_line already
+    # filtered to (row.taken_at is None); (date, compound) is unique in
+    # practice (one scheduled event per compound per day).
+    _untaken_by_date_compound = {
+        (r.date, r.compound): r.id for r in all_rows if r.taken_at is None
+    }
     missed = [
-        {"date": m["date"].isoformat(), "compound": m["compound"],
+        {"id": _untaken_by_date_compound.get((m["date"], m["compound"])),
+         "date": m["date"].isoformat(), "compound": m["compound"],
          "rule": m["rule"], "action": m["action"]}
         for m in missed_line(all_rows, today)
     ]

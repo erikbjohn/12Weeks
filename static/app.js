@@ -10594,6 +10594,159 @@ function buildFoodContent(d) {
     return renderMealInner(d);
 }
 
+// ─── PROTOCOL (peptide dosing) ─────────────────────────────────────────────
+// Renders GET /api/protocol/today's payload. renderDetail() only fetches
+// and passes this in when the viewed day IS the user's server-tz "today" —
+// the payload has no per-day dimension, so no protocol section is ever
+// rendered on a past/future day. NEVER renders mechanism/effects/watch_fors
+// text — schedule/adherence only (card boundary rule), matching the
+// server's own contract (verified by tests/test_protocol_ui_payload.py).
+
+let _doseSaving = {};  // dose id -> true while a toggle/late POST is in flight
+
+function _fmtDoseTime(hhmm) {
+  var parts = (hhmm || '').split(':');
+  if (parts.length !== 2) return hhmm || '';
+  var h = parseInt(parts[0], 10);
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return h + ':' + parts[1] + ' ' + ampm;
+}
+
+function _fmtShortDate(iso) {
+  if (!iso) return '';
+  var dt = new Date(iso + 'T00:00:00');
+  if (isNaN(dt.getTime())) return iso;
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _doseRowHtml(dose) {
+  var taken = !!dose.taken;
+  var metaParts = [];
+  if (dose.syringe_units) metaParts.push(dose.syringe_units);
+  if (dose.site) metaParts.push(dose.site);
+  var metaHtml = metaParts.length
+    ? '<div style="font-size:13px;color:var(--muted);margin-top:2px">' + escapeHtml(metaParts.join(' · ')) + '</div>'
+    : '';
+  var noteHtml = dose.notes
+    ? '<div style="font-size:13px;color:var(--muted);font-style:italic;margin-top:2px">' + escapeHtml(dose.notes) + '</div>'
+    : '';
+  return '<div class="protocol-dose-row" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)' + (taken ? ';opacity:0.6' : '') + '">' +
+    '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:16px;font-weight:700;color:var(--text)">' + escapeHtml(dose.compound) + ' <span style="font-weight:400;color:var(--muted)">' + dose.dose_mg + 'mg</span></div>' +
+      metaHtml + noteHtml +
+    '</div>' +
+    '<button class="protocol-dose-check' + (taken ? ' done' : '') + '" ' +
+      'style="width:44px;height:44px;min-width:44px;border:1px solid ' + (taken ? 'var(--lift-border)' : 'var(--border2)') + ';border-radius:8px;' +
+      'background:' + (taken ? 'var(--lift-bg)' : 'var(--surface2)') + ';color:' + (taken ? 'var(--accent)' : 'transparent') + ';' +
+      'font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" ' +
+      'onclick="toggleDose(' + dose.id + ', ' + taken + ')">&#10003;</button>' +
+  '</div>';
+}
+
+function _missedRowHtml(m) {
+  var actionHtml = '';
+  var btnStyle = 'padding:8px 14px;font-size:13px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text);cursor:pointer;flex-shrink:0';
+  if (m.action === 'retro_mark' && m.id != null) {
+    actionHtml = '<button class="protocol-action-btn" style="' + btnStyle + '" onclick="toggleDose(' + m.id + ', false)">Mark taken</button>';
+  } else if (m.action === 'taken_late' && m.id != null) {
+    actionHtml = '<button class="protocol-action-btn" style="' + btnStyle + '" onclick="markDoseLate(' + m.id + ')">Taken late</button>';
+  }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;color:var(--muted);font-size:14px">' +
+    '<span>missed: ' + escapeHtml(m.compound) + ' (' + _fmtShortDate(m.date) + ') &mdash; ' + escapeHtml(m.rule) + '</span>' +
+    actionHtml +
+  '</div>';
+}
+
+function buildProtocolContent(p) {
+  var html = '';
+
+  // Doses grouped by time — server already sorts by time; preserve that
+  // group order rather than re-sorting.
+  var groupOrder = [];
+  var groups = {};
+  (p.doses || []).forEach(function(dose) {
+    if (!groups[dose.time]) { groups[dose.time] = []; groupOrder.push(dose.time); }
+    groups[dose.time].push(dose);
+  });
+  groupOrder.forEach(function(t) {
+    html += '<div class="protocol-time-group" style="margin-bottom:16px">' +
+      '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:4px">' + _fmtDoseTime(t) + '</h4>' +
+      groups[t].map(_doseRowHtml).join('') +
+    '</div>';
+  });
+
+  // Missed doses — one quiet row per entry, action-dependent button.
+  if (p.missed && p.missed.length) {
+    html += '<div class="protocol-missed" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">' +
+      p.missed.map(_missedRowHtml).join('') +
+    '</div>';
+  }
+
+  // Fasting bound — derive the actual triggering dose(s) from today's list
+  // rather than hardcoding a compound; the server only guarantees a cutoff.
+  if (p.fasting_bound) {
+    var lateDoses = (p.doses || []).filter(function(dd) { return dd.time >= '21:00'; });
+    var doseLabel = lateDoses.length
+      ? lateDoses.map(function(dd) { return escapeHtml(dd.compound) + ' at ' + _fmtDoseTime(dd.time); }).join(', ')
+      : "tonight's dose";
+    html += '<div class="protocol-fasting-banner" style="margin-top:12px;padding:10px 12px;border:1px solid var(--coach-border);background:var(--coach-bg);border-radius:8px;color:var(--coach);font-size:14px">' +
+      'Last meal by ' + _fmtDoseTime(p.fasting_bound) + ' &mdash; ' + doseLabel + ' requires 2h fasted.' +
+    '</div>';
+  }
+
+  // Vial reorder warnings
+  var flagged = (p.vials || []).filter(function(v) { return v.reorder_flag; });
+  if (flagged.length) {
+    html += flagged.map(function(v) {
+      return '<div class="protocol-reorder-warning" style="margin-top:8px;padding:10px 12px;border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);border-radius:8px;color:var(--run-hiit);font-size:14px">' +
+        '&#9888; ' + escapeHtml(v.compound) + ': ' + v.doses_left + ' doses left &mdash; reorder by ' + _fmtShortDate(v.reorder_by) +
+      '</div>';
+    }).join('');
+  }
+
+  // Labs due
+  if (p.labs_due && p.labs_due.length) {
+    html += p.labs_due.map(function(l) {
+      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px">' +
+        '🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) +
+      '</div>';
+    }).join('');
+  }
+
+  return html;
+}
+
+async function toggleDose(id, currentlyTaken) {
+  if (_doseSaving[id]) return;
+  _doseSaving[id] = true;
+  try {
+    await apiPost('/api/protocol/dose/' + id + '/toggle', { taken: !currentlyTaken });
+  } finally {
+    delete _doseSaving[id];
+  }
+  renderDetail();
+}
+
+async function markDoseLate(id) {
+  if (_doseSaving[id]) return;
+  _doseSaving[id] = true;
+  try {
+    const res = await apiPost('/api/protocol/dose/' + id + '/late', {});
+    if (res && !res.ok) {
+      let msg = 'Could not mark as taken.';
+      try {
+        const body = await res.json();
+        if (body && body.error) msg = body.error === 'confirm with your doctor' ? 'Confirm with your doctor first.' : body.error;
+      } catch(e) {}
+      showToast(msg, 'error');
+    }
+  } finally {
+    delete _doseSaving[id];
+  }
+  renderDetail();
+}
+
 function buildRunSubsection(d, runClass) {
     // Check for run override
     var runOv = _runOverrides.find(function(o) { return o.day_idx === currentDay; });
@@ -11043,6 +11196,24 @@ async function renderDetail() {
     }
   }
 
+  // Load today's protocol snapshot — server-scoped to the user's local
+  // "today" (GET /api/protocol/today), never cached, so a toggle can
+  // renderDetail() to refetch and show the true server state. Gate on BOTH
+  // weekday AND actual program week (mirrors renderMealInner's
+  // isViewingToday) — weekday alone would show today's protocol on every
+  // past/future week sharing the same weekday index.
+  let _protocolToday = null;
+  const _protoTodayIdx = _userTodayMonIdx();
+  const _protoActualWeek = getActualProgramWeek();
+  const _isProtocolToday = currentDay === _protoTodayIdx &&
+      (_protoActualWeek == null || currentWeek === _protoActualWeek);
+  if (_isProtocolToday) {
+    try {
+      const pr = await fetch('/api/protocol/today');
+      if (pr.ok) _protocolToday = await pr.json();
+    } catch(e) {}
+  }
+
   // If traveling, try to load travel workout
   if (isTraveling && !d._travelLoaded) {
     fetch('/api/travel/workout?day=' + encodeURIComponent(d.day))
@@ -11397,6 +11568,7 @@ async function renderDetail() {
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
     ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
+    ${_protocolToday && _protocolToday.doses.length ? renderAccordion('protocol', 'Protocol', buildProtocolContent(_protocolToday), false) : ''}
     ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, currentDay), false)}
   </div>`;
 
