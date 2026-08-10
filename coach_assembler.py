@@ -721,6 +721,89 @@ def _build_cut_status():
     }}
 
 
+@section_builder("protocol_status")
+def _build_protocol_status():
+    """Peptide-protocol status: today's doses, escalation state, adherence,
+    vial reorder flags, labs due, and which compounds' watch_fors are
+    "live" (a dose scheduled within +/-3 days of today).
+
+    Delegates all math to protocol.py (pure, DB-free) — this builder only
+    queries PeptideDose/PeptideVial/LabReminder and shapes the payload.
+    Returns {"protocol_status": None} (block absent, not empty) when the
+    user has zero PeptideDose rows — no protocol imported, nothing to say.
+
+    escalation_window / next_escalation here answer a DIFFERENT question
+    than protocol.escalation_window/next_escalation's own forward-looking
+    ("is a dose increase coming up") framing. CORE_PROMPT rule 22 needs
+    bounded ANOMALY ATTRIBUTION: "did we recently escalate, such that a
+    GI/water symptom might still be attributable to it" — a LOOK-BACK
+    question, not a look-ahead one. We get that from the SAME pure
+    functions by evaluating them from `window_start = today - 6d` instead
+    of `today`: escalation_window then reports True iff an escalation date
+    falls in [today-6, today] (today inclusive — "within 7 days after the
+    escalation, counting the escalation day itself", matching the injected
+    "until +7d after <date>" text), and next_escalation reports whichever
+    escalation event is relevant right now — a still-in-window recent one
+    if there is one, else the next genuinely upcoming one.
+    """
+    from models import PeptideDose, PeptideVial, LabReminder
+    from protocol import (
+        adherence_7d, escalation_window as _escalation_window,
+        next_escalation as _next_escalation, vial_status, missed_line,
+        PROTOCOL_COMPOUNDS,
+    )
+    today = _user_today()
+
+    all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+    if not all_rows:
+        return {"protocol_status": None}
+
+    today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
+    summary = [
+        {"compound": r.compound, "dose_mg": r.dose_mg, "time": r.time}
+        for r in today_rows
+    ]
+
+    reta_rows = sorted(
+        (r for r in all_rows if r.compound == "Retatrutide" and r.date <= today),
+        key=lambda r: r.date,
+    )
+    current_retatrutide_mg = reta_rows[-1].dose_mg if reta_rows else None
+
+    window_start = today - timedelta(days=6)
+    next_esc = _next_escalation(all_rows, window_start)
+    esc_window_active = _escalation_window(all_rows, window_start, days=7)
+
+    vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
+    vial_flags = [v for v in vial_status(vials, all_rows, today) if v["reorder_flag"]]
+
+    labs = LabReminder.query.filter_by(user_id=current_user.id).all()
+    labs_due = [
+        {"label": l.label, "due_date": l.due_date}
+        for l in labs
+        if l.completed_at is None and l.due_date <= today + timedelta(days=7)
+    ]
+
+    watch_fors_active = {}
+    for r in all_rows:
+        if abs((r.date - today).days) <= 3:
+            compound_info = PROTOCOL_COMPOUNDS.get(r.compound)
+            if compound_info and r.compound not in watch_fors_active:
+                watch_fors_active[r.compound] = compound_info["watch_fors"]
+
+    return {"protocol_status": {
+        "summary": summary,
+        "current_retatrutide_mg": current_retatrutide_mg,
+        "next_escalation": next_esc,
+        "escalation_window": esc_window_active,
+        "adherence_7d": adherence_7d(all_rows, today),
+        "missed": missed_line(all_rows, today),
+        "vial_flags": vial_flags,
+        "labs_due": labs_due,
+        "watch_fors_active": watch_fors_active,
+    }}
+
+
 @section_builder("today_status")
 def _build_today_status():
     """One-glance signal of what's done vs pending TODAY. Prevents the coach
@@ -1411,6 +1494,17 @@ Intensity level: {anger_level_label}
    10pm) — call it out FIRST. Examples: "1:14 AM check-in. You're not sleeping —
    that's the conversation." "Weigh-in at 11:40pm is meaningless data — do it
    tomorrow morning fasted."
+   PROTOCOL CARVE-OUT: on any date where <protocol_status> shows a scheduled dose at or after 21:00,
+   protocol interactions in that window — checking a dose off, asking about dose
+   or injection site, noting a side effect — from 30 minutes before that
+   scheduled time until 45 minutes after are PROTOCOL COMPLIANCE, not a
+   late-hours anomaly. Do not scold. Close it toward sleep: "Dose done. Screens
+   off." Derive the window from protocol_status's actual scheduled time for that
+   date — never a hardcoded clock value. Every other after-10pm interaction still
+   gets the full rule-6 callout above, sharpened by the tesamorelin GH-pulse
+   rationale from Oct 5: growth hormone release is pulsatile and disrupted by
+   poor sleep, so a late-night non-protocol conversation is now doubly the wrong
+   move.
 7. FOOD SAFETY — Never suggest a food not in the approved list. Never ignore an allergy. Violations are a system failure.
 8. FASTING — Never suggest calories outside the eating window. Before the window opens: black coffee, water, zero-cal only.
 9. VOLUME — Use the training engine's prescription for sets/reps/weight. Do not re-derive from raw logs.
@@ -1446,6 +1540,14 @@ Intensity level: {anger_level_label}
     b) If no weigh-in has been logged recently, CHASE IT: "No weigh-in since [date]. I can't run the cut blind. Fasted, this morning. Now." A missing weigh-in is not a reason to ignore the cut — it's the first thing to fix.
     c) GLUTEN / WATER GUARD: a one-week jump of roughly 3-8 lb against a downtrend (cut_status.water_spike_suspected or trend_reversal true) is WATER and inflammation, NOT fat. Say so plainly. HOLD the deficit — do NOT deepen it, do NOT call it a blown cut, do NOT panic-cut calories. Expect it to flush in 1-2 weeks. A glutening is an event, not a failure.
     ASSUMING the athlete handled the cut on their own — saying nothing about the scale — is the exact failure that cost block 1. Do not repeat it. The cut is coached, not tracked. (Cross-turn: if you already gave the scale directive earlier in THIS chat and nothing has changed since — no new weigh-in — do not repeat it every message. Like rule 19, reconcile against chat_history; coach the cut, don't nag it.)
+22. PEPTIDE PROTOCOL — BOUNDED ATTRIBUTION, NEVER CAUSATION. The athlete runs a doctor-prescribed peptide protocol; its live state (today's doses, adherence, escalation schedule, vial/lab flags) arrives in <protocol_status> — read it, don't ask the athlete to recite it.
+    a) ANOMALY ATTRIBUTION IS BOUNDED. Only attribute a symptom or a scale/appetite anomaly to the stack when BOTH hold: protocol_status shows escalation_window true, AND the effect is explicitly listed in that compound's watch_fors. Even then, cite the dated event — "escalated to 4mg on 9/21; stall overlaps the window" — never assert the drug caused it. You are noting an overlap, not diagnosing a mechanism.
+    b) DIRECTION: a stall INSIDE an escalation window may be GI/water masking — HOLD the deficit, do not deepen it, expect it to clear within the window (same logic as the gluten/water guard in rule 21c). A stall at a STABLE dose (no recent escalation) is a real stall — tighten it, same as any other rule-21 stall.
+    c) RULE 21 STILL FIRES EVERY RESPONSE. The protocol never excuses silence on the scale — name the pace with the number and give ONE cut directive every time, exactly as rule 21 requires.
+    d) PROTEIN FLOOR — enforce it hardest during escalation windows and appetite crashes; appetite suppression is exactly when lean mass is most at risk.
+    e) LIFTING VOLUME — when <lift_trend> reports lift_decline_suspected, surface the cut-speed vs training-volume trade-off explicitly, with the underlying numbers (deficit size, weeks left, the lift trend itself). Never silently cut lifting volume to protect the cut — that trade-off is named out loud, with numbers, every time it's live.
+    f) MISSED DOSES — state the compound's codified missed_dose_rule verbatim from protocol_status. Every compound ships with the placeholder rule: say EXACTLY "confirm with your doctor" and nothing more. Never improvise dosing advice, a "safe to take late" window, or a make-up dose schedule — rule 20 (never fabricate a rationale) applies to dosing exactly as it does to training data.
+    g) GLP-1 HYGIENE — with Retatrutide active, emphasize fiber and hydration (gastric emptying is slowed). Flag alcohol explicitly: it hits much harder under delayed gastric emptying — treat it as a bigger violation than usual, not the same as an unmedicated week.
 </non_negotiable_rules>
 
 <markers>
@@ -1799,6 +1901,47 @@ def _format_athlete_data(ctx, requires):
             "If sodium_prep_active is true, surface the reminder to the athlete."
         )
         parts.append("\n".join(cs_lines))
+
+    # Protocol status — peptide-protocol dose/adherence/escalation state.
+    # Absent entirely (no <protocol_status> block) when the athlete has no
+    # PeptideDose rows imported — silence reads as "no protocol", never a
+    # fabricated empty block.
+    ps = ctx.get("protocol_status")
+    if ps:
+        ps_lines = ["<protocol_status>"]
+        for s in ps.get("summary") or []:
+            ps_lines.append(f"  dose: {s['compound']} {s['dose_mg']}mg @ {s['time']}")
+        if ps.get("current_retatrutide_mg") is not None:
+            ps_lines.append(f"  current_retatrutide_mg: {ps['current_retatrutide_mg']}")
+        ne = ps.get("next_escalation")
+        if ps.get("escalation_window") and ne:
+            ps_lines.append(
+                f"  ESCALATION WINDOW ACTIVE (until +7d after {ne['date']}): {ne['detail']}"
+            )
+        if ne:
+            ps_lines.append(f"  next_escalation: {ne['date']} — {ne['detail']}")
+        adh = ps.get("adherence_7d") or {}
+        if adh.get("pct") is not None:
+            ps_lines.append(f"  adherence_7d: {adh['pct']}% ({adh.get('late', 0)} late)")
+        for m in ps.get("missed") or []:
+            ps_lines.append(f"  missed: {m['compound']} on {m['date']} — rule: {m['rule']}")
+        for v in ps.get("vial_flags") or []:
+            ps_lines.append(
+                f"  VIAL REORDER: {v['compound']} — runout {v['runout_date']}, reorder by {v['reorder_by']}"
+            )
+        for lab in ps.get("labs_due") or []:
+            ps_lines.append(f"  lab_due: {lab['label']} — due {lab['due_date']}")
+        for compound, effects in (ps.get("watch_fors_active") or {}).items():
+            ps_lines.append(f"  watch_fors: {compound} — {'; '.join(effects)}")
+        ps_lines.append("</protocol_status>")
+        ps_lines.append(
+            "Use protocol_status for dose state and adherence. Attribute anomalies to "
+            "the stack ONLY when escalation_window is true AND the effect is listed in "
+            "watch_fors — cite the dated event, never assert causation. Missed doses: "
+            "state the compound's rule verbatim; if it is 'confirm with your doctor', "
+            "say exactly that and nothing more."
+        )
+        parts.append("\n".join(ps_lines))
 
     # Today's status — explicit state signal so the coach doesn't tell the
     # athlete to "get the run done" after it was logged, OR (the inverse bug)

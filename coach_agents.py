@@ -14,8 +14,8 @@ AGENTS = {
             "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
             "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
             "food_safety", "fasting", "user_rules",
-            "today_sets", "today_status", "cut_status", "completed_days", "overrides",
-            "exercise_deltas",
+            "today_sets", "today_status", "cut_status", "protocol_status",
+            "completed_days", "overrides", "exercise_deltas",
         ],
     },
     "morning_checkin": {
@@ -28,7 +28,7 @@ AGENTS = {
             # The cut is coached at the morning moment — react to the scale, run the
             # gluten guard (CORE_PROMPT rule 21). Block 1's coach never saw cut_status
             # here, so it never coached the cut.
-            "cut_status", "goal",
+            "cut_status", "protocol_status", "goal",
         ],
     },
     "morning_briefing": {
@@ -87,7 +87,7 @@ AGENTS = {
             "fasting", "user_rules", "today_status",
             # See the cut at the meals moment too — adherence vs the deficit, and
             # the gluten guard so a water spike doesn't read as a blown day.
-            "cut_status", "bodyweight",
+            "cut_status", "protocol_status", "bodyweight",
         ],
     },
     "end_of_day": {
@@ -117,7 +117,7 @@ AGENTS = {
         "max_tokens": 600,
         "temperature": 0.4,
         "requires": [
-            "base", "goal", "cut_status", "bodyweight",
+            "base", "goal", "cut_status", "protocol_status", "bodyweight",
             "meals_today", "weekly_meals", "food_safety",
             "fasting", "today_status",
             # NOTE: workout_today + week_schedule were tried in round 5
