@@ -8271,13 +8271,25 @@ function _pdHeroCard(startWeight, currentWeight, targetWeight, projections) {
   var barPct = Math.round(pct);
 
   // Trust backend extrapolation. Fall back to nothing rather than guessing.
+  // The badge (On pace / Off pace) renders whenever the SERVER computed an
+  // on_pace verdict, independent of projected_final_weight — block-3 mode
+  // can judge on_pace off a single weigh-in (pace_status vs the curve) well
+  // before projected_final_weight's own 2-weigh-in minimum is met, and the
+  // badge going invisible in exactly that window was the bug. The "tracking
+  // to X lb" text still needs its own null guard since it quotes
+  // projected/targetWeight directly.
   var projText = '';
   var projected = projections.projected_final_weight;
-  if (projected != null && targetWeight != null) {
-    var onPace = projections.on_pace;
-    var paceClass = onPace === true ? 'pd-green' : onPace === false ? 'pd-red' : '';
-    var label = onPace === true ? 'On pace' : onPace === false ? 'Off pace' : 'Projected';
-    projText = '<span class="pd-hero-pace ' + paceClass + '">' + label + '</span> — tracking to ' +
+  var onPace = projections.on_pace;
+  if (onPace != null) {
+    var paceClass = onPace === true ? 'pd-green' : 'pd-red';
+    var label = onPace === true ? 'On pace' : 'Off pace';
+    projText = '<span class="pd-hero-pace ' + paceClass + '">' + label + '</span>';
+    if (projected != null && targetWeight != null) {
+      projText += ' — tracking to ' + Math.round(projected) + ' lb by Week 12 (goal ' + Math.round(targetWeight) + ')';
+    }
+  } else if (projected != null && targetWeight != null) {
+    projText = '<span class="pd-hero-pace">Projected</span> — tracking to ' +
                Math.round(projected) + ' lb by Week 12 (goal ' + Math.round(targetWeight) + ')';
   }
 

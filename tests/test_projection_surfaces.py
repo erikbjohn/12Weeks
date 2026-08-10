@@ -263,6 +263,55 @@ def test_cut_status_curve_fields_agree_with_dashboard_on_pace(app_ctx, clean_blo
         assert key in cs
 
 
+def test_despike_window_matches_across_dashboard_and_cutstatus(app_ctx, clean_block3_flags, monkeypatch):
+    """Fix-round-1 reviewer repro (CRITICAL #1): app._despiked_current_weight
+    used to read a GLOBAL (all-time) BodyWeight window while cut_status's bws
+    is BLOCK-SCOPED (>= AppState.start_date). With pre-block history present
+    (228 @ Jul28, 220.5 @ Aug5 -- both before start_date Aug10) and a single
+    in-block weigh-in (227 @ Aug10), the dashboard could despike off the
+    cross-block rows (spike detected: latest 227 vs prior 220.5, adjusted
+    step ~7.4 lb -> anchors on 220.5 -> on_pace True/green) while cut_status's
+    block-scoped window sees only the raw 227 with <3 rows (can't confirm a
+    spike -> judges 227 raw -> on_curve "behind") -- a same-instant,
+    same-user contradiction. Both now read the SAME block-scoped window: with
+    only ONE in-block row, NEITHER surface can spike-check, so both judge the
+    raw 227 against the curve and AGREE ("behind"-consistent)."""
+    app_, db = app_ctx
+    import app as appmod
+    import coach_assembler as ca
+    from flask_login import login_user
+    from goal_engine import build_block3_projection
+
+    uid, email, client = _login(app_, db, "b3-despike-window@test.com")
+    proj = build_block3_projection(ANCHOR, START)
+    _seed_goal_and_state(app_, db, uid, proj)
+    _set_weights(app_, db, uid, [
+        (date(2026, 7, 28), 228.0),   # pre-block (before AppState.start_date)
+        (date(2026, 8, 5), 220.5),    # pre-block
+        (START, 227.0),               # the ONLY in-block row
+    ])
+    _set_block3_flags(app_, db)
+    monkeypatch.setattr(appmod, "_user_today", lambda: START)
+
+    r = client.get("/api/progress/dashboard")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    dash_on_pace = r.get_json()["projections"]["on_pace"]
+
+    def _do_it():
+        from models import User
+        u = User.query.get(uid)
+        monkeypatch.setattr(ca, "_user_today", lambda: START)
+        with app_.test_request_context():
+            login_user(u, force=True)
+            return ca._build_cut_status()["cut_status"]
+    cs = _do(app_, _do_it)
+
+    # Curve target at elapsed=0 is the anchor (220.0); the raw 227 is 7 lb
+    # over tolerance (1.5) on BOTH surfaces -- "behind" on both sides.
+    assert cs["on_curve"] == "behind"
+    assert dash_on_pace is False
+
+
 # ── (e) weekly_report weight_vs_projected agrees at week-1 ──────────────────
 
 def test_weekly_report_on_track_at_week1_curve_target(app_ctx, clean_block3_flags):
@@ -347,6 +396,45 @@ def test_goal_compute_overwrites_with_explicit_override(app_ctx, clean_block3_fl
     assert "tdee" in new_proj[0]
 
 
+def test_goal_compute_writes_canonical_curve_for_fresh_user_under_flag(app_ctx, clean_block3_flags):
+    """Fix-round-1 reviewer repro (IMPORTANT #2): a user's FIRST-EVER goal
+    compute while the flag is set has existing_goal is None, which used to
+    bypass the preserve-guard entirely and fall through to the LEGACY
+    project_weight_curve shape. The canonical curve must be the default
+    output everywhere the flag is set -- never the legacy re-simulation --
+    so a brand-new user onboarded after the block-3 transition gets the same
+    curve every other surface reads, from their very first compute."""
+    app_, db = app_ctx
+    from goal_engine import build_block3_projection
+
+    uid, email, client = _login(app_, db, "b3-fresh-goal@test.com")
+
+    def _seed_fresh():
+        from models import PsychIntake, PhysicalAssessment, AppState, BodyWeight, TrainingGoal
+        TrainingGoal.query.filter_by(user_id=uid).delete()
+        PsychIntake.query.filter_by(user_id=uid).delete()
+        PhysicalAssessment.query.filter_by(user_id=uid).delete()
+        AppState.query.filter_by(user_id=uid).delete()
+        BodyWeight.query.filter_by(user_id=uid).delete()
+        db.session.commit()
+        db.session.add(PsychIntake(user_id=uid, conversation=[]))
+        db.session.add(PhysicalAssessment(user_id=uid, height_inches=70, bodyweight_lbs=220.0))
+        db.session.add(AppState(user_id=uid, current_week=1, start_date=START))
+        db.session.add(BodyWeight(user_id=uid, weight_lbs=220.0, log_date=START))
+        db.session.commit()
+    _do(app_, _seed_fresh)
+    _set_block3_flags(app_, db)  # anchor == ANCHOR == 220.0
+
+    r = client.post("/api/goal/compute", json={})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+
+    expected = build_block3_projection(ANCHOR, START)
+    assert body["weight_projection"] == expected
+    assert "tdee" not in body["weight_projection"][0]  # never the legacy shape
+    assert _get_goal(app_, db, uid) == expected
+
+
 # ── (h) FLAG-ABSENT REGRESSION: every surface falls back to legacy ─────────
 
 def test_regression_dashboard_legacy_straight_line_without_flag(app_ctx, clean_block3_flags, monkeypatch):
@@ -362,9 +450,11 @@ def test_regression_dashboard_legacy_straight_line_without_flag(app_ctx, clean_b
     assert r.status_code == 200, r.get_data(as_text=True)
     data = r.get_json()
     linear_plan = data["projections"]["linear_plan"]
-    # Legacy straight line: week1 == start_weight, week12 == target_weight.
-    assert linear_plan[0]["planned_weight"] == pytest.approx(220.0)
-    assert linear_plan[-1]["planned_weight"] == pytest.approx(195.0)
+    # Legacy straight line: ALL 12 weeks, not just the endpoints -- a partial
+    # (first/last only) check could hide a broken interior formula.
+    expected = [{"week": w, "planned_weight": round(220.0 + (195.0 - 220.0) * ((w - 1) / 11.0), 1)}
+                for w in range(1, 13)]
+    assert linear_plan == expected
     assert data["projections"].get("projection_mode") is None
 
 

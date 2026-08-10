@@ -1153,16 +1153,31 @@ def _despiked_current_weight(user_id):
     (weight_or_None, spiked: bool).
 
     The spike rule itself lives in cut_guard.detect_water_spike — the single
-    shared implementation coach_assembler._build_cut_status also calls, so
-    the two call sites can no longer drift out of sync."""
-    from models import BodyWeight
+    shared implementation coach_assembler._build_cut_status also calls. BOTH
+    call sites are now structurally guaranteed to agree, not just because
+    they share one detector function, but because they read the SAME window:
+    this query is BLOCK-SCOPED (>= AppState.start_date) to match
+    coach_assembler._build_cut_status's bws query exactly (see its comment at
+    ~735-738). Before this fix, this query was global (all-time) while
+    cut_status's was block-scoped — with pre-block history present, this
+    function could despike off a cross-block row cut_status could never see,
+    producing a disagreeing verdict (dashboard on_pace green, cut_status
+    on_curve "behind") for the same user at the same instant. With fewer than
+    3 block-scoped rows, neither surface can confirm a spike — both fall back
+    to the raw latest weight, which is the invariant that actually matters:
+    they AGREE even when neither can spike-check."""
+    from models import BodyWeight, AppState
     import cut_guard
+    state = AppState.query.filter_by(user_id=user_id).first()
+    block_start = state.start_date if state and state.start_date else None
+    q = (BodyWeight.query.filter_by(user_id=user_id)
+         .filter(BodyWeight.weight_lbs.isnot(None)))
+    if block_start is not None:
+        q = q.filter(BodyWeight.log_date >= block_start)
     # Deterministic ordering (log_date desc, id desc) so a same-date re-logged
     # weigh-in resolves to the SAME "latest" row as coach_assembler._build_cut_status
-    # (which uses asc + id asc). Null weights excluded.
-    rows = (BodyWeight.query.filter_by(user_id=user_id)
-            .filter(BodyWeight.weight_lbs.isnot(None))
-            .order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all())
+    # (which uses asc + id asc).
+    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all()
     expected_loss = cut_guard.expected_weekly_loss_for(user_id, _current_week())
     return cut_guard.detect_water_spike(rows, expected_loss)
 
@@ -10030,17 +10045,33 @@ def _compute_goal_for_user(user, overrides=None):
     # this legacy metabolic re-simulation — unless the caller explicitly asks
     # for it via override_projection_mode (e.g. an admin re-anchor).
     import cut_guard
-    _preserve_curve = (
-        cut_guard._block3_mode()
-        and existing_goal is not None
-        and existing_goal.weight_projection
-        and not overrides.get("override_projection_mode")
-    )
-    if _preserve_curve:
+    _override = bool(overrides.get("override_projection_mode"))
+    if _override:
+        goal.weight_projection = projection
+    elif cut_guard._block3_mode() and existing_goal is not None and existing_goal.weight_projection:
         logging.info(
             "[block3] preserving curve weight_projection for user %s "
             "(projection_mode=piecewise_block3, no override_projection_mode)",
             user.id)
+    elif cut_guard._block3_mode():
+        # No existing curve to preserve — a first-ever compute under the flag
+        # (existing_goal is None) or an existing goal that has no stored
+        # projection yet. The CANONICAL curve is the default output here too,
+        # never the legacy metabolic re-simulation — the best-known-method
+        # rule (block 3's curve replaces the old projection everywhere, not
+        # only where a curve already happens to be sitting). Without this
+        # branch, a brand-new user onboarded after the block-3 transition got
+        # the legacy shape on their very first goal compute.
+        anchor, _b3_start = cut_guard._block3_anchor_and_start(user.id)
+        if anchor is not None and _b3_start is not None:
+            from goal_engine import build_block3_projection
+            goal.weight_projection = build_block3_projection(anchor, _b3_start)
+        else:
+            goal.weight_projection = None
+            logging.warning(
+                "[block3] projection_mode is on but anchor/start_date could "
+                "not be resolved for user %s; leaving weight_projection unset "
+                "instead of writing the legacy shape", user.id)
     else:
         goal.weight_projection = projection
     db.session.commit()
