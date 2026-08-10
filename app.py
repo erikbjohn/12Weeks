@@ -1134,26 +1134,21 @@ def _despiked_current_weight(user_id):
     not fat — recalibrating the deficit off it would TIGHTEN calories on a
     glutened week (the exact block-1 failure, requirement #3). When a spike is
     detected, anchor on the prior (lower) weigh-in instead. Returns
-    (weight_or_None, spiked: bool)."""
+    (weight_or_None, spiked: bool).
+
+    The spike rule itself lives in cut_guard.detect_water_spike — the single
+    shared implementation coach_assembler._build_cut_status also calls, so
+    the two call sites can no longer drift out of sync."""
     from models import BodyWeight
+    import cut_guard
     # Deterministic ordering (log_date desc, id desc) so a same-date re-logged
     # weigh-in resolves to the SAME "latest" row as coach_assembler._build_cut_status
-    # (which uses asc + id asc). Null weights excluded. The spike rule below MUST
-    # match _build_cut_status exactly: latest jump 3-8 lb within ~10 days on a
-    # prior-down step, with >=3 weigh-ins to establish the trend.
+    # (which uses asc + id asc). Null weights excluded.
     rows = (BodyWeight.query.filter_by(user_id=user_id)
             .filter(BodyWeight.weight_lbs.isnot(None))
             .order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all())
-    if not rows:
-        return None, False
-    latest = rows[0].weight_lbs
-    if len(rows) >= 3 and rows[1].weight_lbs is not None and rows[2].weight_lbs is not None:
-        step = latest - rows[1].weight_lbs
-        step_days = (rows[0].log_date - rows[1].log_date).days
-        prior_down = rows[1].weight_lbs < rows[2].weight_lbs
-        if 3 <= step <= 8 and prior_down and 0 < step_days <= 10:
-            return rows[1].weight_lbs, True
-    return latest, False
+    expected_loss = cut_guard.expected_weekly_loss_for(user_id, _current_week())
+    return cut_guard.detect_water_spike(rows, expected_loss)
 
 
 def _current_week():

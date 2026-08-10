@@ -781,16 +781,13 @@ def _build_cut_status():
         recent_pace = round((recent[-1].weight_lbs - recent[0].weight_lbs) / (rdays / 7), 2)
         if pace_per_week is not None and pace_per_week < 0 and recent_pace > 0:
             trend_reversal = True  # overall losing, recently gaining
-        # Acute spike: the LATEST weigh-in jumped 3-8 lb WITHIN ~10 days while the
-        # step before it was still descending, with >=3 weigh-ins to establish the
-        # trend. Strict so a genuine multi-week regain isn't excused as water — a
-        # slow regain still surfaces via trend_reversal, which the coach reacts to.
-        # This definition MUST match _despiked_current_weight in app.py exactly.
-        last_step = bws[-1].weight_lbs - bws[-2].weight_lbs
-        step_days = (bws[-1].log_date - bws[-2].log_date).days
-        prior_down = len(bws) >= 3 and bws[-2].weight_lbs < bws[-3].weight_lbs
-        if 3 <= last_step <= 8 and prior_down and 0 < step_days <= 10:
-            water_spike_suspected = True
+        # Acute spike: shares cut_guard.detect_water_spike with
+        # app._despiked_current_weight, so the two can no longer drift out of
+        # sync. bws here is oldest-first; the detector wants newest-first.
+        import cut_guard
+        expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
+        _, water_spike_suspected = cut_guard.detect_water_spike(
+            list(reversed(bws[-3:])), expected_loss)
 
     # Latest weigh-in note (e.g. "glutened at dinner") — surfaces context the coach
     # would otherwise never see.
