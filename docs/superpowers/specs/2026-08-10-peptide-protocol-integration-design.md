@@ -350,10 +350,17 @@ invariant). Week 12 softens to 2.0 matching the deload week.
 
 **Canonical evaluation — ONE function, ONE constant, in goal_engine, imported
 everywhere, never re-implemented:**
-- `curve(date)`: piecewise-linear DAILY interpolation; a week-N-day-1 date accrues at
-  the NEW week's rate. Pinned test values: curve(2026-08-23) = 217.5;
-  curve(2026-08-24) accrues at 2.0/7; curve(2026-09-20) = 209.5; curve(2026-09-21)
-  accrues at 2.5/7; curve(2026-11-01) = 195.0.
+- `curve(date)`: piecewise-linear DAILY interpolation under the **morning-weigh-in
+  convention** — curve(D) is the target at the MORNING of D, i.e. loss accrued over
+  the elapsed days before D (weigh-ins are fasted-morning, before that day's
+  deficit). Consequences, all pinned in tests: curve(start) = 220.0 exactly (the
+  anchor); the week-2 target 217.5 lands on the 2026-08-24 morning (Aug 23 =
+  220 − 13×1.25/7 ≈ 217.68); curve(2026-09-21) = 209.5 with Sep 22 accruing at the
+  new 2.5/7; curve(2026-11-01) = 195.0 + 2.0/7 ≈ 195.29 (the final day's loss is
+  still in progress); **195.0 is reached at the 2026-11-02 morning** — the
+  completion of Nov 1 — and the curve clamps to 195.0 for all later dates (84
+  elapsed-day cap). The ≤0.3 lb morning-vs-evening drift at boundaries is far
+  inside CURVE_TOLERANCE_LB and the stored weekly table is unaffected.
 - `CURVE_TOLERANCE_LB = 1.5`, defined once. Three-state judgment: behind if
   weight > curve(date)+tol; ahead if < curve(date)−tol; else on-pace. (Kills the
   existing ±1.0 vs ±1.5 split.)
@@ -678,9 +685,10 @@ stay. The §6 step-8 table maps every check to its endpoint.
 
 **Curve:**
 - `curve[12] == target_weight == 195.0`; deltas sum to 25.0.
-- Pinned boundaries: curve(2026-08-23)=217.5; curve(2026-08-24) accrues at 2.0/7
-  (≈217.21, NOT ≈217.32); curve(2026-09-20)=209.5; curve(2026-09-21) accrues at
-  2.5/7; curve(2026-11-01)=195.0.
+- Pinned boundaries (morning convention): curve(start)=220.0 exactly;
+  curve(2026-08-24)=217.5; curve(2026-08-25)=217.5−2.0/7; curve(2026-09-21)=209.5;
+  curve(2026-09-22)=209.5−2.5/7; curve(2026-11-01)=195.0+2.0/7;
+  curve(2026-11-02)=195.0; curve(any later date)=195.0 (clamped).
 - Exactly the §5 slope table (slope(week 5) == 2.0 — pins "no wk-5 boundary" against
   well-meaning fixes).
 - On-pace: weigh-in equal to curve(t) mid-week in EACH phase → on-pace;

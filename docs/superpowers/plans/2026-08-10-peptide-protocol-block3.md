@@ -190,7 +190,7 @@ git commit -m "feat(protocol): PeptideDose/PeptideVial/LabReminder models"
   - `BLOCK3_WEEKLY_RATES: dict[int, float]` = `{1:1.25, 2:1.25, 3:2.0, 4:2.0, 5:2.0, 6:2.0, 7:2.5, 8:2.5, 9:2.5, 10:2.5, 11:2.5, 12:2.0}`
   - `CURVE_TOLERANCE_LB = 1.5`
   - `build_block3_projection(anchor_weight: float, start_date: date) -> list[dict]` → 12 rows `[{"week": w, "projected": lbs}]` (end-of-week targets; week 12 == anchor − 25.0)
-  - `curve_value(anchor_weight: float, start_date: date, on_date: date) -> float` — piecewise-linear DAILY interpolation; a week-N-day-1 date accrues at week N's rate; clamped to [start_date, start_date+83]
+  - `curve_value(anchor_weight: float, start_date: date, on_date: date) -> float` — piecewise-linear DAILY interpolation, **morning-weigh-in convention**: curve(D) = anchor − Σ over the `(D − start_date)` ELAPSED days d of rate(week(d))/7, with elapsed days clamped to [0, 84]. So curve(start)=anchor exactly; week-boundary targets land on the morning AFTER the week completes; curve(start+84 days and later)=195.0
   - `pace_status(weight: float, anchor_weight: float, start_date: date, on_date: date) -> str` — "behind" | "ahead" | "on_pace" using CURVE_TOLERANCE_LB
 - Consumes: nothing from other tasks.
 
@@ -223,12 +223,22 @@ def test_slope_table_pins_no_week5_boundary():
 
 def test_curve_value_pinned_boundaries():
     from goal_engine import curve_value
-    assert curve_value(ANCHOR, START, date(2026, 8, 23)) == pytest.approx(217.5)
-    # Aug 24 = week-3 day 1: accrues at the NEW 2.0/7 rate (NOT 1.25/7)
-    assert curve_value(ANCHOR, START, date(2026, 8, 24)) == pytest.approx(217.5 - 2.0 / 7)
-    assert curve_value(ANCHOR, START, date(2026, 9, 20)) == pytest.approx(209.5)
-    assert curve_value(ANCHOR, START, date(2026, 9, 21)) == pytest.approx(209.5 - 2.5 / 7)
-    assert curve_value(ANCHOR, START, date(2026, 11, 1)) == pytest.approx(195.0)
+    # Morning-weigh-in convention: curve(D) = target at the MORNING of D
+    # (loss accrued over elapsed days BEFORE D). Day 0 = the anchor exactly.
+    assert curve_value(ANCHOR, START, START) == pytest.approx(220.0)
+    assert curve_value(ANCHOR, START, date(2026, 8, 23)) == pytest.approx(220.0 - 13 * 1.25 / 7)
+    # Week-2 target lands the morning AFTER week 2 completes:
+    assert curve_value(ANCHOR, START, date(2026, 8, 24)) == pytest.approx(217.5)
+    # Aug 25 accrues at the NEW 2.0/7 rate (NOT 1.25/7)
+    assert curve_value(ANCHOR, START, date(2026, 8, 25)) == pytest.approx(217.5 - 2.0 / 7)
+    assert curve_value(ANCHOR, START, date(2026, 9, 21)) == pytest.approx(209.5)
+    assert curve_value(ANCHOR, START, date(2026, 9, 22)) == pytest.approx(209.5 - 2.5 / 7)
+    # Final day's loss is in progress on the Nov 1 morning; 195.0 is reached
+    # at the Nov 2 morning (completion of Nov 1) and clamps thereafter.
+    assert curve_value(ANCHOR, START, date(2026, 11, 1)) == pytest.approx(195.0 + 2.0 / 7)
+    assert curve_value(ANCHOR, START, date(2026, 11, 2)) == pytest.approx(195.0)
+    assert curve_value(ANCHOR, START, date(2026, 12, 25)) == pytest.approx(195.0)
+    assert curve_value(ANCHOR, START, date(2026, 8, 1)) == pytest.approx(220.0)  # pre-block clamp
 
 def test_curve_continuous_at_phase_boundaries():
     from goal_engine import curve_value
@@ -273,13 +283,16 @@ def build_block3_projection(anchor_weight, start_date):
 
 
 def curve_value(anchor_weight, start_date, on_date):
-    """Piecewise-linear DAILY interpolation. A week-N-day-1 date accrues at
-    week N's rate. Clamped to the 84-day block."""
-    days = (on_date - start_date).days
-    days = max(0, min(days, 84))
+    """Piecewise-linear DAILY interpolation, morning-weigh-in convention:
+    curve(D) is the target at the MORNING of D — loss accrued over the
+    elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
+    curve(start) == anchor exactly; 195.0 is reached at start+84 days (the
+    morning after the block's final day) and clamps thereafter."""
+    elapsed = (on_date - start_date).days
+    elapsed = max(0, min(elapsed, 84))
     w = anchor_weight
-    for d in range(1, days + 1):
-        week = min(12, (d - 1) // 7 + 1)
+    for d in range(elapsed):
+        week = min(12, d // 7 + 1)
         w -= BLOCK3_WEEKLY_RATES[week] / 7.0
     return round(w, 4)
 
