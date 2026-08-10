@@ -280,8 +280,18 @@ today):**
   before 2026-08-10; sustained trends are judged against that anchor (a rolling
   window slowly absorbs a drug-induced rise) and flagged against the
   retatrutide/tesamorelin timeline.
-- §6 verifies GarminWellness rows actually exist for the trailing 7 days (live
-  wellness E2E is still unproven); if empty, the watch ships dark **and says so**.
+- **VERIFIED 2026-08-10: Garmin sync has NEVER worked on prod.** Tokens are linked
+  (June 12) but `live: false`; `last_activity_sync: null`; zero wellness rows in 14
+  days; forced sync → 503 whose "rate-limited" copy masks the real restore failure.
+  Therefore: (a) the wellness watch ships dark by design and SAYS SO until the
+  connection is repaired; (b) a **Garmin connection repair task** is in scope —
+  read the real restore error from Render logs (`DEBUG: Garmin token restore`
+  line), fix the misleading 503 copy to distinguish "rate-limited" from
+  "restore failed: <reason>", and re-auth via `garmin_login.py` run locally BY
+  ERIK (credentials are his alone) + `POST /api/admin/garmin/save-tokens`; then
+  verify `live: true` and wellness rows landing. The pre-protocol RHR/HRV baseline
+  (14-28 days pre-08-10) is IMPOSSIBLE — no data exists; baseline instead = first
+  14 days of data after repair, labeled as such in the context block.
 
 ## 4. Meal-plan rail (code-enforced)
 
@@ -513,10 +523,13 @@ this list (catches schema drift between spec-writing and execution).
 5. Regenerate week 1 via `/api/admin/replan-week` (async background job; default
    preserve_through_day = −1 replans all 7 days — correct for a fresh block; pass no
    preserve value). Gate completion on DB truth, not job status (§0).
-6. **Forced Garmin sync** (`POST /api/garmin/sync-activities {"force": true}`);
-   verify today's GarminActivity + RunLog sit at week 1 day 0. Expected + harmless:
-   this sync nulls week/day_idx on Aug 7-9 GarminActivity audit rows inside the
-   3-day pull window — documented so nobody panic-debugs it.
+6. **Today's run lands manually, not via Garmin.** Garmin sync has never worked on
+   prod (verified 2026-08-10 — see §3), so there is no Garmin pull to rely on:
+   Erik logs today's run manually (the norm for every run to date) and the check
+   is simply that the manual RunLog row sits at week 1 day 0 after the re-home.
+   A forced sync (`POST /api/garmin/sync-activities {"force": true}`) may be
+   attempted AFTER the connection repair task lands; until then expect 503 and do
+   not treat it as a transition failure.
 7. Erik confirms the shifted ramp with his doctor (2mg start) — if it changes, edit
    CSV → re-import (the designed path).
 8. **Served-state verification (no-UI-contradictions: audit SERVED values). The
