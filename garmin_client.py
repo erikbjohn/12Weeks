@@ -46,6 +46,7 @@ class GarminClient:
             tokens = query.first()
             log.info("DEBUG: Garmin token restore for user_id=%s, found=%s", uid, bool(tokens))  # DEBUG: remove after fix confirmed
             if not tokens:
+                self.last_restore_error = "NoTokens: no stored Garmin tokens for user"
                 return False
             self.api = Garmin()
             self.api.login(tokenstore=tokens.token_data)

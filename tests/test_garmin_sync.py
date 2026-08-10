@@ -944,6 +944,72 @@ def test_try_restore_tokens_cooldown_gate_and_refresh_persistence(app_ctx, monke
     assert gc2._rate_limited_until > _time.time()  # (c)
 
 
+def test_try_restore_tokens_last_restore_error_state_machine(app_ctx, monkeypatch):
+    """Test GarminClient.last_restore_error state machine:
+    (a) non-429 failure → error set, returns False
+    (b) 429 failure → error set AND cooldown active
+    (c) during cooldown → error preserved, early return doesn't overwrite
+    (d) successful restore → error cleared to None
+    """
+    import time as _time
+    app_, db = app_ctx
+    from models import GarminTokens
+    from garmin_client import GarminClient
+    u = _mk_user(db, "restore-error@test.com")
+    GarminTokens.query.filter_by(user_id=u.id).delete()
+    db.session.add(GarminTokens(user_id=u.id, token_data="valid-token"))
+    db.session.commit()
+
+    # (a) Non-429 failure: error captured, False returned
+    class FailingGarmin:
+        def __init__(self, *a, **k):
+            pass
+        def login(self, tokenstore=None):
+            raise ValueError("OAuth token invalid")
+
+    import garminconnect
+    monkeypatch.setattr(garminconnect, "Garmin", FailingGarmin)
+    gc = GarminClient(user_id=u.id)
+    assert gc.try_restore_tokens(u.id) is False
+    assert gc.last_restore_error == "ValueError: OAuth token invalid"
+    assert gc._rate_limited_until == 0  # no cooldown for non-429
+
+    # (b) 429 failure: error captured AND cooldown set
+    class RateLimitedGarmin:
+        def __init__(self, *a, **k):
+            pass
+        def login(self, tokenstore=None):
+            raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(garminconnect, "Garmin", RateLimitedGarmin)
+    gc2 = GarminClient(user_id=u.id)
+    before = _time.time()
+    assert gc2.try_restore_tokens(u.id) is False
+    after = _time.time()
+    assert gc2.last_restore_error == "RuntimeError: 429 Too Many Requests"
+    assert gc2._rate_limited_until > after  # cooldown active
+    assert gc2._rate_limited_until <= after + 1000  # reasonable cooldown window
+
+    # (c) During cooldown: early return, error unchanged
+    original_error = gc2.last_restore_error
+    gc2.try_restore_tokens(u.id)  # early return due to cooldown
+    assert gc2.last_restore_error == original_error  # NOT overwritten
+
+    # (d) Successful restore: error cleared to None
+    class SuccessfulGarmin:
+        def __init__(self, *a, **k):
+            self.garth = type('obj', (object,), {'dumps': lambda: "refreshed-token"})()
+        def login(self, tokenstore=None):
+            return True
+
+    monkeypatch.setattr(garminconnect, "Garmin", SuccessfulGarmin)
+    gc3 = GarminClient(user_id=u.id)
+    gc3.last_restore_error = "SomeError: something went wrong"  # set error first
+    assert gc3.try_restore_tokens(u.id) is True
+    assert gc3.last_restore_error is None  # cleared on success
+    assert gc3.connected is True
+
+
 def test_morning_briefing_unknown_readiness_never_fabricated(app_ctx, monkeypatch):
     # No Garmin data → assess_readiness says score=None / unknown. The endpoint
     # used `score or 70` → GREEN (70/100): a confident recovery verdict backed

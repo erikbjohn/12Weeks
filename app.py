@@ -991,6 +991,25 @@ def _garmin_linked(uid):
         return False
 
 
+def _garmin_reconnect_response(gc):
+    """Return (json_payload, 503) when Garmin is linked but not connected.
+
+    Branches on active cooldown vs restore failure:
+    - Active cooldown: "Garmin is rate-limited (cooldown: Ns remaining)"
+    - Restore failed: "Garmin token restore failed: <error class>"
+
+    Both responses include restore_error for diagnostic visibility.
+    """
+    if time.time() < gc._rate_limited_until:
+        cooldown_secs = int(gc._rate_limited_until - time.time())
+        error_msg = f"Garmin is rate-limited (cooldown: {cooldown_secs}s remaining). Account still linked — try again shortly."
+    else:
+        error_msg = f"Garmin token restore failed: {gc.last_restore_error or 'unknown'}. Account is linked but the connection is dead — re-auth may be needed."
+    return jsonify({"error": error_msg,
+                    "linked": True, "reconnecting": True,
+                    "restore_error": gc.last_restore_error}), 503
+
+
 def _garmin_push_week_best_effort(user_id, week):
     """Push a week's planned runs/HIIT to Garmin. Best-effort: never raises —
     a Garmin failure must never break planning or chat.
@@ -9233,16 +9252,7 @@ def garmin_today():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            # Branch on active cooldown vs restore failure
-            import time as time_module
-            if time_module.time() < gc._rate_limited_until:
-                cooldown_secs = int(gc._rate_limited_until - time_module.time())
-                error_msg = f"Garmin is rate-limited (cooldown: {cooldown_secs}s remaining). Account still linked — try again shortly."
-            else:
-                error_msg = f"Garmin token restore failed: {gc.last_restore_error or 'unknown'}. Account is linked but the connection is dead — re-auth may be needed."
-            return jsonify({"error": error_msg,
-                            "linked": True, "reconnecting": True,
-                            "restore_error": gc.last_restore_error}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     summary = gc.get_today_summary(today=_user_today())
     if summary is None:
@@ -9367,16 +9377,7 @@ def garmin_sync_activities():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            # Branch on active cooldown vs restore failure
-            import time as time_module
-            if time_module.time() < gc._rate_limited_until:
-                cooldown_secs = int(gc._rate_limited_until - time_module.time())
-                error_msg = f"Garmin is rate-limited (cooldown: {cooldown_secs}s remaining). Account still linked — try again shortly."
-            else:
-                error_msg = f"Garmin token restore failed: {gc.last_restore_error or 'unknown'}. Account is linked but the connection is dead — re-auth may be needed."
-            return jsonify({"error": error_msg,
-                            "linked": True, "reconnecting": True,
-                            "restore_error": gc.last_restore_error}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     try:
         days_back = max(1, min(30, int(data.get("days_back") or 3)))
@@ -9410,16 +9411,7 @@ def garmin_push_week():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            # Branch on active cooldown vs restore failure
-            import time as time_module
-            if time_module.time() < gc._rate_limited_until:
-                cooldown_secs = int(gc._rate_limited_until - time_module.time())
-                error_msg = f"Garmin is rate-limited (cooldown: {cooldown_secs}s remaining). Account still linked — try again shortly."
-            else:
-                error_msg = f"Garmin token restore failed: {gc.last_restore_error or 'unknown'}. Account is linked but the connection is dead — re-auth may be needed."
-            return jsonify({"error": error_msg,
-                            "linked": True, "reconnecting": True,
-                            "restore_error": gc.last_restore_error}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     result = garmin_sync.push_week(gc, current_user.id, week, today=_user_today())
     return jsonify(result)

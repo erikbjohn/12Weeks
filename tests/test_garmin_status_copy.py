@@ -252,3 +252,30 @@ def test_garmin_sync_activities_restore_failed_rate_limited(app_ctx, monkeypatch
         assert "rate-limited" in data["error"]
         assert "cooldown" in data["error"]
         assert "token restore failed" not in data["error"]
+
+
+def test_garmin_push_week_restore_failed_not_rate_limited(app_ctx, monkeypatch):
+    """POST /api/garmin/push-week: restore failed (not rate-limited) 503."""
+    app_, db = app_ctx
+    user_id = _make_user(app_, db, "test7@example.com")
+    client = _client_for(app_, user_id)
+
+    stub = StubGarminClient(
+        connected=False,
+        rate_limited_until=0,
+        last_restore_error="Exception: 401 Unauthorized"
+    )
+
+    with app_.app_context():
+        import app as appmod
+        monkeypatch.setattr(appmod, "_get_garmin", lambda user_id=None: stub)
+        monkeypatch.setattr(appmod, "_garmin_linked", lambda uid: True)
+
+        resp = client.post("/api/garmin/push-week", json={})
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert "error" in data
+        assert "token restore failed" in data["error"]
+        assert "401 Unauthorized" in data["error"]
+        assert "rate-limited" not in data["error"]
+        assert data.get("restore_error") == "Exception: 401 Unauthorized"
