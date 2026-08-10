@@ -73,25 +73,25 @@ def test_escalation_dates_order_independent():
     assert escalation_dates(shuffled) == escalation_dates(rows)
 
 
-def test_next_escalation_before_first_boundary():
+def test_next_escalation_before_first_boundary_is_dose_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 8, 1))
-    assert n == {"date": date(2026, 8, 24), "weekly_mg_before": 2.0, "weekly_mg_after": 3.0}
+    assert n == {"date": date(2026, 8, 24), "kind": "dose", "detail": "2mg → 3mg per dose"}
 
 
-def test_next_escalation_between_boundaries():
+def test_next_escalation_between_boundaries_is_frequency_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 8, 25))
-    assert n == {"date": date(2026, 9, 10), "weekly_mg_before": 3.0, "weekly_mg_after": 6.0}
+    assert n == {"date": date(2026, 9, 10), "kind": "frequency", "detail": "1×/wk → 2×/wk"}
 
 
-def test_next_escalation_on_boundary_date_is_inclusive():
+def test_next_escalation_on_boundary_date_is_inclusive_dose_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 9, 21))
-    assert n == {"date": date(2026, 9, 21), "weekly_mg_before": 6.0, "weekly_mg_after": 8.0}
+    assert n == {"date": date(2026, 9, 21), "kind": "dose", "detail": "3mg → 4mg per dose"}
 
 
 def test_next_escalation_after_last_boundary_is_none():
@@ -110,6 +110,61 @@ def test_escalation_window_false_when_no_boundary_within_days():
     from protocol import escalation_window
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     assert escalation_window(rows, today=date(2026, 8, 25), days=7) is False
+
+
+# ── escalation_dates: hold-robustness (fix round 1) ───────────────────────
+
+def test_escalation_dates_robust_to_held_dose_row_removed():
+    """Removing the 2026-09-24 row entirely (held for GI/travel) must NOT
+    change the escalation dates — no phantom on a later date where the
+    rolling window merely 'catches up'."""
+    from protocol import escalation_dates
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide" and r.date != date(2026, 9, 24)]
+    assert escalation_dates(rows) == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
+
+
+def test_escalation_dates_robust_to_held_dose_zero_mg():
+    """Same hold, represented by KEEPING the row but zeroing dose_mg
+    (instead of omitting it) — must produce the identical result."""
+    from protocol import escalation_dates
+    rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
+    for r in rows:
+        if r.date == date(2026, 9, 24):
+            r.dose_mg = 0.0
+    assert escalation_dates(rows) == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
+
+
+def test_escalation_dates_two_back_to_back_dose_steps_both_fire():
+    """Two genuine, independent dose-steps (3mg->4mg, then 4mg->5mg) only
+    3 days apart must BOTH be reported as distinct dates — never merged
+    into a single date the way the old rising-run trailing-sum definition
+    would have collapsed them."""
+    from protocol import escalation_dates
+    rows = [
+        Row(date=date(2030, 1, 1), time="07:00", compound="Retatrutide", dose_mg=2.0, taken_at=None),
+        Row(date=date(2030, 3, 1), time="07:00", compound="Retatrutide", dose_mg=3.0, taken_at=None),
+        Row(date=date(2030, 5, 1), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+        Row(date=date(2030, 5, 4), time="07:00", compound="Retatrutide", dose_mg=5.0, taken_at=None),
+    ]
+    dates = escalation_dates(rows)
+    assert date(2030, 5, 1) in dates
+    assert date(2030, 5, 4) in dates
+    assert dates == [date(2030, 3, 1), date(2030, 5, 1), date(2030, 5, 4)]
+
+
+def test_escalation_dates_frequency_step_not_flagged_on_dose_reduction():
+    """A frequency bump that coincides with a dose REDUCTION (e.g. a
+    loading->maintenance step-down going twice-weekly to compensate) must
+    NOT be flagged as an escalation — exposure isn't rising overall."""
+    from protocol import escalation_dates
+    rows = [
+        Row(date=date(2030, 1, 1), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+        Row(date=date(2030, 1, 8), time="07:00", compound="Retatrutide", dose_mg=4.0, taken_at=None),
+        # frequency jumps from 1x/wk to 2x/wk here, but dose_mg DROPS to 2.0 (below running max 4.0)
+        Row(date=date(2030, 1, 11), time="07:00", compound="Retatrutide", dose_mg=2.0, taken_at=None),
+        Row(date=date(2030, 1, 15), time="07:00", compound="Retatrutide", dose_mg=2.0, taken_at=None),
+    ]
+    assert escalation_dates(rows) == []
 
 
 # ── adherence_7d ───────────────────────────────────────────────────────

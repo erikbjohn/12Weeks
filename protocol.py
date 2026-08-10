@@ -36,39 +36,66 @@ wrong in the first place.
 ── Escalation-date definition (derived from real CSV, not hardcoded) ────
 `escalation_dates` must yield exactly the three retatrutide exposure-rise
 dates in the shipped protocol: 2026-08-24 (2mg -> 3mg), 2026-09-10
-(1x/week -> 2x/week), 2026-09-21 (3mg -> 4mg). A naive "trailing 7-day sum
-exceeds the max of all prior trailing sums" definition over-fires: because
-the twice-weekly cadence takes two dose-cycles to fully "flush" a stale
-lower-dose day out of a 7-day rolling window, the rolling sum keeps
-climbing for one extra dose after each frequency change (e.g. after the
-Sep-21 3mg->4mg step, the trailing sum rises again on Sep-24 purely because
-the window is still digesting the transition, not because a NEW escalation
-started). The correct, final definition used here:
+(1x/week -> 2x/week), 2026-09-21 (3mg -> 4mg).
 
-  1. Group scheduled retatrutide mg by calendar date (dose dates, sorted).
-  2. For each dose date d, compute the trailing 7-day (inclusive) sum of
-     scheduled mg over [d-6, d].
-  3. Walk the sorted trailing sums and find maximal RUNS of consecutive
-     dose dates where each date's trailing sum is strictly greater than the
-     previous date's trailing sum ("rising runs").
-  4. An escalation date is the FIRST date of each rising run — i.e. the day
-     the increased exposure STARTS, not every day until the rolling window
-     finishes reflecting the new steady state.
+FIX ROUND 1 (2026-08-10 review): the original definition here was "trailing
+7-day sum exceeds the max of all prior trailing sums" over a rolling
+scheduled-mg window. Reviewer found two real bugs: (a) it is NOT robust to a
+held/removed dose — pulling one row out (e.g. a 2026-09-24 dose held for
+GI/travel) shifts which future dates the rolling window "catches up" on and
+can fabricate a phantom escalation on a later date where nothing actually
+changed; (b) it can MERGE two genuine, independent step-ups that happen to
+land close enough together that the rolling window is still rising from the
+first one when the second one hits, reporting only one date instead of two.
+Both bugs trace to the same root cause: reasoning about a SUM inherently
+entangles "how many doses are in the window" with "how big each dose is",
+so a change in either one perturbs a quantity that's supposed to represent
+both, and a single dip-then-recover in that entangled quantity can look
+identical to a fresh, real increase.
 
-  `weekly_mg_before` = the trailing sum immediately before the run began
-  (the last non-rising value). `weekly_mg_after` = the trailing sum at the
-  END of the run (the new steady-state weekly total once the window has
-  fully caught up). Verified against the shipped CSV: this yields exactly
-  [2026-08-24 (2->3), 2026-09-10 (3->6), 2026-09-21 (6->8)] with no false
-  positive on 2026-09-24 (which the naive "exceeds all-prior-max" approach
-  incorrectly also flags).
+The replacement definition decomposes escalation into the two INDEPENDENT
+real-world events it's actually about, each tracked via a monotonically
+non-decreasing running maximum (a running max only advances on a genuine
+new high; a hold, a removed row, or a dip-then-recover can never re-trigger
+it, because it never goes down):
+
+  1. DOSE-STEP: a dose date whose `dose_mg` exceeds the running MAX
+     `dose_mg` of all STRICTLY EARLIER doses of that compound. Held doses
+     (dose_mg <= 0, whether represented by omitting the row entirely or by
+     keeping the row with dose_mg=0) are excluded from consideration
+     entirely — they contribute to neither the running max nor the
+     trailing count below, so a hold can never spuriously suppress or
+     manufacture a step.
+  2. FREQUENCY-STEP: a dose date whose trailing-7-day (inclusive) dose
+     COUNT exceeds the running MAX trailing-7-day count over all earlier
+     dose dates, PROVIDED this date's dose_mg has not dropped below the
+     running max dose (a frequency bump that coincides with a dose
+     REDUCTION — e.g. TB-500's loading->maintenance step-down — is not
+     rising overall exposure and must not be flagged).
+
+  `escalation_dates` = the sorted UNION of both kinds' dates (deduped — a
+  date can in principle carry both kinds, e.g. a simultaneous dose AND
+  frequency increase, and still counts once). `next_escalation` reports the
+  `kind` ("dose" | "frequency") and a human-readable `detail` string for
+  the nearest upcoming date; ties on the same date prefer the dose-step
+  (dose-steps are evaluated before frequency-steps within a date).
+
+  Verified against the shipped CSV: dose-steps = [2026-08-24 (2mg->3mg),
+  2026-09-21 (3mg->4mg)]; frequency-steps = [2026-09-10 (1x/wk->2x/wk)];
+  union = exactly [2026-08-24, 2026-09-10, 2026-09-21]. Also verified
+  robust to removing (or zeroing) the 2026-09-24 row — same three dates,
+  no phantom — and to two independent dose-steps landing only 3 days
+  apart — both fire on their own distinct dates, never merged.
 """
+from __future__ import annotations
+
 from collections import defaultdict
 from datetime import datetime, time as _time, timedelta
+from typing import Optional
 
 CONFIRM_WITH_DOCTOR = "confirm with your doctor"
 
-PROTOCOL_COMPOUNDS = {
+PROTOCOL_COMPOUNDS: dict[str, dict] = {
     "Enclomiphene": {
         "what": "Oral selective estrogen receptor modulator (SERM) used off-label to support endogenous testosterone production.",
         "mechanism": "Blocks estrogen receptors at the hypothalamus/pituitary, reducing negative feedback so LH and FSH pulsatility rises, which drives up endogenous testosterone production.",
@@ -177,68 +204,85 @@ PROTOCOL_COMPOUNDS = {
 }
 
 
-def _parse_time(hhmm):
+def _parse_time(hhmm: str):
     return datetime.strptime(hhmm, "%H:%M").time()
+
+
+def _fmt_mg(mg: float) -> str:
+    return f"{mg:g}"
 
 
 # ── Escalation derivation ────────────────────────────────────────────────
 
-def _retatrutide_escalations(dose_rows):
-    """Internal: full escalation records [{"date", "weekly_mg_before",
-    "weekly_mg_after"}] per the module-docstring definition."""
-    totals = defaultdict(float)
+def _retatrutide_escalations(dose_rows: list) -> list[dict]:
+    """Internal: full escalation event records, sorted by date —
+    [{"date", "kind": "dose"|"frequency", "detail"}] — per the two-event
+    decomposition documented in the module docstring.
+
+    Held doses (dose_mg <= 0) are excluded entirely before any max/count
+    tracking happens, whether represented by omitting the row or by a
+    dose_mg=0 row, so a hold can never fabricate or suppress an event.
+    """
+    totals: dict = defaultdict(float)
     for r in dose_rows:
-        if r.compound == "Retatrutide":
+        if r.compound == "Retatrutide" and r.dose_mg > 0:
             totals[r.date] += r.dose_mg
     dates = sorted(totals)
     if not dates:
         return []
 
-    def trailing_sum(d):
-        return sum(mg for dd, mg in totals.items() if 0 <= (d - dd).days <= 6)
+    def trailing_count(d):
+        return sum(1 for dd in dates if 0 <= (d - dd).days <= 6)
 
-    sums = [trailing_sum(d) for d in dates]
+    events = []
+    running_max_dose = None
+    running_max_count = None
+    for d in dates:
+        mg = totals[d]
+        count = trailing_count(d)
 
-    escalations = []
-    run_start = None
-    for i in range(1, len(dates)):
-        rising = sums[i] > sums[i - 1]
-        if rising:
-            if run_start is None:
-                run_start = i
-        else:
-            if run_start is not None:
-                escalations.append({
-                    "date": dates[run_start],
-                    "weekly_mg_before": sums[run_start - 1],
-                    "weekly_mg_after": sums[i - 1],
+        if running_max_dose is not None and mg > running_max_dose:
+            events.append({
+                "date": d,
+                "kind": "dose",
+                "detail": f"{_fmt_mg(running_max_dose)}mg → {_fmt_mg(mg)}mg per dose",
+            })
+
+        if running_max_count is not None and count > running_max_count:
+            dose_not_reduced = mg >= (running_max_dose if running_max_dose is not None else mg)
+            if dose_not_reduced:
+                events.append({
+                    "date": d,
+                    "kind": "frequency",
+                    "detail": f"{running_max_count}×/wk → {count}×/wk",
                 })
-                run_start = None
-    if run_start is not None:
-        escalations.append({
-            "date": dates[run_start],
-            "weekly_mg_before": sums[run_start - 1],
-            "weekly_mg_after": sums[-1],
-        })
-    return escalations
+
+        running_max_dose = mg if running_max_dose is None else max(running_max_dose, mg)
+        running_max_count = count if running_max_count is None else max(running_max_count, count)
+
+    events.sort(key=lambda e: e["date"])
+    return events
 
 
-def escalation_dates(dose_rows):
-    """Dates where the scheduled weekly retatrutide mg-sum increases
-    week-over-week (derived from rows, never hardcoded). Defensively
-    filters to compound == "Retatrutide" — safe to call with a full,
-    mixed-compound dose list."""
-    return [e["date"] for e in _retatrutide_escalations(dose_rows)]
+def escalation_dates(dose_rows: list) -> list:
+    """Sorted, deduped union of dose-step and frequency-step dates
+    (derived from rows, never hardcoded). Defensively filters to
+    compound == "Retatrutide" — safe to call with a full, mixed-compound
+    dose list."""
+    return sorted({e["date"] for e in _retatrutide_escalations(dose_rows)})
 
 
-def escalation_window(dose_rows, today, days=7):
+def escalation_window(dose_rows: list, today, days: int = 7) -> bool:
     """True if an escalation date falls within [today, today+days)."""
     horizon = today + timedelta(days=days)
-    return any(today <= e["date"] < horizon for e in _retatrutide_escalations(dose_rows))
+    return any(today <= d < horizon for d in escalation_dates(dose_rows))
 
 
-def next_escalation(dose_rows, today):
-    """The next escalation date >= today, or None if there isn't one."""
+def next_escalation(dose_rows: list, today) -> Optional[dict]:
+    """The next escalation event {"date", "kind", "detail"} with
+    date >= today, or None if there isn't one. If a date carries both a
+    dose-step and a frequency-step, the dose-step is reported (dose-steps
+    are evaluated first within a date in `_retatrutide_escalations`)."""
     for e in _retatrutide_escalations(dose_rows):
         if e["date"] >= today:
             return dict(e)
@@ -247,7 +291,7 @@ def next_escalation(dose_rows, today):
 
 # ── Adherence ─────────────────────────────────────────────────────────
 
-def adherence_7d(dose_rows, today):
+def adherence_7d(dose_rows: list, today) -> dict:
     """7-day adherence window [today-6, today]. A row counts as TAKEN iff
     `taken_at is not None` (never inferred from taken_at's own date — see
     module docstring). "late" subclassifies already-taken rows whose
@@ -267,7 +311,7 @@ def adherence_7d(dose_rows, today):
 
 # ── Vial mg-walk ──────────────────────────────────────────────────────
 
-def vial_status(vials, dose_rows, today, lead_time_days=7):
+def vial_status(vials: list, dose_rows: list, today, lead_time_days: int = 7) -> list[dict]:
     """Per-vial inventory projection via the mg walk (spec §1):
 
     - mg_used = sum of dose_mg for TAKEN rows whose date falls in the
@@ -353,7 +397,7 @@ def vial_status(vials, dose_rows, today, lead_time_days=7):
 
 # ── Missed-dose action classification ────────────────────────────────
 
-def missed_line(dose_rows, today, rules=None):
+def missed_line(dose_rows: list, today, rules: Optional[dict] = None) -> list[dict]:
     """One entry per untaken, past-due dose row: {"date", "compound",
     "rule", "action"}.
 
@@ -409,7 +453,7 @@ def missed_line(dose_rows, today, rules=None):
 
 # ── Fasted dose lookup ────────────────────────────────────────────────
 
-def fasted_dose_time(dose_rows, on_date):
+def fasted_dose_time(dose_rows: list, on_date) -> Optional[str]:
     """Time string ("HH:MM") of a dose scheduled at or after 21:00 on
     `on_date`, else None. HH:MM zero-padded strings compare correctly as
     plain strings, so no time parsing is needed."""
