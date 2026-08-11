@@ -279,3 +279,64 @@ def test_garmin_push_week_restore_failed_not_rate_limited(app_ctx, monkeypatch):
         assert "401 Unauthorized" in data["error"]
         assert "rate-limited" not in data["error"]
         assert data.get("restore_error") == "Exception: 401 Unauthorized"
+
+
+def test_sync_default_window_is_week_to_date(app_ctx, monkeypatch):
+    """Without an explicit days_back, sync covers Monday-of-the-current-block-
+    week through today only — day 0 syncs 1 day, day 3 syncs 4 days."""
+    from datetime import date
+    import app as appmod
+    app_, db = app_ctx
+    from models import User, AppState
+    with app_.app_context():
+        u = User.query.filter_by(email="syncwin@test.com").first()
+        if not u:
+            u = User(email="syncwin@test.com")
+            db.session.add(u); db.session.commit()
+        st = AppState.query.filter_by(user_id=u.id).first()
+        if not st:
+            st = AppState(user_id=u.id)
+            db.session.add(st)
+        st.start_date = date(2026, 8, 10)
+        st.current_week = 1
+        db.session.commit()
+        uid = u.id
+
+    captured = {}
+
+    class _StubGC:
+        connected = True
+        last_restore_error = None
+        _rate_limited_until = 0
+        def try_restore_tokens(self, uid=None): return True
+
+    def _fake_sync(gc, uid, days_back=3, today=None):
+        captured["days_back"] = days_back
+        return {"pulled": 0, "days_filled": [], "days_skipped_manual": [],
+                "ignored": 0, "error": None, }
+
+    import garmin_sync as gs_mod  # app.py imports it inside the handler
+    monkeypatch.setattr(appmod, "_get_garmin", lambda *a, **k: _StubGC())
+    monkeypatch.setattr(appmod, "_garmin_linked", lambda uid: True)
+    monkeypatch.setattr(gs_mod, "sync_activities", _fake_sync)
+    monkeypatch.setattr(gs_mod, "sync_wellness",
+                        lambda *a, **k: {"wellness_upserted": 0})
+
+    client = app_.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = str(uid); s["_fresh"] = True
+
+    # Thursday of week 1 (day_idx 3) -> window = 4 days (Mon..Thu)
+    monkeypatch.setattr(appmod, "_user_today", lambda: date(2026, 8, 13))
+    r = client.post("/api/garmin/sync-activities", json={"force": True})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert captured["days_back"] == 4
+
+    # Monday day 0 -> 1 day only
+    monkeypatch.setattr(appmod, "_user_today", lambda: date(2026, 8, 10))
+    client.post("/api/garmin/sync-activities", json={"force": True})
+    assert captured["days_back"] == 1
+
+    # Explicit override still honored
+    client.post("/api/garmin/sync-activities", json={"force": True, "days_back": 14})
+    assert captured["days_back"] == 14

@@ -7142,8 +7142,9 @@ async function renderGarminPanelBody() {
       (st.last_activity_sync ? st.last_activity_sync.replace('T', ' ').slice(0, 16) + ' UTC' : 'not yet (this server session)') + '</div>' +
     '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:8px" onclick="garminSyncNow(this)">Sync runs now</button>' +
     '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:12px" onclick="garminPushWeek(this)">Push Week ' + currentWeek + ' to watch</button>' +
-    '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Week ' + st.week + ' workouts on Garmin:</div>' +
-    (rows || '<div style="color:var(--muted);font-size:15px">None pushed yet.</div>') +
+    (rows
+      ? '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Pushed to watch (week ' + st.week + ' schedule &mdash; not sync results):</div>' + rows
+      : '') +
     '<button class="btn btn-secondary" style="width:100%;margin-top:12px;font-size:14px" onclick="garminLogout().then(renderGarminPanelBody)">Disconnect Garmin</button>';
 }
 

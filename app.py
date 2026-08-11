@@ -9781,7 +9781,19 @@ def garmin_sync_activities():
             return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     try:
-        days_back = max(1, min(30, int(data.get("days_back") or 3)))
+        if data.get("days_back"):
+            days_back = max(1, min(30, int(data["days_back"])))
+        else:
+            # Default window: Monday of the CURRENT block week through today —
+            # sync fills the current day + this week's earlier gaps, never a
+            # wider (or future-looking) span (Erik, 2026-08-11). Pre-block or
+            # missing start_date falls back to 3 trailing days.
+            _tw = _user_today()
+            _st = AppState.query.filter_by(user_id=current_user.id).first()
+            if _st and _st.start_date and _tw >= _st.start_date:
+                days_back = max(1, ((_tw - _st.start_date).days % 7) + 1)
+            else:
+                days_back = 3
     except (TypeError, ValueError):
         days_back = 3
     result = garmin_sync.sync_activities(
