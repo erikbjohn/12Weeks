@@ -21,15 +21,12 @@ class TestRetestLockGuard:
     """Guard 1: RETEST_WEEKS == () — the week-12 hard-lock was removed."""
 
     def test_retest_weeks_is_empty(self):
-        try:
-            import app as appmod
-            assert appmod.RETEST_WEEKS == (), (
-                "RETEST_WEEKS must be empty; the week-12 bodyweight retest "
-                "hard-locked the UI (no dashboard/coach/settings until test was done). "
-                "Erik removed it. Restore only if absolutely necessary."
-            )
-        except ImportError as e:
-            pytest.skip(f"Cannot import app: {e}")
+        import app as appmod
+        assert appmod.RETEST_WEEKS == (), (
+            "RETEST_WEEKS must be empty; the week-12 bodyweight retest "
+            "hard-locked the UI (no dashboard/coach/settings until test was done). "
+            "Erik removed it. Restore only if absolutely necessary."
+        )
 
 
 class TestGateCreepGuard:
@@ -190,15 +187,9 @@ class TestTableCensusGuard:
         week-bearing models in models.py (minus 3 explicitly-excluded ones).
         This catches the case where a new week-bearing table gets added later
         and nobody remembers to update SHIFTED_TABLES."""
-        try:
-            from transition_block3 import assert_table_census
-            # This should not raise if the spec matches current models
-            try:
-                assert_table_census()
-            except AssertionError as e:
-                pytest.fail(f"Table census failed: {e}")
-        except ImportError as e:
-            pytest.skip(f"Cannot import transition_block3: {e}")
+        from transition_block3 import assert_table_census
+        # This should not raise if the spec matches current models
+        assert_table_census()
 
 
 class TestCSVIntegrityGuard:
