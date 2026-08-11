@@ -191,6 +191,42 @@ def _destination_conflicts(histograms):
     return conflicts
 
 
+def _week7_day_purity_conflicts(user_id):
+    """Non-empty dict of {table_name: row_count} for every day_idx-bearing
+    shifted table that has week==7 rows OUTSIDE day 0 (day_idx NOT NULL
+    and != 0).
+
+    The re-home step collapses EVERY week-7 row onto week=1, day_idx=0 —
+    that's correct ONLY if week 7's sole occupant is today (day 0; the
+    week just started). A stray week-7 non-zero-day row would otherwise
+    get force-merged into day 0 by re-home: for unique-constrained tables
+    that raises an IntegrityError mid-transaction (safe — the whole
+    transaction rolls back — but an ugly, avoidable 500); for
+    UNCONSTRAINED tables (SessionAnalysis, ExerciseLog, ExerciseSwap) it
+    SILENTLY MERGES two different days' data into one row with a 200 —
+    real data corruption that then survives rollback (rollback restores
+    counts, not which row's data ended up where). Checking this before any
+    write makes the collision structurally unreachable rather than merely
+    caught eventually."""
+    conflicts = {}
+    for model in SHIFTED_TABLES:
+        if not hasattr(model, "day_idx"):
+            continue
+        n = (
+            model.query
+            .filter(
+                model.user_id == user_id,
+                model.week == 7,
+                model.day_idx.isnot(None),
+                model.day_idx != 0,
+            )
+            .count()
+        )
+        if n:
+            conflicts[model.__name__] = n
+    return conflicts
+
+
 def _snapshot_goal(goal):
     return {f: getattr(goal, f) for f in _GOAL_SNAPSHOT_FIELDS}
 
@@ -298,6 +334,13 @@ def run_transition(user, anchor_weight, dry_run=False):
             "detail": conflicts,
         }
 
+    week7_conflicts = _week7_day_purity_conflicts(user.id)
+    if week7_conflicts:
+        return 409, {
+            "error": "week-7 rows exist beyond day 0 — resolve before transitioning",
+            "detail": week7_conflicts,
+        }
+
     if dry_run:
         would_shift = {
             name: {
@@ -356,14 +399,22 @@ def run_transition(user, anchor_weight, dry_run=False):
     # (e) Re-home today's already-logged week-7 rows onto block-3's day 0
     # (today is simultaneously block-2 week-7 day-0 and block-3 week-1
     # day-0 — this is a MOVE, never an archive to a phantom week 19).
+    # Scoped to day_idx IN (0, NULL) — belt over the _week7_day_purity_
+    # conflicts pre-flight assert above: even if that guard were ever
+    # bypassed, this filter alone still can't merge a non-zero day into
+    # day 0 (it just leaves the stray row at week 7, caught by the
+    # post-shift verification's "week7 must be empty" check instead of
+    # silently corrupting data).
     rehomed_total = 0
     for model in SHIFTED_TABLES:
         values = {model.week: 1}
+        conds = [model.user_id == user.id, model.week == 7]
         if hasattr(model, "day_idx"):
             values[model.day_idx] = 0
+            conds.append(db.or_(model.day_idx == 0, model.day_idx.is_(None)))
         n = (
             model.query
-            .filter(model.user_id == user.id, model.week == 7)
+            .filter(*conds)
             .update(values, synchronize_session=False)
         )
         rehomed_total += n
@@ -515,8 +566,17 @@ def run_rollback(user):
         PeptideDose.date >= TRANSITION_DATE,
         PeptideDose.date <= PROTOCOL_ROLLBACK_END,
     ).delete(synchronize_session=False)
+    # PeptideVial has no per-row date to scope against (a vial spans a
+    # reconstitution window, not a single day) — but it's safe to delete
+    # ALL of the user's vials unconditionally because PeptideVial exists
+    # ONLY for this protocol: there is no other writer anywhere in the app
+    # that could have created a PeptideVial row pre-dating this transition
+    # for this user to accidentally destroy.
     PeptideVial.query.filter(PeptideVial.user_id == user.id).delete(synchronize_session=False)
-    LabReminder.query.filter(LabReminder.user_id == user.id).delete(synchronize_session=False)
+    LabReminder.query.filter(
+        LabReminder.user_id == user.id,
+        LabReminder.due_date >= TRANSITION_DATE,
+    ).delete(synchronize_session=False)
 
     return 200, {
         "ok": True,

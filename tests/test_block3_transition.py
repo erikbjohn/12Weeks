@@ -402,6 +402,93 @@ def test_destination_not_empty_guard(app_ctx, monkeypatch, clean_block3_flags):
     assert _flag_count(app_) == 0
 
 
+# ── week-7 day-purity guard (fix round 1, CRITICAL) ─────────────────────
+#
+# The re-home step force-collapses EVERY week-7 row onto week=1, day_idx=0.
+# That's only correct if week 7's sole occupant is today (day 0 — the week
+# just started). A stray week-7 day!=0 row would otherwise get merged into
+# day 0: for an UNCONSTRAINED table (ExerciseSwap) that's a silent 200 that
+# corrupts data; for a UNIQUE-constrained table (RunLog) it's a mid-shift
+# IntegrityError (safe, but late and ugly). The pre-flight purity assert
+# catches both BEFORE any write — verified for one table of each kind.
+
+def test_week7_purity_guard_unconstrained_table(app_ctx, monkeypatch, clean_block3_flags):
+    """A stray week-7, day_idx=1 row in ExerciseSwap (no unique constraint
+    on week/day_idx — the silent-merge risk) must abort with 409 before
+    any write, not silently succeed with two days merged into one."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    email = "block3-week7-unconstrained@test.com"
+    uid = _seed_full_fixture(app_, db, email)
+
+    def _seed_stray():
+        from models import ExerciseSwap
+        db.session.add(ExerciseSwap(user_id=uid, week=7, day_idx=1,
+                                     exercise_idx=0, swapped_to="Stray Swap"))
+        db.session.commit()
+    _do(app_, _seed_stray)
+
+    pre = _snapshot_histograms(app_, uid)
+
+    r = _post_transition(app_, email, ANCHOR, dry_run=False)
+    assert r.status_code == 409, r.get_json()
+    body = r.get_json()
+    assert "detail" in body
+    assert "ExerciseSwap" in body["detail"]
+    assert "day 0" in body["error"].lower()
+
+    post = _snapshot_histograms(app_, uid)
+    assert pre == post
+    assert _flag_count(app_) == 0
+
+
+def test_week7_purity_guard_constrained_table(app_ctx, monkeypatch, clean_block3_flags):
+    """A stray week-7, day_idx=1 row in RunLog (unique on user/week/day_idx
+    — the mid-transaction IntegrityError risk) must abort with a clean 409
+    from the pre-flight assert, never reach the re-home UPDATE at all."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    email = "block3-week7-constrained@test.com"
+    uid = _seed_full_fixture(app_, db, email)
+
+    def _seed_stray():
+        from models import RunLog
+        db.session.add(RunLog(user_id=uid, week=7, day_idx=1, log_date=date(2026, 8, 11),
+                               distance_miles=2.0, duration_min=20, source="manual"))
+        db.session.commit()
+    _do(app_, _seed_stray)
+
+    pre = _snapshot_histograms(app_, uid)
+
+    r = _post_transition(app_, email, ANCHOR, dry_run=False)
+    assert r.status_code == 409, r.get_json()
+    body = r.get_json()
+    assert "detail" in body
+    assert "RunLog" in body["detail"]
+
+    post = _snapshot_histograms(app_, uid)
+    assert pre == post
+    assert _flag_count(app_) == 0
+
+
+def test_week7_purity_guard_happy_path_still_rehomes(app_ctx, monkeypatch, clean_block3_flags):
+    """No stray non-zero-day week-7 rows -> transition proceeds normally
+    and today's day-0 rows still re-home to week 1, day 0 (the scoped
+    re-home filter doesn't regress the happy path)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    email = "block3-week7-happy@test.com"
+    uid = _seed_full_fixture(app_, db, email)
+
+    r = _post_transition(app_, email, ANCHOR, dry_run=False)
+    assert r.status_code == 200, r.get_json()
+
+    assert _week_count(app_, "RunLog", uid, 1) == 1
+    assert _week_count(app_, "SetLog", uid, 1) == 3
+    assert _week_count(app_, "ExerciseSwap", uid, 1) == 1
+    assert _week_count(app_, "ExerciseSwap", uid, 7) == 0
+
+
 # ── (d) block-3 work then rollback ───────────────────────────────────────
 
 def test_block3_work_then_rollback_restores_prestate(app_ctx, monkeypatch, clean_block3_flags):
