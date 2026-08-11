@@ -1611,9 +1611,10 @@ footer {
 .meal-food-name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* WRAP, never truncate: on phone widths the fixed portion/cal chips squeeze
+     this element and ellipsis was hiding the food itself ("Chicken Br…").
+     Readability rule: the athlete must always see the full item. */
+  overflow-wrap: anywhere;
 }
 
 .meal-food-portion {
