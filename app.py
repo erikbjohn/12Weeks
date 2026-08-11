@@ -10191,18 +10191,35 @@ def _morning_brief_body(uid, local_date):
     return " · ".join(parts)
 
 
+def _has_dose_night_due(uid, local_date):
+    """Cheap existence check for _push_scheduler_tick's dose_night gate:
+    is there an untaken, non-held, >=21:00 PeptideDose row for `uid` on
+    `local_date`? A held dose (dose_mg<=0, taken_at=None — the codebase's
+    convention for an intentionally-skipped scheduled dose; see
+    protocol.py's escalation/current_dose_mg docstrings) is never "due"
+    and must never open this window. Kept in sync with _dose_night_body's
+    own `qualifying` filter below — same three conditions, expressed as
+    an EXISTS-style check here instead of a full row fetch."""
+    return PeptideDose.query.filter_by(user_id=uid, date=local_date).filter(
+        PeptideDose.taken_at.is_(None),
+        PeptideDose.dose_mg > 0,
+        PeptideDose.time >= "21:00",
+    ).first() is not None
+
+
 def _dose_night_body(uid, local_date):
-    """Body for the dose-night nudge: names the untaken >=21:00 dose(s)
-    scheduled on local_date. Returns None if none qualify — belt to the
-    scheduler window's own >=21:00 gate, so this function is safe to call
-    standalone too."""
+    """Body for the dose-night nudge: names the untaken, non-held, >=21:00
+    dose(s) scheduled on local_date. A held dose (dose_mg<=0) is excluded
+    — it was intentionally skipped, not something to nudge about. Returns
+    None if none qualify — belt to _has_dose_night_due's own gate, so this
+    function is safe to call standalone too."""
     try:
         rows = PeptideDose.query.filter_by(user_id=uid, date=local_date).all()
     except Exception:
         return None
 
     qualifying = sorted(
-        (r for r in rows if r.taken_at is None and r.time >= "21:00"),
+        (r for r in rows if r.taken_at is None and r.dose_mg > 0 and r.time >= "21:00"),
         key=lambda r: (r.time, r.compound),
     )
     if not qualifying:
@@ -10309,7 +10326,7 @@ def _push_scheduler_tick():
                                       lambda uid=uid, d=local_date: _morning_brief_body(uid, d)):
                     fired.append((uid, "morning"))
 
-            if _in_window(t, _dtime(21, 45), _dtime(22, 30)):
+            if _in_window(t, _dtime(21, 45), _dtime(22, 30)) and _has_dose_night_due(uid, local_date):
                 if _push_window_send(uid, "dose_night", local_date, "12 Weeks",
                                       lambda uid=uid, d=local_date: _dose_night_body(uid, d)):
                     fired.append((uid, "dose_night"))

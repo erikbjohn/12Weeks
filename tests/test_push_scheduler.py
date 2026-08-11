@@ -83,12 +83,12 @@ def _subscribe(app_, db, uid, endpoint=None):
     _app_do(app_, _do)
 
 
-def _add_dose(app_, db, uid, d, compound, time_str, taken=False):
+def _add_dose(app_, db, uid, d, compound, time_str, taken=False, dose_mg=1.0):
     def _do():
         from models import PeptideDose
         db.session.add(PeptideDose(
             user_id=uid, date=d, time=time_str, event_type="Injection",
-            compound=compound, dose_mg=1.0,
+            compound=compound, dose_mg=dose_mg,
             taken_at=(datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
                       if taken else None),
         ))
@@ -315,6 +315,70 @@ def test_dose_night_skips_when_no_late_dose(app_ctx, monkeypatch):
     assert (uid, "dose_night") not in fired
     assert _calls_for(calls, uid) == []
     assert _pushsent_rows(app_, uid) == []
+
+
+def test_dose_night_skips_when_late_dose_is_held(app_ctx, monkeypatch):
+    """A held dose (dose_mg<=0, taken_at=None — the codebase's convention
+    for an intentionally-skipped scheduled dose, per protocol.py's
+    escalation/current_dose_mg docstrings) must never trigger the
+    dose-night nudge, even though it's untaken and scheduled >=21:00."""
+    app_, db = app_ctx
+    import app as appmod
+    uid = _make_user(app_, db, "sched-dose-held@test.com")
+    _subscribe(app_, db, uid)
+    _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", taken=False, dose_mg=0)
+    calls = _stub_push(monkeypatch)
+    _set_now(monkeypatch, _pt(2026, 8, 17, 22, 0))
+    fired = _app_do(app_, appmod._push_scheduler_tick)
+    assert (uid, "dose_night") not in fired
+    assert _calls_for(calls, uid) == []
+    assert _pushsent_rows(app_, uid) == []
+
+
+def test_dose_night_held_dose_excluded_real_dose_still_fires(app_ctx, monkeypatch):
+    """Mixed date: one held dose + one real untaken dose, both >=21:00.
+    Must fire (the real dose is due) and the body must name only the real
+    compound — never the held one, and never counted in "+N more"."""
+    app_, db = app_ctx
+    import app as appmod
+    uid = _make_user(app_, db, "sched-dose-mixed@test.com")
+    _subscribe(app_, db, uid)
+    _add_dose(app_, db, uid, _MON, "GHK-Cu", "22:00", taken=False, dose_mg=0)
+    _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", taken=False, dose_mg=2.0)
+    calls = _stub_push(monkeypatch)
+    _set_now(monkeypatch, _pt(2026, 8, 17, 22, 0))
+    fired = _app_do(app_, appmod._push_scheduler_tick)
+    assert (uid, "dose_night") in fired
+    my_calls = _calls_for(calls, uid)
+    assert len(my_calls) == 1
+    body = my_calls[0]["body"]
+    # Sorted-by-compound tiebreak (same "22:00" time) means a leaked held
+    # row would sort BEFORE "Tesamorelin" ("GHK-Cu" < "Tesamorelin") and
+    # get named as the "first" dose instead — so this also proves the held
+    # row was excluded from `qualifying` entirely, not just hidden.
+    assert "Tesamorelin" in body
+    assert "GHK-Cu" not in body
+    assert "+1 more" not in body  # only 1 qualifying dose — no "+N more" suffix
+    assert _pushsent_rows(app_, uid) == [("dose_night", _MON)]
+
+
+def test_dose_night_body_excludes_held_dose_directly(app_ctx):
+    app_, db = app_ctx
+    import app as appmod
+    uid = _make_user(app_, db, "sched-dose-body-held@test.com")
+    _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", taken=False, dose_mg=0)
+    assert _app_do(app_, lambda: appmod._dose_night_body(uid, _MON)) is None
+
+
+def test_has_dose_night_due_excludes_held(app_ctx):
+    app_, db = app_ctx
+    import app as appmod
+    uid = _make_user(app_, db, "sched-dose-gate-held@test.com")
+    _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", taken=False, dose_mg=0)
+    assert _app_do(app_, lambda: appmod._has_dose_night_due(uid, _MON)) is False
+
+    _add_dose(app_, db, uid, _MON, "GHK-Cu", "21:30", taken=False, dose_mg=1.0)
+    assert _app_do(app_, lambda: appmod._has_dose_night_due(uid, _MON)) is True
 
 
 def test_dose_night_body_names_first_plus_n_more(app_ctx):
