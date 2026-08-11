@@ -2159,8 +2159,9 @@ def debug_serve_as_user():
     """Impersonate a user and call an allowlisted API path, returning the exact
     JSON payload that user would receive. Admin-only diagnostic.
 
-    Allowlist: /api/workouts, /api/meals, /api/progress, /api/stats/projection-inputs,
-               /api/protocol/today, /api/garmin/wellness, /api/bodyweight-retest/status
+    Allowlist: /api/workouts, /api/meals, /api/progress, /api/progress/dashboard,
+               /api/stats/projection-inputs, /api/protocol/today, /api/garmin/wellness,
+               /api/bodyweight-retest/status
     Query: ?email=...&path=/api/workouts (path must start with an allowlisted prefix)
     Response: {"email", "path", "status_code", "payload"}
     """
@@ -2173,6 +2174,7 @@ def debug_serve_as_user():
         "/api/workouts",
         "/api/meals",
         "/api/progress",
+        "/api/progress/dashboard",
         "/api/stats/projection-inputs",
         "/api/protocol/today",
         "/api/garmin/wellness",
@@ -2187,7 +2189,7 @@ def debug_serve_as_user():
 
     # Exact boundary enforcement: path must be exactly the allowlisted endpoint
     # OR be the endpoint with a query string. Prevents accidental matches like
-    # /api/workouts-export or /api/progress/dashboard slipping through.
+    # /api/workouts-export or /api/progress/dashboardx slipping through.
     path_allowed = any(
         path == p or path.startswith(p + "?")
         for p in allowlist
@@ -10448,7 +10450,13 @@ def _morning_brief_body(uid, local_date):
         pass
 
     try:
-        n = PeptideDose.query.filter_by(user_id=uid, date=local_date).count()
+        # dose_mg<=0 is a HELD dose (intentionally skipped) -- excluded here to
+        # match every sibling surface (dose-night gate, recap adherence,
+        # calendar checkmark logic), so a mid-block hold can't make the morning
+        # brief claim "N doses" for a day where some of those N were held.
+        n = PeptideDose.query.filter_by(user_id=uid, date=local_date).filter(
+            PeptideDose.dose_mg > 0
+        ).count()
         if n:
             parts.append(f"{n} dose{'s' if n != 1 else ''}")
     except Exception:

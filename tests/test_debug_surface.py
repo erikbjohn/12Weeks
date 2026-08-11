@@ -461,18 +461,21 @@ def test_serve_as_user_allowlist_rejects_substring_match(app_ctx, monkeypatch):
 
 
 def test_serve_as_user_allowlist_rejects_superpath(app_ctx, monkeypatch):
-    """serve-as-user rejects /api/progress/dashboard (not just /api/progress)."""
+    """serve-as-user rejects /api/progress/dashboardx (not just /api/progress,
+    and not a substring/prefix match against the now-allowlisted
+    /api/progress/dashboard either)."""
     app_, db = app_ctx
     monkeypatch.setenv("ADMIN_API_KEY", "test-key")
 
     with app_.test_client() as c:
         r = c.get(
-            "/api/debug/serve-as-user?email=test@test.com&path=/api/progress/dashboard",
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/progress/dashboardx",
             headers={"X-Admin-Key": "test-key"}
         )
 
-    # /api/progress/dashboard is NOT /api/progress (exact match requires it to start with /api/progress/ or /api/progress?)
-    # So it should be REJECTED by the boundary rule
+    # /api/progress/dashboardx is neither /api/progress nor /api/progress/dashboard
+    # (exact match requires equality or a "?query" suffix) -- REJECTED by the
+    # boundary rule.
     assert r.status_code == 403, r.get_json()
 
 
@@ -496,6 +499,79 @@ def test_serve_as_user_protocol_calendar_path(app_ctx, monkeypatch):
     assert data["email"] == "serve-test-calendar@test.com"
     assert data["path"] == "/api/protocol/calendar"
     assert data["status_code"] == 200
+
+
+def _seed_block3_scoreboard_user(db, email):
+    """Seed a minimal block-3 user (TrainingGoal + AppState.start_date +
+    BodyWeight + the block3 SystemFlags) so /api/progress/dashboard serves a
+    non-null 'scoreboard' key. Cribbed from tests/test_scoreboard.py's
+    _seed_goal_and_state / _set_weights / _set_block3_flags helpers."""
+    from models import User, TrainingGoal, AppState, BodyWeight, SystemFlag
+    from datetime import date
+
+    u = User.query.filter_by(email=email).first()
+    if not u:
+        u = User(email=email)
+        db.session.add(u)
+        db.session.commit()
+
+    TrainingGoal.query.filter_by(user_id=u.id).delete()
+    AppState.query.filter_by(user_id=u.id).delete()
+    BodyWeight.query.filter_by(user_id=u.id).delete()
+    db.session.commit()
+
+    start = date(2026, 8, 10)
+    db.session.add(TrainingGoal(
+        user_id=u.id, goal_type="recomp", target_weight=195.0,
+        daily_calories=1800, tdee=2800,
+    ))
+    db.session.add(AppState(user_id=u.id, current_week=1, start_date=start))
+    db.session.add(BodyWeight(user_id=u.id, weight_lbs=220.0, log_date=start))
+    db.session.commit()
+
+    SystemFlag.query.filter(
+        SystemFlag.key.in_(["projection_mode", "block3_anchor"])
+    ).delete(synchronize_session=False)
+    db.session.add(SystemFlag(key="projection_mode", value="piecewise_block3"))
+    db.session.add(SystemFlag(key="block3_anchor", value="220.0"))
+    db.session.commit()
+    return u
+
+
+def test_serve_as_user_progress_dashboard_path(app_ctx, monkeypatch):
+    """serve-as-user proxies /api/progress/dashboard for a block-3-seeded user
+    and the JSON payload includes the 'scoreboard' key (final review I-4: the
+    allowlist previously rejected this path entirely, making the mandated
+    post-deploy served-check of the block-3 scoreboard impossible)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    email = "serve-test-dashboard@test.com"
+    _seed_block3_scoreboard_user(db, email)
+
+    try:
+        with app_.test_client() as c:
+            r = c.get(
+                f"/api/debug/serve-as-user?email={email}&path=/api/progress/dashboard",
+                headers={"X-Admin-Key": "test-key"}
+            )
+
+        assert r.status_code == 200, r.get_json()
+        data = r.get_json()
+        assert data["email"] == email
+        assert data["path"] == "/api/progress/dashboard"
+        assert data["status_code"] == 200
+        assert "scoreboard" in data["payload"]
+        assert data["payload"]["scoreboard"] is not None
+    finally:
+        # SystemFlag is a GLOBAL table shared across the whole test session's
+        # DB -- clean up so later modules' non-block-3 assertions don't see
+        # this leak (mirrors tests/test_scoreboard.py's clean_block3_flags).
+        from models import SystemFlag
+        SystemFlag.query.filter(
+            SystemFlag.key.in_(["projection_mode", "block3_anchor"])
+        ).delete(synchronize_session=False)
+        db.session.commit()
 
 
 def test_serve_as_user_aerobic_efficiency_path(app_ctx, monkeypatch):

@@ -537,6 +537,11 @@ def test_morning_brief_body_assembles_real_parts(app_ctx):
     _seed_run_plan(app_, db, uid, 1, 0, "Zone 2", "40 min")
     _add_dose(app_, db, uid, _MON, "BPC-157", "08:00")
     _add_dose(app_, db, uid, _MON, "KPV", "08:05")
+    # A HELD dose (dose_mg<=0 -- intentionally skipped) must NOT inflate the
+    # count: every sibling surface (dose-night gate, recap adherence,
+    # calendar checkmark logic) already excludes held rows, so the brief
+    # must still read "2 doses", not "3 doses" (final review I-1).
+    _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", dose_mg=0)
 
     body = _app_do(app_, lambda: appmod._morning_brief_body(uid, _MON))
     assert body == "Weigh in · 2 doses · Upper A - Chest & Back · Zone 2 40 min"
