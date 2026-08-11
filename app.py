@@ -741,7 +741,10 @@ def _parse_coach_markers(text, user_id, week):
             # Same data-layer guard as [PRESCRIPTION]: outside deload weeks the
             # coach may not set a weight below 95% of the proven top set
             # (performed sets only — a typed-but-not-done weight proves nothing).
-            if new_weight > 0 and week not in (4, 8):
+            from coach_planning_program import _layoff_days as _lo_days, LAYOFF_MODERATE as _LO_MOD
+            _lo = _lo_days(user_id)
+            if (new_weight > 0 and week not in (4, 8)
+                    and (_lo is None or _lo < _LO_MOD)):
                 top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == user_id,
                     SetLog.exercise_name == exercise,
@@ -894,7 +897,10 @@ def _parse_coach_markers(text, user_id, week):
             # done 135), then blamed "the engine" for the regression in chat.
             # This guard refuses the write at the data layer so the wave can
             # never drop below proven capacity outside a deload.
-            if p_weight is not None and p_weight > 0 and p_week not in (4, 8):
+            from coach_planning_program import _layoff_days as _plo_days, LAYOFF_MODERATE as _PLO_MOD
+            _plo = _plo_days(user_id)
+            if (p_weight is not None and p_weight > 0 and p_week not in (4, 8)
+                    and (_plo is None or _plo < _PLO_MOD)):
                 top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == user_id,
                     SetLog.exercise_name == p_exercise,
@@ -5761,8 +5767,16 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
 
             # REGRESSION GUARD: never below the athlete's recent top set (except
             # deload). Skip brand-new movements — their light start is the point.
+            # LAYOFF EXCEPTION: after >= 21 days without a completed set, the
+            # "proven top" is pre-layoff and no longer proven — raising the
+            # coach's return-ramp load back to it re-creates the injury setup
+            # the layoff rail exists to prevent (this floor silently undid the
+            # rail's caps three replans in a row, 2026-08-10).
+            from coach_planning_program import _layoff_days, LAYOFF_MODERATE
+            _lo = _layoff_days(current_user.id)
             if (weight is not None and weight > 0
                     and not _it.get("new")
+                    and (_lo is None or _lo < LAYOFF_MODERATE)
                     and target_week not in (4, 8, 12)):
                 _top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == current_user.id,
