@@ -7665,8 +7665,83 @@ def api_progress_dashboard():
             "quote": quote,
         }
 
+    # ── 7. Block-3 recomp scoreboard — BLOCK-3 MODE ONLY ────────────────────
+    # Every value here is SERVED, never client-computed, and reuses the SAME
+    # code paths the existing on_pace badge (above, this same endpoint) and
+    # cut_status.on_curve (coach_assembler._build_cut_status) already call —
+    # goal_engine.curve_value/pace_status on the despiked weight from
+    # _despiked_current_weight/cut_guard.detect_water_spike, and
+    # lift_trend.lift_decline for the lift-trend tripwire — so the scoreboard
+    # can never disagree with the badges it sits beside (no-UI-contradiction
+    # rule). Non-block-3 users get NO "scoreboard" key at all (not even null).
+    scoreboard = None
+    if projection_mode:
+        from goal_engine import curve_value as _sb_curve_value, pace_status as _sb_pace_status
+        from lift_trend import lift_decline as _sb_lift_decline
+
+        _sb_anchor, _sb_start = _block3_anchor_and_start(uid)
+        _sb_despiked, _sb_spiked = _despiked_current_weight(uid)
+        _sb_curve_target = None
+        _sb_on_curve = None
+        if _sb_anchor is not None and _sb_start is not None and _sb_despiked is not None:
+            _sb_curve_target = _sb_curve_value(_sb_anchor, _sb_start, today)
+            _sb_on_curve = _sb_pace_status(_sb_despiked, _sb_anchor, _sb_start, today)
+
+        _sb_lt = _sb_lift_decline(uid, current_week)
+
+        # Waist — BLOCK-SCOPED BodyMeasurement rows (>= this block's
+        # start_date, matching the bodyweight-series scoping in section 1).
+        # day0/latest are the earliest/most-recent row's waist_inches
+        # (nullable — a row can exist without a waist reading logged that day).
+        _sb_bm_q = BodyMeasurement.query.filter_by(user_id=uid)
+        if _block_start is not None:
+            _sb_bm_q = _sb_bm_q.filter(BodyMeasurement.log_date >= _block_start)
+        _sb_bm_rows = _sb_bm_q.order_by(BodyMeasurement.log_date.asc(), BodyMeasurement.id.asc()).all()
+        _sb_waist_day0 = _sb_bm_rows[0].waist_inches if _sb_bm_rows else None
+        _sb_waist_latest = _sb_bm_rows[-1].waist_inches if _sb_bm_rows else None
+        _sb_waist_delta = (
+            round(_sb_waist_latest - _sb_waist_day0, 2)
+            if _sb_waist_day0 is not None and _sb_waist_latest is not None else None
+        )
+
+        # BF estimate (Navy, male) — waist + neck from the SAME latest
+        # block-scoped row used for waist["latest"] above (never splice
+        # fields across two different rows), height from PhysicalAssessment.
+        # Any missing component -> null, never a crash or a guess.
+        # body_stats.estimate_body_fat_navy is the ONE Navy-formula
+        # implementation in this repo (also used by /api/goal/compute) —
+        # reused here, not reimplemented; it already rounds to 1 decimal.
+        _sb_bf = None
+        if _sb_bm_rows:
+            _sb_latest_row = _sb_bm_rows[-1]
+            _sb_pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
+            _sb_height = _sb_pa.height_inches if _sb_pa else None
+            if (_sb_latest_row.waist_inches is not None
+                    and _sb_latest_row.neck is not None
+                    and _sb_height is not None):
+                from body_stats import estimate_body_fat_navy
+                _sb_bf = estimate_body_fat_navy(
+                    _sb_latest_row.waist_inches, _sb_latest_row.neck, _sb_height, "male")
+
+        scoreboard = {
+            "curve_target_today": _sb_curve_target,
+            "on_curve": _sb_on_curve,
+            "current_weight_despiked": _sb_despiked,
+            "lift": {
+                "suspected": _sb_lt["lift_decline_suspected"],
+                "tonnage_delta_pct": _sb_lt["tonnage_delta_pct"],
+                "details": _sb_lt["details"],
+            },
+            "waist": {
+                "day0": _sb_waist_day0,
+                "latest": _sb_waist_latest,
+                "delta": _sb_waist_delta,
+            },
+            "bf_estimate_pct": _sb_bf,
+        }
+
     # ── Assemble response ────────────────────────────────────────────────
-    return jsonify({
+    response_payload = {
         "bodyweight": {
             "series": bw_series,
             "start_weight": start_weight,
@@ -7701,7 +7776,10 @@ def api_progress_dashboard():
             "projection_mode": projection_mode,
         },
         "psych_highlights": psych_highlights,
-    })
+    }
+    if scoreboard is not None:
+        response_payload["scoreboard"] = scoreboard
+    return jsonify(response_payload)
 
 
 # ─── STATS PANEL ENDPOINTS ──────────────────────────────────────────────────

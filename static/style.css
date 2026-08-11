@@ -2400,6 +2400,79 @@ footer {
 .pd-hero-pace.pd-green { background: rgba(74, 222, 128, 0.18); color: #4ade80; }
 .pd-hero-pace.pd-red { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
 
+/* BLOCK 3 SCOREBOARD — served-values-only panel, top of Progress view.
+   All text here is >=16px (readability priority: bad eyesight, high contrast). */
+.pd-scoreboard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px 4px;
+  margin-top: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.pd-scoreboard.pd-section { margin-top: 0.5rem; }
+.pd-scoreboard .pd-section-label { font-size: 16px; margin-bottom: 10px; }
+
+.pd-sb-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pd-sb-row:last-child { border-bottom: none; }
+
+.pd-sb-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pd-sb-row-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.pd-sb-row-main {
+  font-family: 'DM Mono', monospace;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.pd-sb-detail {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.pd-sb-vs {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0 2px;
+}
+
+.pd-sb-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-family: 'DM Mono', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(154, 170, 157, 0.15);
+  color: var(--text);
+  white-space: nowrap;
+}
+.pd-sb-badge.pd-green { background: rgba(74, 222, 128, 0.18); color: #4ade80; }
+.pd-sb-badge.pd-red { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+
 /* SECTIONS */
 .pd-section {
   margin-top: 1.5rem;

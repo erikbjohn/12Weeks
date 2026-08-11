@@ -8276,6 +8276,10 @@ function _renderNewDashboardInner(apiData, overlay) {
   // ── DASHBOARD TAB ──
   html += '<div class="sp-tab-content active" id="sp-dashboard">';
 
+  // 0. BLOCK 3 SCOREBOARD — served-values-only, block-3 mode only. Renders
+  // nothing (panel hidden) when the payload has no "scoreboard" key at all.
+  html += _pdScoreboard(d.scoreboard);
+
   // 1. HERO CARD — uses backend on_pace + projected_final_weight
   html += _pdHeroCard(startWeight, currentWeight, targetWeight, projections);
 
@@ -8309,6 +8313,85 @@ function _renderNewDashboardInner(apiData, overlay) {
   // latch must reset too — otherwise reopening Progress leaves the Lab tab
   // stuck on the placeholder forever (the fetch is skipped as "already done").
   _spLabLoaded = false;
+}
+
+/* ── BLOCK 3 SCOREBOARD ──
+ * Renders ONLY served values — the client computes nothing here (no despike,
+ * no curve math, no pace judgment, no BF formula). Every number/verdict
+ * comes straight from d.scoreboard, which the server built by calling the
+ * SAME code paths as the existing on_pace hero badge and coach cut_status
+ * badge, so this panel is structurally incapable of disagreeing with them.
+ * Absent "scoreboard" key (non-block-3 users) -> render nothing at all. */
+function _pdScoreboard(sb) {
+  if (!sb) return '';
+
+  var h = '<div class="pd-section pd-scoreboard">';
+  h += '<div class="pd-section-label">Block 3 Scoreboard</div>';
+
+  // ── Scale row: despiked current vs today's curve target, colored by the
+  // served on_curve verdict (green on_pace/ahead, red behind). ──
+  var curTxt = sb.current_weight_despiked != null ? sb.current_weight_despiked.toFixed(1) + ' lb' : '--';
+  var curveTxt = sb.curve_target_today != null ? sb.curve_target_today.toFixed(1) + ' lb' : '--';
+  var paceClass = '';
+  var paceLabel = '--';
+  if (sb.on_curve === 'behind') {
+    paceClass = 'pd-red';
+    paceLabel = 'BEHIND';
+  } else if (sb.on_curve === 'ahead') {
+    paceClass = 'pd-green';
+    paceLabel = 'AHEAD';
+  } else if (sb.on_curve === 'on_pace') {
+    paceClass = 'pd-green';
+    paceLabel = 'ON PACE';
+  }
+  h += '<div class="pd-sb-row">';
+  h += '<div class="pd-sb-row-top">';
+  h += '<div class="pd-sb-row-label">Scale</div>';
+  h += '<div class="pd-sb-badge ' + paceClass + '">' + paceLabel + '</div>';
+  h += '</div>';
+  h += '<div class="pd-sb-row-main">' + curTxt + ' <span class="pd-sb-vs">vs curve</span> ' + curveTxt + '</div>';
+  h += '</div>';
+
+  // ── Lift row: suspected decline -> red "Lifts sliding" + details; else
+  // green "Lifts holding" + tonnage delta. ──
+  var lift = sb.lift || {};
+  var liftClass = lift.suspected ? 'pd-red' : 'pd-green';
+  var liftLabel = lift.suspected ? 'Lifts sliding' : 'Lifts holding';
+  var liftDetail = '';
+  if (lift.suspected) {
+    liftDetail = lift.details || '';
+  } else if (lift.tonnage_delta_pct != null) {
+    var tSign = lift.tonnage_delta_pct > 0 ? '+' : '';
+    liftDetail = 'tonnage ' + tSign + lift.tonnage_delta_pct.toFixed(1) + '% vs reference';
+  } else {
+    liftDetail = lift.details || '';
+  }
+  h += '<div class="pd-sb-row">';
+  h += '<div class="pd-sb-row-top">';
+  h += '<div class="pd-sb-row-label">Lift</div>';
+  h += '<div class="pd-sb-badge ' + liftClass + '">' + liftLabel + '</div>';
+  h += '</div>';
+  if (liftDetail) h += '<div class="pd-sb-row-main pd-sb-detail">' + escapeHtml(liftDetail) + '</div>';
+  h += '</div>';
+
+  // ── Tape row: waist day0 -> latest + delta, plus BF est when present.
+  // Omits gracefully (renders nothing) when there's no waist data at all. ──
+  var waist = sb.waist || {};
+  if (waist.day0 != null && waist.latest != null) {
+    var wSign = waist.delta > 0 ? '+' : '';
+    var wDeltaTxt = waist.delta != null ? (' (' + wSign + waist.delta.toFixed(1) + ' in)') : '';
+    var bfTxt = sb.bf_estimate_pct != null ? ' &middot; BF est: ' + sb.bf_estimate_pct.toFixed(1) + '%' : '';
+    h += '<div class="pd-sb-row">';
+    h += '<div class="pd-sb-row-top">';
+    h += '<div class="pd-sb-row-label">Tape</div>';
+    h += '</div>';
+    h += '<div class="pd-sb-row-main">' + waist.day0.toFixed(1) + ' in &rarr; ' + waist.latest.toFixed(1) + ' in' +
+         wDeltaTxt + bfTxt + '</div>';
+    h += '</div>';
+  }
+
+  h += '</div>';
+  return h;
 }
 
 /* ── HERO CARD ── */
