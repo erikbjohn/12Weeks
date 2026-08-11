@@ -11466,6 +11466,64 @@ def api_admin_debug_regenerate_projection():
     })
 
 
+@app.route("/api/admin/block3-transition", methods=["POST"])
+@admin_required
+def api_admin_block3_transition():
+    """Transactional block-2 -> block-3 transition. See transition_block3.py
+    for the full ordering rationale — this endpoint is a thin wrapper that
+    owns the single db.session transaction; run_transition() itself never
+    commits or rolls back. Body: {email, anchor_weight (required),
+    dry_run: bool}."""
+    from transition_block3 import run_transition
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    anchor_weight = data.get("anchor_weight")
+    dry_run = bool(data.get("dry_run", False))
+    if not email or anchor_weight is None:
+        return jsonify({"error": "email + anchor_weight required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    try:
+        status, body = run_transition(user, float(anchor_weight), dry_run=dry_run)
+    except Exception as e:
+        db.session.rollback()
+        logging.error("block3-transition failed for %s: %s", email, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    if status == 200:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return jsonify(body), status
+
+
+@app.route("/api/admin/block3-rollback", methods=["POST"])
+@admin_required
+def api_admin_block3_rollback():
+    """Ordered inverse of block3-transition. See transition_block3.py's
+    run_rollback() docstring — the step order (un-re-home, then park, then
+    delete plan rows, then un-shift) is load-bearing. Body: {email}."""
+    from transition_block3 import run_rollback
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    try:
+        status, body = run_rollback(user)
+    except Exception as e:
+        db.session.rollback()
+        logging.error("block3-rollback failed for %s: %s", email, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    if status == 200:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return jsonify(body), status
+
+
 @app.route("/api/admin/generate-meals", methods=["POST"])
 @admin_required
 def api_admin_generate_meals():
