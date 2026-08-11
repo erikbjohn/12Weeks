@@ -40,7 +40,9 @@ from models import (
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
+    PeptideDose, PeptideVial, LabReminder,
 )
+from protocol import missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -989,6 +991,25 @@ def _garmin_linked(uid):
         return False
 
 
+def _garmin_reconnect_response(gc):
+    """Return (json_payload, 503) when Garmin is linked but not connected.
+
+    Branches on active cooldown vs restore failure:
+    - Active cooldown: "Garmin is rate-limited (cooldown: Ns remaining)"
+    - Restore failed: "Garmin token restore failed: <error class>"
+
+    Both responses include restore_error for diagnostic visibility.
+    """
+    if time.time() < gc._rate_limited_until:
+        cooldown_secs = int(gc._rate_limited_until - time.time())
+        error_msg = f"Garmin is rate-limited (cooldown: {cooldown_secs}s remaining). Account still linked — try again shortly."
+    else:
+        error_msg = f"Garmin token restore failed: {gc.last_restore_error or 'unknown'}. Account is linked but the connection is dead — re-auth may be needed."
+    return jsonify({"error": error_msg,
+                    "linked": True, "reconnecting": True,
+                    "restore_error": gc.last_restore_error}), 503
+
+
 def _garmin_push_week_best_effort(user_id, week):
     """Push a week's planned runs/HIIT to Garmin. Best-effort: never raises —
     a Garmin failure must never break planning or chat.
@@ -1081,6 +1102,15 @@ def _user_today():
     except Exception:
         return date.today()
 
+
+def _utcnow():
+    """Module-level now-provider (UTC, tz-aware). Every write path that
+    stamps a wall-clock "now" (taken_at, completed_at, the /late real-clock
+    gate) MUST call this instead of `datetime.now(timezone.utc)` directly,
+    so tests can freeze it via `monkeypatch.setattr(appmod, "_utcnow", ...)`
+    without patching the stdlib datetime module itself."""
+    return datetime.now(timezone.utc)
+
 # Block-2 CLIMBING weekly working-set target. Block 1 ran a FLAT 81 and the
 # coach obeyed "more is not better" at the low end, so volume tapered 163->48.
 # This curve makes volume climb across the block — non-deload weeks strictly
@@ -1097,6 +1127,22 @@ def _target_weekly_sets(week):
     return _BLOCK_WEEKLY_SETS.get(int(week), 84)
 
 
+def _block3_mode():
+    """True iff the block-3 piecewise curve is the live projection authority.
+    Thin wrapper — cut_guard owns the SystemFlag lookup (it already needed
+    it for expected_weekly_loss_for) so app.py and coach_assembler.py can't
+    drift on what "block 3 mode" means."""
+    import cut_guard
+    return cut_guard._block3_mode()
+
+
+def _block3_anchor_and_start(user_id):
+    """(anchor_weight, start_date) for rebuilding the block-3 curve — see
+    cut_guard._block3_anchor_and_start for the SystemFlag/AppState detail."""
+    import cut_guard
+    return cut_guard._block3_anchor_and_start(user_id)
+
+
 def _despiked_current_weight(user_id):
     """Weight to anchor cut math on, ignoring a suspected GLUTEN/WATER spike.
 
@@ -1104,26 +1150,36 @@ def _despiked_current_weight(user_id):
     not fat — recalibrating the deficit off it would TIGHTEN calories on a
     glutened week (the exact block-1 failure, requirement #3). When a spike is
     detected, anchor on the prior (lower) weigh-in instead. Returns
-    (weight_or_None, spiked: bool)."""
-    from models import BodyWeight
+    (weight_or_None, spiked: bool).
+
+    The spike rule itself lives in cut_guard.detect_water_spike — the single
+    shared implementation coach_assembler._build_cut_status also calls. BOTH
+    call sites are now structurally guaranteed to agree, not just because
+    they share one detector function, but because they read the SAME window:
+    this query is BLOCK-SCOPED (>= AppState.start_date) to match
+    coach_assembler._build_cut_status's bws query exactly (see its comment at
+    ~735-738). Before this fix, this query was global (all-time) while
+    cut_status's was block-scoped — with pre-block history present, this
+    function could despike off a cross-block row cut_status could never see,
+    producing a disagreeing verdict (dashboard on_pace green, cut_status
+    on_curve "behind") for the same user at the same instant. With fewer than
+    3 block-scoped rows, neither surface can confirm a spike — both fall back
+    to the raw latest weight, which is the invariant that actually matters:
+    they AGREE even when neither can spike-check."""
+    from models import BodyWeight, AppState
+    import cut_guard
+    state = AppState.query.filter_by(user_id=user_id).first()
+    block_start = state.start_date if state and state.start_date else None
+    q = (BodyWeight.query.filter_by(user_id=user_id)
+         .filter(BodyWeight.weight_lbs.isnot(None)))
+    if block_start is not None:
+        q = q.filter(BodyWeight.log_date >= block_start)
     # Deterministic ordering (log_date desc, id desc) so a same-date re-logged
     # weigh-in resolves to the SAME "latest" row as coach_assembler._build_cut_status
-    # (which uses asc + id asc). Null weights excluded. The spike rule below MUST
-    # match _build_cut_status exactly: latest jump 3-8 lb within ~10 days on a
-    # prior-down step, with >=3 weigh-ins to establish the trend.
-    rows = (BodyWeight.query.filter_by(user_id=user_id)
-            .filter(BodyWeight.weight_lbs.isnot(None))
-            .order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all())
-    if not rows:
-        return None, False
-    latest = rows[0].weight_lbs
-    if len(rows) >= 3 and rows[1].weight_lbs is not None and rows[2].weight_lbs is not None:
-        step = latest - rows[1].weight_lbs
-        step_days = (rows[0].log_date - rows[1].log_date).days
-        prior_down = rows[1].weight_lbs < rows[2].weight_lbs
-        if 3 <= step <= 8 and prior_down and 0 < step_days <= 10:
-            return rows[1].weight_lbs, True
-    return latest, False
+    # (which uses asc + id asc).
+    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all()
+    expected_loss = cut_guard.expected_weekly_loss_for(user_id, _current_week())
+    return cut_guard.detect_water_spike(rows, expected_loss)
 
 
 def _current_week():
@@ -1662,6 +1718,7 @@ def api_regenerate_meals():
             if day_date in protected_dates:
                 continue  # Logged meals or past day — preserve history
             day_type = day_types[day_idx]
+            _fasted_override, _fasted_note = _fasted_window_override(current_user.id, day_date)
             if day_type == 'fast_day':
                 # Use user's selected foods with fast-day calorie target
                 cal_day_type = _cal_day_type_map.get(day_type, "rest")
@@ -1670,6 +1727,7 @@ def api_regenerate_meals():
                     selected_foods=fs.selected_foods, day_type='fast_day',
                     targets=day_macros, fasting_protocol=fasting_protocol,
                     has_training=_day_has_training(current_user.id, target_week, day_idx),
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
             else:
                 cal_day_type = _cal_day_type_map.get(day_type, "training")
@@ -1680,6 +1738,7 @@ def api_regenerate_meals():
                     selected_foods=fs.selected_foods, day_type=day_type,
                     targets=day_macros, fasting_protocol=fasting_protocol,
                     targets_pre_adjusted=True,
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
 
             db.session.add(WeeklyMealPlan(
@@ -1981,6 +2040,156 @@ def debug_today_status():
             ts = _build_today_status().get("today_status")
             block = "\n".join(_format_today_status_block(ts)) if ts else ""
         return jsonify({"email": email, "today_status": ts, "directive_block": block})
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
+@app.route("/api/debug/serve-as-user", methods=["GET"])
+@admin_required
+def debug_serve_as_user():
+    """Impersonate a user and call an allowlisted API path, returning the exact
+    JSON payload that user would receive. Admin-only diagnostic.
+
+    Allowlist: /api/workouts, /api/meals, /api/progress, /api/stats/projection-inputs,
+               /api/protocol/today, /api/garmin/wellness, /api/bodyweight-retest/status
+    Query: ?email=...&path=/api/workouts (path must start with an allowlisted prefix)
+    Response: {"email", "path", "status_code", "payload"}
+    """
+    email = request.args.get("email", "")
+    path = request.args.get("path", "")
+    if not email or not path:
+        return jsonify({"error": "email and path required"}), 400
+
+    allowlist = {
+        "/api/workouts",
+        "/api/meals",
+        "/api/progress",
+        "/api/stats/projection-inputs",
+        "/api/protocol/today",
+        "/api/garmin/wellness",
+        "/api/bodyweight-retest/status",
+    }
+
+    # Exact boundary enforcement: path must be exactly the allowlisted endpoint
+    # OR be the endpoint with a query string. Prevents accidental matches like
+    # /api/workouts-export or /api/progress/dashboard slipping through.
+    path_allowed = any(
+        path == p or path.startswith(p + "?")
+        for p in allowlist
+    )
+    if not path_allowed:
+        return jsonify({"error": "path not allowlisted"}), 403
+
+    try:
+        from models import User
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+
+        # Impersonate user via test_client session
+        with app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["_user_id"] = str(u.id)
+                sess["_fresh"] = True
+            r = c.get(path)
+            payload = r.get_json() if r.is_json else None
+            status_code = r.status_code
+
+        return jsonify({
+            "email": email,
+            "path": path,
+            "status_code": status_code,
+            "payload": payload,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error_class": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": traceback.format_exc()[-2000:]}), 500
+
+
+@app.route("/api/debug/coach-context", methods=["GET"])
+@admin_required
+def debug_coach_context():
+    """Assemble and return the coach's context blocks (cut_status, protocol_status,
+    lift_trend, readiness, wellness, garmin, today_status) by calling section builders
+    under an impersonated request context. NO LLM calls, NO Garmin live HTTP calls.
+    Admin-only diagnostic.
+
+    Query: ?email=...
+    Response: {"email", "context": {key: payload-or-error}}
+    Each builder wrapped in try/except so a builder failure yields {"error": "..."} for
+    that key, others still present, HTTP 200 overall.
+
+    Note: garmin section is DB-only (wellness_trends from GarminWellness rows, no live
+    client HTTP calls) to keep the debug surface side-effect-free. The three keys
+    "garmin", "readiness", "wellness" are returned as siblings (not nested under one key).
+    """
+    email = request.args.get("email", "")
+    if not email:
+        return jsonify({"error": "email required"}), 400
+
+    try:
+        from models import User, GarminWellness
+        from flask_login import login_user
+        from coach_assembler import _SECTION_BUILDERS, wellness_trends, _user_today
+
+        u = User.query.filter_by(email=email).first()
+        if u is None:
+            return jsonify({"error": f"user {email!r} not found"}), 404
+
+        context = {}
+        builder_names = ["cut_status", "protocol_status", "lift_trend", "today_status"]
+
+        # Call each builder under impersonated request context
+        with app.test_request_context():
+            login_user(u, force=True)
+            for name in builder_names:
+                builder = _SECTION_BUILDERS.get(name)
+                if not builder:
+                    context[name] = {"error": f"builder {name!r} not found"}
+                    continue
+                try:
+                    result = builder()
+                    # Builder returns {key: value}; extract just the value
+                    context[name] = result.get(name)
+                except Exception as e:
+                    import traceback
+                    context[name] = {
+                        "error": str(e),
+                        "traceback": traceback.format_exc()[-500:]
+                    }
+
+            # Build garmin section DB-only (NO live HTTP calls).
+            # The registered garmin builder calls gc.try_restore_tokens + get_today_summary,
+            # which consumes the shared rate-limit budget as a side effect. The debug surface
+            # must be side-effect-free, so we build the garmin section ourselves from the DB.
+            try:
+                wellness_rows = GarminWellness.query.filter_by(user_id=u.id).all()
+                today = _user_today()
+                wellness = wellness_trends(wellness_rows, today)
+                # Return the three sibling keys (not nested), mirroring the original builder's
+                # {"garmin": ..., "readiness": ..., "wellness": ...} return structure.
+                context["garmin"] = None
+                context["readiness"] = None
+                context["wellness"] = wellness
+                context["garmin_note"] = "live client skipped (debug surface is DB-only)"
+            except Exception as e:
+                import traceback
+                context["garmin"] = {
+                    "error": str(e),
+                    "traceback": traceback.format_exc()[-500:]
+                }
+                context["readiness"] = None
+                context["wellness"] = None
+
+        return jsonify({
+            "email": email,
+            "context": context,
+        })
     except Exception as e:
         import traceback
         return jsonify({"error_class": type(e).__name__,
@@ -4467,6 +4676,678 @@ def admin_replan_week():
                     "week": week, "preserve_through_day": preserve})
 
 
+def _user_today_for(user):
+    """Resolve "today" in the TARGET user's local timezone — never the
+    server's UTC date. The admin import endpoint has no logged-in
+    current_user in the right timezone, so "today" for immutability
+    decisions must always come from the target user's own User.timezone
+    column via utils_time.user_local_today (never date.today())."""
+    from utils_time import user_local_today
+    return user_local_today(user.timezone)
+
+
+def _fasted_window_override(user_id, day_date):
+    """Meal-timing rail: when a fasted dose (scheduled >=21:00, same
+    definition as protocol.fasted_dose_time/the "fasting_bound" card field)
+    lands on day_date, the eating window must close early enough to leave
+    2+ hours fasted before it. Returns (override, note) — an "H:MMam/pm"
+    window-end cap and a human-readable reason to surface on the card.
+
+    Both come back None when there's no fasted dose for this date (no
+    PeptideDose rows imported yet, or nothing scheduled late that day) —
+    generation then proceeds with NO rail, never a hardcoded fallback
+    (no-static rule).
+
+    The note names whichever compound(s) actually triggered the rail —
+    read from the row itself, never a hardcoded "Tesamorelin" — so it
+    stays correct if the doctor's protocol changes which compound carries
+    the late dose.
+    """
+    rows = PeptideDose.query.filter_by(user_id=user_id, date=day_date).all()
+    dose_time = fasted_dose_time(rows, day_date)
+    if not dose_time:
+        return None, None
+
+    compounds = sorted({r.compound for r in rows if r.time == dose_time})
+    who = " + ".join(compounds) if compounds else "Tonight's dose"
+    hh, mm = dose_time.split(":")
+    hh = int(hh)
+    suffix = "am" if hh < 12 else "pm"
+    h12 = hh % 12 or 12
+    friendly_time = f"{h12}{suffix}" if mm == "00" else f"{h12}:{mm}{suffix}"
+
+    note = f"{who} at {friendly_time} requires 2h fasted — last meal ends by 8pm"
+    return "7:30pm", note
+
+
+def _reconcile_meal_rail(user, changed_dates):
+    """Given the target user and the dates whose fasted (a dose scheduled
+    at/after 21:00) status changed during this import, regenerate the
+    affected unlogged, non-past days' meal plans that fall in the user's
+    CURRENT week (the only week /api/meals/regenerate ever touches) —
+    reusing that endpoint's logged-meal/past-day protection — and return
+    the list of day_idx values actually regenerated, for the import
+    report.
+
+    Runs on the target user, never current_user (this is called from the
+    admin import endpoint) — mirrors _user_today_for's reasoning. Does NOT
+    commit; the caller (admin_import_protocol) commits everything — the
+    PeptideDose writes and this reconciliation — in one transaction.
+    """
+    if not changed_dates:
+        return []
+
+    today = _user_today_for(user)
+    week_monday = today - timedelta(days=today.weekday())
+    week_end = week_monday + timedelta(days=6)
+    relevant = sorted(d for d in changed_dates if week_monday <= d <= week_end)
+    if not relevant:
+        return []
+
+    state = AppState.query.filter_by(user_id=user.id).first()
+    if not state or not state.start_date:
+        return []  # no program anchor — nothing to regenerate against
+    diff_days = (today - state.start_date).days
+    current_week = min(12, max(1, diff_days // 7 + 1))
+
+    goal = TrainingGoal.query.filter_by(user_id=user.id).first()
+    fs = UserFoodSelections.query.filter_by(user_id=user.id).first()
+    if not goal or not fs or not fs.selected_foods:
+        # No goal/food selections yet — nothing to regenerate FROM. No
+        # hardcoded fallback plan ships in their place (no-static rule).
+        return []
+
+    from meal_generator import generate_meal_plan
+    from goal_engine import compute_day_calories
+
+    bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
+    current_weight = bw.weight_lbs if bw else 200
+    base_calories = goal.daily_calories
+    fasting_protocol = goal.fasting_protocol or "16_8"
+    _cal_day_type_map = {
+        "heavy_lift": "heavy", "long_run": "long_run",
+        "moderate": "training", "fast_day": "fast_day",
+        "rest": "rest", "deload": "rest",
+    }
+
+    regenerated_day_idxs = []
+    for d in relevant:
+        day_idx = (d - week_monday).days
+
+        mlog = MealLog.query.filter_by(user_id=user.id, log_date=d).first()
+        if mlog and (mlog.eaten or []):
+            continue  # logged meals — history, never overwritten
+        if d < today:
+            continue  # past day with no log — still history
+
+        day_type = _get_day_meal_type(user.id, current_week, day_idx)
+        override, note = _fasted_window_override(user.id, d)
+
+        if day_type == 'fast_day':
+            cal_day_type = _cal_day_type_map.get(day_type, "rest")
+            day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+            meal_plan = generate_meal_plan(
+                selected_foods=fs.selected_foods, day_type='fast_day',
+                targets=day_macros, fasting_protocol=fasting_protocol,
+                has_training=_day_has_training(user.id, current_week, day_idx),
+                eating_window_end_override=override, fasting_note=note,
+            )
+        else:
+            cal_day_type = _cal_day_type_map.get(day_type, "training")
+            day_macros = compute_day_calories(base_calories, goal.goal_type or 'cut', cal_day_type, current_weight)
+            meal_plan = generate_meal_plan(
+                selected_foods=fs.selected_foods, day_type=day_type,
+                targets=day_macros, fasting_protocol=fasting_protocol,
+                targets_pre_adjusted=True,
+                eating_window_end_override=override, fasting_note=note,
+            )
+
+        WeeklyMealPlan.query.filter_by(
+            user_id=user.id, week=current_week, day_idx=day_idx,
+        ).delete()
+        db.session.add(WeeklyMealPlan(
+            user_id=user.id, week=current_week, day_idx=day_idx,
+            meal_data=meal_plan,
+            daily_calories=meal_plan.get('targetCal', 0),
+            daily_protein=meal_plan.get('targetProtein', 0),
+            day_type=day_type, source='generator',
+        ))
+        regenerated_day_idxs.append(day_idx)
+
+    return regenerated_day_idxs
+
+
+class _ProtocolImportIntegrityError(Exception):
+    """Raised when the post-write (date, compound) key set for a protocol
+    import doesn't match what the importer expected to write. Caught
+    separately from generic exceptions so it maps to 400 (a CSV/DB state
+    problem the caller can act on), not 500 (an unexpected server fault)."""
+
+
+@app.route("/api/admin/import-protocol", methods=["POST"])
+@admin_required
+def admin_import_protocol():
+    """Admin CSV import for a user's peptide-protocol dose schedule
+    (models.PeptideDose). Query param `email` (required) selects the
+    target user; JSON body optional: {"csv_path": "peptide_protocol.csv",
+    "force_past": false}.
+
+    Full binding contract: docs/superpowers/specs/2026-08-10-peptide-
+    protocol-integration-design.md §1. Summary of what's enforced here:
+
+    1. VALIDATE FIRST: the whole CSV is rejected (400, nothing written) if
+       it contains a duplicate (Date, Compound) pair.
+    2. "Today" is the TARGET user's local date (User.timezone via
+       utils_time.user_local_today through `_user_today_for`), never the
+       server's UTC date.
+    3. Upsert key is (user_id, date, compound) — `time` is a payload field,
+       not part of the key, so a doctor's time edit is a plain update that
+       inherently preserves taken_at.
+       - Rows dated before today are NEVER inserted or updated — unless the
+         caller passes force_past=true, in which case the change is
+         applied and logged in `skipped` (reused here as a diff log, not
+         only a "nothing happened" list).
+       - On a row with taken_at set, dose_mg is NEVER updated (skipped +
+         reported) — UNCONDITIONALLY; force_past does not override this,
+         only the past-date lock. Metadata (time, event_type,
+         syringe_units, site, notes) may still update in place, preserving
+         taken_at.
+    4. Delete pass: a DB row absent from the CSV is deleted only if it is
+       untaken AND (its date is in the future, OR it's today's row, OR
+       it's a past row with force_past=true — the last case is also
+       logged in `skipped`). A row with taken_at set is NEVER deleted,
+       regardless of its date or force_past — it is kept and annotated
+       " [removed from protocol]" instead, and the divergence is logged in
+       `skipped`. A past, untaken row absent from the CSV without
+       force_past is also left untouched but IS reported in `skipped` (a
+       silent no-op here would hide real CSV/DB drift).
+    5. Whole-file integrity: before committing, the importer reconstructs
+       the exact (date, compound) key set it expects to exist and asserts
+       it against the actual DB state; any mismatch raises
+       `_ProtocolImportIntegrityError` and rolls back the entire
+       transaction, returned as 400 (the CSV/DB state is presumed to be
+       the callable-fixable problem here, not a server fault). Any other
+       unexpected exception rolls back and returns 500.
+
+    Every `skipped` entry is {date, compound, field, db_value, csv_value,
+    reason} — db_value/csv_value are always real field values (or null for
+    whole-row divergences with no single field), never free text; `reason`
+    carries the human-readable explanation.
+
+    Everything happens in one db.session transaction.
+    """
+    email = (request.args.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    csv_path = data.get("csv_path") or "peptide_protocol.csv"
+    force_past = bool(data.get("force_past", False))
+
+    if not os.path.isabs(csv_path):
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), csv_path)
+    if not os.path.exists(csv_path):
+        return jsonify({"error": f"CSV not found: {csv_path}"}), 400
+
+    import csv as _csv
+    from collections import Counter
+
+    def _none_if_dash(v):
+        v = (v or "").strip()
+        return None if v in ("", "-") else v
+
+    parsed_rows = []
+    seen_keys = set()
+    dup_keys = set()
+    try:
+        with open(csv_path, newline="") as f:
+            reader = _csv.DictReader(f)
+            for raw in reader:
+                row_date = datetime.strptime(raw["Date"].strip(), "%Y-%m-%d").date()
+                compound = raw["Compound"].strip()
+                key = (row_date, compound)
+                if key in seen_keys:
+                    dup_keys.add(key)
+                seen_keys.add(key)
+                parsed_rows.append({
+                    "date": row_date,
+                    "time": raw["Time"].strip(),
+                    "event_type": raw["Event_Type"].strip(),
+                    "compound": compound,
+                    "dose_mg": float(raw["Dose_mg"]),
+                    "syringe_units": _none_if_dash(raw.get("Syringe_Units")),
+                    "site": _none_if_dash(raw.get("Site")),
+                    "notes": (raw.get("Notes") or "").strip() or None,
+                })
+    except Exception as e:
+        return jsonify({"error": f"failed to parse CSV: {e}"}), 400
+
+    if dup_keys:
+        return jsonify({
+            "error": "duplicate (Date, Compound) rows in CSV — nothing written",
+            "duplicates": sorted(
+                [{"date": d.isoformat(), "compound": c} for d, c in dup_keys],
+                key=lambda x: (x["date"], x["compound"]),
+            ),
+        }), 400
+
+    today = _user_today_for(user)
+
+    existing_rows = PeptideDose.query.filter_by(user_id=user.id).all()
+    existing = {(r.date, r.compound): r for r in existing_rows}
+    csv_keys = {(r["date"], r["compound"]) for r in parsed_rows}
+    # Pre-mutation snapshot of every existing row's time, for the meal-rail
+    # fasted-status diff below — existing_row objects mutate in place as we
+    # process the CSV, so this has to be captured before any writes happen.
+    before_time_by_key = {k: v.time for k, v in existing.items()}
+    csv_time_by_key = {(r["date"], r["compound"]): r["time"] for r in parsed_rows}
+
+    # Bookkeeping for the post-write integrity check: the exact (date,
+    # compound) key set we expect to exist once every row below has been
+    # processed.
+    expected_keys = set(existing.keys())
+
+    imported = 0
+    updated = 0
+    deleted = 0
+    skipped = []
+
+    metadata_fields = ("time", "event_type", "syringe_units", "site", "notes")
+
+    try:
+        for r in parsed_rows:
+            key = (r["date"], r["compound"])
+            is_past = r["date"] < today
+            existing_row = existing.get(key)
+
+            if existing_row is None:
+                if is_past and not force_past:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "row", "db_value": None, "csv_value": None,
+                        "reason": "insert blocked: row is past-dated (force_past=false)",
+                    })
+                    continue
+                new_row = PeptideDose(
+                    user_id=user.id, date=r["date"], time=r["time"],
+                    event_type=r["event_type"], compound=r["compound"],
+                    dose_mg=r["dose_mg"], syringe_units=r["syringe_units"],
+                    site=r["site"], notes=r["notes"], taken_at=None,
+                )
+                db.session.add(new_row)
+                expected_keys.add(key)
+                imported += 1
+                if is_past and force_past:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "row", "db_value": None, "csv_value": None,
+                        "reason": "inserted via force_past (row was past-dated)",
+                    })
+                continue
+
+            # Existing row present — decide what may update.
+            if is_past and not force_past:
+                for field in ("dose_mg",) + metadata_fields:
+                    db_val = getattr(existing_row, field)
+                    csv_val = r[field]
+                    if db_val != csv_val:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": field, "db_value": db_val, "csv_value": csv_val,
+                            "reason": "update blocked: row is past-dated (force_past=false)",
+                        })
+                continue
+
+            taken = existing_row.taken_at is not None
+            row_touched = False
+
+            # dose_mg is immutable once taken — UNCONDITIONALLY. force_past
+            # overrides the past-date lock only, never this rule: the record
+            # of what was actually injected is never rewritten by a bulk
+            # CSV import.
+            if existing_row.dose_mg != r["dose_mg"]:
+                if taken:
+                    skipped.append({
+                        "date": r["date"].isoformat(), "compound": r["compound"],
+                        "field": "dose_mg", "db_value": existing_row.dose_mg,
+                        "csv_value": r["dose_mg"],
+                        "reason": "dose_mg is immutable once taken; update skipped",
+                    })
+                else:
+                    if is_past and force_past:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": "dose_mg", "db_value": existing_row.dose_mg,
+                            "csv_value": r["dose_mg"],
+                            "reason": "updated via force_past (row was past-dated)",
+                        })
+                    existing_row.dose_mg = r["dose_mg"]
+                    row_touched = True
+
+            for field in metadata_fields:
+                db_val = getattr(existing_row, field)
+                csv_val = r[field]
+                if db_val != csv_val:
+                    if is_past and force_past:
+                        skipped.append({
+                            "date": r["date"].isoformat(), "compound": r["compound"],
+                            "field": field, "db_value": db_val, "csv_value": csv_val,
+                            "reason": "updated via force_past (row was past-dated)",
+                        })
+                    setattr(existing_row, field, csv_val)
+                    row_touched = True
+
+            if row_touched:
+                updated += 1
+
+        # Deletion pass — DB rows absent from the CSV. A row with taken_at
+        # set is NEVER deleted, regardless of date or force_past — it is
+        # kept and annotated instead (mirrors across past/today/future
+        # uniformly; this is the fix for the bug where a future-dated taken
+        # row was deleted because the old code only guarded today's rows).
+        marker = "[removed from protocol]"
+        for key, row in existing.items():
+            if key in csv_keys:
+                continue
+            d, c = key
+            taken = row.taken_at is not None
+
+            if taken:
+                if marker not in (row.notes or ""):
+                    row.notes = ((row.notes or "").rstrip() + " " + marker).strip()
+                    updated += 1
+                    skipped.append({
+                        "date": d.isoformat(), "compound": c, "field": "row",
+                        "db_value": None, "csv_value": None,
+                        "reason": "taken row removed from protocol CSV; kept and annotated, never deleted",
+                    })
+                continue
+
+            if d >= today:
+                db.session.delete(row)
+                expected_keys.discard(key)
+                deleted += 1
+            elif force_past:
+                db.session.delete(row)
+                expected_keys.discard(key)
+                deleted += 1
+                skipped.append({
+                    "date": d.isoformat(), "compound": c, "field": "row",
+                    "db_value": None, "csv_value": None,
+                    "reason": "deleted via force_past (past-dated, untaken, absent from CSV)",
+                })
+            else:
+                skipped.append({
+                    "date": d.isoformat(), "compound": c, "field": "row",
+                    "db_value": None, "csv_value": None,
+                    "reason": "past-dated row absent from CSV; not deleted (force_past=false)",
+                })
+
+        db.session.flush()
+
+        # ── Whole-file integrity check ──────────────────────────────────
+        # Per-compound counts are intentionally NOT re-checked separately —
+        # they're derived from the same key set, so a set-equality pass
+        # already implies compound-count equality; a second check would be
+        # dead code that can never fire independently of the first.
+        actual_keys = {
+            (row.date, row.compound)
+            for row in PeptideDose.query.filter_by(user_id=user.id).all()
+        }
+        if actual_keys != expected_keys:
+            missing = sorted(expected_keys - actual_keys)
+            extra = sorted(actual_keys - expected_keys)
+            raise _ProtocolImportIntegrityError(
+                f"protocol import integrity check failed for user {user.id}: "
+                f"missing={missing} extra={extra}"
+            )
+
+        # ── Meal-rail reconciliation: which dates' fasted (>=21:00 dose)
+        # status flipped between before and after this import.
+        def _fasted_dates(time_by_key):
+            out = set()
+            for (d, _c), t in time_by_key.items():
+                if t >= "21:00":
+                    out.add(d)
+            return out
+
+        after_time_by_key = {}
+        for k in expected_keys:
+            if k in existing:
+                after_time_by_key[k] = existing[k].time
+            else:
+                after_time_by_key[k] = csv_time_by_key[k]
+
+        before_fasted = _fasted_dates(before_time_by_key)
+        after_fasted = _fasted_dates(after_time_by_key)
+        changed_dates = sorted(before_fasted ^ after_fasted)
+
+        meal_days_regenerated = _reconcile_meal_rail(user, changed_dates)
+
+        db.session.commit()
+    except _ProtocolImportIntegrityError as e:
+        db.session.rollback()
+        import logging
+        logging.error("protocol import integrity check failed for user %s: %s", user.id, e)
+        return jsonify({"error": f"protocol import integrity check failed: {e}"}), 400
+    except Exception as e:
+        db.session.rollback()
+        import logging
+        logging.exception("protocol import failed for user %s", user.id)
+        return jsonify({"error": f"protocol import failed: {e}"}), 500
+
+    return jsonify({
+        "imported": imported,
+        "updated": updated,
+        "deleted": deleted,
+        "skipped": skipped,
+        "meal_days_regenerated": meal_days_regenerated,
+        "row_count": len(parsed_rows),
+        "per_compound": dict(Counter(r["compound"] for r in parsed_rows)),
+    })
+
+
+# ── User-facing protocol API ─────────────────────────────────────────────
+#
+# Thin endpoints over protocol.py's pure derivations — no gating logic
+# lives here beyond the write-gates documented per-endpoint below. "Today"
+# always comes from `_user_today()` (current_user's timezone), never the
+# server's UTC date. Every stamped "now" comes from `_utcnow()` so tests
+# can freeze it.
+
+@app.route("/api/protocol/today", methods=["GET"])
+@login_required
+def protocol_today():
+    """Today's peptide-protocol snapshot for the logged-in user: every dose
+    scheduled on the user-local date (orals included), the missed-dose
+    action list, per-vial inventory projection, whether today carries a
+    fasted (>=21:00) dose, and any lab reminders due within 7 days.
+
+    Each `missed` entry also carries an `id` (the underlying PeptideDose row
+    id) so the UI can call /toggle or /late on it directly — added at this
+    layer, not in protocol.missed_line() itself (that function's return
+    shape is pinned by tests/test_protocol_derivations.py).
+
+    NEVER includes PROTOCOL_COMPOUNDS reference content (mechanism,
+    effects, watch_fors) — this is a schedule/adherence payload only.
+    """
+    today = _user_today()
+    all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+    today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
+    vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
+    labs = LabReminder.query.filter_by(user_id=current_user.id).all()
+
+    labs_due = [
+        {"id": l.id, "label": l.label, "due_date": l.due_date.isoformat()}
+        for l in labs
+        if l.completed_at is None and l.due_date <= today + timedelta(days=7)
+    ]
+
+    # missed_line() (protocol.py) returns date/compound/rule/action only —
+    # its return shape is locked by tests/test_protocol_derivations.py exact-
+    # dict-equality assertions, so we don't add fields there. The UI's
+    # "mark taken"/"taken late" buttons need a dose id to act on, so we
+    # attach one here from the same untaken rows missed_line already
+    # filtered to (row.taken_at is None); (date, compound) is unique in
+    # practice (one scheduled event per compound per day).
+    _untaken_by_date_compound = {
+        (r.date, r.compound): r.id for r in all_rows if r.taken_at is None
+    }
+    missed = [
+        {"id": _untaken_by_date_compound.get((m["date"], m["compound"])),
+         "date": m["date"].isoformat(), "compound": m["compound"],
+         "rule": m["rule"], "action": m["action"]}
+        for m in missed_line(all_rows, today)
+    ]
+    vials_out = [
+        {"compound": v["compound"], "mg_remaining": v["mg_remaining"],
+         "doses_left": v["doses_left"], "runout_date": v["runout_date"].isoformat(),
+         "reorder_by": v["reorder_by"].isoformat(), "reorder_flag": v["reorder_flag"]}
+        for v in vial_status(vials, all_rows, today)
+    ]
+
+    return jsonify({
+        "date": today.isoformat(),
+        "doses": [
+            {
+                "id": r.id, "time": r.time, "event_type": r.event_type,
+                "compound": r.compound, "dose_mg": r.dose_mg,
+                "syringe_units": r.syringe_units, "site": r.site,
+                "notes": r.notes, "taken": r.taken_at is not None,
+            }
+            for r in today_rows
+        ],
+        "missed": missed,
+        "vials": vials_out,
+        "fasting_bound": "20:00" if fasted_dose_time(all_rows, today) else None,
+        "labs_due": labs_due,
+    })
+
+
+@app.route("/api/protocol/dose/<int:dose_id>/toggle", methods=["POST"])
+@login_required
+def protocol_dose_toggle(dose_id):
+    """UNGATED taken/untaken toggle for today's or yesterday's dose — this
+    is the retro-mark path (recording reality), never doctor-gated. Any
+    other date is rejected (400); a dose that isn't this user's 404s."""
+    dose = PeptideDose.query.get(dose_id)
+    if dose is None or dose.user_id != current_user.id:
+        return jsonify({"error": "dose not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    taken = bool(data.get("taken"))
+
+    today = _user_today()
+    yesterday = today - timedelta(days=1)
+    if dose.date not in (today, yesterday):
+        return jsonify({"error": "dose must be dated today or yesterday; use /late for older doses"}), 400
+
+    dose.taken_at = _utcnow() if taken else None
+    db.session.commit()
+    return jsonify({"taken": dose.taken_at is not None})
+
+
+@app.route("/api/protocol/dose/<int:dose_id>/late", methods=["POST"])
+@login_required
+def protocol_dose_late(dose_id):
+    """DOCTOR-GATED taken-late path for doses OLDER than yesterday (use
+    /toggle for today/yesterday). 403 with exactly CONFIRM_WITH_DOCTOR while
+    the compound's late_window_hours is null (the ship default for every
+    compound). When a doctor-confirmed window exists, the gate is computed
+    from REAL CLOCK TIME — not protocol.missed_line's midnight-floor
+    heuristic, which is display-only: scheduled_dt is the user-local
+    datetime of (dose.date + dose.time) converted to UTC via
+    zoneinfo(user.timezone), and the window closes at
+    scheduled_dt + late_window_hours."""
+    dose = PeptideDose.query.get(dose_id)
+    if dose is None or dose.user_id != current_user.id:
+        return jsonify({"error": "dose not found"}), 404
+
+    today = _user_today()
+    yesterday = today - timedelta(days=1)
+    if dose.date >= yesterday:
+        return jsonify({"error": "dose is not old enough for /late; use /toggle instead"}), 400
+
+    rule = PROTOCOL_COMPOUNDS.get(dose.compound, {})
+    late_window_hours = rule.get("late_window_hours")
+    if late_window_hours is None:
+        return jsonify({"error": CONFIRM_WITH_DOCTOR}), 403
+
+    from utils_time import ZoneInfo
+    tz = ZoneInfo(current_user.timezone or "UTC")
+    naive_local = datetime.combine(dose.date, datetime.strptime(dose.time, "%H:%M").time())
+    scheduled_utc = naive_local.replace(tzinfo=tz).astimezone(timezone.utc)
+    allowed_until = scheduled_utc + timedelta(hours=late_window_hours)
+
+    now = _utcnow()
+    if now > allowed_until:
+        return jsonify({"error": "late window expired"}), 400
+
+    dose.taken_at = now
+    db.session.commit()
+    return jsonify({"taken": True, "late": True})
+
+
+@app.route("/api/admin/add-vial", methods=["POST"])
+@admin_required
+def admin_add_vial():
+    """Create a PeptideVial for the target user. Body: {email, compound,
+    total_mg, reconstituted_on "YYYY-MM-DD", expiry_days, notes?}."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    compound = data.get("compound")
+    total_mg = data.get("total_mg")
+    reconstituted_on = data.get("reconstituted_on")
+    expiry_days = data.get("expiry_days")
+    if not compound or total_mg is None or not reconstituted_on or expiry_days is None:
+        return jsonify({"error": "compound, total_mg, reconstituted_on, expiry_days required"}), 400
+
+    try:
+        recon_date = datetime.strptime(reconstituted_on, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return jsonify({"error": "reconstituted_on must be YYYY-MM-DD"}), 400
+
+    vial = PeptideVial(
+        user_id=user.id, compound=compound, total_mg=float(total_mg),
+        reconstituted_on=recon_date, expiry_days=int(expiry_days),
+        notes=data.get("notes"),
+    )
+    db.session.add(vial)
+    db.session.commit()
+    return jsonify({"id": vial.id})
+
+
+@app.route("/api/admin/complete-lab-reminder", methods=["POST"])
+@admin_required
+def admin_complete_lab_reminder():
+    """Stamp a LabReminder's completed_at (UTC). Body: {email, reminder_id}."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+
+    reminder_id = data.get("reminder_id")
+    reminder = LabReminder.query.filter_by(id=reminder_id, user_id=user.id).first()
+    if not reminder:
+        return jsonify({"error": "lab reminder not found"}), 404
+
+    reminder.completed_at = _utcnow()
+    db.session.commit()
+    return jsonify({"id": reminder.id, "completed_at": reminder.completed_at.isoformat()})
+
+
 def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                             inline_llm=True):
     """Heavy weekly-program generation: exercise + run + meal coaches, then DB
@@ -5007,7 +5888,22 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             current_weight = despiked if despiked is not None else bw.weight_lbs
             target_weight_val = goal.target_weight
             weeks_remaining = max(1, 12 - target_week + 1)
-            required_weekly = (current_weight - target_weight_val) / weeks_remaining
+            _b3_anchor, _b3_start = (
+                _block3_anchor_and_start(current_user.id) if _block3_mode() else (None, None)
+            )
+            if _b3_anchor is not None and _b3_start is not None:
+                # Block-3 mode: required_weekly is the CURVE's own next-week
+                # delta (today -> today+7), not a straight-line recompute off
+                # current weight — the curve is the single authority every
+                # other surface reads (dashboard on_pace, cut_status.on_curve).
+                from goal_engine import curve_value as _curve_value
+                _b3_today = _user_today()
+                required_weekly = (
+                    _curve_value(_b3_anchor, _b3_start, _b3_today)
+                    - _curve_value(_b3_anchor, _b3_start, _b3_today + timedelta(days=7))
+                )
+            else:
+                required_weekly = (current_weight - target_weight_val) / weeks_remaining
             if required_weekly > 0:
                 deficit = {
                     "current_weight": current_weight,
@@ -5140,10 +6036,26 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         ).filter(WeeklyMealPlan.source != 'coach'),
             WeeklyMealPlan).delete(synchronize_session=False)
 
+        # Map (target_week, day_idx) -> calendar date via AppState.start_date —
+        # the SAME idiom /api/admin/generate-meals uses. NOT the calendar
+        # "today's Monday" idiom /api/meals/regenerate uses: this function
+        # regularly generates a FUTURE week ("Plan Next Week" defaults
+        # target_week to _current_week()+1), so a date must be derived from
+        # target_week itself, never from today's calendar week.
+        _meal_state = AppState.query.filter_by(user_id=current_user.id).first()
+
         for day_idx in range(7):
             if preserve_through is not None and day_idx <= preserve_through:
                 continue  # leave today + earlier days untouched
             day_type = day_types[day_idx]
+            _day_date = (
+                _meal_state.start_date + timedelta(days=(target_week - 1) * 7 + day_idx)
+                if _meal_state and _meal_state.start_date else None
+            )
+            _fasted_override, _fasted_note = (
+                _fasted_window_override(current_user.id, _day_date)
+                if _day_date is not None else (None, None)
+            )
 
             if day_type == 'fast_day':
                 # Use user's selected foods with fast-day calorie target
@@ -5167,6 +6079,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                         targets=day_macros,
                         fasting_protocol=fasting_protocol,
                         has_training=_has_tr,
+                        eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                     )
                 else:
                     meal_plan = MEAL_PLANS.get('fast_day', {})  # fallback only if no selections
@@ -5205,6 +6118,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                     targets=day_macros,
                     fasting_protocol=fasting_protocol,
                     targets_pre_adjusted=True,
+                    eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
                 )
                 # Surface the nutritionist's rationale on the served card so
                 # the athlete sees WHY the day is fueled this way.
@@ -6561,10 +7475,17 @@ def api_progress_dashboard():
     start_date = state.start_date if state and state.start_date else None
     weeks_remaining = max(0, 12 - current_week)
 
-    # Linear plan: straight line from start_weight to target_weight across 12 weeks.
-    # This is the "where you need to be" reference line the dashboard draws.
+    # Linear plan: the "where you need to be" reference line the dashboard
+    # draws. Block-3 mode: emit the stored curve rows under the SAME client
+    # key ({"week", "planned_weight"}) so the chart code (app.js
+    # _pdWeightChart) works unchanged. Legacy: straight line from
+    # start_weight to target_weight across 12 weeks.
+    projection_mode = "piecewise_block3" if _block3_mode() else None
     linear_plan = []
-    if start_weight is not None and target_weight is not None:
+    if projection_mode and goal and goal.weight_projection:
+        linear_plan = [{"week": row["week"], "planned_weight": row["projected"]}
+                       for row in goal.weight_projection]
+    elif start_weight is not None and target_weight is not None:
         for w in range(1, 13):
             frac = (w - 1) / 11.0 if 11 else 0
             linear_plan.append({
@@ -6601,7 +7522,20 @@ def api_progress_dashboard():
     # current-week linear-plan milestone disagreed with the projection, so the
     # badge could say ON PACE while the projection landed well above goal.
     on_pace = None
-    if projected_final_weight is not None and target_weight is not None:
+    if projection_mode:
+        # Block-3 mode: judge pace against the CURVE for today, not the
+        # extrapolated-to-week-12 projection — that's what curve_value/
+        # pace_status are for, and it's the same judgment cut_status.on_curve
+        # makes (both read the despiked weight so the two badges can't
+        # disagree — the no-UI-contradiction pin).
+        from goal_engine import pace_status
+        anchor, block3_start = _block3_anchor_and_start(uid)
+        if anchor is not None and block3_start is not None:
+            despiked_wt, _spiked = _despiked_current_weight(uid)
+            weight_for_pace = despiked_wt if despiked_wt is not None else current_weight
+            if weight_for_pace is not None:
+                on_pace = pace_status(weight_for_pace, anchor, block3_start, today) != "behind"
+    elif projected_final_weight is not None and target_weight is not None:
         tol = 1.5  # lb tolerance so tiny rounding differences don't flip the badge
         if start_weight is not None and target_weight < start_weight:
             on_pace = projected_final_weight <= target_weight + tol  # cut
@@ -6714,6 +7648,7 @@ def api_progress_dashboard():
             "weeks_remaining": weeks_remaining,
             "current_week": current_week,
             "on_pace": on_pace,
+            "projection_mode": projection_mode,
         },
         "psych_highlights": psych_highlights,
     })
@@ -8658,7 +9593,7 @@ def garmin_status():
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
     linked = gc.connected or _garmin_linked(current_user.id)
-    return jsonify({"connected": linked, "live": gc.connected, "linked": linked})
+    return jsonify({"connected": linked, "live": gc.connected, "linked": linked, "restore_error": gc.last_restore_error})
 
 
 @app.route("/api/garmin/today")
@@ -8669,8 +9604,7 @@ def garmin_today():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
-                            "linked": True, "reconnecting": True}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     summary = gc.get_today_summary(today=_user_today())
     if summary is None:
@@ -8795,8 +9729,7 @@ def garmin_sync_activities():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
-                            "linked": True, "reconnecting": True}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     try:
         days_back = max(1, min(30, int(data.get("days_back") or 3)))
@@ -8830,8 +9763,7 @@ def garmin_push_week():
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
-            return jsonify({"error": "Garmin is reconnecting (rate-limited). Your account is still linked — try again shortly.",
-                            "linked": True, "reconnecting": True}), 503
+            return _garmin_reconnect_response(gc)
         return jsonify({"error": "Not connected to Garmin"}), 401
     result = garmin_sync.push_week(gc, current_user.id, week, today=_user_today())
     return jsonify(result)
@@ -9257,7 +10189,41 @@ def _compute_goal_for_user(user, overrides=None):
     goal.calorie_by_day_type = cal_by_day
     goal.fasting_protocol = fasting["protocol"]
     goal.electrolyte_supplementation = fasting["electrolytes"]
-    goal.weight_projection = projection
+    # Block-3 mode: weight_projection is curve-managed (the transition writes
+    # it once from build_block3_projection; recalibrate/regenerate own any
+    # rebuild). Recomputing the goal here must never clobber the curve with
+    # this legacy metabolic re-simulation — unless the caller explicitly asks
+    # for it via override_projection_mode (e.g. an admin re-anchor).
+    import cut_guard
+    _override = bool(overrides.get("override_projection_mode"))
+    if _override:
+        goal.weight_projection = projection
+    elif cut_guard._block3_mode() and existing_goal is not None and existing_goal.weight_projection:
+        logging.info(
+            "[block3] preserving curve weight_projection for user %s "
+            "(projection_mode=piecewise_block3, no override_projection_mode)",
+            user.id)
+    elif cut_guard._block3_mode():
+        # No existing curve to preserve — a first-ever compute under the flag
+        # (existing_goal is None) or an existing goal that has no stored
+        # projection yet. The CANONICAL curve is the default output here too,
+        # never the legacy metabolic re-simulation — the best-known-method
+        # rule (block 3's curve replaces the old projection everywhere, not
+        # only where a curve already happens to be sitting). Without this
+        # branch, a brand-new user onboarded after the block-3 transition got
+        # the legacy shape on their very first goal compute.
+        anchor, _b3_start = cut_guard._block3_anchor_and_start(user.id)
+        if anchor is not None and _b3_start is not None:
+            from goal_engine import build_block3_projection
+            goal.weight_projection = build_block3_projection(anchor, _b3_start)
+        else:
+            goal.weight_projection = None
+            logging.warning(
+                "[block3] projection_mode is on but anchor/start_date could "
+                "not be resolved for user %s; leaving weight_projection unset "
+                "instead of writing the legacy shape", user.id)
+    else:
+        goal.weight_projection = projection
     db.session.commit()
 
     daily_deficit = tdee_info["tdee"] - targets["calories"]
@@ -9280,7 +10246,9 @@ def _compute_goal_for_user(user, overrides=None):
         "fasting_protocol": fasting["protocol"],
         "electrolytes": fasting["electrolytes"],
         "phase_plan": phase_plan,
-        "weight_projection": projection,
+        # Reflect what's actually STORED (preserved curve or freshly
+        # computed), never the discarded legacy re-simulation.
+        "weight_projection": goal.weight_projection,
         "calorie_by_day_type": cal_by_day,
     }, 200
 
@@ -9849,6 +10817,13 @@ def api_weekly_report(week):
     report = WeeklyReport.query.filter_by(user_id=current_user.id, week=week).first()
     if not report:
         return jsonify({"error": "No report for this week"}), 404
+    # Wellness has no WeeklyReport column (no schema migration for this) —
+    # recomputed at read-time via the SAME shared path compute_weekly_metrics
+    # uses (weekly_report.compute_week_wellness). GarminWellness rows are
+    # immutable per-date (write-once/refresh-in-place, never deleted), so
+    # this recompute is stable across repeated GETs, not a live-drifting value.
+    from weekly_report import compute_week_wellness
+    wellness = compute_week_wellness(report.week, current_user.id)
     return jsonify({
         "week": report.week,
         "workouts_completed": report.workouts_completed,
@@ -9861,6 +10836,7 @@ def api_weekly_report(week):
         "checkin_avg": report.checkin_avg,
         "adherence_pct": report.adherence_pct,
         "narrative": report.narrative,
+        "wellness": wellness,
     })
 
 @app.route("/api/weekly-report/result/<job_id>")
@@ -9883,68 +10859,12 @@ def api_weekly_report_result(job_id):
 @app.route("/api/goal/recalibrate", methods=["POST"])
 @login_required
 def api_goal_recalibrate():
-    from goal_engine import recalibrate_projection, compute_tdee
-
-    data = request.get_json()
-    actual_weight = data.get("weight")
-    week = data.get("week")
-
-    if not actual_weight or not week:
-        return jsonify({"error": "weight and week required"}), 400
-
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if not goal or not pa:
-        return jsonify({"error": "Goal not computed yet"}), 400
-
-    # Extract age/sex for TDEE recalc
-    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
-    sex = "male"
-    age = 30
-    if intake and intake.conversation:
-        for msg in intake.conversation:
-            content = msg.get("content", "").lower().strip()
-            if msg.get("role") == "user":
-                if content in ("male", "female", "m", "f"):
-                    sex = "female" if content in ("female", "f") else "male"
-                try:
-                    num = int(content)
-                    if 15 <= num <= 80:
-                        age = num
-                except ValueError:
-                    pass
-
-    # recalibrate_projection requires daily_calories + target_weight in every
-    # branch — omitting them made this endpoint 500 (TypeError on None math)
-    # on ANY weigh-in.
-    if goal.daily_calories is None or goal.target_weight is None:
-        return jsonify({"error": "Goal has no daily_calories/target_weight — recompute the goal first"}), 400
-
-    tdee_params = {
-        "height_in": pa.height_inches or 70,
-        "age": age,
-        "sex": sex,
-        "daily_calories": goal.daily_calories,
-        "target_weight": goal.target_weight,
-    }
-
-    result = recalibrate_projection(
-        actual_weight, week,
-        goal.weight_projection or [],
-        tdee_params
-    )
-
-    # Update goal — recalc TDEE at new weight
-    goal.weight_projection = result["updated_projection"]
-    goal.daily_calories = result["new_daily_calories"]
-    try:
-        new_tdee = compute_tdee(actual_weight, pa.height_inches or 70, age, sex)
-        goal.tdee = new_tdee["tdee"]
-    except Exception:
-        pass
-    db.session.commit()
-
-    return jsonify(result)
+    """RETIRED. Projection is curve-managed (goal_engine.build_block3_projection
+    / curve_value / pace_status) — recalibrating off a single weigh-in via the
+    old metabolic re-simulation would fight the canonical curve every writer
+    now preserves (see _compute_goal_for_user's block-3 guard). No replacement
+    endpoint: the coach reacts to pace via cut_status.on_curve instead."""
+    return jsonify({"error": "retired — projection is curve-managed"}), 410
 
 
 # ─── MORNING BRIEFING ─────────────────────────────────────────────────────
@@ -10494,8 +11414,15 @@ def api_admin_debug_regenerate_projection():
 
     Admin-only. Used when the original projection was anchored on an intermediate
     weigh-in (e.g., post-water-weight) instead of the true Mar 30 baseline.
+
+    Block-3 mode (SystemFlag projection_mode=piecewise_block3): rebuilds from
+    the CANONICAL curve (goal_engine.build_block3_projection) using the
+    stored block3_anchor SystemFlag + AppState.start_date — the request's
+    starting_weight is ignored (the curve has exactly one authority) so this
+    endpoint can't silently fork the projection away from what every other
+    surface reads.
     """
-    from goal_engine import project_weight_curve
+    from goal_engine import project_weight_curve, build_block3_projection
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     starting_weight = data.get("starting_weight")
@@ -10507,19 +11434,26 @@ def api_admin_debug_regenerate_projection():
     goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     if not goal:
         return jsonify({"error": "no training_goal for user"}), 404
-    pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
-    height = pa.height_inches if pa and pa.height_inches else 70
-    age = pa.age if pa and getattr(pa, "age", None) else 40
-    sex = pa.sex if pa and getattr(pa, "sex", None) else "male"
     before = goal.weight_projection
-    projection = project_weight_curve(
-        starting_weight=float(starting_weight),
-        target_weight=goal.target_weight,
-        tdee=goal.tdee or 2500,
-        daily_calories=goal.daily_calories or 2000,
-        weeks=12,
-        height_in=height, age=age, sex=sex,
-    )
+
+    if _block3_mode():
+        anchor, block3_start = _block3_anchor_and_start(user.id)
+        if anchor is None or block3_start is None:
+            return jsonify({"error": "block3 mode is on but anchor/start_date is missing"}), 400
+        projection = build_block3_projection(anchor, block3_start)
+    else:
+        pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
+        height = pa.height_inches if pa and pa.height_inches else 70
+        age = pa.age if pa and getattr(pa, "age", None) else 40
+        sex = pa.sex if pa and getattr(pa, "sex", None) else "male"
+        projection = project_weight_curve(
+            starting_weight=float(starting_weight),
+            target_weight=goal.target_weight,
+            tdee=goal.tdee or 2500,
+            daily_calories=goal.daily_calories or 2000,
+            weeks=12,
+            height_in=height, age=age, sex=sex,
+        )
     goal.weight_projection = projection
     db.session.commit()
     return jsonify({
@@ -10530,6 +11464,64 @@ def api_admin_debug_regenerate_projection():
         "before": before,
         "after": projection,
     })
+
+
+@app.route("/api/admin/block3-transition", methods=["POST"])
+@admin_required
+def api_admin_block3_transition():
+    """Transactional block-2 -> block-3 transition. See transition_block3.py
+    for the full ordering rationale — this endpoint is a thin wrapper that
+    owns the single db.session transaction; run_transition() itself never
+    commits or rolls back. Body: {email, anchor_weight (required),
+    dry_run: bool}."""
+    from transition_block3 import run_transition
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    anchor_weight = data.get("anchor_weight")
+    dry_run = bool(data.get("dry_run", False))
+    if not email or anchor_weight is None:
+        return jsonify({"error": "email + anchor_weight required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    try:
+        status, body = run_transition(user, float(anchor_weight), dry_run=dry_run)
+    except Exception as e:
+        db.session.rollback()
+        logging.error("block3-transition failed for %s: %s", email, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    if status == 200:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return jsonify(body), status
+
+
+@app.route("/api/admin/block3-rollback", methods=["POST"])
+@admin_required
+def api_admin_block3_rollback():
+    """Ordered inverse of block3-transition. See transition_block3.py's
+    run_rollback() docstring — the step order (un-re-home, then park, then
+    delete plan rows, then un-shift) is load-bearing. Body: {email}."""
+    from transition_block3 import run_rollback
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        return jsonify({"error": f"user {email!r} not found"}), 404
+    try:
+        status, body = run_rollback(user)
+    except Exception as e:
+        db.session.rollback()
+        logging.error("block3-rollback failed for %s: %s", email, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+    if status == 200:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return jsonify(body), status
 
 
 @app.route("/api/admin/generate-meals", methods=["POST"])
@@ -10611,6 +11603,25 @@ def api_admin_generate_meals():
         if day_meal_type == 'fast_day':
             day_macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
 
+        # Don't overwrite days the athlete has already logged meals for.
+        # Mirror the protection in /api/meals/regenerate so admin tools can't
+        # silently rewrite history either. Computed BEFORE generate_meal_plan
+        # (not just before the save) so the same _day_date also resolves the
+        # fasted-dose meal-timing rail below.
+        from datetime import timedelta as _timedelta, date as _date
+        from models import AppState as _AppState
+        _state = _AppState.query.filter_by(user_id=user.id).first()
+        _day_date = (_state.start_date + _timedelta(days=(week - 1) * 7 + day_idx)
+                    if _state and _state.start_date else None)
+        if _day_date is not None:
+            _mlog = MealLog.query.filter_by(user_id=user.id, log_date=_day_date).first()
+            if _mlog and (_mlog.eaten or []):
+                continue
+
+        _fasted_override, _fasted_note = (
+            _fasted_window_override(user.id, _day_date) if _day_date is not None else (None, None)
+        )
+
         try:
             meal_plan = generate_meal_plan(
                 selected_foods=fs.selected_foods,
@@ -10619,21 +11630,10 @@ def api_admin_generate_meals():
                 fasting_protocol=fasting_protocol,
                 has_training=_day_has_training(user.id, week, day_idx),
                 targets_pre_adjusted=True,
+                eating_window_end_override=_fasted_override, fasting_note=_fasted_note,
             )
         except Exception as e:
             continue
-
-        # Don't overwrite days the athlete has already logged meals for.
-        # Mirror the protection in /api/meals/regenerate so admin tools can't
-        # silently rewrite history either.
-        from datetime import timedelta as _timedelta, date as _date
-        from models import AppState as _AppState
-        _state = _AppState.query.filter_by(user_id=user.id).first()
-        if _state and _state.start_date:
-            _day_date = _state.start_date + _timedelta(days=(week - 1) * 7 + day_idx)
-            _mlog = MealLog.query.filter_by(user_id=user.id, log_date=_day_date).first()
-            if _mlog and (_mlog.eaten or []):
-                continue
 
         # Save
         save_day_type = day_meal_type if day_meal_type != 'standard' else cal_day_type
@@ -11217,128 +12217,13 @@ def api_session_summary(week, day_idx):
 @app.route("/api/deficit-plan", methods=["POST"])
 @login_required
 def api_deficit_plan():
-    """Calculate deficit gap and recommend interventions to hit target weight."""
-    from math import ceil
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    if not goal or not goal.target_weight:
-        return jsonify({"error": "No target weight set"}), 400
-
-    # Current weight from latest bodyweight entry
-    bw = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date.desc()).first()
-    if not bw:
-        return jsonify({"error": "No weight data"}), 400
-
-    current_weight = bw.weight_lbs  # BodyWeight has no `.weight` — was a live AttributeError/500
-    target_weight = goal.target_weight
-
-    week = _current_week()
-    weeks_remaining = max(1, 12 - week + 1)
-    required_weekly_loss = (current_weight - target_weight) / weeks_remaining
-
-    if required_weekly_loss <= 0:
-        return jsonify({"on_pace": True, "message": "Already at or below target"})
-
-    # BMR -- use actual if available, otherwise Mifflin-St Jeor
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if pa and pa.actual_bmr:
-        bmr = pa.actual_bmr
-    elif pa and pa.bodyweight_lbs and pa.height_inches:
-        # Mifflin-St Jeor (male): 10 x kg + 6.25 x cm - 5 x age - 5
-        weight_kg = pa.bodyweight_lbs * 0.453592
-        height_cm = pa.height_inches * 2.54
-        age = _extract_age_from_intake(current_user.id)
-        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 5
-    else:
-        bmr = current_weight * 10  # rough fallback
-
-    # Current daily calories
-    daily_cals = goal.daily_calories or 2000
-
-    # Exercise burn estimate (from this week's SetLog)
-    local_today = _user_today()
-    week_start = local_today - timedelta(days=local_today.weekday())
-    sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.logged_date >= week_start,
-        SetLog.done == True
-    ).all()
-    # Rough estimate: ~7 cal per completed set (conservative average for compound lifts)
-    # 100 sets/week x 7 = 700 cal/week, consistent with research (150-250 kcal/hour)
-    exercise_burn = len(sets) * 7
-    exercise_burn = max(exercise_burn, 200)  # floor at 200 cal/week from lifting
-
-    # Run burn estimate
-    runs = RunLog.query.filter(
-        RunLog.user_id == current_user.id,
-        RunLog.log_date >= week_start
-    ).all()
-    run_burn = sum((r.distance_miles or 0) * current_weight * 0.63 for r in runs)
-
-    # Weekly budget
-    eating_days = 5  # Mon-Fri (Sat-Sun could be fast)
-    weekly_intake = daily_cals * eating_days
-    weekly_expenditure = (bmr * 7) + exercise_burn + run_burn
-    current_deficit = weekly_expenditure - weekly_intake
-    required_deficit = required_weekly_loss * 3500
-    gap = required_deficit - current_deficit
-
-    if gap <= 0:
-        return jsonify({
-            "on_pace": True,
-            "current_weight": current_weight,
-            "target_weight": target_weight,
-            "weeks_remaining": weeks_remaining,
-            "current_deficit": round(current_deficit),
-            "required_deficit": round(required_deficit),
-            "bmr": round(bmr),
-        })
-
-    recommendations = {"add_saturday_fast": True}
-    remaining_gap = gap
-
-    # 1. Saturday fast
-    fast_savings = bmr
-    remaining_gap -= fast_savings
-
-    # 2. Reduce daily calories
-    protein_floor = target_weight  # 1g/lb target weight in protein = ~4 cal/g
-    cal_floor = max(bmr, protein_floor * 4 + 400)  # protein + minimum fat/carb
-    max_reduction = max(0, daily_cals - cal_floor)
-    cal_reduction = min(remaining_gap / eating_days, max_reduction) if remaining_gap > 0 else 0
-    remaining_gap -= cal_reduction * eating_days
-    recommendations["cal_reduction_per_day"] = round(cal_reduction)
-    recommendations["new_daily_calories"] = round(daily_cals - cal_reduction)
-
-    # 3. Increase run duration
-    if remaining_gap > 0:
-        extra_min = remaining_gap / 50  # ~10 cal/min x 5 days
-        remaining_gap -= extra_min * 50
-        recommendations["extra_run_minutes"] = round(extra_min)
-
-    # 4. Tempo swaps
-    if remaining_gap > 0:
-        avg_run_burn = (run_burn / max(len(runs), 1))
-        tempo_swaps = min(3, ceil(remaining_gap / max(avg_run_burn * 0.3, 50)))
-        remaining_gap -= tempo_swaps * max(avg_run_burn * 0.3, 50)
-        recommendations["tempo_swap_days"] = tempo_swaps
-
-    if remaining_gap > 0:
-        recommendations["shortfall"] = round(remaining_gap)
-
-    recommendations["protein_floor_grams"] = round(target_weight)
-
-    return jsonify({
-        "on_pace": False,
-        "current_weight": current_weight,
-        "target_weight": target_weight,
-        "weeks_remaining": weeks_remaining,
-        "required_weekly_loss": round(required_weekly_loss, 1),
-        "current_deficit": round(current_deficit),
-        "required_deficit": round(required_deficit),
-        "gap": round(gap),
-        "bmr": round(bmr),
-        "recommendations": recommendations,
-    })
+    """RETIRED. Projection is curve-managed (goal_engine.build_block3_projection
+    / curve_value / pace_status) — the ad-hoc deficit-gap recommender computed
+    its own required_weekly_loss off a straight-line target, which now
+    disagrees with the curve every other surface reads. No replacement
+    endpoint: the coach reacts via cut_status.on_curve / weekly-gen's
+    curve-derived required_weekly instead."""
+    return jsonify({"error": "retired — projection is curve-managed"}), 410
 
 
 @app.route("/api/bmr-recalculate", methods=["POST"])

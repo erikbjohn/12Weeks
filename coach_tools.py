@@ -98,6 +98,26 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_protocol_status",
+        "description": (
+            "Get the athlete's peptide-protocol dose history, 7-day "
+            "adherence, and upcoming escalation schedule (dose or "
+            "frequency increases). Use when the athlete asks about their "
+            "peptide stack, a specific compound's schedule, whether "
+            "they've been consistent taking doses, or when their next "
+            "dose/frequency increase happens."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer", "default": 7, "minimum": 1, "maximum": 90,
+                    "description": "How many days of dose history to return, ending today.",
+                },
+            },
+        },
+    },
+    {
         "name": "consult_nutritionist",
         "description": (
             "Consult the Nutritionist specialist. Use when the question "
@@ -396,6 +416,42 @@ def _tool_get_today_status(user_id: int) -> str:
     }, default=str)
 
 
+def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
+    """Peptide-protocol dose history + adherence + upcoming escalation
+    schedule. `days` bounds the dose-history window (ending today, default
+    7d); escalation_dates_next_14d always looks 14 days ahead regardless of
+    `days` so the coach never misses a near-term schedule change even when
+    asked for a short history window.
+    """
+    from models import PeptideDose
+    from protocol import adherence_7d, next_escalation, escalation_dates, is_late
+    today = _user_local_today(user_id)
+    all_rows = PeptideDose.query.filter_by(user_id=user_id).all()
+    days = int(days)
+    start = today - timedelta(days=days - 1)
+    window_rows = sorted(
+        (r for r in all_rows if start <= r.date <= today),
+        key=lambda r: (r.date, r.time),
+    )
+    history = [
+        {
+            "date": str(r.date), "time": r.time, "compound": r.compound,
+            "dose_mg": r.dose_mg, "taken": r.taken_at is not None,
+            "late": is_late(r),
+        }
+        for r in window_rows
+    ]
+    horizon = today + timedelta(days=14)
+    upcoming = [str(d) for d in escalation_dates(all_rows) if today <= d < horizon]
+    return json.dumps({
+        "window_days": days,
+        "dose_history": history,
+        "adherence_7d": adherence_7d(all_rows, today),
+        "next_escalation": next_escalation(all_rows, today),
+        "escalation_dates_next_14d": upcoming,
+    }, default=str)
+
+
 def _tool_consult_nutritionist(user_id: int, brief: str) -> str:
     from coach_specialists.nutritionist import consult
     return consult(brief=brief, user_id=user_id)
@@ -417,6 +473,7 @@ _DISPATCH = {
     "get_e1rm": _tool_get_e1rm,
     "get_body_state": _tool_get_body_state,
     "get_today_status": _tool_get_today_status,
+    "get_protocol_status": _tool_get_protocol_status,
     "consult_nutritionist": _tool_consult_nutritionist,
     "consult_strength": _tool_consult_strength,
     "consult_running": _tool_consult_running,

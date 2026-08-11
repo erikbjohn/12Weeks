@@ -61,6 +61,141 @@ DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 # ---------------------------------------------------------------------------
+# Wellness trend aggregation — pure, DB-row-in / dict-out. Shared by the
+# coach's "garmin" section builder AND weekly_report.compute_weekly_metrics
+# (window override) so there is exactly ONE definition of "RHR 7d avg" etc.
+# ---------------------------------------------------------------------------
+
+# Garmin sync was REPAIRED 2026-08-10 (see project_garmin_sync memory) — no
+# wellness rows exist before that date. A pre-protocol baseline is therefore
+# impossible; "baseline" instead means the first BASELINE_WINDOW_DAYS calendar
+# days on/after this fixed anchor, gated on having a real sample in that span.
+BASELINE_ANCHOR = date(2026, 8, 10)
+BASELINE_WINDOW_DAYS = 14
+BASELINE_MIN_DAYS = 7
+
+# All nullable metric columns on GarminWellness (excludes id/user_id/date/
+# raw_json/pulled_at) — mirrors garmin_sync._METRIC_COLS. Used only to decide
+# whether a row counts as "has data" (an all-NULL row means "checked, nothing
+# there", not a sync miss).
+_WELLNESS_METRIC_COLS = (
+    "sleep_seconds", "sleep_score", "hrv_last_night", "hrv_weekly_avg",
+    "hrv_status", "body_battery", "training_readiness", "training_status",
+    "vo2max", "stress_overall", "resting_hr",
+)
+
+
+def _mean1(values):
+    """Mean of the non-None values, rounded to 1dp, or None if none present."""
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 1)
+
+
+def _wellness_has_data(row):
+    return any(getattr(row, c, None) is not None for c in _WELLNESS_METRIC_COLS)
+
+
+def wellness_trends(rows, today, window=None):
+    """Pure RHR/HRV/sleep-score trend summary over GarminWellness rows.
+
+    rows: any iterable of GarminWellness-like objects (order doesn't matter —
+        every stat is computed by filtering on `.date`, never by position).
+    today: date anchor for the default "last 7 days" / "last 28 days"
+        windows. Ignored (but still required) when `window` is given.
+    window: optional (start_date, end_date) INCLUSIVE override for the "7d"
+        window — weekly_report uses this to report a specific past week
+        instead of the trailing 7 days from today. The "28d" window always
+        trails the 7d window's END date (not `today`), so a past-week report
+        and a live coach read stay internally consistent.
+
+    "dark" fires when fewer than 4 of the 7 days in the (possibly overridden)
+    window have ANY synced metric — sparse data the coach must not narrate
+    around (rule 20 confabulation guard). `dark_line` is the exact sentence
+    to surface verbatim in that case; None when not dark.
+
+    "baseline" is NOT relative to `today`/`window` — see BASELINE_ANCHOR
+    above. It is only populated when at least BASELINE_MIN_DAYS of the
+    BASELINE_WINDOW_DAYS-day baseline span actually have data; otherwise
+    None (sample too thin to call it a baseline).
+    """
+    if window is not None:
+        win_start, win_end = window
+    else:
+        win_end = today
+        win_start = today - timedelta(days=6)
+    win28_start = win_end - timedelta(days=27)
+
+    def _in_range(lo, hi):
+        return [r for r in rows if r.date is not None and lo <= r.date <= hi]
+
+    rows_7d = _in_range(win_start, win_end)
+    rows_28d = _in_range(win28_start, win_end)
+
+    days_with_data_7d = sum(1 for r in rows_7d if _wellness_has_data(r))
+    dark = days_with_data_7d < 4
+
+    result = {
+        "rhr_7d": _mean1(r.resting_hr for r in rows_7d),
+        "rhr_28d": _mean1(r.resting_hr for r in rows_28d),
+        "hrv_7d": _mean1(r.hrv_last_night for r in rows_7d),
+        "hrv_28d": _mean1(r.hrv_last_night for r in rows_28d),
+        "sleep_score_7d": _mean1(r.sleep_score for r in rows_7d),
+        "days_with_data_7d": days_with_data_7d,
+        "dark": dark,
+        "dark_line": (
+            f"Garmin wellness: no synced data for {7 - days_with_data_7d} of last 7 days"
+            if dark else None
+        ),
+    }
+
+    baseline_end = BASELINE_ANCHOR + timedelta(days=BASELINE_WINDOW_DAYS - 1)
+    rows_baseline = _in_range(BASELINE_ANCHOR, baseline_end)
+    baseline_days = sum(1 for r in rows_baseline if _wellness_has_data(r))
+    if baseline_days >= BASELINE_MIN_DAYS:
+        result["baseline"] = {
+            "rhr": _mean1(r.resting_hr for r in rows_baseline),
+            "hrv": _mean1(r.hrv_last_night for r in rows_baseline),
+            "since": BASELINE_ANCHOR.isoformat(),
+        }
+    else:
+        result["baseline"] = None
+
+    return result
+
+
+def format_wellness_line(w):
+    """One-line, numbers-only rendering of a wellness_trends() dict — the
+    dark_line verbatim when dark, else
+    'wellness: RHR 7d avg X (28d Y[; baseline Z since D]) · HRV 7d X (28d Y)
+    · sleep score 7d X · data N/7 days'. Returns None when `w` is falsy.
+
+    SHARED by the coach prompt injection (_format_athlete_data) and the
+    weekly-report narrative prompt (weekly_report.generate_report_narrative)
+    — one definition of "what the wellness line looks like", never a second
+    copy that could drift. Numbers only — interpretation is the caller's
+    (coach or narrative model), never this formatter's.
+    """
+    if not w:
+        return None
+    if w.get("dark"):
+        return w["dark_line"]
+
+    def _n(v):
+        return "?" if v is None else v
+
+    rhr_frag = f"RHR 7d avg {_n(w['rhr_7d'])} (28d {_n(w['rhr_28d'])}"
+    if w.get("baseline"):
+        rhr_frag += f"; baseline {_n(w['baseline']['rhr'])} since {w['baseline']['since']}"
+    rhr_frag += ")"
+    hrv_frag = f"HRV 7d {_n(w['hrv_7d'])} (28d {_n(w['hrv_28d'])})"
+    sleep_frag = f"sleep score 7d {_n(w['sleep_score_7d'])}"
+    data_frag = f"data {w['days_with_data_7d']}/7 days"
+    return "wellness: " + " · ".join([rhr_frag, hrv_frag, sleep_frag, data_frag])
+
+
+# ---------------------------------------------------------------------------
 # Section builders — one per agent.requires key
 # ---------------------------------------------------------------------------
 
@@ -170,7 +305,25 @@ def _build_garmin():
         gc.try_restore_tokens(current_user.id)
     garmin_data = gc.get_today_summary() if gc.connected else None
     readiness = assess_readiness(garmin_data) if garmin_data else None
-    return {"garmin": garmin_data, "readiness": readiness}
+
+    # Wellness trend: DB-only read, ZERO Garmin API calls — works even when
+    # the live client above is disconnected/rate-limited. ALWAYS included
+    # (even all-None/dark): omitting this block on sparse data is exactly
+    # the silence that let the coach invent a rationale before (rule 20).
+    # Isolated in its own try/except (mirrors the build_claims pattern in
+    # _format_athlete_data, ~line 1962) so a wellness QUERY failure degrades
+    # to a dark wellness block instead of discarding the whole garmin
+    # section — including the live garmin_data/readiness already fetched
+    # above, which have nothing to do with this DB read.
+    try:
+        from models import GarminWellness
+        wellness_rows = GarminWellness.query.filter_by(user_id=current_user.id).all()
+        wellness = wellness_trends(wellness_rows, _user_today())
+    except Exception:
+        log.warning("Wellness DB read failed; degrading to dark wellness block", exc_info=True)
+        wellness = wellness_trends([], _user_today())
+
+    return {"garmin": garmin_data, "readiness": readiness, "wellness": wellness}
 
 
 def _resolve_workout_for_day(week, day_idx):
@@ -628,16 +781,13 @@ def _build_cut_status():
         recent_pace = round((recent[-1].weight_lbs - recent[0].weight_lbs) / (rdays / 7), 2)
         if pace_per_week is not None and pace_per_week < 0 and recent_pace > 0:
             trend_reversal = True  # overall losing, recently gaining
-        # Acute spike: the LATEST weigh-in jumped 3-8 lb WITHIN ~10 days while the
-        # step before it was still descending, with >=3 weigh-ins to establish the
-        # trend. Strict so a genuine multi-week regain isn't excused as water — a
-        # slow regain still surfaces via trend_reversal, which the coach reacts to.
-        # This definition MUST match _despiked_current_weight in app.py exactly.
-        last_step = bws[-1].weight_lbs - bws[-2].weight_lbs
-        step_days = (bws[-1].log_date - bws[-2].log_date).days
-        prior_down = len(bws) >= 3 and bws[-2].weight_lbs < bws[-3].weight_lbs
-        if 3 <= last_step <= 8 and prior_down and 0 < step_days <= 10:
-            water_spike_suspected = True
+        # Acute spike: shares cut_guard.detect_water_spike with
+        # app._despiked_current_weight, so the two can no longer drift out of
+        # sync. bws here is oldest-first; the detector wants newest-first.
+        import cut_guard
+        expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
+        _, water_spike_suspected = cut_guard.detect_water_spike(
+            list(reversed(bws[-3:])), expected_loss)
 
     # Latest weigh-in note (e.g. "glutened at dinner") — surfaces context the coach
     # would otherwise never see.
@@ -699,6 +849,25 @@ def _build_cut_status():
     weekday = today.weekday()  # Mon=0
     sodium_prep_active = weekday in (4, 5)  # Fri / Sat
 
+    # ── Block-3 curve fields ─────────────────────────────────────────────
+    # Same judgment the dashboard's on_pace badge makes (goal_engine.curve_value
+    # / pace_status, on the DESPIKED weight) so the two surfaces can never
+    # disagree — the no-UI-contradiction pin. cut_guard owns the SystemFlag
+    # lookup; this module must not import app.py.
+    import cut_guard
+    curve_target_today = None
+    on_curve = None
+    if cut_guard._block3_mode():
+        _anchor, _block3_start = cut_guard._block3_anchor_and_start(current_user.id)
+        if _anchor is not None and _block3_start is not None:
+            from goal_engine import curve_value, pace_status
+            _expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
+            _curve_weight, _ = cut_guard.detect_water_spike(
+                list(reversed(bws))[:3], _expected_loss)
+            if _curve_weight is not None:
+                curve_target_today = curve_value(_anchor, _block3_start, today)
+                on_curve = pace_status(_curve_weight, _anchor, _block3_start, today)
+
     return {"cut_status": {
         "current_weight": current_weight,
         "target_weight": target_weight,
@@ -718,7 +887,109 @@ def _build_cut_status():
             "Plain water, no soy/cured/processed. Drops 2-3 lb water by Sun morning."
             if sodium_prep_active else None
         ),
+        "curve_target_today": curve_target_today,
+        "on_curve": on_curve,
     }}
+
+
+@section_builder("protocol_status")
+def _build_protocol_status():
+    """Peptide-protocol status: today's doses, escalation state, adherence,
+    vial reorder flags, labs due, and which compounds' watch_fors are
+    "live" (a dose scheduled within +/-3 days of today).
+
+    Delegates all math to protocol.py (pure, DB-free) — this builder only
+    queries PeptideDose/PeptideVial/LabReminder and shapes the payload.
+    Returns {"protocol_status": None} (block absent, not empty) when the
+    user has zero PeptideDose rows — no protocol imported, nothing to say.
+
+    escalation_window / next_escalation here answer a DIFFERENT question
+    than protocol.escalation_window/next_escalation's own forward-looking
+    ("is a dose increase coming up") framing. CORE_PROMPT rule 22 needs
+    bounded ANOMALY ATTRIBUTION: "did we recently escalate, such that a
+    GI/water symptom might still be attributable to it" — a LOOK-BACK
+    question, not a look-ahead one. We get that from the SAME pure
+    functions by evaluating them from `window_start = today - 6d` instead
+    of `today`: escalation_window then reports True iff an escalation date
+    falls in [today-6, today] (today inclusive — "within 7 days after the
+    escalation, counting the escalation day itself", matching the injected
+    "until +7d after <date>" text), and next_escalation reports whichever
+    escalation event is relevant right now — a still-in-window recent one
+    if there is one, else the next genuinely upcoming one.
+    """
+    from models import PeptideDose, PeptideVial, LabReminder
+    from protocol import (
+        adherence_7d, escalation_window as _escalation_window,
+        next_escalation as _next_escalation, vial_status, missed_line,
+        current_dose_mg, PROTOCOL_COMPOUNDS,
+    )
+    today = _user_today()
+
+    all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+    if not all_rows:
+        return {"protocol_status": None}
+
+    today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
+    summary = [
+        {"compound": r.compound, "dose_mg": r.dose_mg, "time": r.time}
+        for r in today_rows
+    ]
+
+    # Held doses (dose_mg <= 0) are excluded — a hold means "no dose today",
+    # not a new dose LEVEL. Delegated to protocol.current_dose_mg so a held
+    # row on the most recent scheduled date doesn't read as "current dose
+    # is 0mg" (that reported 0.0 for a real athlete before this fix).
+    current_retatrutide_mg = current_dose_mg(all_rows, today, "Retatrutide")
+
+    window_start = today - timedelta(days=6)
+    next_esc = _next_escalation(all_rows, window_start)
+    esc_window_active = _escalation_window(all_rows, window_start, days=7)
+
+    vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
+    vial_flags = [v for v in vial_status(vials, all_rows, today) if v["reorder_flag"]]
+
+    labs = LabReminder.query.filter_by(user_id=current_user.id).all()
+    labs_due = [
+        {"label": l.label, "due_date": l.due_date}
+        for l in labs
+        if l.completed_at is None and l.due_date <= today + timedelta(days=7)
+    ]
+
+    watch_fors_active = {}
+    for r in all_rows:
+        if abs((r.date - today).days) <= 3:
+            compound_info = PROTOCOL_COMPOUNDS.get(r.compound)
+            if compound_info and r.compound not in watch_fors_active:
+                watch_fors_active[r.compound] = compound_info["watch_fors"]
+
+    return {"protocol_status": {
+        "summary": summary,
+        "current_retatrutide_mg": current_retatrutide_mg,
+        "next_escalation": next_esc,
+        "escalation_window": esc_window_active,
+        "adherence_7d": adherence_7d(all_rows, today),
+        "missed": missed_line(all_rows, today),
+        "vial_flags": vial_flags,
+        "labs_due": labs_due,
+        "watch_fors_active": watch_fors_active,
+    }}
+
+
+@section_builder("lift_trend")
+def _build_lift_trend():
+    """Codified lift-decline detector (recomp goal "Line 2" tripwire) —
+    ALL math delegates to lift_trend.lift_decline (pure, DB-only, no
+    request context), the SAME function weekly_report.compute_weekly_metrics
+    calls, so the coach and the weekly report can never disagree about
+    whether a decline is real. Never left to LLM judgment.
+
+    Unlike cut_status/protocol_status this block is never None — it's not
+    gated on a goal type, and lift_decline() itself degrades gracefully
+    (never trips) when there isn't enough lifting history yet.
+    """
+    from lift_trend import lift_decline
+    week = _current_week()
+    return {"lift_trend": lift_decline(current_user.id, week)}
 
 
 @section_builder("today_status")
@@ -1411,6 +1682,17 @@ Intensity level: {anger_level_label}
    10pm) — call it out FIRST. Examples: "1:14 AM check-in. You're not sleeping —
    that's the conversation." "Weigh-in at 11:40pm is meaningless data — do it
    tomorrow morning fasted."
+   PROTOCOL CARVE-OUT: on any date where <protocol_status> shows a scheduled dose at or after 21:00,
+   protocol interactions in that window — checking a dose off, asking about dose
+   or injection site, noting a side effect — from 30 minutes before that
+   scheduled time until 45 minutes after are PROTOCOL COMPLIANCE, not a
+   late-hours anomaly. Do not scold. Close it toward sleep: "Dose done. Screens
+   off." Derive the window from protocol_status's actual scheduled time for that
+   date — never a hardcoded clock value. Every other after-10pm interaction still
+   gets the full rule-6 callout above, sharpened by the tesamorelin GH-pulse
+   rationale from Oct 5: growth hormone release is pulsatile and disrupted by
+   poor sleep, so a late-night non-protocol conversation is now doubly the wrong
+   move.
 7. FOOD SAFETY — Never suggest a food not in the approved list. Never ignore an allergy. Violations are a system failure.
 8. FASTING — Never suggest calories outside the eating window. Before the window opens: black coffee, water, zero-cal only.
 9. VOLUME — Use the training engine's prescription for sets/reps/weight. Do not re-derive from raw logs.
@@ -1446,6 +1728,14 @@ Intensity level: {anger_level_label}
     b) If no weigh-in has been logged recently, CHASE IT: "No weigh-in since [date]. I can't run the cut blind. Fasted, this morning. Now." A missing weigh-in is not a reason to ignore the cut — it's the first thing to fix.
     c) GLUTEN / WATER GUARD: a one-week jump of roughly 3-8 lb against a downtrend (cut_status.water_spike_suspected or trend_reversal true) is WATER and inflammation, NOT fat. Say so plainly. HOLD the deficit — do NOT deepen it, do NOT call it a blown cut, do NOT panic-cut calories. Expect it to flush in 1-2 weeks. A glutening is an event, not a failure.
     ASSUMING the athlete handled the cut on their own — saying nothing about the scale — is the exact failure that cost block 1. Do not repeat it. The cut is coached, not tracked. (Cross-turn: if you already gave the scale directive earlier in THIS chat and nothing has changed since — no new weigh-in — do not repeat it every message. Like rule 19, reconcile against chat_history; coach the cut, don't nag it.)
+22. PEPTIDE PROTOCOL — BOUNDED ATTRIBUTION, NEVER CAUSATION. The athlete runs a doctor-prescribed peptide protocol; its live state (today's doses, adherence, escalation schedule, vial/lab flags) arrives in <protocol_status> — read it, don't ask the athlete to recite it.
+    a) ANOMALY ATTRIBUTION IS BOUNDED. Only attribute a symptom or a scale/appetite anomaly to the stack when BOTH hold: protocol_status shows escalation_window true, AND the effect is explicitly listed in that compound's watch_fors. Even then, cite the dated event — "escalated to 4mg on 9/21; stall overlaps the window" — never assert the drug caused it. You are noting an overlap, not diagnosing a mechanism.
+    b) DIRECTION: a stall INSIDE an escalation window may be GI/water masking — HOLD the deficit, do not deepen it, expect it to clear within the window (same logic as the gluten/water guard in rule 21c). A stall at a STABLE dose (no recent escalation) is a real stall — tighten it, same as any other rule-21 stall.
+    c) RULE 21 STILL FIRES EVERY RESPONSE. The protocol never excuses silence on the scale — name the pace with the number and give ONE cut directive every time, exactly as rule 21 requires.
+    d) PROTEIN FLOOR — enforce it hardest during escalation windows and appetite crashes; appetite suppression is exactly when lean mass is most at risk.
+    e) LIFTING VOLUME — when <lift_trend> reports lift_decline_suspected, surface the cut-speed vs training-volume trade-off explicitly, with the underlying numbers (deficit size, weeks left, the lift trend itself). Never silently cut lifting volume to protect the cut — that trade-off is named out loud, with numbers, every time it's live.
+    f) MISSED DOSES — state the compound's codified missed_dose_rule verbatim from protocol_status. Every compound ships with the placeholder rule: say EXACTLY "confirm with your doctor" and nothing more. Never improvise dosing advice, a "safe to take late" window, or a make-up dose schedule — rule 20 (never fabricate a rationale) applies to dosing exactly as it does to training data.
+    g) GLP-1 HYGIENE — with Retatrutide active, emphasize fiber and hydration (gastric emptying is slowed). Flag alcohol explicitly: it hits much harder under delayed gastric emptying — treat it as a bigger violation than usual, not the same as an unmedicated week.
 </non_negotiable_rules>
 
 <markers>
@@ -1800,6 +2090,78 @@ def _format_athlete_data(ctx, requires):
         )
         parts.append("\n".join(cs_lines))
 
+    # Protocol status — peptide-protocol dose/adherence/escalation state.
+    # Absent entirely (no <protocol_status> block) when the athlete has no
+    # PeptideDose rows imported — silence reads as "no protocol", never a
+    # fabricated empty block.
+    ps = ctx.get("protocol_status")
+    if ps:
+        ps_lines = ["<protocol_status>"]
+        for s in ps.get("summary") or []:
+            ps_lines.append(f"  dose: {s['compound']} {s['dose_mg']}mg @ {s['time']}")
+        if ps.get("current_retatrutide_mg") is not None:
+            ps_lines.append(f"  current_retatrutide_mg: {ps['current_retatrutide_mg']}")
+        ne = ps.get("next_escalation")
+        if ps.get("escalation_window") and ne:
+            ps_lines.append(
+                f"  ESCALATION WINDOW ACTIVE (until +7d after {ne['date']}): {ne['detail']}"
+            )
+        if ne:
+            ps_lines.append(f"  next_escalation: {ne['date']} — {ne['detail']}")
+        adh = ps.get("adherence_7d") or {}
+        if adh.get("pct") is not None:
+            ps_lines.append(f"  adherence_7d: {adh['pct']}% ({adh.get('late', 0)} late)")
+        for m in ps.get("missed") or []:
+            ps_lines.append(f"  missed: {m['compound']} on {m['date']} — rule: {m['rule']}")
+        for v in ps.get("vial_flags") or []:
+            ps_lines.append(
+                f"  VIAL REORDER: {v['compound']} — runout {v['runout_date']}, reorder by {v['reorder_by']}"
+            )
+        for lab in ps.get("labs_due") or []:
+            ps_lines.append(f"  lab_due: {lab['label']} — due {lab['due_date']}")
+        for compound, effects in (ps.get("watch_fors_active") or {}).items():
+            ps_lines.append(f"  watch_fors: {compound} — {'; '.join(effects)}")
+        ps_lines.append("</protocol_status>")
+        ps_lines.append(
+            "Use protocol_status for dose state and adherence. Attribute anomalies to "
+            "the stack ONLY when escalation_window is true AND the effect is listed in "
+            "watch_fors — cite the dated event, never assert causation. Missed doses: "
+            "state the compound's rule verbatim; if it is 'confirm with your doctor', "
+            "say exactly that and nothing more."
+        )
+        parts.append("\n".join(ps_lines))
+
+    # Lift-decline tripwire (recomp "Line 2") — codified, never LLM
+    # judgment. Always present (not gated on goal type, unlike
+    # cut_status/protocol_status): either the full suspected block with
+    # per-lift deltas + tonnage + weeks compared, or a brief one-liner
+    # confirming the detector ran and found nothing.
+    lt = ctx.get("lift_trend")
+    if lt:
+        if lt.get("lift_decline_suspected"):
+            lt_lines = ["<lift_trend>"]
+            lt_lines.append(f"  LIFT_DECLINE_SUSPECTED: {lt.get('details', '')}")
+            for name, pct in (lt.get("e1rm_deltas") or {}).items():
+                if pct is not None:
+                    lt_lines.append(f"  e1rm_delta: {name} {pct}%")
+            if lt.get("tonnage_delta_pct") is not None:
+                lt_lines.append(f"  tonnage_delta_pct: {lt['tonnage_delta_pct']}%")
+            lt_lines.append(f"  weeks_compared: {lt.get('weeks_compared')}")
+            lt_lines.append("</lift_trend>")
+            lt_lines.append(
+                "Use lift_trend as the source of truth for a lift decline — never "
+                "eyeball a trend yourself. When LIFT_DECLINE_SUSPECTED is present, "
+                "surface it explicitly with the numbers (rule 22e: name the "
+                "cut-speed vs training-volume trade-off out loud)."
+            )
+            parts.append("\n".join(lt_lines))
+        else:
+            weeks_compared = lt.get("weeks_compared") or []
+            recent = weeks_compared[-2:] if len(weeks_compared) >= 2 else weeks_compared
+            refs = weeks_compared[:-2] if len(weeks_compared) >= 2 else []
+            recent_label = "/".join(str(w) for w in recent) if recent else "?"
+            parts.append(f"lift_trend: no decline (weeks {recent_label} vs best of {refs})")
+
     # Today's status — explicit state signal so the coach doesn't tell the
     # athlete to "get the run done" after it was logged, OR (the inverse bug)
     # tell them they're "done lifting" after a single partial set.
@@ -1885,6 +2247,16 @@ def _format_athlete_data(ctx, requires):
         if r.get("flags"):
             readiness_line += f" Flags: {', '.join(r['flags'])}."
         parts.append(readiness_line)
+
+    # Wellness trend (RHR/HRV/sleep) — DB-derived, always present whenever
+    # the garmin section ran (see _build_garmin). Dark case renders the
+    # dark_line verbatim; lit case is numbers ONLY. Interpretation
+    # ("your HRV is trending down", sustained-shift framing) is the coach's
+    # job, not this formatter's — same bounded-attribution discipline as
+    # rule 22 (cite the numbers, don't editorialize a mechanism here).
+    wellness_line = format_wellness_line(ctx.get("wellness"))
+    if wellness_line:
+        parts.append(wellness_line)
 
     # Check-ins
     if "checkins" in requires:

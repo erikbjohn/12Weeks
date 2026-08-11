@@ -19,6 +19,37 @@ Write a 3-5 sentence weekly review for your athlete. Address them as "you." Refe
 No fluff. No generic motivation. Use their actual numbers."""
 
 
+def compute_week_wellness(week_num, user_id, today=None):
+    """Wellness (RHR/HRV/sleep) for a SPECIFIC report week — anchored on
+    AppState.start_date so "week N" always maps to the same calendar week
+    the coach/UI show, never "today" (a report for week 3 run in week 9
+    must still describe week 3's dates). Block starts are always Mondays
+    by transition design, so week_monday is genuinely that week's Monday.
+
+    This is the ONE shared path for "what did week N's wellness look
+    like" — used by compute_weekly_metrics (persisted at generate-time)
+    AND by GET /api/weekly-report/<week> (recomputed at read-time, since
+    WeeklyReport has no wellness column and GarminWellness rows are
+    immutable per-date, so recomputing is stable and avoids a migration
+    for a value that's always re-derivable from the same source rows).
+    """
+    from models import AppState, GarminWellness
+    from coach_assembler import wellness_trends
+
+    today = today or date.today()
+    wellness_window = None
+    if user_id is not None:
+        state = AppState.query.filter_by(user_id=user_id).first()
+        if state and state.start_date:
+            week_monday = state.start_date + timedelta(days=(week_num - 1) * 7)
+            wellness_window = (week_monday, week_monday + timedelta(days=6))
+    wellness_rows = (
+        GarminWellness.query.filter_by(user_id=user_id).all()
+        if user_id is not None else []
+    )
+    return wellness_trends(wellness_rows, today, window=wellness_window)
+
+
 def compute_weekly_metrics(week_num, user_id=None):
     """Compute all metrics for a given week. Returns dict."""
     from models import (
@@ -144,6 +175,16 @@ def compute_weekly_metrics(week_num, user_id=None):
         if (workouts_total and completions) else (0 if workouts_total else None)
     )
 
+    # Wellness (RHR/HRV/sleep) for THIS report week — see compute_week_wellness
+    # (the shared path also used by GET /api/weekly-report/<week>).
+    wellness = compute_week_wellness(week_num, user_id, today=today)
+
+    # Codified lift-decline detector (recomp "Line 2" tripwire) — the SAME
+    # function the coach context (<lift_trend>) calls, so the two surfaces
+    # can never disagree about whether a decline is real.
+    from lift_trend import lift_decline
+    lift_trend_result = lift_decline(user_id, week_num)
+
     return {
         "week": week_num,
         "workouts_completed": completions,
@@ -157,22 +198,16 @@ def compute_weekly_metrics(week_num, user_id=None):
         "checkin_avg": checkin_avg,
         "adherence_pct": adherence,
         "meals_logged": meals_logged,
+        "wellness": wellness,
+        "lift_trend": lift_trend_result,
     }
 
 
-def generate_report_narrative(metrics):
-    """Generate a coach narrative from metrics using Claude. Returns text or None."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
-    except Exception:
-        return None
-
-    # Build the data summary for Claude
+def _build_narrative_data_lines(metrics):
+    """Build the plain-text data summary handed to Claude as the narrative
+    prompt's user message. Pure/testable — split out from
+    generate_report_narrative so the exact prompt text (incl. the wellness
+    line) can be asserted without mocking the Anthropic client."""
     data_lines = [f"Week {metrics['week']} Summary:"]
     if metrics.get("workouts_total") is not None:
         data_lines.append(f"Workouts: {metrics['workouts_completed']}/{metrics['workouts_total']}")
@@ -199,6 +234,34 @@ def generate_report_narrative(metrics):
 
     if metrics.get("adherence_pct") is not None:
         data_lines.append(f"Adherence: {metrics['adherence_pct']}%")
+
+    # Wellness (RHR/HRV/sleep) — same shared formatter the coach prompt
+    # uses (coach_assembler.format_wellness_line): dark_line verbatim when
+    # sparse, numbers-only line when lit. The narrative MODEL does the
+    # interpreting (headline framing etc.) — this is data, not commentary.
+    if metrics.get("wellness"):
+        from coach_assembler import format_wellness_line
+        wellness_line = format_wellness_line(metrics["wellness"])
+        if wellness_line:
+            data_lines.append(wellness_line)
+
+    return data_lines
+
+
+def generate_report_narrative(metrics):
+    """Generate a coach narrative from metrics using Claude. Returns text or None."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+    except Exception:
+        return None
+
+    # Build the data summary for Claude
+    data_lines = _build_narrative_data_lines(metrics)
 
     try:
         full_text = ""

@@ -556,131 +556,6 @@ def project_weight_curve(starting_weight, target_weight, tdee, daily_calories,
     return projection
 
 
-def recalibrate_projection(current_weight, current_week, original_projection,
-                            tdee_params):
-    """Recalibrate weight projection after a real weigh-in.
-
-    Called every Sunday. Compares actual weight to projected, adjusts
-    TDEE and calorie targets for remaining weeks.
-
-    Args:
-        current_weight: Actual weigh-in weight in lbs.
-        current_week: Which week just completed (1-12).
-        original_projection: The original projection list from
-            project_weight_curve().
-        tdee_params: Dict with keys needed to recompute TDEE:
-            {"height_in", "age", "sex", "daily_calories", "target_weight"}
-
-    Returns:
-        dict: {
-            "updated_projection": [...],
-            "new_daily_calories": int,
-            "status": "ahead" | "on_track" | "behind",
-            "adjustment_note": str
-        }
-    """
-    # Find projected weight for this week
-    projected_entry = None
-    for entry in original_projection:
-        if entry["week"] == current_week:
-            projected_entry = entry
-            break
-
-    if projected_entry is None:
-        projected_weight = current_weight
-    else:
-        projected_weight = projected_entry["projected"]
-
-    delta = current_weight - projected_weight  # negative = ahead of schedule
-
-    # Determine status
-    tolerance = 1.0  # lbs
-    if delta < -tolerance:
-        status = "ahead"
-    elif delta > tolerance:
-        status = "behind"
-    else:
-        status = "on_track"
-
-    # Recalculate TDEE from actual weight
-    height_in = tdee_params.get("height_in", 70)
-    age = tdee_params.get("age", 30)
-    sex = tdee_params.get("sex", "male")
-    daily_calories = tdee_params.get("daily_calories")
-    target_weight = tdee_params.get("target_weight")
-
-    new_tdee_data = compute_tdee(current_weight, height_in, age, sex)
-    new_tdee = new_tdee_data["tdee"]
-
-    remaining_weeks = 12 - current_week
-    if remaining_weeks <= 0:
-        remaining_weeks = 1
-
-    # Adjust calories based on status
-    adjustment_note = ""
-    new_daily_calories = daily_calories
-
-    if status == "ahead":
-        # Ahead of schedule -- consider adding calories to preserve muscle
-        cal_bump = min(int(abs(delta) * 50), 200)
-        new_daily_calories = daily_calories + cal_bump
-        adjustment_note = (
-            f"Ahead of projection by {abs(delta):.1f} lbs. "
-            f"Adding {cal_bump} cal/day to preserve muscle mass. "
-            f"New target: {new_daily_calories} cal/day."
-        )
-    elif status == "behind":
-        # Behind schedule -- tighten deficit
-        weight_to_lose = current_weight - target_weight
-        required_weekly = weight_to_lose / remaining_weeks
-        required_daily_deficit = (required_weekly * 3500) / 7
-        new_daily_calories = max(int(new_tdee - required_daily_deficit), 1000)
-        adjustment_note = (
-            f"Behind projection by {delta:.1f} lbs. "
-            f"Need {required_weekly:.1f} lbs/week for remaining {remaining_weeks} weeks. "
-            f"Tightening to {new_daily_calories} cal/day. "
-            f"FLAG FOR COACH REVIEW."
-        )
-    else:
-        adjustment_note = (
-            f"On track. Delta {delta:+.1f} lbs from projection. "
-            f"Maintaining {daily_calories} cal/day."
-        )
-        new_daily_calories = daily_calories
-
-    # Project remaining weeks from current actual weight
-    gaining = new_daily_calories > new_tdee
-    updated_projection = []
-    weight = current_weight
-
-    for week in range(current_week + 1, 13):
-        daily_delta_cal = new_daily_calories - new_tdee
-        weekly_delta_lbs = (daily_delta_cal * 7) / 3500
-
-        if gaining and weekly_delta_lbs > 0.5:
-            pass  # still track it
-
-        weight += weekly_delta_lbs
-        weight = round(weight, 1)
-
-        # Recalc TDEE
-        recalc = compute_tdee(weight, height_in, age, sex)
-        new_tdee = recalc["tdee"]
-
-        updated_projection.append({
-            "week": week,
-            "projected": weight,
-            "tdee": new_tdee,
-        })
-
-    return {
-        "updated_projection": updated_projection,
-        "new_daily_calories": new_daily_calories,
-        "status": status,
-        "adjustment_note": adjustment_note,
-    }
-
-
 def adjust_workout(base_workout, goal_type, constraints=None):
     """Modify workout structure based on goal type and constraints.
 
@@ -824,3 +699,47 @@ def adjust_workout(base_workout, goal_type, constraints=None):
             workout["exercises"] = exercises
 
     return workout
+
+
+# ── Block-3 piecewise curve (spec §5) — THE single authority ────────────────
+# Keyed to the retatrutide ramp. Week 12 softens to 2.0 (deload) so the sum is
+# exactly 25.0 and week 12 == target 195.0. The Sep-10 frequency doubling is
+# deliberately NOT a boundary — do not add a week-5 rate.
+BLOCK3_WEEKLY_RATES = {1: 1.25, 2: 1.25, 3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0,
+                       7: 2.5, 8: 2.5, 9: 2.5, 10: 2.5, 11: 2.5, 12: 2.0}
+CURVE_TOLERANCE_LB = 1.5
+
+
+def build_block3_projection(anchor_weight, start_date):
+    """12 end-of-week targets [{"week", "projected"}] — the stored
+    TrainingGoal.weight_projection shape weekly_report/app.js already read."""
+    out, w = [], anchor_weight
+    for week in range(1, 13):
+        w -= BLOCK3_WEEKLY_RATES[week]
+        out.append({"week": week, "projected": round(w, 2)})
+    return out
+
+
+def curve_value(anchor_weight, start_date, on_date):
+    """Piecewise-linear DAILY interpolation, morning-weigh-in convention:
+    curve(D) is the target at the MORNING of D — loss accrued over the
+    elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
+    curve(start) == anchor exactly; 195.0 is reached at start+84 days (the
+    morning after the block's final day) and clamps thereafter."""
+    elapsed = (on_date - start_date).days
+    elapsed = max(0, min(elapsed, 84))
+    w = anchor_weight
+    for d in range(elapsed):
+        week = min(12, d // 7 + 1)
+        w -= BLOCK3_WEEKLY_RATES[week] / 7.0
+    return round(w, 4)
+
+
+def pace_status(weight, anchor_weight, start_date, on_date):
+    """3-state judgment vs curve_value with the ONE tolerance."""
+    target = curve_value(anchor_weight, start_date, on_date)
+    if weight > target + CURVE_TOLERANCE_LB:
+        return "behind"
+    if weight < target - CURVE_TOLERANCE_LB:
+        return "ahead"
+    return "on_pace"

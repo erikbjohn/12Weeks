@@ -8185,6 +8185,11 @@ function _renderNewDashboardInner(apiData, overlay) {
   var training = d.training || {};
   var lifts = d.lifts || _weightsCache || {};
   var projections = d.projections || {};
+  // Block 3: the server renders the canonical curve (linear_plan already IS
+  // the curve rows under this flag). The client must never recompute a
+  // parallel projection while this is set — see the _projectWeightCurve
+  // call sites in the Lab tab below.
+  window._projectionMode = projections.projection_mode || null;
   var startDate = projections.start_date || (_stateCache ? _stateCache.start_date : null) || null;
   var targetWeight = bwData.target_weight || null;
   var psychHighlights = d.psych_highlights || {};
@@ -8266,13 +8271,25 @@ function _pdHeroCard(startWeight, currentWeight, targetWeight, projections) {
   var barPct = Math.round(pct);
 
   // Trust backend extrapolation. Fall back to nothing rather than guessing.
+  // The badge (On pace / Off pace) renders whenever the SERVER computed an
+  // on_pace verdict, independent of projected_final_weight — block-3 mode
+  // can judge on_pace off a single weigh-in (pace_status vs the curve) well
+  // before projected_final_weight's own 2-weigh-in minimum is met, and the
+  // badge going invisible in exactly that window was the bug. The "tracking
+  // to X lb" text still needs its own null guard since it quotes
+  // projected/targetWeight directly.
   var projText = '';
   var projected = projections.projected_final_weight;
-  if (projected != null && targetWeight != null) {
-    var onPace = projections.on_pace;
-    var paceClass = onPace === true ? 'pd-green' : onPace === false ? 'pd-red' : '';
-    var label = onPace === true ? 'On pace' : onPace === false ? 'Off pace' : 'Projected';
-    projText = '<span class="pd-hero-pace ' + paceClass + '">' + label + '</span> — tracking to ' +
+  var onPace = projections.on_pace;
+  if (onPace != null) {
+    var paceClass = onPace === true ? 'pd-green' : 'pd-red';
+    var label = onPace === true ? 'On pace' : 'Off pace';
+    projText = '<span class="pd-hero-pace ' + paceClass + '">' + label + '</span>';
+    if (projected != null && targetWeight != null) {
+      projText += ' — tracking to ' + Math.round(projected) + ' lb by Week 12 (goal ' + Math.round(targetWeight) + ')';
+    }
+  } else if (projected != null && targetWeight != null) {
+    projText = '<span class="pd-hero-pace">Projected</span> — tracking to ' +
                Math.round(projected) + ' lb by Week 12 (goal ' + Math.round(targetWeight) + ')';
   }
 
@@ -8719,7 +8736,11 @@ function _spWeightProjection(data) {
   // Projection chart placeholder
   h += '<div id="sp-proj-chart" style="margin:16px 0">';
   // Render initial chart
-  if (typeof _projectWeightCurve === 'function') {
+  if (window._projectionMode === 'piecewise_block3') {
+    // Block 3: render the SERVED curve, never a recomputed parallel one.
+    var proj = (data.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; });
+    h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
+  } else if (typeof _projectWeightCurve === 'function') {
     var proj = _projectWeightCurve(curW, targetW, tdee, cal, 12 - curWeek + 1, heightIn, age, sex, curWeek - 1);
     h += _spRenderProjChart(data.weight_series || [], proj, targetW, startW, data.start_date);
   } else {
@@ -8772,7 +8793,13 @@ function _spUpdateProjection() {
 
   // Recompute weight projection with new TDEE.
   var proj = null;
-  if (typeof _projectWeightCurve === 'function') {
+  if (window._projectionMode === 'piecewise_block3') {
+    // Block 3: the sliders can't change a coach-managed curve — render the
+    // SERVED curve, never a recomputed parallel one.
+    proj = (d.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; });
+    var chartEl = document.getElementById('sp-proj-chart');
+    if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
+  } else if (typeof _projectWeightCurve === 'function') {
     proj = _projectWeightCurve(curW, targetW, tdee, cal, weeksLeft, heightIn, age, sex, curWeek - 1);
     var chartEl = document.getElementById('sp-proj-chart');
     if (chartEl) chartEl.innerHTML = _spRenderProjChart(d.weight_series || [], proj, targetW, d.start_weight || curW, d.start_date);
@@ -9118,7 +9145,11 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
 
   if (typeof _computeTargets === 'function') {
     var targets = _computeTargets(tdee, goalType, curW, targetW, weeksLeft);
-    var proj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
+    // Block 3: the scenario sliders can't change a coach-managed curve --
+    // render the SERVED curve, never a recomputed parallel one.
+    var proj = window._projectionMode === 'piecewise_block3'
+      ? (_spLabData.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; })
+      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, targetW, tdee, targets.calories, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
     var endWeight = proj.length > 0 ? proj[proj.length - 1].projected.toFixed(1) : '?';
     var deficit = tdee - targets.calories;
 
@@ -9139,7 +9170,9 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
     h += '<div class="sp-compare" style="margin-top:12px">';
     h += '<div class="sp-compare-card"><div class="sp-compare-title">Current Plan</div>';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--text)">' + origCal + ' cal/day</div>';
-    var origProj = typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : [];
+    var origProj = window._projectionMode === 'piecewise_block3'
+      ? (_spLabData.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; })
+      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
     var origEnd = origProj.length > 0 ? origProj[origProj.length - 1].projected.toFixed(1) : '?';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">W12: ' + origEnd + ' lb</div>';
     h += '</div>';
@@ -10594,6 +10627,159 @@ function buildFoodContent(d) {
     return renderMealInner(d);
 }
 
+// ─── PROTOCOL (peptide dosing) ─────────────────────────────────────────────
+// Renders GET /api/protocol/today's payload. renderDetail() only fetches
+// and passes this in when the viewed day IS the user's server-tz "today" —
+// the payload has no per-day dimension, so no protocol section is ever
+// rendered on a past/future day. NEVER renders mechanism/effects/watch_fors
+// text — schedule/adherence only (card boundary rule), matching the
+// server's own contract (verified by tests/test_protocol_ui_payload.py).
+
+let _doseSaving = {};  // dose id -> true while a toggle/late POST is in flight
+
+function _fmtDoseTime(hhmm) {
+  var parts = (hhmm || '').split(':');
+  if (parts.length !== 2) return escapeHtml(hhmm || '');
+  var h = parseInt(parts[0], 10);
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return h + ':' + parts[1] + ' ' + ampm;
+}
+
+function _fmtShortDate(iso) {
+  if (!iso) return '';
+  var dt = new Date(iso + 'T00:00:00');
+  if (isNaN(dt.getTime())) return iso;
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _doseRowHtml(dose) {
+  var taken = !!dose.taken;
+  var metaParts = [];
+  if (dose.syringe_units) metaParts.push(dose.syringe_units);
+  if (dose.site) metaParts.push(dose.site);
+  var metaHtml = metaParts.length
+    ? '<div style="font-size:13px;color:var(--muted);margin-top:2px">' + escapeHtml(metaParts.join(' · ')) + '</div>'
+    : '';
+  var noteHtml = dose.notes
+    ? '<div style="font-size:13px;color:var(--muted);font-style:italic;margin-top:2px">' + escapeHtml(dose.notes) + '</div>'
+    : '';
+  return '<div class="protocol-dose-row" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)' + (taken ? ';opacity:0.6' : '') + '">' +
+    '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:16px;font-weight:700;color:var(--text)">' + escapeHtml(dose.compound) + ' <span style="font-weight:400;color:var(--muted)">' + dose.dose_mg + 'mg</span></div>' +
+      metaHtml + noteHtml +
+    '</div>' +
+    '<button class="protocol-dose-check' + (taken ? ' done' : '') + '" ' +
+      'style="width:44px;height:44px;min-width:44px;border:1px solid ' + (taken ? 'var(--lift-border)' : 'var(--border2)') + ';border-radius:8px;' +
+      'background:' + (taken ? 'var(--lift-bg)' : 'var(--surface2)') + ';color:' + (taken ? 'var(--accent)' : 'transparent') + ';' +
+      'font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" ' +
+      'onclick="toggleDose(' + dose.id + ', ' + taken + ')">&#10003;</button>' +
+  '</div>';
+}
+
+function _missedRowHtml(m) {
+  var actionHtml = '';
+  var btnStyle = 'min-height:44px;padding:12px 18px;font-size:15px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--text);cursor:pointer;flex-shrink:0';
+  if (m.action === 'retro_mark' && m.id != null) {
+    actionHtml = '<button class="protocol-action-btn" style="' + btnStyle + '" onclick="toggleDose(' + m.id + ', false)">Mark taken</button>';
+  } else if (m.action === 'taken_late' && m.id != null) {
+    actionHtml = '<button class="protocol-action-btn" style="' + btnStyle + '" onclick="markDoseLate(' + m.id + ')">Taken late</button>';
+  }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;color:var(--muted);font-size:14px">' +
+    '<span>missed: ' + escapeHtml(m.compound) + ' (' + _fmtShortDate(m.date) + ') &mdash; ' + escapeHtml(m.rule) + '</span>' +
+    actionHtml +
+  '</div>';
+}
+
+function buildProtocolContent(p) {
+  var html = '';
+
+  // Doses grouped by time — server already sorts by time; preserve that
+  // group order rather than re-sorting.
+  var groupOrder = [];
+  var groups = {};
+  (p.doses || []).forEach(function(dose) {
+    if (!groups[dose.time]) { groups[dose.time] = []; groupOrder.push(dose.time); }
+    groups[dose.time].push(dose);
+  });
+  groupOrder.forEach(function(t) {
+    html += '<div class="protocol-time-group" style="margin-bottom:16px">' +
+      '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:4px">' + _fmtDoseTime(t) + '</h4>' +
+      groups[t].map(_doseRowHtml).join('') +
+    '</div>';
+  });
+
+  // Missed doses — one quiet row per entry, action-dependent button.
+  if (p.missed && p.missed.length) {
+    html += '<div class="protocol-missed" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">' +
+      p.missed.map(_missedRowHtml).join('') +
+    '</div>';
+  }
+
+  // Fasting bound — derive the actual triggering dose(s) from today's list
+  // rather than hardcoding a compound; the server only guarantees a cutoff.
+  if (p.fasting_bound) {
+    var lateDoses = (p.doses || []).filter(function(dd) { return dd.time >= '21:00'; });
+    var doseLabel = lateDoses.length
+      ? lateDoses.map(function(dd) { return escapeHtml(dd.compound) + ' at ' + _fmtDoseTime(dd.time); }).join(', ')
+      : "tonight's dose";
+    html += '<div class="protocol-fasting-banner" style="margin-top:12px;padding:10px 12px;border:1px solid var(--coach-border);background:var(--coach-bg);border-radius:8px;color:var(--coach);font-size:14px">' +
+      'Last meal by ' + _fmtDoseTime(p.fasting_bound) + ' &mdash; ' + doseLabel + ' requires 2h fasted.' +
+    '</div>';
+  }
+
+  // Vial reorder warnings
+  var flagged = (p.vials || []).filter(function(v) { return v.reorder_flag; });
+  if (flagged.length) {
+    html += flagged.map(function(v) {
+      return '<div class="protocol-reorder-warning" style="margin-top:8px;padding:10px 12px;border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);border-radius:8px;color:var(--run-hiit);font-size:14px">' +
+        '&#9888; ' + escapeHtml(v.compound) + ': ' + v.doses_left + ' doses left &mdash; reorder by ' + _fmtShortDate(v.reorder_by) +
+      '</div>';
+    }).join('');
+  }
+
+  // Labs due
+  if (p.labs_due && p.labs_due.length) {
+    html += p.labs_due.map(function(l) {
+      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px">' +
+        '🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) +
+      '</div>';
+    }).join('');
+  }
+
+  return html;
+}
+
+async function toggleDose(id, currentlyTaken) {
+  if (_doseSaving[id]) return;
+  _doseSaving[id] = true;
+  try {
+    await apiPost('/api/protocol/dose/' + id + '/toggle', { taken: !currentlyTaken });
+  } finally {
+    delete _doseSaving[id];
+  }
+  renderDetail();
+}
+
+async function markDoseLate(id) {
+  if (_doseSaving[id]) return;
+  _doseSaving[id] = true;
+  try {
+    const res = await apiPost('/api/protocol/dose/' + id + '/late', {});
+    if (res && !res.ok) {
+      let msg = 'Could not mark as taken.';
+      try {
+        const body = await res.json();
+        if (body && body.error) msg = body.error === 'confirm with your doctor' ? 'Confirm with your doctor first.' : body.error;
+      } catch(e) {}
+      showToast(msg, 'error');
+    }
+  } finally {
+    delete _doseSaving[id];
+  }
+  renderDetail();
+}
+
 function buildRunSubsection(d, runClass) {
     // Check for run override
     var runOv = _runOverrides.find(function(o) { return o.day_idx === currentDay; });
@@ -11043,6 +11229,24 @@ async function renderDetail() {
     }
   }
 
+  // Load today's protocol snapshot — server-scoped to the user's local
+  // "today" (GET /api/protocol/today), never cached, so a toggle can
+  // renderDetail() to refetch and show the true server state. Gate on BOTH
+  // weekday AND actual program week (mirrors renderMealInner's
+  // isViewingToday) — weekday alone would show today's protocol on every
+  // past/future week sharing the same weekday index.
+  let _protocolToday = null;
+  const _protoTodayIdx = _userTodayMonIdx();
+  const _protoActualWeek = getActualProgramWeek();
+  const _isProtocolToday = currentDay === _protoTodayIdx &&
+      (_protoActualWeek == null || currentWeek === _protoActualWeek);
+  if (_isProtocolToday) {
+    try {
+      const pr = await fetch('/api/protocol/today');
+      if (pr.ok) _protocolToday = await pr.json();
+    } catch(e) {}
+  }
+
   // If traveling, try to load travel workout
   if (isTraveling && !d._travelLoaded) {
     fetch('/api/travel/workout?day=' + encodeURIComponent(d.day))
@@ -11397,6 +11601,7 @@ async function renderDetail() {
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
     ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
+    ${_protocolToday && _protocolToday.doses.length ? renderAccordion('protocol', 'Protocol', buildProtocolContent(_protocolToday), false) : ''}
     ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, currentDay), false)}
   </div>`;
 
