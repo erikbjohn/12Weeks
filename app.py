@@ -751,6 +751,7 @@ def _parse_coach_markers(text, user_id, week):
                     SetLog.weight > 0,
                     SetLog.done == True,  # noqa: E712
                     SetLog.set_skipped.isnot(True),  # NULL-safe: legacy rows count
+                    SetLog.week <= week,  # current block only — parked history is not "proven"
                 ).scalar()
                 if top is not None and new_weight < top * 0.95:
                     logging.warning(
@@ -905,6 +906,7 @@ def _parse_coach_markers(text, user_id, week):
                     SetLog.user_id == user_id,
                     SetLog.exercise_name == p_exercise,
                     SetLog.weight > 0,
+                    SetLog.week <= p_week,  # current block only — parked history is not "proven"
                 ).scalar()
                 if top is not None and p_weight < top * 0.95:
                     import logging
@@ -5783,6 +5785,11 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                     SetLog.exercise_name == exercise_name,
                     SetLog.weight > 0,
                     SetLog.week >= max(1, target_week - 4),
+                    # Upper bound: parked prior-block history lives at weeks
+                    # 13+/25+ and would otherwise masquerade as "recent" —
+                    # post-layoff, the floor must anchor on CURRENT-block
+                    # performance, not June's tops (the week-2 snap-back bug).
+                    SetLog.week <= target_week,
                 ).scalar()
                 if _top is not None and weight < _top:
                     # REPLACE the coach's reason — it names the lighter number it
