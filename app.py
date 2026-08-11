@@ -10123,6 +10123,230 @@ def api_push_vapid_public_key():
     return jsonify({"key": public_key})
 
 
+# ─── PUSH SCHEDULER DAEMON ──────────────────────────────────────────────────
+# Background tick (5 min) that sends the morning brief, the dose-night
+# nudge, and (once Task 7 lands) the Sunday recap. Same shape as the Garmin
+# auto-sync daemon above (grep GARMIN_AUTOSYNC): daemon thread, env-guarded
+# start, first tick delayed one full interval after boot, per-user
+# try/except so one bad user never kills the loop. Idempotency lives
+# entirely in the DB (PushSent's UNIQUE(user_id, kind, local_date)), never
+# in memory, so a worker restart/deploy can never double-send.
+
+PUSH_SCHEDULER_INTERVAL_S = 300  # 5 min — notification windows are wide (45min+)
+
+
+def _friendly_dose_time(hhmm):
+    """"HH:MM" (24h) -> "10:00 PM" / "9:00 AM" — same %I:%M %p + lstrip('0')
+    convention as utils_time.format_user_local."""
+    return datetime.strptime(hhmm, "%H:%M").strftime("%I:%M %p").lstrip("0")
+
+
+def _morning_brief_body(uid, local_date):
+    """Compact one-line morning brief for `uid` on `local_date`, assembled
+    from real per-user data (BodyWeight, PeptideDose, WeeklyDaySchedule,
+    WeeklyRunPlan). Every part is independently try/excepted — a broken
+    part is dropped silently; this function itself must never raise."""
+    parts = []
+
+    try:
+        if not BodyWeight.query.filter_by(user_id=uid, log_date=local_date).first():
+            parts.append("Weigh in")
+    except Exception:
+        pass
+
+    try:
+        n = PeptideDose.query.filter_by(user_id=uid, date=local_date).count()
+        if n:
+            parts.append(f"{n} dose{'s' if n != 1 else ''}")
+    except Exception:
+        pass
+
+    def _week_for():
+        state = AppState.query.filter_by(user_id=uid).first()
+        if state and state.start_date:
+            return min(12, max(1, (local_date - state.start_date).days // 7 + 1))
+        return (state.current_week if state else None) or 1
+
+    day_idx = local_date.weekday()
+
+    try:
+        sched = WeeklyDaySchedule.query.filter_by(
+            user_id=uid, week=_week_for(), day_idx=day_idx).first()
+        if sched:
+            if sched.is_rest:
+                parts.append("Rest")
+            elif sched.lift_name:
+                parts.append(sched.lift_name)
+    except Exception:
+        pass
+
+    try:
+        run = WeeklyRunPlan.query.filter_by(
+            user_id=uid, week=_week_for(), day_idx=day_idx).first()
+        if run and run.label:
+            parts.append(f"{run.label} {run.duration}" if run.duration else run.label)
+    except Exception:
+        pass
+
+    return " · ".join(parts)
+
+
+def _dose_night_body(uid, local_date):
+    """Body for the dose-night nudge: names the untaken >=21:00 dose(s)
+    scheduled on local_date. Returns None if none qualify — belt to the
+    scheduler window's own >=21:00 gate, so this function is safe to call
+    standalone too."""
+    try:
+        rows = PeptideDose.query.filter_by(user_id=uid, date=local_date).all()
+    except Exception:
+        return None
+
+    qualifying = sorted(
+        (r for r in rows if r.taken_at is None and r.time >= "21:00"),
+        key=lambda r: (r.time, r.compound),
+    )
+    if not qualifying:
+        return None
+
+    first = qualifying[0]
+    try:
+        friendly_time = _friendly_dose_time(first.time)
+    except Exception:
+        friendly_time = first.time
+
+    # "Fasted" is a schedule fact in this app, never a per-compound one:
+    # protocol.fasted_dose_time defines it purely as "a dose at/after
+    # 21:00" (the same helper app._fasted_window_override's meal-timing
+    # rail uses), so any dose reaching this point (already filtered to
+    # >=21:00) always carries the fasted phrasing. Routed through the real
+    # helper — never a hardcoded compound name/time — so this stays
+    # correct if that definition ever changes.
+    if fasted_dose_time(rows, local_date):
+        action = "fasted 2h? Take it, check it off."
+    else:
+        action = "Take it, check it off."
+
+    extra = len(qualifying) - 1
+    who = first.compound + (f" +{extra} more" if extra else "")
+
+    return f"{who} at {friendly_time} — {action}"
+
+
+def _sunday_recap_push(uid, local_date):
+    """STUB — Task 7 fills this in with the real Sunday recap body. Returns
+    None so the scheduler's generic None-guard skips both the send AND the
+    PushSent ledger row (the recap must not burn its once-per-Sunday
+    idempotency slot on an empty stub)."""
+    return None
+
+
+def _push_window_send(uid, kind, local_date, title, body_fn):
+    """Send `kind`'s push for `uid`/`local_date` if (a) it hasn't already
+    been sent — PushSent is the sole idempotency authority (DB, never
+    memory) — and (b) body_fn() returns a non-empty body. The PushSent row
+    is written only after a *completed* send attempt: push_to_user
+    returning (even 0 — no live subscriptions) counts as attempted;
+    push_to_user raising does NOT, so a later tick can retry. A body_fn()
+    that returns None/empty is the generic stub-guard: no send, no ledger
+    row — it never burns the kind's once-per-date slot. Returns True iff a
+    send was actually attempted+recorded this call."""
+    from sqlalchemy.exc import IntegrityError
+
+    if PushSent.query.filter_by(user_id=uid, kind=kind, local_date=local_date).first():
+        return False
+
+    body = body_fn()
+    if not body:
+        return False
+
+    try:
+        push_to_user(uid, title, body, tag=kind)
+    except Exception:
+        logging.exception("[PUSH] scheduler send failed user=%s kind=%s", uid, kind)
+        return False
+
+    try:
+        db.session.add(PushSent(user_id=uid, kind=kind, local_date=local_date))
+        db.session.commit()
+    except IntegrityError:
+        # Another worker already recorded this exact send — it won the race.
+        db.session.rollback()
+    return True
+
+
+def _in_window(t, start, end):
+    return start <= t < end
+
+
+def _push_scheduler_tick():
+    """One background pass over every user with at least one push
+    subscription (distinct PushSubscription.user_id — a user with none is
+    never queried into a send). For each such user, checks the morning,
+    dose-night, and Sunday-recap windows in THAT USER's own local time
+    (zoneinfo-based, never a fixed offset) and sends at most one push per
+    kind per local_date. Returns the list of (user_id, kind) actually sent
+    this tick. Any per-user exception is logged and never kills the loop
+    (same contract as _garmin_autosync_tick)."""
+    from datetime import time as _dtime
+    from utils_time import ZoneInfo
+
+    now_utc = _utcnow()
+    fired = []
+
+    user_ids = [row[0] for row in
+                db.session.query(PushSubscription.user_id).distinct().all()]
+
+    for uid in user_ids:
+        try:
+            user = db.session.get(User, uid)
+            tz_name = (user.timezone if user and user.timezone else None) or "America/Los_Angeles"
+            local_now = now_utc.astimezone(ZoneInfo(tz_name))
+            local_date = local_now.date()
+            t = local_now.time()
+
+            if _in_window(t, _dtime(6, 30), _dtime(11, 0)):
+                if _push_window_send(uid, "morning", local_date, "12 Weeks",
+                                      lambda uid=uid, d=local_date: _morning_brief_body(uid, d)):
+                    fired.append((uid, "morning"))
+
+            if _in_window(t, _dtime(21, 45), _dtime(22, 30)):
+                if _push_window_send(uid, "dose_night", local_date, "12 Weeks",
+                                      lambda uid=uid, d=local_date: _dose_night_body(uid, d)):
+                    fired.append((uid, "dose_night"))
+
+            if local_date.weekday() == 6 and _in_window(t, _dtime(19, 0), _dtime(21, 0)):
+                if _push_window_send(uid, "recap", local_date, "12 Weeks",
+                                      lambda uid=uid, d=local_date: _sunday_recap_push(uid, d)):
+                    fired.append((uid, "recap"))
+        except Exception as e:
+            logging.warning("push scheduler: user %s failed: %s", uid, e)
+
+    return fired
+
+
+def _push_scheduler_loop():
+    """Daemon loop: tick every PUSH_SCHEDULER_INTERVAL_S inside an app
+    context. Started once per process from startup (guarded there)."""
+    while True:
+        time.sleep(PUSH_SCHEDULER_INTERVAL_S)
+        try:
+            with app.app_context():
+                _push_scheduler_tick()
+        except Exception as e:
+            logging.warning("push scheduler loop error: %s", e)
+
+
+# ON in prod (Render sets RENDER=true), OFF for tests/local unless
+# PUSH_SCHEDULER=1 is set explicitly — mirrors GARMIN_AUTOSYNC's gate. First
+# tick lands one full interval after boot, so a fresh deploy sends zero
+# pushes at startup.
+if os.environ.get("PUSH_SCHEDULER", "1" if os.environ.get("RENDER") else "0") == "1":
+    threading.Thread(target=_push_scheduler_loop, daemon=True,
+                     name="push-scheduler").start()
+    logging.info("[STARTUP] push scheduler daemon started (interval %ss)",
+                 PUSH_SCHEDULER_INTERVAL_S)
+
+
 # ─── CONSTRAINTS ───────────────────────────────────────────────────────────
 
 @app.route("/api/constraints")
