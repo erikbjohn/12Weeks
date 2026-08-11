@@ -301,6 +301,35 @@ def test_missing_sleep_data_segment_omitted(app_ctx, monkeypatch):
     assert "200" in recap["text"] and "199" in recap["text"]
 
 
+# ── (b2) genuine 0.0 miles logged -> shown, never silently omitted ─────────
+
+def test_genuine_zero_miles_logged_shows_zero_not_omitted(app_ctx, monkeypatch):
+    """A RunLog row that exists for this week but logged 0.0 miles (e.g. a
+    run cut short to nothing, or a placeholder entry) is REAL data, not
+    missing data — it must render "0 mi", never be dropped the way a week
+    with zero RunLog rows at all is dropped. This is exactly the falsy-zero
+    bug class this codebase has been bitten by before
+    (feedback_falsy_zero_bugs.md: `if data["miles"]:` would wrongly treat
+    0.0 as "nothing to show" and silently omit the segment; the code under
+    test uses `if data["miles"] is not None:` instead — this test pins
+    that so a future truthy-check regression fails loudly)."""
+    app_, db = app_ctx
+    import weekly_report
+
+    uid = _fresh_user(app_, db, "recap-b2@test.com")
+    _seed_appstate(app_, db, uid, START)
+    _add_run(app_, db, uid, WEEK6_MON, 6, 0, 0.0)  # only run this week: 0.0 miles
+
+    _freeze_weekly_report_today(monkeypatch, WEEK6_SUN)
+
+    recap = _do(app_, lambda: weekly_report.build_sunday_recap(uid, WEEK6_SUN))
+
+    assert recap is not None
+    assert recap["data"]["miles"] == 0.0
+    assert recap["data"]["miles"] is not None  # explicit: 0.0 is not missing
+    assert "0 mi" in recap["text"], recap["text"]
+
+
 # ── (c) dose math: late counts taken, held excluded both sides ─────────────
 
 def test_dose_adherence_late_counts_taken_held_excluded(app_ctx, monkeypatch):
