@@ -10640,6 +10640,17 @@ function buildFoodContent(d) {
 // text — schedule/adherence only (card boundary rule), matching the
 // server's own contract (verified by tests/test_protocol_ui_payload.py).
 
+
+// Isometric HOLD movements are prescribed in SECONDS. The coach sometimes
+// writes reps as "30" instead of "30s" — for these names a bare number is
+// still a timed set (2026-08-11: plank lost its START timer to a dropped s).
+// Deliberately excludes rep-based core work (Shoulder Taps, Dead Bug,
+// Mountain Climbers).
+function _isHoldExercise(name) {
+  return /^(side |weighted |rkc )?plank$|^hollow hold$|^wall sit$|^l-? ?sit$|^dead hang$|hold$/i
+    .test(String(name || '').trim());
+}
+
 let _doseSaving = {};  // dose id -> true while a toggle/late POST is in flight
 
 function _fmtDoseTime(hhmm) {
@@ -11332,12 +11343,14 @@ async function renderDetail() {
     var targetRepsDisplay = ex.reps || (setsMatch ? setsMatch[2] : ex.sets);
     // "each" is ambiguous — show "per side" so users know it means per leg/arm
     if (typeof targetRepsDisplay === 'string') targetRepsDisplay = targetRepsDisplay.replace(/\beach\b/gi, 'per side');
+    if (_isHoldExercise(displayName) && /^\d+$/.test(String(targetRepsDisplay))) targetRepsDisplay = targetRepsDisplay + 's';
     const restSeconds = parseRestSeconds(ex.rest);
     const escapedName = displayName.replace(/'/g, "\\'");
 
     // Detect timed exercises — check ex.reps first (separate field), then parsed sets format
     const repsField = (ex.reps != null && ex.reps !== '') ? String(ex.reps) : targetReps;
-    const isTimedEx = /^\d+s$/i.test(repsField);
+    const isTimedEx = /^\d+s$/i.test(repsField) ||
+        (_isHoldExercise(displayName) && /^\d+$/.test(repsField));
     const timedSeconds = isTimedEx ? parseInt(repsField) : 0;
 
     // Detect bodyweight exercises (Ring Row, Plank, Push-Ups, etc.)
@@ -12357,7 +12370,8 @@ function renderExerciseFocus() {
     return;
   }
 
-  const isTimedExercise = typeof _focusTargetReps === 'string' && _focusTargetReps.includes('s');
+  const isTimedExercise = (typeof _focusTargetReps === 'string' && _focusTargetReps.includes('s')) ||
+      (_isHoldExercise(_focusExName) && /^\d+$/.test(String(_focusTargetReps)));
   const timedSeconds = isTimedExercise ? parseInt(_focusTargetReps) : 0;
 
   // Build video + note + swap bar (available during exercise, not a separate screen)
