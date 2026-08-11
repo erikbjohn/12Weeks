@@ -5849,12 +5849,27 @@ async function showMorningCheckinOverlay() {
     return; // Don't start coach chat yet — wait for measurement submission
   }
 
+  // Daily weigh-in strip: hidden if today's weight is already logged.
+  var _mcAlreadyWeighed = false;
+  try {
+    var _bwList = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
+    var _bwLast = _bwList.length ? _bwList[_bwList.length - 1] : null;
+    _mcAlreadyWeighed = !!(_bwLast && _bwLast.date === todayStr());
+  } catch(e) {}
+  var _mcWeighRow = _mcAlreadyWeighed ? '' :
+    '<div id="mc-weigh-row" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">' +
+      '<label style="color:var(--text);font-size:15px;font-weight:600;flex:1">Morning weigh-in</label>' +
+      '<input type="number" inputmode="decimal" id="mc-weight" class="weight-input" style="width:90px;font-size:16px" placeholder="lbs" step="0.1">' +
+      '<button class="btn btn-primary" style="min-height:44px;padding:10px 16px" onclick="logMorningWeight()">Log</button>' +
+    '</div>';
+
   el.innerHTML = `<div class="morning-checkin-overlay">
     <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
       <div class="morning-briefing" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
         <div class="morning-briefing-label">Check-In with Erik</div>
         <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px" onclick="finishMorningCheckin()">&times;</button>
       </div>
+      ${_mcWeighRow}
       <div id="mc-chat-messages" class="mc-coach-messages" style="flex:1;overflow-y:auto;padding:12px 0">
         <div class="mc-typing-indicator"><div class="chat-typing"><span></span><span></span><span></span></div></div>
       </div>
@@ -6194,6 +6209,21 @@ async function _startMcChat() {
   // Focus the input
   const input = document.getElementById('mc-chat-input');
   if (input) setTimeout(() => input.focus(), 100);
+}
+
+async function logMorningWeight() {
+  var inp = document.getElementById('mc-weight');
+  var v = parseFloat(inp && inp.value);
+  if (!v || v < 60 || v > 500) { if (inp) inp.focus(); return; }
+  var row = document.getElementById('mc-weigh-row');
+  try {
+    await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ date: todayStr(), weight: v }) });
+    if (Array.isArray(_bodyweightCache)) _bodyweightCache.push({ date: todayStr(), weight: v });
+    if (row) row.innerHTML = '<div style="color:var(--accent);font-size:15px;padding:2px 0">&#10003; ' + v + ' lb logged</div>';
+  } catch(e) {
+    if (row) row.innerHTML = '<div style="color:var(--muted);font-size:14px">Save failed &mdash; use Stats to log weight.</div>';
+  }
 }
 
 async function sendMcChat() {
