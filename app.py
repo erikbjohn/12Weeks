@@ -9758,6 +9758,70 @@ def garmin_logout():
 
 _garmin_sync_last = {}  # user_id -> epoch seconds of last successful pull
 
+GARMIN_AUTOSYNC_INTERVAL_S = 1800  # 30 min — data endpoints only, cheap
+
+
+def _garmin_autosync_tick():
+    """One background sync pass over every token-holding user. Returns the
+    list of user_ids actually synced.
+
+    Rules (2026-08-11 lockout lessons):
+    - A client in a 429 cooldown is SKIPPED without touching Garmin — quiet
+      clears their auth blocks; knocking extends them.
+    - A disconnected client gets at most ONE restore attempt per tick.
+    - Any per-user exception is logged and never kills the loop.
+    """
+    import garmin_sync
+    from models import GarminTokens
+    synced = []
+    for tok in GarminTokens.query.all():
+        uid = tok.user_id
+        if not uid:
+            continue
+        try:
+            gc = _get_garmin(uid)
+            if getattr(gc, "_rate_limited_until", 0) > time.time():
+                continue  # in cooldown — stay silent
+            if not gc.connected:
+                gc.try_restore_tokens(uid)
+            if not gc.connected:
+                continue
+            from models import User as _U
+            from utils_time import user_local_today
+            _u = db.session.get(_U, uid)
+            _tz_today = user_local_today(_u.timezone if _u and _u.timezone else "UTC")
+            res = garmin_sync.sync_activities(gc, uid, days_back=3, today=_tz_today)
+            garmin_sync.sync_wellness(gc, uid, today=_tz_today)
+            if not (res or {}).get("error"):
+                _garmin_sync_last[uid] = time.time()
+                synced.append(uid)
+        except Exception as e:
+            logging.warning("garmin autosync: user %s failed: %s", uid, e)
+    return synced
+
+
+def _garmin_autosync_loop():
+    """Daemon loop: tick every GARMIN_AUTOSYNC_INTERVAL_S inside an app
+    context. Started once per process from startup (guarded there)."""
+    while True:
+        time.sleep(GARMIN_AUTOSYNC_INTERVAL_S)
+        try:
+            with app.app_context():
+                _garmin_autosync_tick()
+        except Exception as e:
+            logging.warning("garmin autosync loop error: %s", e)
+
+
+# Start the auto-sync daemon: ON in prod (Render sets RENDER=true), OFF for
+# tests/local unless GARMIN_AUTOSYNC=1 is set explicitly. One thread per
+# process; first tick comes after a full interval, so a fresh deploy makes
+# zero Garmin calls at boot (auth stays quiet — the 2026-08-10 lockout rule).
+if os.environ.get("GARMIN_AUTOSYNC", "1" if os.environ.get("RENDER") else "0") == "1":
+    threading.Thread(target=_garmin_autosync_loop, daemon=True,
+                     name="garmin-autosync").start()
+    logging.info("[STARTUP] garmin auto-sync daemon started (interval %ss)",
+                 GARMIN_AUTOSYNC_INTERVAL_S)
+
 
 @app.route("/api/garmin/sync-activities", methods=["POST"])
 @login_required
