@@ -10445,11 +10445,17 @@ def _dose_night_body(uid, local_date):
 
 
 def _sunday_recap_push(uid, local_date):
-    """STUB — Task 7 fills this in with the real Sunday recap body. Returns
-    None so the scheduler's generic None-guard skips both the send AND the
-    PushSent ledger row (the recap must not burn its once-per-Sunday
-    idempotency slot on an empty stub)."""
-    return None
+    """Sunday recap push body — delegates entirely to
+    weekly_report.build_sunday_recap, the SAME builder GET /api/sunday-recap
+    calls for the check-in card, so the push text and the card can never
+    disagree (one-source-of-truth, Task 7). Returns None (the scheduler's
+    generic None-guard skips both the send AND the PushSent ledger row —
+    the recap must not burn its once-per-Sunday idempotency slot) whenever
+    build_sunday_recap has nothing to summarize; build_sunday_recap itself
+    never raises."""
+    from weekly_report import build_sunday_recap
+    recap = build_sunday_recap(uid, local_date)
+    return recap["text"] if recap else None
 
 
 def _push_window_send(uid, kind, local_date, title, body_fn):
@@ -11498,6 +11504,21 @@ def api_weekly_report(week):
         "narrative": report.narrative,
         "wellness": wellness,
     })
+
+@app.route("/api/sunday-recap")
+@login_required
+def api_sunday_recap():
+    """Sunday recap card for the check-in overlay — calls the SAME builder
+    (weekly_report.build_sunday_recap) the Sunday push slot's
+    _sunday_recap_push uses, so the card and the push text can never
+    disagree (one-source-of-truth, Task 7). {"recap": null} when there's
+    nothing to summarize (e.g. no current-block week resolvable) — never a
+    404, since a Sunday with nothing to recap is a normal state, not an
+    error."""
+    from weekly_report import build_sunday_recap
+    recap = build_sunday_recap(current_user.id, _user_today())
+    return jsonify({"recap": recap})
+
 
 @app.route("/api/weekly-report/result/<job_id>")
 @login_required

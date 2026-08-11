@@ -88,11 +88,18 @@ def compute_weekly_metrics(week_num, user_id=None):
 
     # Weight vs projection
     weight_vs_projected = "on_track"
+    weight_projection_target = None
     goal = TrainingGoal.query.filter_by(user_id=user_id).first() if user_id is not None else TrainingGoal.query.first()
-    if goal and goal.weight_projection and weight_end:
+    if goal and goal.weight_projection:
         proj = goal.weight_projection
         week_proj = next((p for p in proj if p.get("week") == week_num), None)
+        # Exposed as-is (raw stored projection value for this week — block-3
+        # mode stores the piecewise curve here, see goal_engine.build_block3_projection)
+        # so callers like weekly_report.build_sunday_recap can show the
+        # target WITHOUT a second weight/curve computation of their own.
         if week_proj:
+            weight_projection_target = week_proj.get("projected")
+        if week_proj and weight_end:
             diff = weight_end - week_proj.get("projected", weight_end)
             if diff < -1:
                 weight_vs_projected = "ahead"
@@ -194,6 +201,7 @@ def compute_weekly_metrics(week_num, user_id=None):
         "weight_change": weight_change,
         "weight_trend": weight_trend,
         "weight_vs_projected": weight_vs_projected,
+        "weight_projection_target": weight_projection_target,
         "key_lifts": lifts_summary,
         "checkin_avg": checkin_avg,
         "adherence_pct": adherence,
@@ -201,6 +209,144 @@ def compute_weekly_metrics(week_num, user_id=None):
         "wellness": wellness,
         "lift_trend": lift_trend_result,
     }
+
+
+def _fmt_num(x):
+    """Trim a float to its shortest readable form for the recap line —
+    220.0 -> "220", 218.9 -> "218.9", 209.5 -> "209.5". Display-only,
+    never used for comparisons."""
+    return f"{x:g}"
+
+
+def build_sunday_recap(uid, local_date):
+    """One-line Sunday recap for `uid`'s CURRENT block week (the week
+    containing `local_date` — the push scheduler's recap slot
+    (app._sunday_recap_push) and GET /api/sunday-recap both call this with
+    the user's local Sunday, so the push text and the check-in card read
+    the IDENTICAL dict and can never disagree — one source of truth).
+
+    Returns {"text": str, "data": {...}} or None when there's no current
+    block week to summarize (no AppState.start_date for this user). Never
+    raises — every internal failure is logged and turned into None,
+    because a broken recap must not break the Sunday push tick or the
+    check-in overlay (same contract as
+    app._morning_brief_body/_dose_night_body).
+
+    Reuses compute_weekly_metrics for weight/curve/lift-trend — NO second
+    weight/curve computation lives here; `curve_target` is read straight
+    from compute_weekly_metrics's own `weight_projection_target` (which is
+    itself just the SAME TrainingGoal.weight_projection lookup that
+    function already does internally for `weight_vs_projected`, now also
+    returned). This function only adds the pieces compute_weekly_metrics
+    doesn't carry at all — run miles, dose adherence (with held-dose
+    exclusion), and average sleep hours — all scoped to the SAME
+    Monday-Sunday week compute_weekly_metrics' week_num identifies.
+    """
+    try:
+        return _build_sunday_recap_inner(uid, local_date)
+    except Exception:
+        log.exception("build_sunday_recap failed user=%s local_date=%s", uid, local_date)
+        return None
+
+
+def _build_sunday_recap_inner(uid, local_date):
+    from models import AppState, PeptideDose, RunLog, GarminWellness
+
+    state = AppState.query.filter_by(user_id=uid).first()
+    if not state or not state.start_date:
+        return None
+
+    # Same start_date-based week resolution as app._week_for()/_current_week
+    # (clamped 1..12) — never date.today(), so this stays correct however
+    # far `local_date` is from the server's own clock.
+    diff_days = (local_date - state.start_date).days
+    week_num = min(12, max(1, diff_days // 7 + 1))
+    week_monday = state.start_date + timedelta(days=(week_num - 1) * 7)
+    week_sunday = week_monday + timedelta(days=6)
+
+    metrics = compute_weekly_metrics(week_num, user_id=uid)
+
+    # ── Dose adherence for THIS week. Held doses (dose_mg<=0) were never
+    # scheduled — excluded from both numerator and denominator. A
+    # LATE-taken dose still counts as taken (is_late is irrelevant here;
+    # only `taken_at is not None` matters, per protocol.py's "date-authority
+    # semantics" — taken_at is audit trail, not a gating field).
+    dose_rows = PeptideDose.query.filter(
+        PeptideDose.user_id == uid,
+        PeptideDose.date >= week_monday,
+        PeptideDose.date <= week_sunday,
+    ).all()
+    scheduled_doses = [d for d in dose_rows if d.dose_mg is not None and d.dose_mg > 0]
+    if scheduled_doses:
+        doses_scheduled = len(scheduled_doses)
+        doses_taken = sum(1 for d in scheduled_doses if d.taken_at is not None)
+    else:
+        doses_scheduled = None
+        doses_taken = None
+
+    # ── Run miles for THIS week — shown whenever any RunLog row exists
+    # (even a real 0.0-mile week: falsy-zero discipline), omitted only when
+    # there are no rows at all (nothing logged, not "zero miles logged").
+    run_rows = RunLog.query.filter(
+        RunLog.user_id == uid,
+        RunLog.log_date >= week_monday,
+        RunLog.log_date <= week_sunday,
+    ).all()
+    miles = sum((r.distance_miles or 0.0) for r in run_rows) if run_rows else None
+
+    # ── Average sleep hours for THIS week — from the same GarminWellness
+    # rows compute_week_wellness reads, converted seconds->hours with the
+    # SAME round(.,1) convention GET /api/garmin/wellness already uses.
+    wellness_rows = GarminWellness.query.filter(
+        GarminWellness.user_id == uid,
+        GarminWellness.date >= week_monday,
+        GarminWellness.date <= week_sunday,
+    ).all()
+    sleep_hours = [r.sleep_seconds / 3600.0 for r in wellness_rows if r.sleep_seconds]
+    sleep_avg_h = round(sum(sleep_hours) / len(sleep_hours), 1) if sleep_hours else None
+
+    lift_trend_pct = (metrics.get("lift_trend") or {}).get("tonnage_delta_pct")
+
+    data = {
+        "week": week_num,
+        "weight_start": metrics.get("weight_start"),
+        "weight_end": metrics.get("weight_end"),
+        "curve_target": metrics.get("weight_projection_target"),
+        "lift_trend": lift_trend_pct,
+        "miles": miles,
+        "doses_taken": doses_taken,
+        "doses_scheduled": doses_scheduled,
+        "sleep_avg_h": sleep_avg_h,
+    }
+
+    # RULE: a segment whose data is missing is OMITTED — never "None",
+    # never a fabricated 0. Present-but-genuinely-zero values (0.0 miles
+    # with runs logged, 0/N doses taken) DO render — see the falsy-zero
+    # notes on `miles`/doses above.
+    segments = []
+    if data["weight_start"] is not None and data["weight_end"] is not None:
+        seg = f"{_fmt_num(data['weight_start'])}→{_fmt_num(data['weight_end'])}"
+        if data["curve_target"] is not None:
+            seg += f" (curve {_fmt_num(data['curve_target'])})"
+        segments.append(seg)
+
+    if data["lift_trend"] is not None:
+        segments.append(f"lifts {data['lift_trend']:+g}%")
+
+    if data["miles"] is not None:
+        segments.append(f"{_fmt_num(data['miles'])} mi")
+
+    if data["doses_scheduled"]:
+        segments.append(f"doses {data['doses_taken']}/{data['doses_scheduled']}")
+
+    if data["sleep_avg_h"] is not None:
+        segments.append(f"sleep {_fmt_num(data['sleep_avg_h'])}h avg")
+
+    text = f"Wk {week_num}"
+    if segments:
+        text += ": " + " · ".join(segments)
+
+    return {"text": text, "data": data}
 
 
 def _build_narrative_data_lines(metrics):

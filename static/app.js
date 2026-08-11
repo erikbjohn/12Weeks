@@ -5770,6 +5770,32 @@ function buildMorningBriefing() {
   return lines.join(' ');
 }
 
+// Sunday recap card — served by GET /api/sunday-recap, itself a thin
+// wrapper over weekly_report.build_sunday_recap (the SAME builder the
+// Sunday push slot calls). `recap` is either null (nothing to summarize —
+// render nothing) or {"text": str, "data": {...}}; every `data` field is
+// already None-for-missing, so this renderer only shows what's real.
+function _renderSundayRecapCard(recap) {
+  if (!recap || !recap.text) return '';
+  var d = recap.data || {};
+  var bits = [];
+  if (d.weight_start != null && d.weight_end != null) {
+    var wLine = d.weight_start + '→' + d.weight_end;
+    if (d.curve_target != null) wLine += ' (curve ' + d.curve_target + ')';
+    bits.push(wLine);
+  }
+  if (d.lift_trend != null) bits.push('Lifts ' + (d.lift_trend > 0 ? '+' : '') + d.lift_trend + '%');
+  if (d.miles != null) bits.push(d.miles + ' mi');
+  if (d.doses_scheduled) bits.push('Doses ' + d.doses_taken + '/' + d.doses_scheduled);
+  if (d.sleep_avg_h != null) bits.push(d.sleep_avg_h + 'h sleep avg');
+
+  return '<div class="sunday-recap-card" style="flex-shrink:0;background:var(--card-elevated,rgba(127,127,127,0.08));' +
+    'border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0">' +
+    '<div style="font-size:16px;font-weight:600;color:var(--text);line-height:1.4">' + escapeHtml(recap.text) + '</div>' +
+    (bits.length ? '<div style="font-size:13px;color:var(--muted);margin-top:6px">' + bits.map(escapeHtml).join(' · ') + '</div>' : '') +
+    '</div>';
+}
+
 let _mcExchangeCount = 0;
 
 async function startMorningCheckin() {
@@ -5805,6 +5831,16 @@ async function showMorningCheckinOverlay() {
       }
     } catch(e) {}
 
+    // Sunday recap card — fetched fresh every time the overlay opens, from
+    // the SAME builder (weekly_report.build_sunday_recap) that feeds the
+    // Sunday push, so the card can never disagree with the push text.
+    var _recapCardHtml = '';
+    try {
+      const _recapRes = await fetch('/api/sunday-recap');
+      const _recapJson = await _recapRes.json();
+      _recapCardHtml = _renderSundayRecapCard(_recapJson && _recapJson.recap);
+    } catch(e) {}
+
     // Show measurement form with dismiss button
     el.innerHTML = `<div class="morning-checkin-overlay">
       <div class="morning-checkin-card" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
@@ -5812,6 +5848,7 @@ async function showMorningCheckinOverlay() {
           <div class="morning-briefing-label">Sunday Measurements</div>
           <button style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px" onclick="closeMorningCheckin()">&times;</button>
         </div>
+        ${_recapCardHtml}
         <div style="flex:1;overflow-y:auto;padding:12px 0">
           <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Take all measurements before your coach review.</div>
           <div class="mc-slider-row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
