@@ -9755,8 +9755,12 @@ function buildCoachContent(d) {
     html += '<div id="coach-inline-chat" style="margin-top:12px">';
     // Show Plan Week button only on Sunday/Monday AND only if next week isn't planned yet.
     // Check if next week has meal plans — meals are only generated during planning.
-    var _cDow = new Date().getDay(); // 0=Sun, 1=Mon
-    var _isSunOrMon = _cDow === 0 || _cDow === 1;
+    // Sunday ONLY: planning next week is a week's-end action. Showing this
+    // Monday-through-the-week put a "Plan Week N+1" banner at the top of a
+    // freshly planned week (Erik, 2026-08-10). A week that somehow starts
+    // unplanned still gets the day card's own "Plan this week" button.
+    var _cDow = new Date().getDay(); // 0=Sun
+    var _isSunOrMon = _cDow === 0;
     // Key off the ACTUAL program week (from start_date), never the week being
     // browsed — browsing week 11 on Sunday must not offer "Plan Week 12".
     var _nextWk = (getActualProgramWeek() || currentWeek) + 1;
@@ -9767,13 +9771,14 @@ function buildCoachContent(d) {
         if (_nextWkData.days[_ndi] && _nextWkData.days[_ndi].mealPlan) _nextWkPlanned = true;
       }
     }
+    html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>';
     if (_isSunOrMon && !_nextWkPlanned && _nextWk <= 12) {
       // Pass the week explicitly so the button label and the generated week
-      // can never diverge.
-      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-bottom:8px;background:var(--accent);color:#0d0f0e" onclick="launchWeeklyPlanning(' + _nextWk + ')">Plan Week ' + _nextWk + '</button>';
+      // can never diverge. Renders BELOW Talk to Erik — planning is the
+      // secondary action, never the top of the screen.
+      html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px;margin-top:8px;background:var(--accent);color:#0d0f0e" onclick="launchWeeklyPlanning(' + _nextWk + ')">Plan Week ' + _nextWk + '</button>';
     }
-    html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>' +
-    '</div>';
+    html += '</div>';
     return html;
 }
 
