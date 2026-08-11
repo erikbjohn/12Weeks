@@ -393,14 +393,27 @@ def test_migration_renames_unkeyed_rows_to_keyed_for_resolved_user(app_ctx):
     assert snap2 == snap
 
 
-def test_migration_ambiguous_user_leaves_rows_untouched_and_logs(app_ctx, caplog):
-    """erik@placemetry.com exists but there's no corroborating signal (no
-    block3_prestate, no AppState consistent with the block-3 transition
-    date) -- the migration must NOT guess. Rows stay unkeyed, the marker is
-    still set (so this never re-runs), and a loud warning is logged."""
+def test_migration_ambiguous_when_erik_user_does_not_exist(app_ctx, caplog):
+    """Code-review fix-round-2 (finding I1): resolution is a plain email
+    lookup for erik@placemetry.com -- run_transition is the only writer of
+    these unkeyed rows and always writes block3_prestate in the SAME
+    transaction, so a "has block3_prestate" corroboration check is always
+    true whenever the unkeyed rows this function is already gated on
+    exist; it was dead weight dressed up as a second signal. The only
+    genuine ambiguity left is "no User row for that email at all" -- the
+    migration must NOT guess a different user. Rows stay unkeyed, the
+    marker is still set (so this never re-runs), and a loud warning is
+    logged."""
     app_, db = app_ctx
-    erik_uid = _erik_uid(app_, db)
-    _reset_migration_state(app_, db, erik_uid)
+
+    def _reset_no_erik():
+        from models import SystemFlag, User
+        SystemFlag.query.filter(SystemFlag.key.in_(
+            ["block3_flags_keyed_v1", "projection_mode", "block3_anchor", "block3_prestate"]
+        )).delete(synchronize_session=False)
+        User.query.filter_by(email="erik@placemetry.com").delete(synchronize_session=False)
+        db.session.commit()
+    _do(app_, _reset_no_erik)
 
     def _seed():
         from models import SystemFlag
@@ -408,18 +421,22 @@ def test_migration_ambiguous_user_leaves_rows_untouched_and_logs(app_ctx, caplog
         db.session.add(SystemFlag(key="block3_anchor", value="220.0"))
         db.session.commit()
     _do(app_, _seed)
-    # Deliberately NO block3_prestate and NO AppState for erik_uid.
+    # Deliberately NO User row for erik@placemetry.com at all.
 
     with caplog.at_level(logging.WARNING):
         _run_migration(app_)
-    assert any("could not unambiguously resolve" in r.message for r in caplog.records)
+    assert any("could not resolve" in r.message for r in caplog.records)
 
-    snap = _flag_snapshot(app_, erik_uid)
-    assert snap["unkeyed_pm"] == "piecewise_block3"  # untouched
-    assert snap["unkeyed_ba"] == "220.0"
-    assert snap["keyed_pm"] is None
-    assert snap["keyed_ba"] is None
-    assert snap["marker"] == "ambiguous_no_migration"
+    def _check():
+        from models import SystemFlag
+        def val(key):
+            f = SystemFlag.query.filter_by(key=key).first()
+            return f.value if f else None
+        return val("projection_mode"), val("block3_anchor"), val("block3_flags_keyed_v1")
+    unkeyed_pm, unkeyed_ba, marker = _do(app_, _check)
+    assert unkeyed_pm == "piecewise_block3"  # untouched
+    assert unkeyed_ba == "220.0"
+    assert marker == "ambiguous_no_migration"
 
 
 def test_migration_collision_deletes_stale_unkeyed_row_not_left_forever(app_ctx, caplog):

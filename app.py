@@ -142,18 +142,23 @@ def _migrate_block3_flags_to_keyed():
     Erik's block-3 mode via the old global fallback.
 
     The unkeyed rows were only EVER written for one user — the block-3
-    transition target (Erik, erik@placemetry.com) — so uid is resolved by
-    finding that user AND confirming they actually went through the
-    transition: an existing `block3_prestate` SystemFlag (global, but can
-    only be non-null if SOME transition happened), OR an AppState whose
-    start_date matches transition_block3.TRANSITION_DATE (a strong
-    per-user signal). If that user can't be resolved this way, this does
-    NOT guess — it logs loudly and leaves the unkeyed rows in place for
-    the (still-safe, pre-migration) fallback path in cut_guard. The marker
-    is set on every run (no-op / migrated / ambiguous), so this executes
-    its resolution logic at most once ever regardless of outcome."""
-    from models import SystemFlag, User, AppState
-    import transition_block3
+    transition target (Erik, erik@placemetry.com) — `run_transition` is
+    the ONLY code that ever wrote them, and always for that one user.
+    Resolution is therefore a plain email lookup for erik@placemetry.com;
+    no further corroboration (`block3_prestate`, AppState.start_date) is
+    checked, because none would actually discriminate anything here —
+    `run_transition` writes `block3_prestate` in the SAME transaction as
+    the (then-unkeyed) flags, so by construction `block3_prestate` exists
+    whenever the unkeyed rows this function is already gated on (see the
+    `if not unkeyed` guard above) exist; treating it as independent
+    corroboration would be a docstring claim the code doesn't back up
+    (code-review fix-round-2). If erik@placemetry.com can't be found at
+    all, this does NOT guess — it logs loudly and leaves the unkeyed rows
+    in place for the (still-safe, pre-migration) fallback path in
+    cut_guard. The marker is set on every run (no-op / migrated /
+    ambiguous), so this executes its resolution logic at most once ever
+    regardless of outcome."""
+    from models import SystemFlag, User
 
     if SystemFlag.query.filter_by(key=_BLOCK3_FLAG_MIGRATION_KEY).first():
         return  # already ran (success, no-op, or ambiguous) — never re-run
@@ -168,21 +173,14 @@ def _migrate_block3_flags_to_keyed():
         return
 
     user = User.query.filter(User.email.ilike("erik@placemetry.com")).first()
-    resolved_uid = None
-    if user is not None:
-        has_prestate = SystemFlag.query.filter_by(key="block3_prestate").first() is not None
-        state = AppState.query.filter_by(user_id=user.id).first()
-        state_consistent = bool(state and state.start_date == transition_block3.TRANSITION_DATE)
-        if has_prestate or state_consistent:
-            resolved_uid = user.id
+    resolved_uid = user.id if user is not None else None
 
     if resolved_uid is None:
         logging.warning(
-            "[migration] block3 flag keying: could not unambiguously resolve "
-            "the block-3 user (erik@placemetry.com not found, or no "
-            "block3_prestate flag / AppState consistent with block 3) -- "
-            "leaving unkeyed projection_mode/block3_anchor rows in place "
-            "for the fallback path. NEVER guessing the target user.")
+            "[migration] block3 flag keying: could not resolve the block-3 "
+            "user (no User row for erik@placemetry.com) -- leaving unkeyed "
+            "projection_mode/block3_anchor rows in place for the fallback "
+            "path. NEVER guessing the target user.")
         db.session.add(SystemFlag(key=_BLOCK3_FLAG_MIGRATION_KEY, value="ambiguous_no_migration"))
         db.session.commit()
         return
