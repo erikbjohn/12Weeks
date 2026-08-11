@@ -10658,7 +10658,8 @@ function _fmtShortDate(iso) {
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function _doseRowHtml(dose) {
+function _doseRowHtml(dose, interactive) {
+  if (interactive === undefined) interactive = true;
   var taken = !!dose.taken;
   var metaParts = [];
   if (dose.syringe_units) metaParts.push(dose.syringe_units);
@@ -10674,11 +10675,14 @@ function _doseRowHtml(dose) {
       '<div style="font-size:16px;font-weight:700;color:var(--text)">' + escapeHtml(dose.compound) + ' <span style="font-weight:400;color:var(--muted)">' + dose.dose_mg + 'mg</span></div>' +
       metaHtml + noteHtml +
     '</div>' +
-    '<button class="protocol-dose-check' + (taken ? ' done' : '') + '" ' +
-      'style="width:44px;height:44px;min-width:44px;border:1px solid ' + (taken ? 'var(--lift-border)' : 'var(--border2)') + ';border-radius:8px;' +
-      'background:' + (taken ? 'var(--lift-bg)' : 'var(--surface2)') + ';color:' + (taken ? 'var(--accent)' : 'transparent') + ';' +
-      'font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" ' +
-      'onclick="toggleDose(' + dose.id + ', ' + taken + ')">&#10003;</button>' +
+    (interactive
+      ? '<button class="protocol-dose-check' + (taken ? ' done' : '') + '" ' +
+        'style="width:44px;height:44px;min-width:44px;border:1px solid ' + (taken ? 'var(--lift-border)' : 'var(--border2)') + ';border-radius:8px;' +
+        'background:' + (taken ? 'var(--lift-bg)' : 'var(--surface2)') + ';color:' + (taken ? 'var(--accent)' : 'transparent') + ';' +
+        'font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" ' +
+        'onclick="toggleDose(' + dose.id + ', ' + taken + ')">&#10003;</button>'
+      : '<span style="width:44px;height:44px;min-width:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0;' +
+        'font-size:20px;color:' + (taken ? 'var(--accent)' : 'var(--border2)') + '">' + (taken ? '&#10003;' : '&#9675;') + '</span>') +
   '</div>';
 }
 
@@ -10698,6 +10702,7 @@ function _missedRowHtml(m) {
 
 function buildProtocolContent(p) {
   var html = '';
+  var _interactive = p.is_today !== false;  // older payloads lack the flag -> today
 
   // Doses grouped by time — server already sorts by time; preserve that
   // group order rather than re-sorting.
@@ -10710,7 +10715,7 @@ function buildProtocolContent(p) {
   groupOrder.forEach(function(t) {
     html += '<div class="protocol-time-group" style="margin-bottom:16px">' +
       '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:4px">' + _fmtDoseTime(t) + '</h4>' +
-      groups[t].map(_doseRowHtml).join('') +
+      groups[t].map(function(dd) { return _doseRowHtml(dd, _interactive); }).join('') +
     '</div>';
   });
 
@@ -11243,14 +11248,18 @@ async function renderDetail() {
   let _protocolToday = null;
   const _protoTodayIdx = _userTodayMonIdx();
   const _protoActualWeek = getActualProgramWeek();
-  const _isProtocolToday = currentDay === _protoTodayIdx &&
-      (_protoActualWeek == null || currentWeek === _protoActualWeek);
-  if (_isProtocolToday) {
-    try {
-      const pr = await fetch('/api/protocol/today');
-      if (pr.ok) _protocolToday = await pr.json();
-    } catch(e) {}
-  }
+  // Viewed date = today + week-delta*7 + day-delta. Protocol renders for ANY
+  // viewed day (like meals/workouts); check-offs stay interactive only when
+  // the payload says is_today (server write-gate enforces it regardless).
+  try {
+    const _wkDelta = (_protoActualWeek == null) ? 0 : (currentWeek - _protoActualWeek);
+    const _dayDelta = currentDay - _protoTodayIdx;
+    const _vd = new Date();
+    _vd.setDate(_vd.getDate() + _wkDelta * 7 + _dayDelta);
+    const _iso = _vd.getFullYear() + '-' + String(_vd.getMonth() + 1).padStart(2, '0') + '-' + String(_vd.getDate()).padStart(2, '0');
+    const pr = await fetch('/api/protocol/today?date=' + _iso);
+    if (pr.ok) _protocolToday = await pr.json();
+  } catch(e) {}
 
   // If traveling, try to load travel workout
   if (isTraveling && !d._travelLoaded) {

@@ -216,3 +216,23 @@ def test_missed_entry_carries_dose_id_that_works_against_toggle(app_ctx, monkeyp
 
     r_after = client.get("/api/protocol/today")
     assert not any(m["compound"] == "Tesamorelin" for m in r_after.get_json()["missed"])
+
+
+def test_date_param_serves_any_day_readonly_state(app_ctx, monkeypatch):
+    """?date=YYYY-MM-DD returns that day's doses with is_today false and
+    today-anchored blocks (missed/labs_due) suppressed — protocol is viewable
+    on every card day, actionable only on today."""
+    app_, db = app_ctx
+    uid = _make_user(app_, db, "ui-dateparam@test.com")
+    _set_today(monkeypatch, date(2026, 8, 10))
+    _add_dose(app_, db, uid, date(2026, 8, 17), "07:00", "Injection",
+              "Retatrutide", 2, syringe="20u", site="Abdomen", notes="wk2")
+    client = _client_for(app_, uid)
+    p = client.get("/api/protocol/today?date=2026-08-17").get_json()
+    assert p["date"] == "2026-08-17"
+    assert p["is_today"] is False
+    assert len(p["doses"]) == 1 and p["doses"][0]["compound"] == "Retatrutide"
+    assert p["missed"] == [] and p["labs_due"] == []
+    today = client.get("/api/protocol/today").get_json()
+    assert today["is_today"] is True
+    assert client.get("/api/protocol/today?date=not-a-date").status_code == 400

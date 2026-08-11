@@ -5197,8 +5197,19 @@ def protocol_today():
     effects, watch_fors) — this is a schedule/adherence payload only.
     """
     today = _user_today()
+    # Optional ?date=YYYY-MM-DD lets the card show ANY day's scheduled doses
+    # (browsing forward/back), exactly like workouts and meals do. Check-offs
+    # remain valid only for today/yesterday — the toggle endpoint enforces
+    # that server-side regardless of what date is being VIEWED.
+    view_date = today
+    _d = request.args.get("date")
+    if _d:
+        try:
+            view_date = date.fromisoformat(_d)
+        except ValueError:
+            return jsonify({"error": "bad date"}), 400
     all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
-    today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
+    today_rows = sorted((r for r in all_rows if r.date == view_date), key=lambda r: r.time)
     vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
     labs = LabReminder.query.filter_by(user_id=current_user.id).all()
 
@@ -5232,7 +5243,8 @@ def protocol_today():
     ]
 
     return jsonify({
-        "date": today.isoformat(),
+        "date": view_date.isoformat(),
+        "is_today": view_date == today,
         "doses": [
             {
                 "id": r.id, "time": r.time, "event_type": r.event_type,
@@ -5242,10 +5254,12 @@ def protocol_today():
             }
             for r in today_rows
         ],
-        "missed": missed,
+        # missed/vials/labs are TODAY-anchored state, not per-viewed-day —
+        # only meaningful on the today card.
+        "missed": missed if view_date == today else [],
         "vials": vials_out,
-        "fasting_bound": "20:00" if fasted_dose_time(all_rows, today) else None,
-        "labs_due": labs_due,
+        "fasting_bound": "20:00" if fasted_dose_time(all_rows, view_date) else None,
+        "labs_due": labs_due if view_date == today else [],
     })
 
 
