@@ -2317,6 +2317,18 @@ def debug_full_day_state():
                         "traceback": traceback.format_exc()[-2000:]}), 500
 
 
+@app.route("/api/debug/version")
+@admin_required
+def debug_version():
+    """Which commit is this process actually running? Render sets
+    RENDER_GIT_COMMIT at build time. Exists because two replan jobs raced a
+    deploy (2026-08-10) and there was no way to tell old code from new."""
+    return jsonify({
+        "commit": os.environ.get("RENDER_GIT_COMMIT"),
+        "deployed_at": os.environ.get("RENDER_GIT_COMMIT_TIMESTAMP"),
+    })
+
+
 @app.route("/api/debug/show-sets")
 @admin_required
 def debug_show_sets():
