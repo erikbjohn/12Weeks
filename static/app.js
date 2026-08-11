@@ -7126,13 +7126,36 @@ async function renderGarminPanelBody() {
     return;
   }
   const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const rows = (st.workouts || []).map(w =>
-    '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:15px">' +
-      '<span>' + days[w.day_idx] + (w.scheduled_date ? ' &middot; ' + w.scheduled_date : '') + '</span>' +
-      (w.status === 'ok'
-        ? '<span style="color:var(--accent)">&#10003; on watch</span>'
-        : '<span style="color:#e66" title="' + String(w.error || '').replace(/"/g, '&quot;') + '">&#10007; failed</span>') +
-    '</div>').join('');
+  // Day-aware status: past days report what HAPPENED (run synced/logged or
+  // not), not whether a workout file sits on the watch. "On watch" is only a
+  // meaningful statement about today and the future.
+  let _rlMap = {};
+  try {
+    const rlr = await fetch('/api/run-log');
+    if (rlr.ok) _rlMap = await rlr.json();
+  } catch(e) {}
+  const _todayIso = todayStr();
+  const rows = (st.workouts || []).map(w => {
+    let status;
+    if (w.status !== 'ok') {
+      status = '<span style="color:#e66" title="' + String(w.error || '').replace(/"/g, '&quot;') + '">&#10007; push failed</span>';
+    } else if (w.scheduled_date && w.scheduled_date < _todayIso) {
+      const rl = _rlMap[st.week + '_' + w.day_idx];
+      status = rl
+        ? '<span style="color:var(--accent)">&#10003; run done' + (rl.source === 'garmin' ? ' (synced)' : '') + '</span>'
+        : '<span style="color:var(--muted)">&middot; no run logged</span>';
+    } else if (w.scheduled_date === _todayIso) {
+      const rl = _rlMap[st.week + '_' + w.day_idx];
+      status = rl
+        ? '<span style="color:var(--accent)">&#10003; run done today</span>'
+        : '<span style="color:var(--run-tempo)">today &middot; on watch</span>';
+    } else {
+      status = '<span style="color:var(--muted)">scheduled &middot; on watch</span>';
+    }
+    return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:15px">' +
+      '<span>' + days[w.day_idx] + (w.scheduled_date ? ' &middot; ' + w.scheduled_date : '') + '</span>' + status +
+    '</div>';
+  }).join('');
   var connLine = (st.live === false)
     ? '<div style="margin-bottom:10px;color:var(--run-tempo);font-size:16px">&#10003; Connected &middot; reconnecting&hellip;</div>'
     : '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>';
@@ -7143,7 +7166,7 @@ async function renderGarminPanelBody() {
     '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:8px" onclick="garminSyncNow(this)">Sync runs now</button>' +
     '<button class="btn btn-primary" style="width:100%;font-size:16px;margin-bottom:12px" onclick="garminPushWeek(this)">Push Week ' + currentWeek + ' to watch</button>' +
     (rows
-      ? '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Pushed to watch (week ' + st.week + ' schedule &mdash; not sync results):</div>' + rows
+      ? '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Week ' + st.week + ' &mdash; workouts loaded on your watch (past days show what actually happened):</div>' + rows
       : '') +
     '<button class="btn btn-secondary" style="width:100%;margin-top:12px;font-size:14px" onclick="garminLogout().then(renderGarminPanelBody)">Disconnect Garmin</button>';
 }
