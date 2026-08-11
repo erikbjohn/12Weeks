@@ -244,11 +244,3 @@ class TestCSVIntegrityGuard:
                     f"Retatrutide dose must be in {valid_retratrutide_doses}, "
                     f"got {dose} on {row['Date']}"
                 )
-
-
-class TestFullSuiteBaseline:
-    """Ensure the new guards don't break existing tests."""
-
-    def test_full_suite_runs(self):
-        """Placeholder — actual full-suite run is done via pytest command."""
-        pass

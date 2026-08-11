@@ -96,6 +96,10 @@ AGENTS = {
         "requires": [
             "base", "workout_today", "week_schedule", "completed_days",
             "next_week", "fasting", "user_rules", "today_status",
+            # Dose-night greetings ("Tesamorelin at 22:00 — take it, check it
+            # off, lights out") and the rule-6 late-hours carve-out both need
+            # protocol_status reachable at end-of-day, not just mid-day agents.
+            "protocol_status",
         ],
     },
     "chat_opened": {
@@ -106,6 +110,9 @@ AGENTS = {
             "meals_today", "completed_days", "coach_memories",
             "fasting", "user_rules",
             "today_sets", "today_status", "overrides",
+            # Same dose-night reachability as end_of_day — chat can be opened
+            # at 22:00 too.
+            "protocol_status",
         ],
     },
     "crisis": {

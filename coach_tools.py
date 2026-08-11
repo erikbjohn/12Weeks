@@ -424,7 +424,7 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     asked for a short history window.
     """
     from models import PeptideDose
-    from protocol import adherence_7d, next_escalation, escalation_dates
+    from protocol import adherence_7d, next_escalation, escalation_dates, is_late
     today = _user_local_today(user_id)
     all_rows = PeptideDose.query.filter_by(user_id=user_id).all()
     days = int(days)
@@ -437,7 +437,7 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
         {
             "date": str(r.date), "time": r.time, "compound": r.compound,
             "dose_mg": r.dose_mg, "taken": r.taken_at is not None,
-            "late": r.taken_at is not None and r.taken_at.date() > r.date,
+            "late": is_late(r),
         }
         for r in window_rows
     ]

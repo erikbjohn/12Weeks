@@ -454,3 +454,14 @@ def test_agents_with_cut_status_also_require_protocol_status():
             checked += 1
             assert "protocol_status" in reqs, f"{name} requires cut_status but not protocol_status"
     assert checked >= 4  # conversation, morning_checkin, meals_complete, nutritionist
+
+
+def test_chat_opened_and_end_of_day_require_protocol_status():
+    """chat_opened and end_of_day don't carry cut_status (so the loop above
+    never checks them), but they still need protocol_status reachable so the
+    dose-night greeting ("Tesamorelin at 22:00 — take it, check it off,
+    lights out") and the rule-6 late-hours carve-out fire from a greeting,
+    not just from mid-day agents."""
+    from coach_agents import AGENTS
+    assert "protocol_status" in AGENTS["chat_opened"]["requires"]
+    assert "protocol_status" in AGENTS["end_of_day"]["requires"]

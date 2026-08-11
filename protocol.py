@@ -24,14 +24,24 @@ toward. `taken_at` is an audit-trail timestamp only (it records WHEN the
 user tapped "taken", which — because a 22:00 dose logged locally can cross
 midnight UTC — can land on the calendar day AFTER `date`). No function in
 this module ever derives taken-ness or the counted day from `taken_at`'s
-date. The one and only use of `taken_at.date() > row.date` is to
-SUBCLASSIFY an already-taken row as "late" in `adherence_7d` — it is never
-used to decide whether a row counts as taken, and it is never used to pick
-which day a dose belongs to. Because of this, none of the functions in this
-module do any timezone conversion or "local day" arithmetic at all, which
-means DST transitions (e.g. the US fall-back on 2026-11-01) are simply
-irrelevant to every derivation here — there is no local-time math to get
-wrong in the first place.
+date. The one and only use of `taken_at.date()` is in `is_late()`, which
+SUBCLASSIFIES an already-taken row as "late" in `adherence_7d` — it is
+never used to decide whether a row counts as taken, and it is never used to
+pick which day a dose belongs to.
+
+`is_late()` uses a ONE-DAY grace boundary, not a same-day one:
+`taken_at.date() > row.date + timedelta(days=1)`. A same-day evening tap
+(e.g. a 22:0x local dose that lands on `row.date` in UTC after ~17:00 PT)
+and a next-morning retro-mark (`taken_at.date() == row.date + 1`) both
+count as on-time; only a tap that lands two or more calendar days (UTC)
+after `row.date` is "late". This boundary is intentional: the doctor-gated
+`/late` endpoint is only ever reachable for doses that are already >=2 days
+old, so anything `is_late()` would flag was always going to go through that
+gated path anyway — the two checks agree on where "late" starts. Because of
+this, none of the functions in this module do any timezone conversion or
+"local day" arithmetic at all, which means DST transitions (e.g. the US
+fall-back on 2026-11-01) are simply irrelevant to every derivation here —
+there is no local-time math to get wrong in the first place.
 
 ── Escalation-date definition (derived from real CSV, not hardcoded) ────
 `escalation_dates` must yield exactly the three retatrutide exposure-rise
@@ -308,18 +318,29 @@ def current_dose_mg(dose_rows: list, today, compound: str = "Retatrutide") -> Op
 
 # ── Adherence ─────────────────────────────────────────────────────────
 
+def is_late(row) -> bool:
+    """True iff an already-taken row's `taken_at` (UTC) date is more than
+    one calendar day after its own `date` — see the module docstring's
+    "Date-authority semantics" section for why the boundary sits at
+    `date + 1` (not `date`). A same-day evening tap that crosses UTC
+    midnight, and a next-morning retro-mark, are both on-time; only a tap
+    landing two or more UTC calendar days after `date` is late. Returns
+    False for untaken rows (`taken_at is None`)."""
+    return row.taken_at is not None and row.taken_at.date() > row.date + timedelta(days=1)
+
+
 def adherence_7d(dose_rows: list, today) -> dict:
     """7-day adherence window [today-6, today]. A row counts as TAKEN iff
     `taken_at is not None` (never inferred from taken_at's own date — see
-    module docstring). "late" subclassifies already-taken rows whose
-    taken_at date (UTC) is after the row's own date. "missed" = scheduled,
-    untaken, and strictly in the past (today's untaken doses aren't missed
-    yet)."""
+    module docstring). "late" subclassifies already-taken rows via
+    `is_late()` (taken_at date (UTC) is more than one day after the row's
+    own date). "missed" = scheduled, untaken, and strictly in the past
+    (today's untaken doses aren't missed yet)."""
     start = today - timedelta(days=6)
     window_rows = [r for r in dose_rows if start <= r.date <= today]
     scheduled = len(window_rows)
     taken = sum(1 for r in window_rows if r.taken_at is not None)
-    late = sum(1 for r in window_rows if r.taken_at is not None and r.taken_at.date() > r.date)
+    late = sum(1 for r in window_rows if is_late(r))
     missed = [{"date": r.date, "compound": r.compound}
               for r in window_rows if r.taken_at is None and r.date < today]
     pct = round(taken / scheduled * 100, 1) if scheduled else None

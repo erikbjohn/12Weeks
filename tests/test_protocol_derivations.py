@@ -253,7 +253,9 @@ def test_adherence_counts_taken_late_missed_and_pct():
         # taken on time
         Row(date=date(2026, 9, 1), time="07:00", compound="Enclomiphene", dose_mg=6.25,
             taken_at=datetime(2026, 9, 1, 15, 0, tzinfo=timezone.utc)),
-        # taken but late (taken_at date > row date)
+        # taken on time — 21:00-PDT-equivalent evening tap crosses UTC midnight
+        # (taken_at date == row date + 1); the 1-day grace boundary keeps this
+        # on-time, not late (see is_late()).
         Row(date=date(2026, 9, 2), time="07:00", compound="Enclomiphene", dose_mg=6.25,
             taken_at=datetime(2026, 9, 3, 4, 0, tzinfo=timezone.utc)),
         # missed (untaken, in the past)
@@ -266,9 +268,39 @@ def test_adherence_counts_taken_late_missed_and_pct():
     a = adherence_7d(rows, today=today)
     assert a["scheduled"] == 4
     assert a["taken"] == 2
-    assert a["late"] == 1
+    assert a["late"] == 0
     assert a["missed"] == [{"date": date(2026, 9, 3), "compound": "Enclomiphene"}]
     assert a["pct"] == 50.0
+
+
+def test_adherence_late_boundary_same_day_evening_tap_after_1700pt_not_late():
+    """(a) 22:05 PT tap on the dose's own date (05:05 UTC next day) must NOT
+    be late — this is the every-night Tesamorelin case."""
+    from protocol import adherence_7d
+    row = Row(date=date(2026, 10, 5), time="22:00", compound="Tesamorelin",
+              dose_mg=2.0, taken_at=datetime(2026, 10, 6, 5, 5, tzinfo=timezone.utc))
+    a = adherence_7d([row], today=date(2026, 10, 6))
+    assert a["late"] == 0
+
+
+def test_adherence_late_boundary_next_morning_retro_mark_not_late():
+    """(b) A next-morning retro-mark (taken_at date == row.date + 1, UTC)
+    must NOT be late — the spec counts these as on-time."""
+    from protocol import adherence_7d
+    row = Row(date=date(2026, 9, 1), time="07:00", compound="Enclomiphene",
+              dose_mg=6.25, taken_at=datetime(2026, 9, 2, 14, 0, tzinfo=timezone.utc))
+    a = adherence_7d([row], today=date(2026, 9, 2))
+    assert a["late"] == 0
+
+
+def test_adherence_late_boundary_genuine_late_path_take_is_late():
+    """(c) A genuine /late-path take (taken_at date == row.date + 3, UTC —
+    i.e. the doctor-gated >=2-days-old territory) IS late."""
+    from protocol import adherence_7d
+    row = Row(date=date(2026, 9, 1), time="07:00", compound="Enclomiphene",
+              dose_mg=6.25, taken_at=datetime(2026, 9, 4, 14, 0, tzinfo=timezone.utc))
+    a = adherence_7d([row], today=date(2026, 9, 4))
+    assert a["late"] == 1
 
 
 def test_adherence_pct_none_when_nothing_scheduled():
