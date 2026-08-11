@@ -304,6 +304,63 @@ def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
     return out
 
 
+RUN_BASE_MIN_WEEKLY_MINUTES = 120.0  # below this, no hard sessions — base first
+RUN_BASE_EASY_CAP_MIN = 40           # converted days are bounded easy runs
+_EASY_RUN_TYPES = {"z2", "easy", "recovery", "rest", "walk"}
+
+
+def weekly_run_minutes(user_id: int) -> float:
+    """Trailing-14-day RunLog volume as a weekly-minutes average. Duration
+    first; falls back to 10 min/mile when only distance was logged."""
+    from datetime import date as _date, timedelta as _td
+    from models import RunLog
+    cutoff = _date.today() - _td(days=14)
+    rows = (RunLog.query
+            .filter(RunLog.user_id == user_id,
+                    RunLog.log_date.isnot(None),
+                    RunLog.log_date >= cutoff)
+            .all())
+    total = 0.0
+    for r in rows:
+        if r.duration_min:
+            total += float(r.duration_min)
+        elif r.distance_miles:
+            total += float(r.distance_miles) * 10.0
+    return round(total / 2.0, 1)
+
+
+def enforce_run_base(out: dict, weekly_minutes: float) -> dict:
+    """Deterministic aerobic-base rail: with a low trailing volume, every
+    hard-type day (threshold/interval/tempo/anything non-easy) is converted to
+    a bounded easy Z2 run with an honest detail. The prompt asks for this; this
+    function makes it true regardless (2026-08-10: 4x4 @ HR165 was prescribed
+    off a ~70 min/week base — never again)."""
+    if weekly_minutes >= RUN_BASE_MIN_WEEKLY_MINUTES:
+        return out
+    gated = {}
+    for d, plan in out.items():
+        p = dict(plan)
+        rtype = (p.get("type") or "").strip().lower()
+        if rtype and rtype not in _EASY_RUN_TYPES:
+            try:
+                orig_min = int(str(p.get("duration", "")).split()[0])
+            except (ValueError, IndexError):
+                orig_min = RUN_BASE_EASY_CAP_MIN
+            mins = min(orig_min, RUN_BASE_EASY_CAP_MIN)
+            steady = max(10, mins - 10)
+            p["type"] = "z2"
+            p["label"] = "Zone 2 Easy"
+            p["duration"] = f"{mins} min"
+            p["detail"] = (
+                f"5 min warmup; {steady} min steady (@ HR <=135); 5 min cooldown — "
+                f"converted from a higher-intensity session: current run volume "
+                f"(~{weekly_minutes:g} min/week) is below the base needed for "
+                f"quality work. Build the base first; intensity returns as "
+                f"weekly volume grows.")
+        gated[d] = p
+    return gated
+
+
 def generate_week_runs(
     user_id: int,
     week: int,
@@ -498,6 +555,9 @@ def generate_week_runs(
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
     out = _apply_run_regression_floor(out, user_id, week)
+    # Aerobic-base rail: no quality sessions off a thin base — deterministic,
+    # runs AFTER the regression floor so a floored hard day still converts.
+    out = enforce_run_base(out, weekly_run_minutes(user_id))
     # Hard backstop: never let a "baseline / first / no prior history" claim
     # reach an athlete who is mid-program. Prompt adherence is unreliable.
     out = _strip_baseline_confabulation(out, week)
