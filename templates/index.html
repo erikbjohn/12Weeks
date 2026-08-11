@@ -94,7 +94,8 @@ if ('serviceWorker' in navigator) {
   // would only cover /static/* and never control this page; app.py's
   // /static/sw.js route sends `Service-Worker-Allowed: /` so the browser
   // permits widening the scope to the whole app.
-  navigator.serviceWorker.register('/static/sw.js', { scope: '/', updateViaCache: 'none' });
+  navigator.serviceWorker.register('/static/sw.js', { scope: '/', updateViaCache: 'none' })
+    .catch(err => console.warn('SW registration failed:', err));
 }
 if ('caches' in window) {
   caches.keys().then(names => names.forEach(n => caches.delete(n)));

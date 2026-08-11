@@ -11983,10 +11983,11 @@ function _pushSupported() {
 }
 
 function _withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), ms)),
-  ]);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timed out')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // unsupported | blocked | on | off
@@ -12017,8 +12018,12 @@ async function refreshPushToggleUI() {
   btnEl.style.cursor = disabled ? 'default' : 'pointer';
 }
 
-async function _enablePush() {
-  const permission = await Notification.requestPermission();
+async function _enablePush(permissionPromise) {
+  // permissionPromise, when passed, is the result of a requestPermission()
+  // call already fired synchronously by togglePushNotifications() (see
+  // there for why) — await that instead of calling requestPermission()
+  // again here, several `await`s deep, which iOS Safari silently ignores.
+  const permission = permissionPromise ? await permissionPromise : Notification.permission;
   if (permission !== 'granted') return;
   const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
   const keyRes = await fetch('/api/push/vapid-public-key');
@@ -12050,18 +12055,32 @@ async function _disablePush() {
   if (!res.ok) throw new Error('server rejected unsubscribe (status ' + res.status + ')');
 }
 
-async function togglePushNotifications() {
+function togglePushNotifications() {
   const textEl = document.getElementById('push-status-text');
   const btnEl = document.getElementById('push-toggle-btn');
   if (!_pushSupported()) return;
   if (btnEl) btnEl.disabled = true;
+  // iOS Safari only honors Notification.requestPermission() when it's
+  // invoked synchronously inside the click handler, with no `await` ahead
+  // of it — a hop through serviceWorker.ready/getSubscription first burns
+  // the user-activation gesture and the prompt silently no-ops instead of
+  // showing. So this function stays a plain (non-async) click handler and
+  // fires the request FIRST, before anything else, whenever permission
+  // hasn't been decided yet; everything else happens async afterward.
+  const permissionPromise = (Notification.permission === 'default')
+    ? Notification.requestPermission()
+    : null;
+  return _togglePushNotifications(textEl, permissionPromise);
+}
+
+async function _togglePushNotifications(textEl, permissionPromise) {
   try {
     const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
     const existing = await reg.pushManager.getSubscription();
     if (existing) {
       await _disablePush();
     } else {
-      await _enablePush();
+      await _enablePush(permissionPromise);
     }
   } catch (e) {
     console.warn('Push toggle failed:', e);

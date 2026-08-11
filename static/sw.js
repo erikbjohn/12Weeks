@@ -1,6 +1,9 @@
-const CACHE_NAME = '12weeks-v141';
+const CACHE_NAME = '12weeks-v142';
+// '/' is deliberately NOT precached — it's the authenticated, per-user app
+// shell. Caching it (and falling back to that cache offline) risked
+// serving a previous user's page to a different user on a shared device
+// once this worker went live. See the 'fetch' handler below.
 const STATIC_ASSETS = [
-  '/',
   '/static/style.css?v=297',
   '/static/app.js?v=297',
   '/static/manifest.json',
@@ -32,14 +35,20 @@ self.addEventListener('fetch', (e) => {
   // Skip non-GET requests
   if (e.request.method !== 'GET') return;
 
-  // HTML pages — ALWAYS network first so updates show immediately
+  // HTML pages — network only, NEVER cached. This is the authenticated,
+  // per-user app shell; caching it and serving that cache offline could
+  // hand a different user's page to whoever is next on a shared device.
+  // The offline fallback is a static, content-free message instead of a
+  // cache lookup.
   if (e.request.mode === 'navigate' || url.pathname === '/') {
     e.respondWith(
-      fetch(e.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-        return res;
-      }).catch(() => caches.match(e.request))
+      fetch(e.request).catch(() => new Response(
+        '<!doctype html><meta charset="utf-8"><title>Offline</title>' +
+        '<body style="font-family:system-ui,sans-serif;text-align:center;' +
+        'padding:48px 16px;color:#333">You’re offline. Reconnect and ' +
+        'reload to continue.</body>',
+        { status: 503, headers: { 'Content-Type': 'text/html' } }
+      ))
     );
     return;
   }

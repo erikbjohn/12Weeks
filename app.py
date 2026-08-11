@@ -9978,10 +9978,15 @@ def api_user_timezone():
 # VAPID_PRIVATE_KEY env vars, which lost every subscription on every deploy
 # and required hand-provisioning the keypair. Those old routes
 # (/api/push/vapid-key, the old /api/push/subscribe body shape, /api/push/test)
-# were never actually reachable — the only caller, static/app.js's
-# initPushNotifications(), is defined but never invoked (the service worker
-# it depends on is explicitly disabled/unregistered in templates/index.html)
-# — so they're replaced outright rather than kept for back-compat.
+# were never actually reachable at the time — the only caller, static/app.js's
+# initPushNotifications(), was defined but never invoked (the service worker
+# it depended on was explicitly disabled/unregistered in templates/index.html)
+# — so they were replaced outright rather than kept for back-compat.
+# Both of those are now fixed by the push-client follow-up work:
+# initPushNotifications() was deleted and replaced by a real Notifications
+# toggle in Settings that calls the routes below, and templates/index.html
+# now registers static/sw.js (scope '/', updateViaCache: 'none') instead of
+# unregistering it.
 
 def _get_or_create_vapid():
     """Returns (private_pem: str, public_key_b64: str). Self-provisions a
