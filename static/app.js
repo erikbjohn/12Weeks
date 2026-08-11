@@ -8652,15 +8652,36 @@ function _pdAerobicChart(weeks) {
   }
   svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--run-z2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
-  // Dots — native <title> gives a hover tooltip with avg HR, run count, miles.
+  // Dots + on-chart avg-HR labels. HR must be visible at a glance, not only
+  // on hover -- the primary device here is a phone, where hover never
+  // fires. Default label position is above the dot; when a dot's nearest
+  // neighbor is close enough to collide horizontally, alternate above/below
+  // per index. The <title> tooltip is kept too (harmless extra on desktop).
+  var xs = [];
+  for (var xi = 0; xi < weeks.length; xi++) xs.push(xPos(weeks[xi].week_start));
+
   for (var di = 0; di < weeks.length; di++) {
     var wpt = weeks[di];
-    var cx = xPos(wpt.week_start), cy = yPos(wpt.pace_sec_per_mi);
+    var cx = xs[di], cy = yPos(wpt.pace_sec_per_mi);
     var isLast = di === weeks.length - 1;
     svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (isLast ? 5 : 3) + '" fill="var(--run-z2)"' + (isLast ? '' : ' opacity="0.75"') + '>' +
       '<title>' + _fmtShortDate(wpt.week_start) + ': ' + _fmtPace(wpt.pace_sec_per_mi) + '/mi @ ' + wpt.avg_hr + ' bpm avg (' +
       wpt.n_runs + ' run' + (wpt.n_runs === 1 ? '' : 's') + ', ' + wpt.miles + ' mi)</title>' +
     '</circle>';
+
+    // Nearest-neighbor pixel gap decides collision risk (pure layout math,
+    // not derived from any health value).
+    var nearestGap = Infinity;
+    if (di > 0) nearestGap = Math.min(nearestGap, cx - xs[di - 1]);
+    if (di < weeks.length - 1) nearestGap = Math.min(nearestGap, xs[di + 1] - cx);
+    var crowded = nearestGap < 40;
+    // The last dot's label always goes below -- the pace annotation drawn
+    // further down already claims the space above the last dot.
+    var above = isLast ? false : (crowded ? (di % 2 === 0) : true);
+    var hrY = above ? cy - 8 : cy + 14;
+    if (hrY < padT + 10) hrY = cy + 14;    // don't crash into the top edge
+    if (hrY > H - padB - 2) hrY = cy - 8;  // don't crash into the x-axis labels
+    svg += '<text x="' + cx.toFixed(1) + '" y="' + hrY.toFixed(1) + '" text-anchor="middle" fill="var(--muted)" font-size="11" font-family="DM Mono,monospace">' + Math.round(wpt.avg_hr) + '</text>';
   }
 
   // Latest-week annotation, matching _pdWeightChart's current-value label.

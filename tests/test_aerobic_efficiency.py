@@ -23,6 +23,10 @@ Covers:
       without the endpoint crashing.
   (f) cross-user isolation — one user's runs never leak into another's
       response.
+  (g) a SUNDAY log_date (last day of a Monday-start week) buckets to that
+      week's Monday, not the following Monday -- pins down the boundary
+      the endpoint's `log_date - timedelta(days=log_date.weekday())` math
+      is supposed to hit but which wasn't exercised by any of (a)-(f).
 
 App-context handling: SHORT-LIVED contexts only, matching the documented
 pattern in tests/test_projection_surfaces.py (module-scoped `app_ctx` just
@@ -248,3 +252,23 @@ def test_cross_user_isolation(app_ctx):
 
     assert len(weeks_a) == 1 and weeks_a[0]["miles"] == 3.0 and weeks_a[0]["n_runs"] == 1
     assert len(weeks_b) == 1 and weeks_b[0]["miles"] == 10.0 and weeks_b[0]["n_runs"] == 1
+
+
+# ── (g) Sunday log_date buckets to ITS week's Monday, not the next one ─────
+
+def test_sunday_log_date_buckets_to_same_week_monday(app_ctx):
+    app_, db = app_ctx
+    uid, email, client = _login(app_, db, "aero-sunday@test.com")
+
+    # ANCHOR_MONDAY (2026-08-10) is a confirmed Monday; +6 days is the
+    # SUNDAY that closes out that same Monday-start week, not the next one.
+    sunday = ANCHOR_MONDAY + timedelta(days=6)
+    assert sunday.isoformat() == "2026-08-16"
+    _seed_run(app_, db, uid, sunday, 3.0, 27, 125, week=1, day_idx=0)
+
+    r = client.get("/api/stats/aerobic-efficiency")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    weeks = r.get_json()["weeks"]
+
+    assert len(weeks) == 1
+    assert weeks[0]["week_start"] == ANCHOR_MONDAY.isoformat()  # NOT the following Monday
