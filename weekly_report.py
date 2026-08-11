@@ -100,11 +100,47 @@ def compute_weekly_metrics(week_num, user_id=None):
         if week_proj:
             weight_projection_target = week_proj.get("projected")
         if week_proj and weight_end:
-            diff = weight_end - week_proj.get("projected", weight_end)
-            if diff < -1:
-                weight_vs_projected = "ahead"
-            elif diff > 1:
-                weight_vs_projected = "behind"
+            # I-3: in block-3 mode, judge the SAME way the dashboard on_pace
+            # badge and coach_assembler's cut_status.on_curve do —
+            # goal_engine.pace_status on the DESPIKED weight vs the curve,
+            # with the ONE tolerance (CURVE_TOLERANCE_LB=1.5) — never a raw
+            # ±1.0 comparison against the raw logged weight. Without this, a
+            # spiked weigh-in (a 3-8 lb water/gluten jump the despiker
+            # strips on every OTHER surface) could make the weekly report
+            # say "behind" in the same beat the dashboard badge says
+            # "on pace" for the same user — the no-UI-contradiction
+            # violation this fixes. Evaluated at the END of week_num
+            # (block3_start + 7*week_num days), which is exactly the date
+            # whose curve_value equals this week's own stored
+            # `weight_projection_target` above (goal_engine.curve_value's
+            # daily interpolation reproduces build_block3_projection's
+            # cumulative per-week subtraction exactly at day 7*week_num) —
+            # so "the same judgment" holds bit-for-bit, not approximately.
+            # NON-block-3 users (or a block-3 user whose anchor/start/
+            # despiked weight can't be resolved) fall through to the
+            # legacy ±1.0 path, byte-for-byte unchanged.
+            import cut_guard
+            block3_status = None
+            if user_id is not None and cut_guard._block3_mode(user_id):
+                anchor, block3_start = cut_guard._block3_anchor_and_start(user_id)
+                if anchor is not None and block3_start is not None:
+                    despiked_wt, _spiked = cut_guard.despiked_weight_for_week(user_id, week_num)
+                    if despiked_wt is not None:
+                        from goal_engine import pace_status
+                        eval_date = block3_start + timedelta(days=7 * week_num)
+                        status = pace_status(despiked_wt, anchor, block3_start, eval_date)
+                        # pace_status's 3 states are on_pace/ahead/behind;
+                        # this field's existing vocabulary is
+                        # on_track/ahead/behind — map, don't rename.
+                        block3_status = "on_track" if status == "on_pace" else status
+            if block3_status is not None:
+                weight_vs_projected = block3_status
+            else:
+                diff = weight_end - week_proj.get("projected", weight_end)
+                if diff < -1:
+                    weight_vs_projected = "ahead"
+                elif diff > 1:
+                    weight_vs_projected = "behind"
 
     # Key lifts — find PRs this week
     key_lift_names = [

@@ -54,33 +54,57 @@ def detect_water_spike(rows, expected_weekly_loss=0.0):
     return latest.weight_lbs, False
 
 
-def _block3_mode():
-    """True iff the block-3 piecewise curve is the live projection authority
-    (SystemFlag key="projection_mode", value="piecewise_block3"). THE single
-    flag lookup — app.py and coach_assembler.py both import this (never
-    re-implement the query) so the two surfaces can't drift on what "block 3
-    mode" means, the same discipline detect_water_spike enforces for the
-    spike rule itself."""
+def _flag_value(base_key, user_id):
+    """SystemFlag value for `base_key`, preferring the per-user KEYED row
+    (`<base_key>:<user_id>`) and falling back to the legacy GLOBAL unkeyed
+    row (`base_key`) only when no keyed row exists for this user.
+
+    I-4 (per-user block-3 flags): the legacy unkeyed rows — Erik's original
+    block-3 transition flags — don't record an owner, so this fallback is
+    read by EVERY user pre-migration (status quo, a brief window at first
+    boot). Once app.py's one-shot startup migration renames Erik's rows to
+    the keyed form, the unkeyed rows are gone: Erik's own lookup hits his
+    keyed row on the first query; every OTHER user's first query (their own
+    keyed row, which never existed) finds nothing, the second (legacy)
+    query finds nothing either (it's gone), and they correctly see no
+    block-3 state — the actual I-4 fix. See app.py's
+    `_migrate_block3_flags_to_keyed` for the rename."""
     from models import SystemFlag
-    flag = SystemFlag.query.filter_by(key="projection_mode").first()
-    return bool(flag and flag.value == "piecewise_block3")
+    if user_id is not None:
+        flag = SystemFlag.query.filter_by(key=f"{base_key}:{user_id}").first()
+        if flag is not None:
+            return flag.value
+    flag = SystemFlag.query.filter_by(key=base_key).first()
+    return flag.value if flag else None
+
+
+def _block3_mode(user_id):
+    """True iff the block-3 piecewise curve is the live projection authority
+    for `user_id` (SystemFlag key=f"projection_mode:{user_id}", value=
+    "piecewise_block3", falling back to the legacy unkeyed "projection_mode"
+    row pre-migration — see _flag_value). THE single flag lookup — app.py
+    and coach_assembler.py both import this (never re-implement the query)
+    so the two surfaces can't drift on what "block 3 mode" means, the same
+    discipline detect_water_spike enforces for the spike rule itself."""
+    return _flag_value("projection_mode", user_id) == "piecewise_block3"
 
 
 def _block3_anchor_and_start(user_id):
     """(anchor_weight, start_date) for rebuilding the block-3 curve, or
     (None, None)/partial-None when either half is missing.
 
-    anchor_weight comes from SystemFlag(key="block3_anchor", value=<float
-    as str>) — written once by the block-3 transition (Task 15) alongside
-    the projection_mode flag, rather than re-derived from
-    TrainingGoal.weight_projection[0] every call. start_date is
-    AppState.start_date for user_id (per-user; SystemFlag is global)."""
-    from models import SystemFlag, AppState
-    flag = SystemFlag.query.filter_by(key="block3_anchor").first()
+    anchor_weight comes from the keyed-with-fallback SystemFlag value for
+    "block3_anchor" (see _flag_value) — written once by the block-3
+    transition alongside the projection_mode flag, rather than re-derived
+    from TrainingGoal.weight_projection[0] every call. start_date is
+    AppState.start_date for user_id (always per-user; SystemFlag rows are
+    what used to be global before the I-4 keying fix)."""
+    from models import AppState
     anchor = None
-    if flag and flag.value:
+    value = _flag_value("block3_anchor", user_id)
+    if value:
         try:
-            anchor = float(flag.value)
+            anchor = float(value)
         except (TypeError, ValueError):
             anchor = None
     state = AppState.query.filter_by(user_id=user_id).first()
@@ -90,15 +114,33 @@ def _block3_anchor_and_start(user_id):
 
 def expected_weekly_loss_for(user_id, week):
     """The slope-adjustment rate to feed into detect_water_spike, gated
-    behind the `projection_mode` SystemFlag (set once block 3's piecewise
-    curve goes live). Returns 0.0 — reproducing today's unadjusted behavior
-    exactly — whenever the flag isn't set to "piecewise_block3", so this is
-    a no-op everywhere until that flag flips on.
-
-    user_id is accepted for a future per-user rollout but the flag is
-    currently global; it is not yet used to scope the lookup.
+    behind `_block3_mode(user_id)` (per-user, keyed-with-fallback — see
+    _flag_value). Returns 0.0 — reproducing today's unadjusted behavior
+    exactly — whenever block-3 mode isn't on for this user, so this is a
+    no-op everywhere until that flag flips on for them.
     """
-    if not _block3_mode():
+    if not _block3_mode(user_id):
         return 0.0
     import goal_engine
     return goal_engine.BLOCK3_WEEKLY_RATES.get(week, 0.0)
+
+
+def despiked_weight_for_week(user_id, week):
+    """(weight_to_anchor_on, spiked: bool) for `user_id` — the SAME
+    block-scoped (>= AppState.start_date), newest-first-limit-3 query
+    app._despiked_current_weight and coach_assembler._build_cut_status
+    already run, reused here so weekly_report's block-3 judgment (I-3)
+    can't drift from either badge's despike verdict. `week` feeds
+    expected_weekly_loss_for's slope adjustment — callers pass the specific
+    program week being judged (e.g. a weekly report's own week_num), not
+    necessarily "today's" week."""
+    from models import BodyWeight, AppState
+    state = AppState.query.filter_by(user_id=user_id).first()
+    block_start = state.start_date if state and state.start_date else None
+    q = (BodyWeight.query.filter_by(user_id=user_id)
+         .filter(BodyWeight.weight_lbs.isnot(None)))
+    if block_start is not None:
+        q = q.filter(BodyWeight.log_date >= block_start)
+    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all()
+    expected_loss = expected_weekly_loss_for(user_id, week)
+    return detect_water_spike(rows, expected_loss)

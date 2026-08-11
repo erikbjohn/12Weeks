@@ -857,7 +857,7 @@ def _build_cut_status():
     import cut_guard
     curve_target_today = None
     on_curve = None
-    if cut_guard._block3_mode():
+    if cut_guard._block3_mode(current_user.id):
         _anchor, _block3_start = cut_guard._block3_anchor_and_start(current_user.id)
         if _anchor is not None and _block3_start is not None:
             from goal_engine import curve_value, pace_status

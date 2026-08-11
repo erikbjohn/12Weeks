@@ -431,11 +431,16 @@ def run_transition(user, anchor_weight, dry_run=False):
     goal.target_weight = BLOCK3_TARGET_WEIGHT
     goal.weight_projection = goal_engine.build_block3_projection(anchor_weight, TRANSITION_DATE)
 
-    # (h) SystemFlags — same transaction as everything above (Task-13
+    # (h) SystemFlags — PER-USER KEYED names (I-4: the flags used to be
+    # global/unkeyed, so a second app user would silently inherit whichever
+    # user last transitioned). Same transaction as everything above (Task-13
     # handoff: both flags must land together or anchor-dependent consumers
-    # break while projection_mode still reports piecewise_block3).
-    _upsert_flag("projection_mode", "piecewise_block3")
-    _upsert_flag("block3_anchor", str(anchor_weight))
+    # break while projection_mode still reports piecewise_block3). Readers
+    # go through cut_guard's keyed-with-fallback helpers, which still find
+    # legacy unkeyed rows for pre-migration deploys — this write path only
+    # ever writes the keyed form, never the legacy shape.
+    _upsert_flag(f"projection_mode:{user.id}", "piecewise_block3")
+    _upsert_flag(f"block3_anchor:{user.id}", str(anchor_weight))
 
     # (i) Day-0 BodyWeight, only if none exists yet for today.
     existing_bw = BodyWeight.query.filter_by(user_id=user.id, log_date=TRANSITION_DATE).first()
@@ -557,7 +562,14 @@ def run_rollback(user):
     for field, value in goal_snap.items():
         setattr(goal, field, value)
 
-    for key in ("projection_mode", "block3_anchor", "block3_prestate"):
+    # Clear this user's KEYED flags (the only form this module writes, see
+    # run_transition). Also clear the legacy unkeyed names defensively — the
+    # only way they could still exist post-fix is a rollback executed in the
+    # brief pre-migration window, and leaving them behind would silently
+    # re-enable block-3-mode-for-everyone via cut_guard's legacy fallback,
+    # undermining I-4 the moment this same rollback is meant to clean up.
+    for key in (f"projection_mode:{user.id}", f"block3_anchor:{user.id}",
+                "projection_mode", "block3_anchor", "block3_prestate"):
         SystemFlag.query.filter_by(key=key).delete(synchronize_session=False)
 
     # (6) Delete imported protocol rows, scoped to the transition window.

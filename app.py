@@ -127,6 +127,82 @@ def _safe_next_url(next_url):
 
 from sqlalchemy import inspect as sa_inspect, text
 
+_BLOCK3_FLAG_MIGRATION_KEY = "block3_flags_keyed_v1"
+
+
+def _migrate_block3_flags_to_keyed():
+    """ONE-SHOT (guarded by SystemFlag marker `_BLOCK3_FLAG_MIGRATION_KEY`,
+    same pattern as the target_weight backfill below): renames Erik's
+    legacy UNKEYED `projection_mode`/`block3_anchor` SystemFlag rows to the
+    per-user KEYED form (`projection_mode:<uid>`, `block3_anchor:<uid>`)
+    cut_guard's keyed-with-fallback readers now prefer (I-4). PROD REALITY:
+    these rows exist unkeyed in the production DB (the block-3 transition
+    wrote them that way before this fix) — this runs once at boot to
+    convert them so a second app user can no longer silently inherit
+    Erik's block-3 mode via the old global fallback.
+
+    The unkeyed rows were only EVER written for one user — the block-3
+    transition target (Erik, erik@placemetry.com) — so uid is resolved by
+    finding that user AND confirming they actually went through the
+    transition: an existing `block3_prestate` SystemFlag (global, but can
+    only be non-null if SOME transition happened), OR an AppState whose
+    start_date matches transition_block3.TRANSITION_DATE (a strong
+    per-user signal). If that user can't be resolved this way, this does
+    NOT guess — it logs loudly and leaves the unkeyed rows in place for
+    the (still-safe, pre-migration) fallback path in cut_guard. The marker
+    is set on every run (no-op / migrated / ambiguous), so this executes
+    its resolution logic at most once ever regardless of outcome."""
+    from models import SystemFlag, User, AppState
+    import transition_block3
+
+    if SystemFlag.query.filter_by(key=_BLOCK3_FLAG_MIGRATION_KEY).first():
+        return  # already ran (success, no-op, or ambiguous) — never re-run
+
+    unkeyed = {
+        f.key: f for f in
+        SystemFlag.query.filter(SystemFlag.key.in_(["projection_mode", "block3_anchor"])).all()
+    }
+    if not unkeyed:
+        db.session.add(SystemFlag(key=_BLOCK3_FLAG_MIGRATION_KEY, value="noop_no_unkeyed_rows"))
+        db.session.commit()
+        return
+
+    user = User.query.filter(User.email.ilike("erik@placemetry.com")).first()
+    resolved_uid = None
+    if user is not None:
+        has_prestate = SystemFlag.query.filter_by(key="block3_prestate").first() is not None
+        state = AppState.query.filter_by(user_id=user.id).first()
+        state_consistent = bool(state and state.start_date == transition_block3.TRANSITION_DATE)
+        if has_prestate or state_consistent:
+            resolved_uid = user.id
+
+    if resolved_uid is None:
+        logging.warning(
+            "[migration] block3 flag keying: could not unambiguously resolve "
+            "the block-3 user (erik@placemetry.com not found, or no "
+            "block3_prestate flag / AppState consistent with block 3) -- "
+            "leaving unkeyed projection_mode/block3_anchor rows in place "
+            "for the fallback path. NEVER guessing the target user.")
+        db.session.add(SystemFlag(key=_BLOCK3_FLAG_MIGRATION_KEY, value="ambiguous_no_migration"))
+        db.session.commit()
+        return
+
+    renamed = []
+    for base_key, flag in unkeyed.items():
+        new_key = f"{base_key}:{resolved_uid}"
+        if SystemFlag.query.filter_by(key=new_key).first():
+            logging.warning(
+                "[migration] keyed flag %s already exists; leaving unkeyed "
+                "%s row as-is", new_key, base_key)
+            continue
+        flag.key = new_key
+        renamed.append(base_key)
+    db.session.add(SystemFlag(key=_BLOCK3_FLAG_MIGRATION_KEY, value=f"migrated_uid_{resolved_uid}"))
+    db.session.commit()
+    if renamed:
+        logging.info("[migration] block3 flags keyed for user %s: %s", resolved_uid, renamed)
+
+
 with app.app_context():
     # Drop and recreate psych_intake if it's missing the locked_until column
     try:
@@ -457,6 +533,15 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         logging.warning("[migration] target_weight backfill skipped: %s", e)
+
+    # ONE-SHOT (guarded): rename Erik's legacy unkeyed block-3 SystemFlag
+    # rows (projection_mode/block3_anchor) to the per-user keyed form
+    # (I-4). See _migrate_block3_flags_to_keyed's docstring above.
+    try:
+        _migrate_block3_flags_to_keyed()
+    except Exception as e:
+        db.session.rollback()
+        logging.warning("[migration] block3 flag keying skipped: %s", e)
 
     # PRE-START COACH EMAIL: Send day before start date
     try:
@@ -1139,13 +1224,14 @@ def _target_weekly_sets(week):
     return _BLOCK_WEEKLY_SETS.get(int(week), 84)
 
 
-def _block3_mode():
-    """True iff the block-3 piecewise curve is the live projection authority.
-    Thin wrapper — cut_guard owns the SystemFlag lookup (it already needed
-    it for expected_weekly_loss_for) so app.py and coach_assembler.py can't
-    drift on what "block 3 mode" means."""
+def _block3_mode(user_id):
+    """True iff the block-3 piecewise curve is the live projection authority
+    for `user_id`. Thin wrapper — cut_guard owns the keyed-with-fallback
+    SystemFlag lookup (it already needed it for expected_weekly_loss_for)
+    so app.py and coach_assembler.py can't drift on what "block 3 mode"
+    means, and can't drift on per-user flag keying (I-4) either."""
     import cut_guard
-    return cut_guard._block3_mode()
+    return cut_guard._block3_mode(user_id)
 
 
 def _block3_anchor_and_start(user_id):
@@ -5997,7 +6083,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             target_weight_val = goal.target_weight
             weeks_remaining = max(1, 12 - target_week + 1)
             _b3_anchor, _b3_start = (
-                _block3_anchor_and_start(current_user.id) if _block3_mode() else (None, None)
+                _block3_anchor_and_start(current_user.id) if _block3_mode(current_user.id) else (None, None)
             )
             if _b3_anchor is not None and _b3_start is not None:
                 # Block-3 mode: required_weekly is the CURVE's own next-week
@@ -7588,7 +7674,7 @@ def api_progress_dashboard():
     # key ({"week", "planned_weight"}) so the chart code (app.js
     # _pdWeightChart) works unchanged. Legacy: straight line from
     # start_weight to target_weight across 12 weeks.
-    projection_mode = "piecewise_block3" if _block3_mode() else None
+    projection_mode = "piecewise_block3" if _block3_mode(uid) else None
     linear_plan = []
     if projection_mode and goal and goal.weight_projection:
         linear_plan = [{"week": row["week"], "planned_weight": row["projected"]}
@@ -10864,12 +10950,12 @@ def _compute_goal_for_user(user, overrides=None):
     _override = bool(overrides.get("override_projection_mode"))
     if _override:
         goal.weight_projection = projection
-    elif cut_guard._block3_mode() and existing_goal is not None and existing_goal.weight_projection:
+    elif cut_guard._block3_mode(user.id) and existing_goal is not None and existing_goal.weight_projection:
         logging.info(
             "[block3] preserving curve weight_projection for user %s "
             "(projection_mode=piecewise_block3, no override_projection_mode)",
             user.id)
-    elif cut_guard._block3_mode():
+    elif cut_guard._block3_mode(user.id):
         # No existing curve to preserve — a first-ever compute under the flag
         # (existing_goal is None) or an existing goal that has no stored
         # projection yet. The CANONICAL curve is the default output here too,
@@ -12117,7 +12203,7 @@ def api_admin_debug_regenerate_projection():
         return jsonify({"error": "no training_goal for user"}), 404
     before = goal.weight_projection
 
-    if _block3_mode():
+    if _block3_mode(user.id):
         anchor, block3_start = _block3_anchor_and_start(user.id)
         if anchor is None or block3_start is None:
             return jsonify({"error": "block3 mode is on but anchor/start_date is missing"}), 400
