@@ -2073,8 +2073,13 @@ def debug_serve_as_user():
         "/api/bodyweight-retest/status",
     }
 
-    # Check if path starts with an allowlisted prefix
-    path_allowed = any(path.startswith(prefix) for prefix in allowlist)
+    # Exact boundary enforcement: path must be exactly the allowlisted endpoint
+    # OR be the endpoint with a query string. Prevents accidental matches like
+    # /api/workouts-export or /api/progress/dashboard slipping through.
+    path_allowed = any(
+        path == p or path.startswith(p + "?")
+        for p in allowlist
+    )
     if not path_allowed:
         return jsonify({"error": "path not allowlisted"}), 403
 
@@ -2110,29 +2115,34 @@ def debug_serve_as_user():
 @admin_required
 def debug_coach_context():
     """Assemble and return the coach's context blocks (cut_status, protocol_status,
-    lift_trend, garmin, today_status) by calling section builders under an impersonated
-    request context. NO LLM calls. Admin-only diagnostic.
+    lift_trend, readiness, wellness, garmin, today_status) by calling section builders
+    under an impersonated request context. NO LLM calls, NO Garmin live HTTP calls.
+    Admin-only diagnostic.
 
     Query: ?email=...
     Response: {"email", "context": {key: payload-or-error}}
     Each builder wrapped in try/except so a builder failure yields {"error": "..."} for
     that key, others still present, HTTP 200 overall.
+
+    Note: garmin section is DB-only (wellness_trends from GarminWellness rows, no live
+    client HTTP calls) to keep the debug surface side-effect-free. The three keys
+    "garmin", "readiness", "wellness" are returned as siblings (not nested under one key).
     """
     email = request.args.get("email", "")
     if not email:
         return jsonify({"error": "email required"}), 400
 
     try:
-        from models import User
+        from models import User, GarminWellness
         from flask_login import login_user
-        from coach_assembler import _SECTION_BUILDERS
+        from coach_assembler import _SECTION_BUILDERS, wellness_trends, _user_today
 
         u = User.query.filter_by(email=email).first()
         if u is None:
             return jsonify({"error": f"user {email!r} not found"}), 404
 
         context = {}
-        builder_names = ["cut_status", "protocol_status", "lift_trend", "garmin", "today_status"]
+        builder_names = ["cut_status", "protocol_status", "lift_trend", "today_status"]
 
         # Call each builder under impersonated request context
         with app.test_request_context():
@@ -2152,6 +2162,29 @@ def debug_coach_context():
                         "error": str(e),
                         "traceback": traceback.format_exc()[-500:]
                     }
+
+            # Build garmin section DB-only (NO live HTTP calls).
+            # The registered garmin builder calls gc.try_restore_tokens + get_today_summary,
+            # which consumes the shared rate-limit budget as a side effect. The debug surface
+            # must be side-effect-free, so we build the garmin section ourselves from the DB.
+            try:
+                wellness_rows = GarminWellness.query.filter_by(user_id=u.id).all()
+                today = _user_today()
+                wellness = wellness_trends(wellness_rows, today)
+                # Return the three sibling keys (not nested), mirroring the original builder's
+                # {"garmin": ..., "readiness": ..., "wellness": ...} return structure.
+                context["garmin"] = None
+                context["readiness"] = None
+                context["wellness"] = wellness
+                context["garmin_note"] = "live client skipped (debug surface is DB-only)"
+            except Exception as e:
+                import traceback
+                context["garmin"] = {
+                    "error": str(e),
+                    "traceback": traceback.format_exc()[-500:]
+                }
+                context["readiness"] = None
+                context["wellness"] = None
 
         return jsonify({
             "email": email,

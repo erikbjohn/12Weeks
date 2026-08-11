@@ -379,3 +379,188 @@ def test_coach_context_no_admin_key_401(app_ctx):
         r = c.get("/api/debug/coach-context?email=some@test.com")
 
     assert r.status_code in (401, 403)
+
+
+# ── Method enforcement tests (POST → 405) ────────────────────────────────────
+
+def test_serve_as_user_post_405(app_ctx, monkeypatch):
+    """serve-as-user rejects POST with 405."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.post(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/workouts",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 405
+
+
+def test_coach_context_post_405(app_ctx, monkeypatch):
+    """coach-context rejects POST with 405."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.post(
+            "/api/debug/coach-context?email=test@test.com",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 405
+
+
+# ── Allowlist boundary enforcement tests ───────────────────────────────────
+
+def test_serve_as_user_allowlist_exact_match(app_ctx, monkeypatch):
+    """serve-as-user allows exact allowlist match."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, _ = _login_via_session(app_, "boundary-exact@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=boundary-exact@test.com&path=/api/workouts",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200
+
+
+def test_serve_as_user_allowlist_with_query_string(app_ctx, monkeypatch):
+    """serve-as-user allows path with query string (?pattern)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, _ = _login_via_session(app_, "boundary-query@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=boundary-query@test.com&path=/api/workouts?week=6",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+
+
+def test_serve_as_user_allowlist_rejects_substring_match(app_ctx, monkeypatch):
+    """serve-as-user rejects substring matches like /api/workoutsEVIL."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/workoutsEVIL",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 403
+    assert "not allowlisted" in r.get_json().get("error", "").lower()
+
+
+def test_serve_as_user_allowlist_rejects_superpath(app_ctx, monkeypatch):
+    """serve-as-user rejects /api/progress/dashboard (not just /api/progress)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/progress/dashboard",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    # /api/progress/dashboard is NOT /api/progress (exact match requires it to start with /api/progress/ or /api/progress?)
+    # So it should be REJECTED by the boundary rule
+    assert r.status_code == 403, r.get_json()
+
+
+# ── Garmin DB-only tests (no live HTTP calls) ────────────────────────────────
+
+def test_coach_context_garmin_db_only_with_wellness(app_ctx, monkeypatch):
+    """coach-context returns populated wellness from GarminWellness DB rows (DB-only, no live calls)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    email = "garmin-db-only@test.com"
+    from models import User, GarminWellness
+    from datetime import date, timedelta
+
+    u = User.query.filter_by(email=email).first()
+    if not u:
+        u = User(email=email)
+        db.session.add(u)
+
+    # Seed wellness data
+    GarminWellness.query.filter_by(user_id=u.id).delete()
+    today = date.today()
+    for i in range(5):
+        w = GarminWellness(
+            user_id=u.id,
+            date=today - timedelta(days=i),
+            resting_hr=60 + i,
+            hrv_last_night=40.0 + i,
+            sleep_score=85 - i
+        )
+        db.session.add(w)
+    db.session.commit()
+
+    with app_.test_client() as c:
+        r = c.get(
+            f"/api/debug/coach-context?email={email}",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    context = data["context"]
+
+    # Garmin should be None (live client skipped)
+    assert context["garmin"] is None
+    # Readiness should be None (live client skipped)
+    assert context["readiness"] is None
+    # Wellness should be populated from DB
+    assert context["wellness"] is not None
+    assert "rhr_7d" in context["wellness"]
+    # There should be a note explaining why live client is skipped
+    assert "garmin_note" in context
+    assert "DB-only" in context["garmin_note"]
+
+
+def test_coach_context_garmin_no_live_client_calls(app_ctx, monkeypatch):
+    """coach-context does NOT call live Garmin client (even if it would raise)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    email = "garmin-no-live@test.com"
+    from models import User
+    from app import _get_garmin
+
+    u = User.query.filter_by(email=email).first()
+    if not u:
+        u = User(email=email)
+        db.session.add(u)
+        db.session.commit()
+
+    # Monkeypatch the Garmin client to raise if touched
+    def broken_get_garmin(user_id):
+        raise RuntimeError("Live Garmin client was called! Debug surface must be side-effect-free.")
+
+    monkeypatch.setattr("app._get_garmin", broken_get_garmin)
+
+    # This should still succeed with 200, because the debug endpoint uses DB-only wellness
+    with app_.test_client() as c:
+        r = c.get(
+            f"/api/debug/coach-context?email={email}",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    # Should be 200, not 500 (live client was NOT called)
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    context = data["context"]
+    assert context["garmin"] is None
+    assert context["readiness"] is None
+    # wellness should be present (from DB, no live calls)
+    assert "wellness" in context
