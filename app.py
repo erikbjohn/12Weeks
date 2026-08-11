@@ -2079,6 +2079,8 @@ def debug_serve_as_user():
         "/api/protocol/today",
         "/api/garmin/wellness",
         "/api/bodyweight-retest/status",
+        "/api/measurements",
+        "/api/bodyweight",
     }
 
     # Exact boundary enforcement: path must be exactly the allowlisted endpoint
