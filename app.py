@@ -41,6 +41,7 @@ from models import (
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
     PeptideDose, PeptideVial, LabReminder,
+    PushSubscription, PushSent,
 )
 from protocol import missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
 
@@ -9971,57 +9972,150 @@ def api_user_timezone():
 
 
 # ─── PUSH NOTIFICATIONS ────────────────────────────────────────────────────
+# DB-backed subscriptions (PushSubscription) + a self-provisioned VAPID
+# keypair (persisted in SystemFlag, survives worker restarts/deploys). This
+# replaces the old in-memory `_push_subscriptions` dict + VAPID_PUBLIC_KEY /
+# VAPID_PRIVATE_KEY env vars, which lost every subscription on every deploy
+# and required hand-provisioning the keypair. Those old routes
+# (/api/push/vapid-key, the old /api/push/subscribe body shape, /api/push/test)
+# were never actually reachable — the only caller, static/app.js's
+# initPushNotifications(), is defined but never invoked (the service worker
+# it depends on is explicitly disabled/unregistered in templates/index.html)
+# — so they're replaced outright rather than kept for back-compat.
 
-# In-memory for now; could be stored in DB (subscriptions are lost on
-# worker restart/deploy). Keyed by user_id so one user's action can never
-# push to another user's devices.
-_push_subscriptions = {}  # user_id -> [subscription_info, ...]
+def _get_or_create_vapid():
+    """Returns (private_pem: str, public_key_b64: str). Self-provisions a
+    VAPID keypair on first use and persists it in SystemFlag so every worker
+    (and every deploy) shares the same keypair — existing browser
+    subscriptions stay valid across restarts. public_key_b64 is the
+    base64url-encoded uncompressed P-256 point (65 raw bytes, starts 0x04)
+    the browser's PushManager.subscribe({applicationServerKey}) expects."""
+    from models import SystemFlag
+    priv = SystemFlag.query.filter_by(key="vapid_private_pem").first()
+    pub = SystemFlag.query.filter_by(key="vapid_public_key").first()
+    if priv and pub:
+        return priv.value, pub.value
 
-@app.route("/api/push/vapid-key")
-@login_required
-def api_vapid_key():
-    key = os.environ.get("VAPID_PUBLIC_KEY")
-    if not key:
-        return jsonify({"error": "Push not configured"}), 404
-    return jsonify({"publicKey": key})
+    from py_vapid import Vapid02
+    from py_vapid.utils import b64urlencode
+    from cryptography.hazmat.primitives import serialization
+
+    vapid = Vapid02()
+    vapid.generate_keys()
+    private_pem = vapid.private_pem().decode("utf-8")
+    public_key_b64 = b64urlencode(
+        vapid.public_key.public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+    )
+    try:
+        db.session.add(SystemFlag(key="vapid_private_pem", value=private_pem))
+        db.session.add(SystemFlag(key="vapid_public_key", value=public_key_b64))
+        db.session.commit()
+    except Exception:
+        # Lost a startup race to another worker generating concurrently —
+        # use whichever keypair actually landed in the DB.
+        db.session.rollback()
+        priv = SystemFlag.query.filter_by(key="vapid_private_pem").first()
+        pub = SystemFlag.query.filter_by(key="vapid_public_key").first()
+        if priv and pub:
+            return priv.value, pub.value
+        raise
+    return private_pem, public_key_b64
+
+
+def push_to_user(user_id, title, body, tag=None):
+    """Push a notification to every device `user_id` has subscribed on.
+    Returns the count of successful sends. NEVER raises — every failure is
+    logged and the remaining subscriptions are still attempted. A
+    subscription whose push answers 404/410 (gone/expired at the push
+    service) is pruned so it's never retried."""
+    from pywebpush import webpush, WebPushException
+
+    private_pem, _ = _get_or_create_vapid()
+    try:
+        from py_vapid import Vapid02
+        vapid_key = Vapid02.from_pem(private_pem.encode("utf-8"))
+    except Exception:
+        logging.exception("[PUSH] could not load VAPID private key")
+        return 0
+
+    subs = PushSubscription.query.filter_by(user_id=user_id).all()
+    sent = 0
+    for sub in subs:
+        try:
+            keys = json.loads(sub.keys_json)
+            webpush(
+                subscription_info={"endpoint": sub.endpoint, "keys": keys},
+                data=json.dumps({"title": title, "body": body, "tag": tag}),
+                vapid_private_key=vapid_key,
+                vapid_claims={"sub": "mailto:erik@placemetry.com"},
+            )
+            sent += 1
+        except WebPushException as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            logging.warning("[PUSH] webpush failed user=%s sub=%s status=%s: %s",
+                             user_id, sub.id, status, e)
+            if status in (404, 410):
+                try:
+                    db.session.delete(sub)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    logging.exception("[PUSH] failed to prune dead subscription %s", sub.id)
+        except Exception:
+            logging.exception("[PUSH] push_to_user failed user=%s sub=%s", user_id, sub.id)
+    return sent
 
 
 @app.route("/api/push/subscribe", methods=["POST"])
 @login_required
 def api_push_subscribe():
-    data = request.get_json()
-    sub = data.get("subscription")
-    if not sub:
-        return jsonify({"error": "subscription required"}), 400
-    subs = _push_subscriptions.setdefault(current_user.id, [])
-    # Deduplicate
-    if sub not in subs:
-        subs.append(sub)
+    """Body = the browser's PushSubscription JSON: {endpoint, keys:{p256dh,
+    auth}}. Upserts by endpoint — a browser resubscribing with the same
+    endpoint (keys can rotate) updates the existing row instead of
+    duplicating it."""
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint")
+    keys = data.get("keys")
+    if not endpoint or not keys:
+        return jsonify({"error": "endpoint and keys required"}), 400
+    row = PushSubscription.query.filter_by(endpoint=endpoint).first()
+    if row:
+        row.user_id = current_user.id
+        row.keys_json = json.dumps(keys)
+    else:
+        db.session.add(PushSubscription(
+            user_id=current_user.id, endpoint=endpoint, keys_json=json.dumps(keys),
+        ))
+    db.session.commit()
     return jsonify({"ok": True})
 
 
-@app.route("/api/push/test", methods=["POST"])
+@app.route("/api/push/unsubscribe", methods=["POST"])
 @login_required
-def api_push_test():
-    """Send a test push notification — ONLY to the current user's devices."""
-    vapid_private = os.environ.get("VAPID_PRIVATE_KEY")
-    vapid_email = os.environ.get("VAPID_EMAIL", "mailto:test@example.com")
-    subs = _push_subscriptions.get(current_user.id) or []
-    if not vapid_private or not subs:
-        return jsonify({"error": "Push not configured or no subscribers"}), 400
-    try:
-        from pywebpush import webpush
-        import json
-        for sub in subs:
-            webpush(
-                subscription_info=sub,
-                data=json.dumps({"title": "12 Weeks", "body": "Time for your morning check-in!", "tag": "morning-checkin"}),
-                vapid_private_key=vapid_private,
-                vapid_claims={"sub": vapid_email},
-            )
-        return jsonify({"ok": True, "sent": len(subs)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def api_push_unsubscribe():
+    """Body: {endpoint}. Deletes the row only if it's owned by the current
+    user — never lets one user delete another user's subscription by
+    endpoint alone."""
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint")
+    if endpoint:
+        row = PushSubscription.query.filter_by(
+            endpoint=endpoint, user_id=current_user.id
+        ).first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/push/vapid-public-key")
+@login_required
+def api_push_vapid_public_key():
+    _, public_key = _get_or_create_vapid()
+    return jsonify({"key": public_key})
 
 
 # ─── CONSTRAINTS ───────────────────────────────────────────────────────────

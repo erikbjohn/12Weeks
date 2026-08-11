@@ -10,8 +10,9 @@ Covers:
 - /api/test/create-user is no longer anonymous account minting.
 - _intake_jobs are scoped per user + kind: one user can never consume
   another user's psych-intake / profile / report job.
-- Push subscriptions are per-user: /api/push/test never fans out to other
-  users' devices.
+- Push subscriptions are per-user: push_to_user() is scoped by user_id at
+  the DB layer, so it can never fan out to another user's devices (see also
+  tests/test_push_foundation.py for the full push-foundation suite).
 
 NOTE: these tests deliberately do NOT hold an app context open across client
 requests — flask-login caches the loaded user on the active app context's `g`,
@@ -204,19 +205,36 @@ def test_pending_intake_job_of_other_user_is_not_handed_back(app_ctx, monkeypatc
 
 # ---- push subscription scoping ----------------------------------------------
 
-def test_push_test_only_targets_current_users_subscriptions(app_ctx):
+def test_push_to_user_only_targets_that_users_subscriptions(app_ctx, monkeypatch):
+    """push_to_user(user_id, ...) is scoped by user_id at the DB query
+    layer: subscribing as A and then pushing to B must never touch A's
+    device. (Regression guard for the DB-backed PushSubscription design —
+    the old in-memory _push_subscriptions dict kept this property too, via
+    /api/push/test, which no longer exists.)"""
     app_, db = app_ctx
     import app as app_module
-    a = _user_id(app_, db, "push-a@test.com")
-    b = _user_id(app_, db, "push-b@test.com")
+    a = _user_id(app_, db, "push-scope-a@test.com")
+    b = _user_id(app_, db, "push-scope-b@test.com")
+
     client_a = app_.test_client()
     _login(client_a, a)
-    r = client_a.post("/api/push/subscribe", json={"subscription": {"endpoint": "https://push/a"}})
+    r = client_a.post("/api/push/subscribe", json={
+        "endpoint": "https://push.example.com/security-scope-a",
+        "keys": {"p256dh": "k", "auth": "v"},
+    })
     assert r.status_code == 200
-    assert app_module._push_subscriptions.get(a) == [{"endpoint": "https://push/a"}]
-    # B has no subscriptions: /api/push/test must NOT fan out to A's device.
-    client_b = app_.test_client()
-    _login(client_b, b)
-    r = client_b.post("/api/push/test")
-    assert r.status_code == 400  # "no subscribers" for B — A untouched
-    assert app_module._push_subscriptions.get(a) == [{"endpoint": "https://push/a"}]
+
+    import pywebpush
+    calls = []
+
+    def fake_webpush(subscription_info, **kwargs):
+        calls.append(subscription_info["endpoint"])
+
+    monkeypatch.setattr(pywebpush, "webpush", fake_webpush)
+
+    # B has no subscriptions: push_to_user(B, ...) must send zero and must
+    # never touch A's device.
+    with app_.app_context():
+        sent = app_module.push_to_user(b, "Title", "Body")
+    assert sent == 0
+    assert calls == []

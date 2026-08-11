@@ -772,3 +772,30 @@ class LabReminder(db.Model):
     label = db.Column(db.Text, nullable=False)
     due_date = db.Column(db.Date, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
+
+
+class PushSubscription(db.Model):
+    """A browser's Web Push subscription (one row per device/browser install).
+    endpoint is globally unique per browser install (the push service assigns
+    it); keys_json holds the browser's {p256dh, auth} keys JSON-encoded, used
+    to encrypt payloads for that device."""
+    __tablename__ = "push_subscription"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    endpoint = db.Column(db.Text, unique=True, nullable=False)
+    keys_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow())
+
+
+class PushSent(db.Model):
+    """Idempotency ledger for push sends. One row per (user, kind, local_date)
+    guards against re-sending the same notification after a worker
+    restart/deploy — a duplicate insert for the same key must fail, not
+    silently double-send."""
+    __tablename__ = "push_sent"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    kind = db.Column(db.String(20), nullable=False)
+    local_date = db.Column(db.Date, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow())
+    __table_args__ = (db.UniqueConstraint("user_id", "kind", "local_date"),)
