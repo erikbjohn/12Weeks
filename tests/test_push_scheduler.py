@@ -409,6 +409,44 @@ def test_pushsent_written_when_send_returns_zero(app_ctx, monkeypatch):
     assert _pushsent_rows(app_, uid) == [("morning", _MON)]
 
 
+def test_pushsent_integrity_error_rolls_back_and_does_not_duplicate(app_ctx, monkeypatch):
+    """A genuine multi-worker race: two ticks both pass the PushSent
+    pre-check before either commits its ledger row. Simulated here by
+    having the body builder itself (called AFTER the pre-check, BEFORE
+    _push_window_send's own insert) commit a real PushSent row on `uid`'s
+    behalf — "the other worker" finishing first. This drives a REAL
+    sqlite UNIQUE-constraint IntegrityError through the actual
+    app.py:_push_window_send code path (not a mocked exception), proving
+    the rollback-and-skip branch neither crashes the tick nor leaves a
+    duplicate/corrupt ledger row."""
+    app_, db = app_ctx
+    import app as appmod
+    uid = _make_user(app_, db, "sched-race@test.com")
+    _subscribe(app_, db, uid)
+    calls = _stub_push(monkeypatch)
+    _set_now(monkeypatch, _pt(2026, 8, 17, 7, 0))
+
+    def _racing_body(uid_, local_date_):
+        from models import PushSent
+        db.session.add(PushSent(user_id=uid_, kind="morning", local_date=local_date_))
+        db.session.commit()
+        return "Weigh in"
+
+    monkeypatch.setattr(appmod, "_morning_brief_body", _racing_body)
+
+    fired = _app_do(app_, appmod._push_scheduler_tick)  # must not raise
+
+    # This process still sent (push_to_user was already called once the
+    # PushSent pre-check passed, per the contract's "counts as attempted"
+    # rule) even though its own ledger insert lost the race.
+    assert (uid, "morning") in fired
+    assert len(_calls_for(calls, uid)) == 1
+    # Exactly ONE row survives — "the other worker's" — never zero (the
+    # rollback didn't wipe it) and never two (no duplicate/crash on the
+    # UNIQUE constraint).
+    assert _pushsent_rows(app_, uid) == [("morning", _MON)]
+
+
 def test_push_to_user_raises_no_crash_no_ledger_row(app_ctx, monkeypatch):
     app_, db = app_ctx
     import app as appmod
