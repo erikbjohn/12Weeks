@@ -8295,6 +8295,13 @@ function _renderNewDashboardInner(apiData, overlay) {
   // 5. LIFT PROGRESSION
   html += _pdLiftProgression(lifts);
 
+  // 5.5 AEROBIC EFFICIENCY — served by its OWN endpoint (not part of
+  // /api/progress/dashboard), so it's mounted as a placeholder here and
+  // filled in by a follow-up fetch after overlay.innerHTML is set below
+  // (see _pdLoadAerobicEfficiency). Keeps the main dashboard render from
+  // waiting on a second round-trip.
+  html += '<div id="pd-aerobic-mount"><div class="pd-section"><div class="pd-section-label" style="font-size:16px">Easy pace @ Z2 (HR 118-140)</div><div class="pd-empty">Loading...</div></div></div>';
+
   // 6. Optional quiet quote pulled from psych intake — no cheerleading.
   if (psychQuote) {
     html += '<div class="pd-quote"><div class="pd-section-label">Why you started</div>' +
@@ -8313,6 +8320,27 @@ function _renderNewDashboardInner(apiData, overlay) {
   // latch must reset too — otherwise reopening Progress leaves the Lab tab
   // stuck on the placeholder forever (the fetch is skipped as "already done").
   _spLabLoaded = false;
+
+  _pdLoadAerobicEfficiency();
+}
+
+/* ── AEROBIC EFFICIENCY (Z2 pace-at-HR) ──
+ * Own endpoint, fetched separately from /api/progress/dashboard so a slow
+ * RunLog scan never blocks the rest of the dashboard render. */
+function _pdLoadAerobicEfficiency() {
+  var mount = document.getElementById('pd-aerobic-mount');
+  if (!mount) return;
+  fetch('/api/stats/aerobic-efficiency')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      var m = document.getElementById('pd-aerobic-mount');
+      if (!m) return; // Progress closed/re-rendered before this resolved
+      m.innerHTML = _pdAerobicChart(data ? data.weeks : []);
+    })
+    .catch(function() {
+      var m = document.getElementById('pd-aerobic-mount');
+      if (m) m.innerHTML = '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">Easy pace @ Z2 (HR 118-140)</div><div class="pd-empty">Failed to load</div></div>';
+    });
 }
 
 /* ── BLOCK 3 SCOREBOARD ──
@@ -8549,6 +8577,118 @@ function _pdWeightChart(bw, projections, targetWeight, startDate) {
 
   svg += '</svg>';
   return '<div class="pd-section"><div class="pd-section-label">Weight</div>' + svg + '</div>';
+}
+
+/* ── AEROBIC EFFICIENCY (Z2 pace-at-HR) CHART ──
+ * Follows the _pdWeightChart SVG idiom (viewBox, padding, DM Mono labels,
+ * gridlines) with two deliberate departures:
+ *   1. Y axis is INVERTED relative to that chart's convention: there we plot
+ *      bigger raw values higher; here bigger pace (slower) must plot LOWER
+ *      so "up" always reads as "faster" — so the (1 - ...) flip used there
+ *      is dropped here on purpose.
+ *   2. X axis is positioned by real calendar date (week_start), not by
+ *      array index, so a run of weeks with no qualifying easy runs leaves an
+ *      honest visual gap instead of compressing the timeline.
+ * `weeks` is the ascending-by-week_start array served by
+ * GET /api/stats/aerobic-efficiency: {week_start, pace_sec_per_mi, avg_hr,
+ * n_runs, miles}. The only client-side computation is formatting (M:SS,
+ * short dates) plus min() over the served pace values for the best-week
+ * reference line — no health math happens here. */
+function _pdAerobicChart(weeks) {
+  var title = 'Easy pace @ Z2 (HR 118-140)';
+  if (!weeks || weeks.length === 0) {
+    return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div><div class="pd-empty">No easy-zone runs logged yet</div></div>';
+  }
+
+  var W = 340, H = 200, padL = 52, padR = 16, padT = 16, padB = 28;
+
+  var paces = weeks.map(function(w) { return w.pace_sec_per_mi; });
+  var paceMin = Math.min.apply(null, paces);
+  var paceMax = Math.max.apply(null, paces);
+  var pacePad = Math.max(10, Math.round((paceMax - paceMin) * 0.15));
+  var yMin = paceMin - pacePad;
+  var yMax = paceMax + pacePad;
+  var yRange = (yMax - yMin) || 1;
+
+  function yPos(pace) {
+    // Deliberately NOT (1 - ...): larger pace (slower) -> larger y (down).
+    // Smaller pace (faster) -> smaller y (up). "Up = faster."
+    return padT + ((pace - yMin) / yRange) * (H - padT - padB);
+  }
+
+  var xStartDate = new Date(weeks[0].week_start + 'T00:00:00');
+  var xEndDate = new Date(weeks[weeks.length - 1].week_start + 'T00:00:00');
+  var xRangeMs = xEndDate - xStartDate;
+  function xPos(dateStr) {
+    if (!xRangeMs) return padL + (W - padL - padR) / 2;
+    var d = new Date(dateStr + 'T00:00:00');
+    var pct = (d - xStartDate) / xRangeMs;
+    return padL + Math.max(0, Math.min(1, pct)) * (W - padL - padR);
+  }
+
+  var svg = '<svg class="pd-weight-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
+
+  // Y-axis: gridlines at round 30s (or 60s if the range is wide) steps, labeled M:SS.
+  var tickStep = yRange > 240 ? 60 : 30;
+  var tickLo = Math.ceil(yMin / tickStep) * tickStep;
+  var tickHi = Math.floor(yMax / tickStep) * tickStep;
+  for (var tv = tickLo; tv <= tickHi; tv += tickStep) {
+    var ly = yPos(tv);
+    svg += '<text x="' + (padL - 6) + '" y="' + (ly + 4) + '" text-anchor="end" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtPace(tv) + '</text>';
+    svg += '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="var(--border)" stroke-width="0.5"/>';
+  }
+
+  // Best (fastest) week reference line — derived from the SERVED pace
+  // values (client-side min()), not recomputed health math.
+  var bestY = yPos(paceMin);
+  svg += '<line x1="' + padL + '" y1="' + bestY.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + bestY.toFixed(1) + '" stroke="var(--run-z2)" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>';
+  svg += '<text x="' + (W - padR - 2) + '" y="' + (bestY - 4).toFixed(1) + '" text-anchor="end" fill="var(--run-z2)" font-size="12" font-family="DM Mono,monospace" opacity="0.9">best ' + _fmtPace(paceMin) + '/mi</text>';
+
+  // Trajectory line — positioned by real date, so gaps between non-adjacent
+  // weeks are honest rather than visually compressed.
+  var pts = [];
+  for (var i = 0; i < weeks.length; i++) {
+    pts.push(xPos(weeks[i].week_start).toFixed(1) + ',' + yPos(weeks[i].pace_sec_per_mi).toFixed(1));
+  }
+  svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--run-z2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
+
+  // Dots — native <title> gives a hover tooltip with avg HR, run count, miles.
+  for (var di = 0; di < weeks.length; di++) {
+    var wpt = weeks[di];
+    var cx = xPos(wpt.week_start), cy = yPos(wpt.pace_sec_per_mi);
+    var isLast = di === weeks.length - 1;
+    svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (isLast ? 5 : 3) + '" fill="var(--run-z2)"' + (isLast ? '' : ' opacity="0.75"') + '>' +
+      '<title>' + _fmtShortDate(wpt.week_start) + ': ' + _fmtPace(wpt.pace_sec_per_mi) + '/mi @ ' + wpt.avg_hr + ' bpm avg (' +
+      wpt.n_runs + ' run' + (wpt.n_runs === 1 ? '' : 's') + ', ' + wpt.miles + ' mi)</title>' +
+    '</circle>';
+  }
+
+  // Latest-week annotation, matching _pdWeightChart's current-value label.
+  var last = weeks[weeks.length - 1];
+  var lx = xPos(last.week_start), ly2 = yPos(last.pace_sec_per_mi);
+  var plotRight = W - padR;
+  var annX, annAnchor;
+  if (lx + 46 < plotRight) { annX = lx + 8; annAnchor = 'start'; }
+  else                     { annX = lx - 8; annAnchor = 'end'; }
+  var annY = ly2 - 10;
+  if (annY < padT + 12) annY = ly2 + 18; // flip below the dot if it would collide with the top tick
+  svg += '<text x="' + annX.toFixed(1) + '" y="' + annY.toFixed(1) + '" text-anchor="' + annAnchor + '" fill="var(--run-z2)" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + _fmtPace(last.pace_sec_per_mi) + '</text>';
+
+  // X-axis: first + last week only (irregular gaps make a fixed tick set misleading).
+  svg += '<text x="' + xPos(weeks[0].week_start).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="start" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(weeks[0].week_start) + '</text>';
+  if (weeks.length > 1) {
+    svg += '<text x="' + xPos(last.week_start).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="end" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(last.week_start) + '</text>';
+  }
+
+  svg += '</svg>';
+  return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div>' + svg + '</div>';
+}
+
+function _fmtPace(secPerMi) {
+  var s = Math.round(secPerMi);
+  var m = Math.floor(s / 60);
+  var sec = s % 60;
+  return m + ':' + (sec < 10 ? '0' : '') + sec;
 }
 
 /* ── BODY COMPOSITION GRID ── */

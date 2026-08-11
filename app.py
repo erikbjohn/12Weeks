@@ -8129,6 +8129,65 @@ def api_stats_wellness():
         return jsonify({"error": str(e)[:200]}), 500
 
 
+@app.route("/api/stats/aerobic-efficiency")
+@login_required
+def api_stats_aerobic_efficiency():
+    """Return weekly (calendar-week, Monday-start) easy-pace-at-HR data.
+
+    Universe: ALL of the user's RunLog rows regardless of program week —
+    program week numbers are SCRAMBLED across history (block-1 rows re-homed
+    to weeks 25-36, block-2 to 13-18, current block 1-12), so buckets are
+    keyed strictly off log_date, never the week/day_idx columns.
+
+    Easy band: avg_hr in [118, 140] inclusive (Z2). Rows outside the band, or
+    missing distance/duration/HR, are excluded. Per calendar week: pace is
+    distance-weighted (total seconds / total miles), avg_hr is
+    duration-weighted. Weeks with zero qualifying runs are omitted entirely
+    (no zero-fill) so the chart never implies a data point that doesn't exist.
+    """
+    try:
+        uid = current_user.id
+        runs = RunLog.query.filter(
+            RunLog.user_id == uid,
+            RunLog.log_date.isnot(None),
+            RunLog.distance_miles.isnot(None),
+            RunLog.distance_miles > 0,
+            RunLog.duration_min.isnot(None),
+            RunLog.duration_min > 0,
+            RunLog.avg_hr.isnot(None),
+            RunLog.avg_hr >= 118,
+            RunLog.avg_hr <= 140,
+        ).all()
+
+        buckets = {}
+        for r in runs:
+            week_start = r.log_date - timedelta(days=r.log_date.weekday())
+            b = buckets.setdefault(week_start, {"sec": 0.0, "miles": 0.0, "hr_sec": 0.0, "n": 0})
+            dur_sec = r.duration_min * 60.0
+            b["sec"] += dur_sec
+            b["miles"] += r.distance_miles
+            b["hr_sec"] += r.avg_hr * dur_sec
+            b["n"] += 1
+
+        weeks = []
+        for week_start in sorted(buckets.keys()):
+            b = buckets[week_start]
+            if b["miles"] <= 0 or b["sec"] <= 0:
+                continue  # defensive: never emit a bucket we can't legitimately compute
+            weeks.append({
+                "week_start": week_start.isoformat(),
+                "pace_sec_per_mi": round(b["sec"] / b["miles"]),
+                "avg_hr": round(b["hr_sec"] / b["sec"], 1),
+                "n_runs": b["n"],
+                "miles": round(b["miles"], 2),
+            })
+
+        return jsonify({"weeks": weeks})
+    except Exception as e:
+        logging.exception("stats/aerobic-efficiency failed")
+        return jsonify({"error": str(e)[:200]}), 500
+
+
 # ─── TRAVEL MODE ────────────────────────────────────────────────────────────
 
 @app.route("/api/travel/workout")
