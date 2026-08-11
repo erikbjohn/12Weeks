@@ -43,7 +43,10 @@ from models import (
     PeptideDose, PeptideVial, LabReminder,
     PushSubscription, PushSent,
 )
-from protocol import missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
+from protocol import (
+    missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS,
+    CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -5326,6 +5329,57 @@ def protocol_dose_late(dose_id):
     dose.taken_at = now
     db.session.commit()
     return jsonify({"taken": True, "late": True})
+
+
+def _humanize_escalation(event):
+    """Build a human-readable "next change" string from an escalation
+    event dict ({"date", "kind", "detail"} — see protocol.escalation_events)
+    — e.g. "Aug 24: retatrutide 2 mg → 3 mg" or
+    "Sep 10: retatrutide 1×/wk → 2×/wk". The date and the
+    before/after values always come from the event itself, never
+    hardcoded. "retatrutide" is the one literal here because escalation
+    derivation is retatrutide-only today (protocol.py's module docstring)
+    — the event carries no compound field to read it from."""
+    detail = re.sub(r"(\d)mg\b", r"\1 mg", event["detail"]).replace(" per dose", "")
+    return f"{event['date'].strftime('%b %-d')}: retatrutide {detail}"
+
+
+@app.route("/api/protocol/calendar", methods=["GET"])
+@login_required
+def protocol_calendar():
+    """Full-calendar view of the user's whole peptide protocol — every
+    scheduled dose (including held doses), grouped by iso date, plus
+    escalation flags and the next upcoming change. This is the
+    "see-the-whole-artifact" view (design-from-artifact rule): the daily
+    Protocol accordion (/api/protocol/today) stays the check-off surface;
+    this endpoint is READ-ONLY (no writes happen here).
+
+    NEVER includes PROTOCOL_COMPOUNDS reference content (mechanism,
+    effects, watch_fors) — same card-boundary rule as /api/protocol/today.
+    """
+    today = _user_today()
+    all_rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+
+    days: dict = {}
+    for r in all_rows:
+        days.setdefault(r.date.isoformat(), []).append({
+            "compound": r.compound, "dose_mg": r.dose_mg, "time": r.time,
+            "taken": r.taken_at is not None,
+        })
+    for iso in days:
+        days[iso].sort(key=lambda d: d["time"])
+
+    escalations = [
+        {"date": e["date"].isoformat(), "kind": e["kind"], "detail": e["detail"]}
+        for e in escalation_events(all_rows)
+    ]
+
+    # Strictly AFTER today (next_escalation's own boundary is >=, so we
+    # shift the query date forward by one to exclude a same-day event).
+    upcoming = next_escalation(all_rows, today + timedelta(days=1))
+    next_change = _humanize_escalation(upcoming) if upcoming is not None else None
+
+    return jsonify({"days": days, "escalations": escalations, "next_change": next_change})
 
 
 @app.route("/api/admin/add-vial", methods=["POST"])

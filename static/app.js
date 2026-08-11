@@ -10860,6 +10860,15 @@ function buildProtocolContent(p) {
   var html = '';
   var _interactive = p.is_today !== false;  // older payloads lack the flag -> today
 
+  // Full-calendar link — the daily card only ever shows one day's slice of
+  // the doctor's 12-week artifact; this opens the whole thing, read-only
+  // (design-from-artifact rule). Follows the existing full-width DM-Mono
+  // action-button idiom (see showGroceryListPreStart's button).
+  html += '<button onclick="openProtocolCalendar()" style="width:100%;margin-bottom:14px;' +
+    'background:var(--surface2);border:1px solid var(--border2);color:var(--text);' +
+    'padding:10px;border-radius:8px;font-size:14px;cursor:pointer;font-family:\'DM Mono\',monospace">' +
+    '&#128197; Full calendar</button>';
+
   // Doses grouped by time — server already sorts by time; preserve that
   // group order rather than re-sorting.
   var groupOrder = [];
@@ -10944,6 +10953,188 @@ async function markDoseLate(id) {
     delete _doseSaving[id];
   }
   renderDetail();
+}
+
+// ─── PROTOCOL FULL CALENDAR (design-from-artifact: browse the whole thing) ──
+// Read-only grid over GET /api/protocol/calendar's payload. Check-offs stay
+// on the daily card (toggleDose/markDoseLate above) — this view never posts
+// anything. Weeks are derived from the payload's own date range, never
+// hardcoded to 12, so a shorter or longer protocol renders correctly.
+
+// Small static abbreviation map for the compounds actually in real use;
+// anything unrecognized falls back to its own first 4 characters, so a
+// future compound the coach hasn't seen yet still renders something sane.
+var _PROTOCOL_ABBR = {
+  'Enclomiphene': 'E',
+  'BPC-157': 'BPC',
+  'KPV': 'KPV',
+  'Retatrutide': 'Reta',
+  'TB-500': 'TB',
+  'GHK-Cu': 'GHK',
+  'Tesamorelin': 'Tesa',
+};
+
+function _protoAbbr(compound) {
+  return _PROTOCOL_ABBR[compound] || String(compound || '').slice(0, 4);
+}
+
+function _protoIsoFromDate(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+
+function _protoMondayOf(dt) {
+  var day = dt.getDay(); // 0=Sun..6=Sat
+  var diff = day === 0 ? -6 : 1 - day; // shift back to Monday
+  var monday = new Date(dt);
+  monday.setDate(dt.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+// Rows derive from the DATA's own date range — min day's Monday through
+// max day — never a hardcoded 12 weeks.
+function _protoCalWeeks(days) {
+  var isoDates = Object.keys(days || {}).sort();
+  if (!isoDates.length) return [];
+  var minDate = new Date(isoDates[0] + 'T00:00:00');
+  var maxDate = new Date(isoDates[isoDates.length - 1] + 'T00:00:00');
+  var cursor = _protoMondayOf(minDate);
+  var weeks = [];
+  while (cursor <= maxDate) {
+    var week = [];
+    for (var i = 0; i < 7; i++) {
+      week.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+// A compound "varies" if it has more than one distinct positive dose_mg
+// anywhere in the protocol (e.g. retatrutide's 2mg->3mg->4mg escalation) —
+// only then does the cell also print the dose alongside the abbreviation.
+// Held (dose_mg<=0) rows never count toward this — a hold isn't a new dose
+// level.
+function _protoVaryingCompounds(days) {
+  var seen = {};
+  Object.keys(days || {}).forEach(function(iso) {
+    (days[iso] || []).forEach(function(dd) {
+      if (dd.dose_mg > 0) {
+        if (!seen[dd.compound]) seen[dd.compound] = {};
+        seen[dd.compound][dd.dose_mg] = true;
+      }
+    });
+  });
+  var varies = {};
+  Object.keys(seen).forEach(function(c) { varies[c] = Object.keys(seen[c]).length > 1; });
+  return varies;
+}
+
+function _protoDoseLine(dd, varies) {
+  var abbr = _protoAbbr(dd.compound);
+  var held = dd.dose_mg <= 0;
+  var label = held ? abbr : (varies[dd.compound] ? abbr + ' ' + dd.dose_mg + 'mg' : abbr);
+  var style = 'display:block;font-size:12px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+    (held ? 'opacity:0.4;text-decoration:line-through;color:var(--muted)'
+          : (dd.taken ? 'color:var(--muted)' : 'color:var(--text)'));
+  return '<span style="' + style + '" title="' + escapeHtml(dd.compound + ' ' + dd.dose_mg + 'mg @ ' + dd.time) + '">' + escapeHtml(label) + '</span>';
+}
+
+function _protoCalCellHtml(dt, days, escByIso, todayIso, varies) {
+  var iso = _protoIsoFromDate(dt);
+  var doses = days[iso] || [];
+  var esc = escByIso[iso];
+  var isToday = iso === todayIso;
+  var nonHeld = doses.filter(function(dd) { return dd.dose_mg > 0; });
+  var allTaken = nonHeld.length > 0 && nonHeld.every(function(dd) { return dd.taken; });
+
+  var border = isToday ? '2px solid var(--accent)' : '1px solid var(--border)';
+  var bg = esc ? 'var(--run-hiit-bg)' : 'var(--surface2)';
+  var doseLines = doses.map(function(dd) { return _protoDoseLine(dd, varies); }).join('');
+
+  return '<div style="border:' + border + ';background:' + bg + ';border-radius:6px;padding:4px;min-height:60px"' +
+    (esc ? ' title="' + escapeHtml(esc.detail) + '"' : '') + '>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
+      '<span style="font-size:16px;font-weight:700;color:var(--text)">' + dt.getDate() + '</span>' +
+      '<span style="display:flex;gap:3px;align-items:center">' +
+        (esc ? '<span style="color:var(--run-hiit);font-size:12px">&#9650;</span>' : '') +
+        (allTaken ? '<span style="color:var(--accent);font-size:13px">&#10003;</span>' : '') +
+      '</span>' +
+    '</div>' +
+    doseLines +
+  '</div>';
+}
+
+function _protoCalRowHtml(week, days, escByIso, todayIso, varies, weekIdx) {
+  var startIso = _protoIsoFromDate(week[0]);
+  var endIso = _protoIsoFromDate(week[6]);
+  var label = 'Wk ' + (weekIdx + 1) + ' &middot; ' + _fmtShortDate(startIso) + '&ndash;' + _fmtShortDate(endIso);
+  var cells = week.map(function(dt) { return _protoCalCellHtml(dt, days, escByIso, todayIso, varies); }).join('');
+  return '<div style="margin-bottom:10px">' +
+    '<div style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:4px">' + label + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">' + cells + '</div>' +
+  '</div>';
+}
+
+function _buildProtocolCalendarHtml(data) {
+  var days = data.days || {};
+  var weeks = _protoCalWeeks(days);
+  if (!weeks.length) {
+    return '<div style="padding:2rem;text-align:center;color:var(--muted)">No protocol scheduled.</div>';
+  }
+  var escByIso = {};
+  (data.escalations || []).forEach(function(e) { escByIso[e.date] = e; });
+  var varies = _protoVaryingCompounds(days);
+  var todayIso = todayStr();
+
+  var dowLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  var dowHeader = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px">' +
+    dowLabels.map(function(l) {
+      return '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);text-align:center">' + l + '</div>';
+    }).join('') +
+  '</div>';
+
+  var nextChangeHtml = data.next_change
+    ? '<div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--coach-border);background:var(--coach-bg);border-radius:8px;color:var(--coach);font-size:14px">' +
+      '&#9650; Next change: ' + escapeHtml(data.next_change) + '</div>'
+    : '';
+
+  var legendHtml = '<div style="margin-bottom:12px;font-size:12px;color:var(--muted)">' +
+    '&#9650; dose/frequency change &nbsp;&middot;&nbsp; &#10003; day complete &nbsp;&middot;&nbsp; dimmed = held' +
+  '</div>';
+
+  var rowsHtml = weeks.map(function(week, idx) {
+    return _protoCalRowHtml(week, days, escByIso, todayIso, varies, idx);
+  }).join('');
+
+  return nextChangeHtml + legendHtml + dowHeader + rowsHtml;
+}
+
+async function openProtocolCalendar() {
+  var overlay = document.getElementById('protocol-cal-overlay');
+  if (!overlay) return;
+  var header = '<div class="pd-header"><span class="pd-title">Protocol Calendar</span>' +
+    '<button class="pd-close" onclick="closeProtocolCalendar()">&times;</button></div>';
+  overlay.classList.add('visible');
+  overlay.innerHTML = header + '<div style="padding:1.5rem;text-align:center;color:var(--muted)">Loading&hellip;</div>';
+  try {
+    var res = await fetch('/api/protocol/calendar');
+    if (!res.ok) throw new Error('protocol calendar fetch failed: ' + res.status);
+    var data = await res.json();
+    overlay.innerHTML = header +
+      '<div style="padding:1rem;width:100%;max-width:640px;margin:0 auto;box-sizing:border-box">' +
+      _buildProtocolCalendarHtml(data) +
+      '</div>';
+  } catch (e) {
+    console.error('Protocol calendar load error:', e);
+    overlay.innerHTML = header + '<div style="padding:1.5rem;text-align:center;color:var(--run-tempo)">Could not load the calendar.</div>';
+  }
+}
+
+function closeProtocolCalendar() {
+  var overlay = document.getElementById('protocol-cal-overlay');
+  if (overlay) overlay.classList.remove('visible');
 }
 
 function buildRunSubsection(d, runClass) {

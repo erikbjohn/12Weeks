@@ -299,6 +299,22 @@ def next_escalation(dose_rows: list, today) -> Optional[dict]:
     return None
 
 
+def escalation_events(dose_rows: list) -> list[dict]:
+    """Public, calendar-facing view of the escalation events: one entry per
+    DATE — {"date", "kind", "detail"} — deduped the same way
+    `next_escalation` ties break (a date carrying both a dose-step and a
+    frequency-step reports only the dose-step). Because this is a straight
+    dedup-by-date of `_retatrutide_escalations`'s output, the set of dates
+    here is always IDENTICAL to `escalation_dates(dose_rows)` — this
+    function just also carries each date's kind/detail for display."""
+    by_date: dict = {}
+    for e in _retatrutide_escalations(dose_rows):
+        cur = by_date.get(e["date"])
+        if cur is None or (cur["kind"] != "dose" and e["kind"] == "dose"):
+            by_date[e["date"]] = e
+    return [by_date[d] for d in sorted(by_date)]
+
+
 # ── Current dose lookup ──────────────────────────────────────────────────
 
 def current_dose_mg(dose_rows: list, today, compound: str = "Retatrutide") -> Optional[float]:
