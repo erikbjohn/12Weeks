@@ -422,6 +422,46 @@ def test_migration_ambiguous_user_leaves_rows_untouched_and_logs(app_ctx, caplog
     assert snap["marker"] == "ambiguous_no_migration"
 
 
+def test_migration_collision_deletes_stale_unkeyed_row_not_left_forever(app_ctx, caplog):
+    """Code-review fix-round-1 finding: if a KEYED row for the resolved
+    user already exists (defensive/edge case -- shouldn't happen via any
+    normal write path), the migration must not just skip-and-leave the
+    unkeyed row in place. Since the marker is set unconditionally and this
+    never re-runs, an orphaned unkeyed row left here would sit forever as
+    a fallback hazard any OTHER user's cut_guard lookup could still hit --
+    reproducing I-4. The pre-existing keyed row (already correct for the
+    resolved user) must be left untouched; only the now-redundant unkeyed
+    row is deleted."""
+    app_, db = app_ctx
+    erik_uid = _erik_uid(app_, db)
+    _reset_migration_state(app_, db, erik_uid)
+
+    def _seed():
+        from models import SystemFlag, AppState
+        import transition_block3
+        db.session.add(SystemFlag(key="projection_mode", value="piecewise_block3"))
+        db.session.add(SystemFlag(key="block3_anchor", value="220.0"))
+        db.session.add(SystemFlag(key="block3_prestate", value="{}"))
+        db.session.add(AppState(user_id=erik_uid, current_week=1,
+                                 start_date=transition_block3.TRANSITION_DATE))
+        # A keyed row ALREADY exists for erik_uid, pre-empting the rename.
+        db.session.add(SystemFlag(key=f"projection_mode:{erik_uid}", value="already_here"))
+        db.session.commit()
+    _do(app_, _seed)
+
+    with caplog.at_level(logging.WARNING):
+        _run_migration(app_)
+    assert any("already exists" in r.message for r in caplog.records)
+
+    snap = _flag_snapshot(app_, erik_uid)
+    assert snap["keyed_pm"] == "already_here"  # pre-existing keyed value untouched
+    assert snap["unkeyed_pm"] is None  # the redundant unkeyed row is GONE, not orphaned
+    # The non-colliding flag (block3_anchor) still migrates normally.
+    assert snap["keyed_ba"] == "220.0"
+    assert snap["unkeyed_ba"] is None
+    assert snap["marker"] == f"migrated_uid_{erik_uid}"
+
+
 # ── (e) transition/rollback write PATH: keyed only, never unkeyed ──────────
 
 def test_transition_and_rollback_write_and_clear_keyed_flags_only(app_ctx):

@@ -191,9 +191,21 @@ def _migrate_block3_flags_to_keyed():
     for base_key, flag in unkeyed.items():
         new_key = f"{base_key}:{resolved_uid}"
         if SystemFlag.query.filter_by(key=new_key).first():
+            # The keyed row already exists (defensive/edge case — shouldn't
+            # happen via any normal write path, see run_transition's
+            # block3_prestate idempotency guard). DELETE the now-redundant
+            # unkeyed row rather than leaving it: since the marker is set
+            # unconditionally below and this never re-runs, an orphaned
+            # unkeyed row left here would sit forever as a fallback hazard
+            # ANY other user's cut_guard._flag_value lookup could still hit
+            # — exactly the I-4 bug this migration exists to close. The
+            # existing keyed row is left untouched (never overwritten with
+            # a possibly-stale value).
             logging.warning(
-                "[migration] keyed flag %s already exists; leaving unkeyed "
-                "%s row as-is", new_key, base_key)
+                "[migration] keyed flag %s already exists; deleting the "
+                "now-redundant unkeyed %s row instead of leaving it as a "
+                "fallback hazard for other users", new_key, base_key)
+            db.session.delete(flag)
             continue
         flag.key = new_key
         renamed.append(base_key)
@@ -1263,21 +1275,19 @@ def _despiked_current_weight(user_id):
     on_curve "behind") for the same user at the same instant. With fewer than
     3 block-scoped rows, neither surface can confirm a spike — both fall back
     to the raw latest weight, which is the invariant that actually matters:
-    they AGREE even when neither can spike-check."""
-    from models import BodyWeight, AppState
+    they AGREE even when neither can spike-check.
+
+    Thin wrapper — cut_guard.despiked_weight_for_week owns the block-scoped
+    query + detect_water_spike call (it needed the identical query for
+    weekly_report's I-3 fix, so this delegates instead of carrying a THIRD
+    independent copy of the same window/ordering logic; see that function's
+    docstring for the exact query shape, unchanged from before this
+    refactor). Deterministic ordering (log_date desc, id desc) so a
+    same-date re-logged weigh-in resolves to the SAME "latest" row as
+    coach_assembler._build_cut_status (which uses asc + id asc) is
+    preserved inside cut_guard.despiked_weight_for_week."""
     import cut_guard
-    state = AppState.query.filter_by(user_id=user_id).first()
-    block_start = state.start_date if state and state.start_date else None
-    q = (BodyWeight.query.filter_by(user_id=user_id)
-         .filter(BodyWeight.weight_lbs.isnot(None)))
-    if block_start is not None:
-        q = q.filter(BodyWeight.log_date >= block_start)
-    # Deterministic ordering (log_date desc, id desc) so a same-date re-logged
-    # weigh-in resolves to the SAME "latest" row as coach_assembler._build_cut_status
-    # (which uses asc + id asc).
-    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all()
-    expected_loss = cut_guard.expected_weekly_loss_for(user_id, _current_week())
-    return cut_guard.detect_water_spike(rows, expected_loss)
+    return cut_guard.despiked_weight_for_week(user_id, _current_week())
 
 
 def _current_week():
