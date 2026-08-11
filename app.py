@@ -2179,6 +2179,10 @@ def debug_serve_as_user():
         "/api/bodyweight-retest/status",
         "/api/measurements",
         "/api/bodyweight",
+        "/api/protocol/calendar",
+        "/api/stats/aerobic-efficiency",
+        "/api/run-log",
+        "/api/sunday-recap",
     }
 
     # Exact boundary enforcement: path must be exactly the allowlisted endpoint

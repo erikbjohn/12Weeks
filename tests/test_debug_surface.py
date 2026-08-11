@@ -476,6 +476,132 @@ def test_serve_as_user_allowlist_rejects_superpath(app_ctx, monkeypatch):
     assert r.status_code == 403, r.get_json()
 
 
+# ── Engagement-features allowlist additions (Task 9) ────────────────────────
+
+def test_serve_as_user_protocol_calendar_path(app_ctx, monkeypatch):
+    """serve-as-user proxies /api/protocol/calendar for a seeded user."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, client = _login_via_session(app_, "serve-test-calendar@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=serve-test-calendar@test.com&path=/api/protocol/calendar",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["email"] == "serve-test-calendar@test.com"
+    assert data["path"] == "/api/protocol/calendar"
+    assert data["status_code"] == 200
+
+
+def test_serve_as_user_aerobic_efficiency_path(app_ctx, monkeypatch):
+    """serve-as-user proxies /api/stats/aerobic-efficiency for a seeded user."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, client = _login_via_session(app_, "serve-test-aerobic@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=serve-test-aerobic@test.com&path=/api/stats/aerobic-efficiency",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["email"] == "serve-test-aerobic@test.com"
+    assert data["path"] == "/api/stats/aerobic-efficiency"
+    assert data["status_code"] == 200
+
+
+def test_serve_as_user_run_log_path(app_ctx, monkeypatch):
+    """serve-as-user proxies /api/run-log for a seeded user."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, client = _login_via_session(app_, "serve-test-runlog@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=serve-test-runlog@test.com&path=/api/run-log",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["email"] == "serve-test-runlog@test.com"
+    assert data["path"] == "/api/run-log"
+    assert data["status_code"] == 200
+
+
+def test_serve_as_user_sunday_recap_path(app_ctx, monkeypatch):
+    """serve-as-user proxies /api/sunday-recap for a seeded user."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    u, client = _login_via_session(app_, "serve-test-recap@test.com")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=serve-test-recap@test.com&path=/api/sunday-recap",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["email"] == "serve-test-recap@test.com"
+    assert data["path"] == "/api/sunday-recap"
+    assert data["status_code"] == 200
+
+
+def test_serve_as_user_allowlist_rejects_run_log_suffix(app_ctx, monkeypatch):
+    """serve-as-user rejects /api/run-logx (prefix-only match on /api/run-log)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/run-logx",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 403, r.get_json()
+    assert "not allowlisted" in r.get_json().get("error", "").lower()
+
+
+def test_serve_as_user_allowlist_rejects_protocol_calendar_superpath(app_ctx, monkeypatch):
+    """serve-as-user rejects /api/protocol/calendar/evil (not exact-or-query)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/protocol/calendar/evil",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 403, r.get_json()
+
+
+def test_serve_as_user_allowlist_rejects_non_allowlisted_sibling(app_ctx, monkeypatch):
+    """serve-as-user rejects /api/push/vapid-public-key (never allowlisted; confirms
+    the Task 9 additions didn't accidentally widen matching)."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+
+    with app_.test_client() as c:
+        r = c.get(
+            "/api/debug/serve-as-user?email=test@test.com&path=/api/push/vapid-public-key",
+            headers={"X-Admin-Key": "test-key"}
+        )
+
+    assert r.status_code == 403, r.get_json()
+
+
 # ── Garmin DB-only tests (no live HTTP calls) ────────────────────────────────
 
 def test_coach_context_garmin_db_only_with_wellness(app_ctx, monkeypatch):
