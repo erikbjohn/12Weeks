@@ -5339,7 +5339,11 @@ def _humanize_escalation(event):
     before/after values always come from the event itself, never
     hardcoded. "retatrutide" is the one literal here because escalation
     derivation is retatrutide-only today (protocol.py's module docstring)
-    — the event carries no compound field to read it from."""
+    — the event carries no compound field to read it from.
+
+    NOTE: `%-d` (no leading zero) is a glibc/BSD strftime extension — fine
+    on Render's Linux runtime (and macOS dev), but not portable to Windows.
+    Don't copy this pattern into code that needs to run there."""
     detail = re.sub(r"(\d)mg\b", r"\1 mg", event["detail"]).replace(" per dose", "")
     return f"{event['date'].strftime('%b %-d')}: retatrutide {detail}"
 

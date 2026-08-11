@@ -11047,6 +11047,8 @@ function _protoCalCellHtml(dt, days, escByIso, todayIso, varies) {
   var esc = escByIso[iso];
   var isToday = iso === todayIso;
   var nonHeld = doses.filter(function(dd) { return dd.dose_mg > 0; });
+  // Deliberately no checkmark on an all-held day (nonHeld.length === 0) —
+  // there's nothing to mark "done" when every dose that day was held.
   var allTaken = nonHeld.length > 0 && nonHeld.every(function(dd) { return dd.taken; });
 
   var border = isToday ? '2px solid var(--accent)' : '1px solid var(--border)';
