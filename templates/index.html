@@ -73,9 +73,28 @@ setTimeout(function() {
 <div id="exercise-focus" class="exercise-focus-overlay"></div>
 
 <script>
-// Nuke service workers so they can't serve stale assets
+// HISTORY: e6a57c4 ("Fix stale cache — unregister SW and clear caches
+// before loading app.js") made this block unregister every service worker
+// on every load, because an old SW was intercepting /static/app.js and
+// serving a stale cached copy before the cache-nuke script finished — a
+// browser keeps a controlling SW across reloads unless told otherwise.
+// That fixed staleness, but it also means a SW can never survive a
+// reload, which push notifications require (delivery needs a live,
+// persistently-registered worker, even with the app closed). Fix: instead
+// of unregistering, register static/sw.js with `updateViaCache: 'none'`
+// (forces the browser to always re-fetch sw.js itself from the network
+// rather than the HTTP cache, so a new SW version is detected promptly —
+// the actual mechanism that made staleness possible). Keep clearing
+// CacheStorage on every load — that targeted step is what actually
+// prevented stale content from being served; app.js/style.css freshness
+// is otherwise guaranteed by asset_url()'s content-hashed URLs plus
+// index.html being served no-store, not by anything the SW caches.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+  // scope: '/' — the script lives under /static/, whose default scope
+  // would only cover /static/* and never control this page; app.py's
+  // /static/sw.js route sends `Service-Worker-Allowed: /` so the browser
+  // permits widening the scope to the whole app.
+  navigator.serviceWorker.register('/static/sw.js', { scope: '/', updateViaCache: 'none' });
 }
 if ('caches' in window) {
   caches.keys().then(names => names.forEach(n => caches.delete(n)));

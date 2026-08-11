@@ -1030,11 +1030,13 @@ function apiPost(url, body) {
 
 // ─── OFFLINE OUTBOX ─────────────────────────────────────────────────────────
 // Failed POSTs are queued in IndexedDB and replayed FROM THE PAGE. This used
-// to hand off to a service-worker 'sync' event — but index.html deliberately
-// unregisters every service worker (stale-asset protection) and nothing ever
-// registers sw.js, so queued sets sat in the outbox forever and workout data
+// to hand off to a service-worker 'sync' event — but for most of this app's
+// life index.html unregistered every service worker on load (stale-asset
+// protection), so queued sets sat in the outbox forever and workout data
 // was silently lost. The page itself now replays the queue on reconnect and
-// at startup.
+// at startup. index.html registers sw.js again as of the push-notifications
+// feature, but sw.js still has no 'sync' handler — keep the replay here (see
+// the NOTE in sw.js) so a SW-side handler can't double-POST the same items.
 
 function _openOutboxDB() {
     return new Promise((resolve, reject) => {
@@ -4891,6 +4893,7 @@ function showSettingsMenu() {
   const el = document.getElementById('settings-dropdown');
   if (el) {
     el.classList.toggle('visible');
+    if (el.classList.contains('visible')) refreshPushToggleUI();
     return;
   }
   // Build settings dropdown
@@ -4913,12 +4916,17 @@ function showSettingsMenu() {
     <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
     <button onclick="${_c}showGroceryList()">Grocery List</button>
     <button onclick="${_c}showGarminPanel()">&#8986; Garmin Sync</button>
+    <div style="padding:10px 20px 12px;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);margin:4px 0;display:flex;flex-direction:column;gap:8px">
+      <div id="push-status-text" style="font-size:16px;line-height:1.4;color:var(--muted)">Notifications: checking&hellip;</div>
+      <button id="push-toggle-btn" onclick="togglePushNotifications()" style="min-height:44px;font-size:16px;font-family:'DM Mono',monospace;border-radius:8px;padding:10px 16px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);text-align:center">&hellip;</button>
+    </div>
     <button onclick="${_c}exportData()">Export Data</button>
     <button onclick="${_c}importData()">Import Data</button>
     <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
+  refreshPushToggleUI();
   // Close on click outside
   setTimeout(() => {
     document.addEventListener('click', function _settingsOutside(e) {
@@ -11955,34 +11963,12 @@ async function loadSundayPhotoPreviews() {
   }
 }
 
-// Service worker disabled — cache-busting handled by index.html
+// Service worker is registered at boot by templates/index.html
+// (updateViaCache: 'none' — see comment there). This section only manages
+// the Notifications toggle in Settings: request permission, subscribe/
+// unsubscribe with the push service, and tell the server.
 
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────
-async function initPushNotifications(reg) {
-  try {
-    const res = await fetch('/api/push/vapid-key');
-    if (!res.ok) return;
-    const { publicKey } = await res.json();
-    if (!publicKey) return;
-
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
-
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    });
-
-    await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: sub.toJSON() }),
-    });
-  } catch (e) {
-    console.warn('Push setup failed:', e);
-  }
-}
-
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -11990,6 +11976,99 @@ function urlBase64ToUint8Array(base64String) {
   const arr = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
   return arr;
+}
+
+function _pushSupported() {
+  return ('serviceWorker' in navigator) && ('PushManager' in window) && (typeof Notification !== 'undefined');
+}
+
+function _withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), ms)),
+  ]);
+}
+
+// unsupported | blocked | on | off
+async function _pushState() {
+  if (!_pushSupported()) return 'unsupported';
+  if (Notification.permission === 'denied') return 'blocked';
+  if (Notification.permission !== 'granted') return 'off';
+  try {
+    const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
+    const sub = await reg.pushManager.getSubscription();
+    return sub ? 'on' : 'off';
+  } catch (e) {
+    return 'off';
+  }
+}
+
+async function refreshPushToggleUI() {
+  const textEl = document.getElementById('push-status-text');
+  const btnEl = document.getElementById('push-toggle-btn');
+  if (!textEl || !btnEl) return;
+  const state = await _pushState();
+  const labels = { on: 'Notifications: on', off: 'Notifications: off', blocked: 'Notifications: blocked', unsupported: 'Notifications: unsupported' };
+  textEl.textContent = labels[state] + (state === 'blocked' ? ' — enable in browser settings' : '');
+  btnEl.textContent = state === 'on' ? 'Turn off' : 'Turn on';
+  const disabled = (state === 'unsupported' || state === 'blocked');
+  btnEl.disabled = disabled;
+  btnEl.style.opacity = disabled ? '0.5' : '1';
+  btnEl.style.cursor = disabled ? 'default' : 'pointer';
+}
+
+async function _enablePush() {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return;
+  const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
+  const keyRes = await fetch('/api/push/vapid-public-key');
+  if (!keyRes.ok) throw new Error('could not fetch push key (status ' + keyRes.status + ')');
+  const keyData = await keyRes.json();
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(keyData.key),
+  });
+  const subRes = await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub.toJSON()),
+  });
+  if (!subRes.ok) throw new Error('server rejected subscription (status ' + subRes.status + ')');
+}
+
+async function _disablePush() {
+  const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return;
+  const endpoint = sub.endpoint;
+  await sub.unsubscribe();
+  const res = await fetch('/api/push/unsubscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: endpoint }),
+  });
+  if (!res.ok) throw new Error('server rejected unsubscribe (status ' + res.status + ')');
+}
+
+async function togglePushNotifications() {
+  const textEl = document.getElementById('push-status-text');
+  const btnEl = document.getElementById('push-toggle-btn');
+  if (!_pushSupported()) return;
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const reg = await _withTimeout(navigator.serviceWorker.ready, 4000);
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      await _disablePush();
+    } else {
+      await _enablePush();
+    }
+  } catch (e) {
+    console.warn('Push toggle failed:', e);
+    if (textEl) textEl.textContent = 'Notifications: error — ' + (e && e.message ? e.message : 'could not update');
+  } finally {
+    await refreshPushToggleUI();
+  }
 }
 
 // ─── SESSION SUMMARY OVERLAY ──────────────────────────────────────────────

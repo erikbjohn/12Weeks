@@ -76,11 +76,12 @@ self.addEventListener('fetch', (e) => {
 });
 
 // NOTE: the offline POST outbox is replayed by the PAGE (app.js
-// replayOutbox), not here. This worker is never registered — index.html
-// deliberately unregisters all service workers to prevent stale assets —
-// so a 'sync'-event replay was dead code and queued sets were lost. Do not
-// re-add a SW-side replay without removing the page-side one (both deleting
-// from the same outbox can double-POST).
+// replayOutbox), not here. index.html now registers this worker (needed so
+// push notifications keep working with the app closed), but it still
+// clears CacheStorage on every load and there is still no 'sync'-event
+// handler here — the page-side replay in app.js remains the only replay
+// path. Do not add a SW-side replay without removing the page-side one
+// (both deleting from the same outbox can double-POST).
 
 // ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────
 self.addEventListener('push', (e) => {
