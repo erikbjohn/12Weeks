@@ -17,6 +17,7 @@ import re
 import json
 import logging
 from collections import defaultdict
+from datetime import date
 
 # Equipment / grip qualifiers that describe the SAME movement (so a coach name
 # like "Barbell Hip Thrust" maps to logged "Hip Thrust"). The core movement
@@ -124,10 +125,34 @@ def validate_program(parsed, catalog, available_equipment):
     return clean, dropped
 
 
+def _layoff_days(user_id: int):
+    """Days since the athlete's most recent COMPLETED set (any lift, any block).
+    None when there is no dated lifting history at all. Drives the
+    return-from-layoff rail: history-anchored loads are unsafe after weeks off."""
+    from models import SetLog
+    row = (SetLog.query
+           .filter(SetLog.user_id == user_id,
+                   SetLog.done.is_(True),
+                   SetLog.logged_date.isnot(None))
+           .order_by(SetLog.logged_date.desc())
+           .first())
+    if row is None:
+        return None
+    return (date.today() - row.logged_date).days
+
+
+# Layoff thresholds (days) and load-cap fractions. >= LAYOFF_LONG is a full
+# return-to-training protocol: 60% loads AND the weekly volume ceiling cut to
+# 60%. >= LAYOFF_MODERATE is 75% loads only.
+LAYOFF_MODERATE = 21
+LAYOFF_LONG = 42
+LAYOFF_CAP_FRAC = {LAYOFF_MODERATE: 0.75, LAYOFF_LONG: 0.60}
+
+
 def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                    history_max_weight, history_top=None, new_move_frac=0.6,
                    max_jump_frac=0.20, prev_by_day=None, min_per_day=4,
-                   deload=False, floor=0):
+                   deload=False, floor=0, layoff_days=None):
     """Deterministic safety rails the LLM can't be trusted to honor. Mutates a
     copy. Returns (program, actions[]).
 
@@ -194,6 +219,41 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                 # narrating the un-capped number (the "@70 but why says 65" class).
                 it["why"] = (f"{capped:g} lb — incremental step up from your recent "
                              f"top {prev_top:g} (held back from a {w:g} lb jump).")
+
+    # 2d. RETURN-FROM-LAYOFF cap — after weeks away from the bar, history-
+    #     anchored loads are an injury setup, not a plan. Cap EVERY logged
+    #     movement at a fraction of its recent top (0.75 at >= 21 days off,
+    #     0.60 at >= 42 days) and, for a long layoff, cut the weekly volume
+    #     ceiling to 60% so the week reads as a return ramp, not a continuation.
+    if layoff_days is not None and layoff_days >= LAYOFF_MODERATE:
+        frac = (LAYOFF_CAP_FRAC[LAYOFF_LONG]
+                if layoff_days >= LAYOFF_LONG else LAYOFF_CAP_FRAC[LAYOFF_MODERATE])
+        wks_off = layoff_days // 7
+        for items in out.values():
+            for it in items:
+                if it.get("new"):
+                    continue  # new movements already start light (rail 2)
+                prev_top = history_top.get(_movement_key(it["exercise"]))
+                w = it.get("weight")
+                if prev_top and w and w > prev_top * frac:
+                    capped = max(5, round(prev_top * frac / 5) * 5)
+                    actions.append(
+                        f"Layoff cap: {it['exercise']} {w:g}->{capped:g} lb "
+                        f"({wks_off} weeks since last logged set; return at "
+                        f"{int(frac * 100)}% and ramp).")
+                    it["weight"] = capped
+                    it["why"] = (
+                        f"{capped:g} lb — {wks_off} weeks off the bar, so we "
+                        f"restart at ~{int(frac * 100)}% of your {prev_top:g} lb "
+                        f"top and ramp back over 2-3 weeks.")
+        if layoff_days >= LAYOFF_LONG:
+            new_ceiling = max(min_per_day, int(ceiling * 0.6))
+            if new_ceiling < ceiling:
+                actions.append(
+                    f"Layoff volume cut: weekly set ceiling {ceiling}->{new_ceiling} "
+                    f"({wks_off} weeks off; volume rebuilds week over week).")
+                ceiling = new_ceiling
+            floor = 0  # the anti-taper floor must not fight the return ramp
 
     # 2c. per-day volume FLOOR (non-deload) — restore movements the day ran last
     #     week so the coach can't silently turn a training day into a deload.
@@ -508,10 +568,25 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         '"weight": <num|0>, "rest": "<single value, e.g. 90s or 2 min — never a '
         'range>", "why": "<one sentence: load + rest rationale>"}. JSON only, no prose.'
     )
+    layoff = _layoff_days(user_id)
+    layoff_block = ""
+    if layoff is not None and layoff >= LAYOFF_MODERATE:
+        frac = (LAYOFF_CAP_FRAC[LAYOFF_LONG]
+                if layoff >= LAYOFF_LONG else LAYOFF_CAP_FRAC[LAYOFF_MODERATE])
+        layoff_block = (
+            f"\nRETURN FROM LAYOFF — READ FIRST: the athlete has NOT lifted in "
+            f"{layoff // 7} weeks (last logged set {layoff} days ago). The top "
+            f"sets below are PRE-LAYOFF numbers, not current ability. Design a "
+            f"RETURN week: loads at ~{int(frac * 100)}% of those tops, moderate "
+            f"volume, nothing near failure, full-body competence over "
+            f"specialization. Say in each why that this is a return ramp and "
+            f"loads rebuild over 2-3 weeks. A deterministic rail will cap any "
+            f"load above {int(frac * 100)}% of a movement's recent top.\n")
     user_prompt = (
         f"ATHLETE:\n- Goal {goal_type}, {current_wt} lb → {target_wt} lb\n"
         f"- Week {week}, phase {phase} ({phase_intent}){' — DELOAD WEEK' if deload else ''}\n"
-        f"- Injuries/limits: {injuries}\n\n"
+        f"- Injuries/limits: {injuries}\n"
+        f"{layoff_block}\n"
         f"ALLOWED EXERCISES (equipment-filtered — use these exact names):\n{catalog_str}\n\n"
         f"RECENT TOP SETS (last 4 weeks):\n{history}\n\n"
         f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
@@ -567,6 +642,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         history_top=hist_top,
         prev_by_day=_prev_program_by_day(user_id, week),
         min_per_day=4, deload=deload, floor=floor,
+        layoff_days=_layoff_days(user_id),
     )
     notes = dropped + actions
     if notes:
