@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Laptop-side Garmin token refresher (see scripts/garmin_refresh_upload_auto.py).
+     Install:
+       cp scripts/com.12weeks.garmin-refresh.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.12weeks.garmin-refresh.plist
+     Remove:
+       launchctl bootout gui/$(id -u)/com.12weeks.garmin-refresh
+       rm ~/Library/LaunchAgents/com.12weeks.garmin-refresh.plist
+     Runs every 6h while the Mac is awake, and once at login/load. If the Mac
+     slept through a scheduled run, launchd fires one catch-up run on wake. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.12weeks.garmin-refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Project venv, not Homebrew python: a brew upgrade relocates
+         site-packages and would silently kill the refresher. -->
+    <string>/Users/erikbjohn/Documents/Github/12Weeks/venv/bin/python</string>
+    <string>/Users/erikbjohn/Documents/Github/12Weeks/scripts/garmin_refresh_upload_auto.py</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/erikbjohn/Library/Logs/garmin-refresh.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/erikbjohn/Library/Logs/garmin-refresh.log</string>
+</dict>
+</plist>

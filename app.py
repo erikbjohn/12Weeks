@@ -19,7 +19,7 @@ from workout_data import (
     get_workouts, get_phase, PHASES, WARMUPS, SUPPLEMENTS,
     TRAVEL_WORKOUTS, TRAVEL_DAY_MAP, EXERCISES,
 )
-from garmin_client import GarminClient
+from garmin_client import GarminClient, stored_oauth2_expires_at
 from overtraining import assess_readiness
 from coach import get_coach_response, extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
@@ -9980,6 +9980,30 @@ def garmin_hrv_trend():
     return jsonify(gc.get_weekly_hrv() or [])
 
 
+def _post_token_save_sync(gc, user):
+    """Fresh valid tokens just landed: clear the cooldown and sync NOW.
+    The whole point of a token upload is landing the data that stalled while
+    auth was dead — waiting up to 30 min for the next tick means the user
+    stares at a missing run (2026-08-12 outage)."""
+    gc._rate_limited_until = 0
+    out = {}
+    try:
+        import garmin_sync
+        from utils_time import user_local_today
+        tz_today = user_local_today(user.timezone if getattr(user, "timezone", None) else "UTC")
+        res = garmin_sync.sync_activities(gc, user.id, days_back=3, today=tz_today) or {}
+        garmin_sync.sync_wellness(gc, user.id, today=tz_today)
+        if not res.get("error"):
+            _garmin_sync_last[user.id] = time.time()
+        out["days_filled"] = res.get("days_filled", [])
+        if res.get("error"):
+            out["sync_error"] = res["error"]
+    except Exception:
+        logging.exception("[GARMIN] post-save-tokens sync failed")
+        out["sync_error"] = "post-save sync crashed (see logs)"
+    return out
+
+
 @app.route("/api/garmin/save-tokens", methods=["POST"])
 @login_required
 def garmin_save_tokens():
@@ -9997,7 +10021,7 @@ def garmin_save_tokens():
         gc._cache = {}
         gc._user_id = current_user.id
         gc._save_tokens()
-        return jsonify({"connected": True})
+        return jsonify({"connected": True, **_post_token_save_sync(gc, current_user)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -10025,7 +10049,8 @@ def admin_garmin_save_tokens():
         gc._cache = {}
         gc._user_id = user.id
         gc._save_tokens()
-        return jsonify({"connected": True, "user_id": user.id})
+        return jsonify({"connected": True, "user_id": user.id,
+                        **_post_token_save_sync(gc, user)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -10053,6 +10078,11 @@ def garmin_logout():
 
 
 _garmin_sync_last = {}  # user_id -> epoch seconds of last successful pull
+# user_id -> epoch seconds of last sync ATTEMPT (success OR failure). The
+# page-load auto-sync throttles on this, not on success: while Garmin's auth
+# endpoint is rate-blocking us, a success-only throttle stays permanently
+# open and every app open re-knocks the block (2026-08-12 outage).
+_garmin_sync_attempt_last = {}
 
 GARMIN_AUTOSYNC_INTERVAL_S = 1800  # 30 min — data endpoints only, cheap
 
@@ -10078,8 +10108,20 @@ def _garmin_autosync_tick():
             gc = _get_garmin(uid)
             if getattr(gc, "_rate_limited_until", 0) > time.time():
                 continue  # in cooldown — stay silent
+            if gc.connected and gc.oauth2_expired_in_memory():
+                # The session's OAuth2 lapsed IN PLACE (connected stays True —
+                # data failures never flip it). If fresh tokens have landed in
+                # the DB (laptop refresher), reload them: exchange-free.
+                # Otherwise fall through — the data call below is this tick's
+                # one controlled exchange knock.
+                exp = stored_oauth2_expires_at(uid)
+                if exp and exp > time.time():
+                    gc.try_restore_tokens(uid)
             if not gc.connected:
-                gc.try_restore_tokens(uid)
+                # The tick is the ONE caller allowed to retry the exchange on
+                # an expired stored token (once per 30 min) — the self-heal
+                # path if Garmin ever unblocks this IP.
+                gc.try_restore_tokens(uid, allow_expired_exchange=True)
             if not gc.connected:
                 continue
             from models import User as _U
@@ -10088,6 +10130,15 @@ def _garmin_autosync_tick():
             _tz_today = user_local_today(_u.timezone if _u and _u.timezone else "UTC")
             res = garmin_sync.sync_activities(gc, uid, days_back=3, today=_tz_today)
             garmin_sync.sync_wellness(gc, uid, today=_tz_today)
+            # Persist regardless of sync outcome: garth may have re-exchanged
+            # the OAuth2 during the data calls even when the sync itself then
+            # failed; an unpersisted refresh dies with the process and the
+            # next boot repeats the exchange.
+            try:
+                gc.persist_tokens_if_changed()
+            except Exception:
+                logging.warning("garmin autosync: token persist failed for user %s",
+                                uid, exc_info=True)
             if not (res or {}).get("error"):
                 _garmin_sync_last[uid] = time.time()
                 synced.append(uid)
@@ -10128,13 +10179,38 @@ def garmin_sync_activities():
     data = request.get_json(silent=True) or {}
     force = bool(data.get("force"))
     now = time.time()
-    last = _garmin_sync_last.get(current_user.id, 0)
+    last = max(_garmin_sync_last.get(current_user.id, 0),
+               _garmin_sync_attempt_last.get(current_user.id, 0))
     if not force and now - last < 900:
         return jsonify({"throttled": True,
                         "seconds_until_next": int(900 - (now - last)),
                         "days_filled": []})
+    # Record the attempt BEFORE touching Garmin: a FAILED sync must also close
+    # the auto-sync throttle, or every page load keeps knocking Garmin's auth
+    # endpoint while it is rate-blocking us (2026-08-12 outage).
+    _garmin_sync_attempt_last[current_user.id] = now
     gc = _get_garmin()
+    if gc.connected and gc.oauth2_expired_in_memory():
+        # Session token lapsed IN PLACE — `connected` stays True but the next
+        # data call would re-run the blocked exchange, not fetch data. If the
+        # DB has fresh tokens (laptop refresher), reload them exchange-free
+        # and carry on; otherwise stay quiet like the disconnected case below.
+        exp = stored_oauth2_expires_at(current_user.id)
+        if exp and exp > now:
+            gc.try_restore_tokens(current_user.id)
+        else:
+            return jsonify({"error": "Garmin auth expired — waiting for automatic "
+                                     "token refresh from the laptop",
+                            "auth_state": "token_expired"}), 503
     if not gc.connected:
+        exp = stored_oauth2_expires_at(current_user.id)
+        if exp and exp < now:
+            # Restoring would force a live OAuth2 exchange from the server IP —
+            # the endpoint Garmin rate-blocks. Stay quiet: the laptop refresher
+            # uploads fresh tokens and save-tokens syncs immediately on arrival.
+            return jsonify({"error": "Garmin auth expired — waiting for automatic "
+                                     "token refresh from the laptop",
+                            "auth_state": "token_expired"}), 503
         gc.try_restore_tokens(current_user.id)
     if not gc.connected:
         if _garmin_linked(current_user.id):
@@ -10196,15 +10272,37 @@ def garmin_sync_status():
     """Connection + last pull + per-day push status for the settings panel."""
     week = request.args.get("week", type=int) or _current_week()
     gc = _get_garmin()
-    if not gc.connected:
+    now = time.time()
+    exp = stored_oauth2_expires_at(current_user.id)
+    token_expired = bool(exp) and exp < now
+    if not gc.connected and not token_expired:
+        # An expired stored OAuth2 means a restore would run the live exchange
+        # Garmin rate-blocks for server IPs — report the state honestly
+        # instead of knocking (2026-08-12 outage).
         gc.try_restore_tokens(current_user.id)
     linked = gc.connected or _garmin_linked(current_user.id)
     last = _garmin_sync_last.get(current_user.id)
+    # A session whose OAuth2 lapsed in place still reports connected=True —
+    # classify it as expired, not live, or the panel lies "✓ Connected"
+    # through the exact outage this state machine exists for.
+    stale_session = gc.connected and gc.oauth2_expired_in_memory()
+    if gc.connected and not stale_session:
+        auth_state = "live"
+    elif token_expired or stale_session:
+        auth_state = "token_expired"
+    elif now < getattr(gc, "_rate_limited_until", 0):
+        auth_state = "cooldown"
+    else:
+        auth_state = "disconnected"
     links = GarminWorkoutLink.query.filter_by(user_id=current_user.id, week=week).all()
     return jsonify({
         "connected": linked,
-        "live": gc.connected,
+        "live": gc.connected and not stale_session,
         "linked": linked,
+        "auth_state": auth_state,
+        "token_expires_at": (datetime.fromtimestamp(exp, timezone.utc).isoformat()
+                             if exp else None),
+        "last_error": getattr(gc, "last_restore_error", None),
         "last_activity_sync": datetime.fromtimestamp(last, timezone.utc).isoformat() if last else None,
         "week": week,
         "workouts": [{

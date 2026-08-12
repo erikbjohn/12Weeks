@@ -45,10 +45,16 @@ class _StubGC:
         self._rate_limited_until = time.time() + 900 if cooldown else 0
         self.restore_calls = 0
 
-    def try_restore_tokens(self, uid=None):
+    def try_restore_tokens(self, uid=None, allow_expired_exchange=False):
         self.restore_calls += 1
         self.connected = True
         return True
+
+    def oauth2_expired_in_memory(self):
+        return False
+
+    def persist_tokens_if_changed(self):
+        return False
 
 
 def test_tick_syncs_connected_user(app_ctx, monkeypatch):

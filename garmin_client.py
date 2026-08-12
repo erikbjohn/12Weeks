@@ -1,10 +1,50 @@
 """Garmin Connect data wrapper with caching, token persistence, and graceful degradation."""
 
+import base64
+import json
 import time
 import logging
 from datetime import date, datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
+
+
+def _oauth2_expires_from_blob(blob):
+    """OAuth2 expires_at (epoch seconds) from a garth token dump — plain-JSON
+    or base64-wrapped [oauth1, oauth2] — with zero HTTP. None if unparseable."""
+    if not blob:
+        return None
+    try:
+        tok = json.loads(blob)
+    except (ValueError, TypeError):
+        try:
+            tok = json.loads(base64.b64decode(blob))
+        except Exception:
+            return None
+    if isinstance(tok, (list, tuple)) and len(tok) >= 2 and isinstance(tok[1], dict):
+        exp = tok[1].get("expires_at")
+        # Range-guard: a corrupt blob with e.g. 1e20 would make callers'
+        # datetime.fromtimestamp() raise and 500 the status endpoint.
+        if isinstance(exp, (int, float)) and 0 < exp < 4102444800:  # < year 2100
+            return exp
+        return None
+    return None
+
+
+def stored_oauth2_expires_at(user_id=None):
+    """The stored token's OAuth2 expiry for a user (epoch), read from the DB
+    blob only. Lets callers decide whether a restore would need a live OAuth2
+    exchange (the auth endpoint Garmin rate-blocks for server IPs) without
+    touching Garmin."""
+    try:
+        from models import GarminTokens
+        q = GarminTokens.query
+        if user_id:
+            q = q.filter_by(user_id=user_id)
+        row = q.first()
+        return _oauth2_expires_from_blob(row.token_data) if row else None
+    except Exception:
+        return None
 
 
 class GarminClient:
@@ -23,22 +63,47 @@ class GarminClient:
     def connected(self):
         return self._connected and self.api is not None
 
-    def try_restore_tokens(self, user_id=None):
+    def oauth2_expired_in_memory(self):
+        """True when the live session's OAuth2 has lapsed IN PLACE — the next
+        data call would silently re-run the blocked exchange instead of
+        fetching data. `connected` stays True in this state (data failures
+        never flip it), so callers must check this to avoid reporting a dead
+        session as live (2026-08-12 outage)."""
+        try:
+            tok = self.api.garth.oauth2_token
+            return bool(tok and tok.expired)
+        except Exception:
+            return False
+
+    def try_restore_tokens(self, user_id=None, allow_expired_exchange=False):
         """Try to restore a session from saved tokens.
 
         Respects the 429 cooldown (a restore performs live HTTP — profile
         fetch and possibly an OAuth2 exchange) and persists any token garth
         refreshed during login, so subsequent restores skip the OAuth2
-        exchange instead of hitting Garmin's auth endpoint every time."""
+        exchange instead of hitting Garmin's auth endpoint every time.
+
+        When the STORED OAuth2 is already expired, a restore is guaranteed to
+        re-run the full exchange — the endpoint Garmin rate-blocks for server
+        IPs — so by default it refuses to try. Only the autosync daemon passes
+        allow_expired_exchange=True: one controlled knock per 30-min tick, in
+        case Garmin ever unblocks this IP. Every other caller (page loads,
+        coach chat, briefings) stays quiet until fresh tokens arrive."""
         uid = user_id or self._user_id
         if time.time() < self._rate_limited_until:
             # Rate-limited: restoring would fire live HTTP at Garmin and
             # sustain the block. Stay disconnected until the cooldown lapses.
             # Do NOT overwrite last_restore_error — keep the original failure reason.
             return False
+        if not allow_expired_exchange:
+            exp = stored_oauth2_expires_at(uid)
+            if exp and exp < time.time():
+                self.last_restore_error = ("TokenExpired: stored OAuth2 expired; "
+                                           "waiting for laptop token refresh")
+                return False
         log.info("DEBUG: Garmin token restore for user_id=%s", uid)  # DEBUG: remove after fix confirmed
         try:
-            from models import GarminTokens, db
+            from models import GarminTokens
             from garminconnect import Garmin
             query = GarminTokens.query
             if uid:
@@ -56,23 +121,11 @@ class GarminClient:
             if uid:
                 self._user_id = uid
             # Persist the refreshed OAuth2 back to the DB. garth silently
-            # refreshes the ~1h OAuth2 during login(tokenstore=...); without
+            # refreshes an expired OAuth2 during login(tokenstore=...); without
             # saving it the stored token stays permanently stale and EVERY
             # restore repeats a full OAuth2 exchange against Garmin's auth
             # endpoint — the classic lockout-heuristic pattern.
-            try:
-                new_dump = self.api.garth.dumps()
-                if new_dump and new_dump != tokens.token_data:
-                    tokens.token_data = new_dump
-                    tokens.updated_at = datetime.now(timezone.utc)
-                    db.session.commit()
-                    log.info("Refreshed Garmin tokens persisted (user_id=%s)", uid)
-            except Exception:
-                log.warning("Failed to persist refreshed Garmin tokens (user_id=%s)", uid, exc_info=True)
-                try:
-                    db.session.rollback()
-                except Exception:
-                    pass
+            self.persist_tokens_if_changed()
             log.info("Garmin session restored from saved tokens (user_id=%s)", uid)
             return True
         except Exception as e:
@@ -88,6 +141,37 @@ class GarminClient:
                 log.warning("Failed to restore Garmin tokens: %s", e)
             self.api = None
             self._connected = False
+            return False
+
+    def persist_tokens_if_changed(self):
+        """Persist garth's current dump iff it differs from the stored row.
+        garth silently re-exchanges the OAuth2 mid-data-call when it lapses;
+        an unpersisted refresh dies with the process, and the next boot then
+        repeats the exchange against Garmin's auth endpoint — the classic
+        lockout-heuristic pattern. Returns True when a new dump was written."""
+        if not self.api:
+            return False
+        try:
+            from models import GarminTokens, db
+            new_dump = self.api.garth.dumps()
+            uid = self._user_id
+            row = (GarminTokens.query.filter_by(user_id=uid).first()
+                   if uid else GarminTokens.query.first())
+            if row is None or not new_dump or new_dump == row.token_data:
+                return False
+            row.token_data = new_dump
+            row.updated_at = datetime.now(timezone.utc)
+            db.session.commit()
+            log.info("Refreshed Garmin tokens persisted (user_id=%s)", uid)
+            return True
+        except Exception:
+            log.warning("Failed to persist refreshed Garmin tokens (user_id=%s)",
+                        self._user_id, exc_info=True)
+            try:
+                from models import db
+                db.session.rollback()
+            except Exception:
+                pass
             return False
 
     def _save_tokens(self):
@@ -354,6 +438,11 @@ class GarminClient:
         """List activities between two ISO dates (inclusive). None on failure
         (caller treats None as 'fetch failed', distinct from empty list)."""
         if not self.connected:
+            return None
+        if time.time() < self._rate_limited_until:
+            # Cooldown active: an expired-OAuth2 session would make garth
+            # re-run the exchange on this call, sustaining the very 429 block
+            # the cooldown exists to clear (2026-08-12 outage). Stay silent.
             return None
         try:
             return self.api.get_activities_by_date(start_iso, end_iso)

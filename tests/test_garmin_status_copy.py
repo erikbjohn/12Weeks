@@ -67,8 +67,14 @@ class StubGarminClient:
         self.last_restore_error = last_restore_error
         self.api = None
 
-    def try_restore_tokens(self, user_id=None):
+    def try_restore_tokens(self, user_id=None, allow_expired_exchange=False):
         # Stub: always return False (we're testing the error path)
+        return False
+
+    def oauth2_expired_in_memory(self):
+        return False
+
+    def persist_tokens_if_changed(self):
         return False
 
     def get_today_summary(self, today=None):
@@ -308,7 +314,9 @@ def test_sync_default_window_is_week_to_date(app_ctx, monkeypatch):
         connected = True
         last_restore_error = None
         _rate_limited_until = 0
-        def try_restore_tokens(self, uid=None): return True
+        def try_restore_tokens(self, uid=None, allow_expired_exchange=False): return True
+        def oauth2_expired_in_memory(self): return False
+        def persist_tokens_if_changed(self): return False
 
     def _fake_sync(gc, uid, days_back=3, today=None):
         captured["days_back"] = days_back

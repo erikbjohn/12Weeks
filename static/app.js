@@ -7201,9 +7201,21 @@ async function renderGarminPanelBody() {
       '<span>' + days[w.day_idx] + (w.scheduled_date ? ' &middot; ' + w.scheduled_date : '') + '</span>' + status +
     '</div>';
   }).join('');
-  var connLine = (st.live === false)
-    ? '<div style="margin-bottom:10px;color:var(--run-tempo);font-size:16px">&#10003; Connected &middot; reconnecting&hellip;</div>'
-    : '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>';
+  var connLine;
+  if (st.live !== false) {
+    connLine = '<div style="margin-bottom:10px;color:var(--accent);font-size:16px">&#10003; Connected</div>';
+  } else if (st.auth_state === 'token_expired') {
+    // Honest dead-auth state: "Connected · reconnecting…" here hid a 2-hour
+    // sync outage on 2026-08-12 while the panel implied all was well.
+    var expTxt = st.token_expires_at ? st.token_expires_at.replace('T', ' ').slice(0, 16) + ' UTC' : '';
+    connLine = '<div style="margin-bottom:10px;color:#e66;font-size:16px">&#9888; Garmin auth expired' +
+      (expTxt ? ' (' + expTxt + ')' : '') +
+      ' &mdash; syncs paused until the laptop refresher uploads fresh tokens.</div>';
+  } else if (st.auth_state === 'cooldown') {
+    connLine = '<div style="margin-bottom:10px;color:var(--run-tempo);font-size:16px">&#10003; Connected &middot; Garmin rate-limited &mdash; backing off, retries automatically.</div>';
+  } else {
+    connLine = '<div style="margin-bottom:10px;color:var(--run-tempo);font-size:16px">&#10003; Connected &middot; reconnecting&hellip;</div>';
+  }
   body.innerHTML =
     connLine +
     '<div style="color:var(--muted);font-size:14px;margin-bottom:12px">Last run sync: ' +
