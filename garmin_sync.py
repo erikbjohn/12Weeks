@@ -201,10 +201,23 @@ def build_workout_json(name, segments):
         nxt = segs[i + 1] if i + 1 < len(segs) else None
         nxt_kind = (nxt.get("kind") or "").lower() if nxt else None
         if kind == "work" and reps > 1 and nxt_kind == "recovery":
-            group, order = _repeat_group([s, nxt], reps, order)
-            steps.append(group)
-            i += 2
-            continue
+            r_reps = int(nxt.get("reps") or 1)
+            if r_reps == reps:
+                group, order = _repeat_group([s, nxt], reps, order)
+                steps.append(group)
+                i += 2
+                continue
+            if r_reps == reps - 1:
+                # recovery BETWEEN reps, none after the last: (n-1) full pairs
+                # then a lone final work step. Repeating all n pairs adds a
+                # phantom recovery and inflates the session (35 → 37 min).
+                group, order = _repeat_group([s, nxt], r_reps, order)
+                steps.append(group)
+                steps.append(_exec_step(s, order))
+                order += 1
+                i += 2
+                continue
+            # any other count mismatch: fall through to separate honest groups
         if reps > 1:
             group, order = _repeat_group([s], reps, order)
             steps.append(group)
@@ -394,10 +407,24 @@ def _minutes_from_duration(duration):
     return _num(m.group(1)) if m else None
 
 
+def _structure_shape(segments):
+    """Canonical (kind, minutes, reps) sequence for contradiction checks —
+    HR text and notes are presentation, not structure."""
+    return [((s.get("kind") or "steady").lower(),
+             float(s.get("minutes") or 0),
+             int(s.get("reps") or 1)) for s in segments or []]
+
+
 def _resolve_segments(plan):
     """segments_json (coach-authoritative) → prose parse → None. Both sources
     are validated against the stored duration — a mismatched structure is
-    discarded so the watch can never contradict the day card."""
+    discarded so the watch can never contradict the day card.
+
+    Contradiction guard: the day card renders the detail PROSE, so when the
+    prose parses cleanly and structurally disagrees with segments_json, the
+    prose wins. (2026-08-13: a rail rewrote detail to an easy Z2 run but left
+    the coach's VO2 interval segments; both summed to 35 min, so the duration
+    check passed and the watch ran 5×2/2 repeats on a "35 min easy" day.)"""
     planned = _minutes_from_duration(plan.duration)
 
     def _validated(segs, source):
@@ -412,16 +439,23 @@ def _resolve_segments(plan):
             return None
         return segs
 
+    prose_segs = parse_detail_to_segments(plan.detail)
     if plan.segments_json:
         try:
             segs = json.loads(plan.segments_json)
             if isinstance(segs, list) and segs:
                 validated = _validated(segs, "segments_json")
                 if validated:
+                    if prose_segs and _structure_shape(prose_segs) != _structure_shape(validated):
+                        log.warning(
+                            "segments_json contradicts detail prose on w%sd%s — "
+                            "the card shows the prose, so the prose wins",
+                            plan.week, plan.day_idx)
+                        return _validated(prose_segs, "parsed prose")
                     return validated
         except Exception:
             log.warning("Bad segments_json on w%sd%s", plan.week, plan.day_idx)
-    return _validated(parse_detail_to_segments(plan.detail), "parsed prose")
+    return _validated(prose_segs, "parsed prose")
 
 
 def push_week(gc, user_id, week, today=None):

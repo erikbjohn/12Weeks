@@ -125,6 +125,43 @@ def test_build_workout_json_vo2_structure():
     assert orders == sorted(orders) and len(set(orders)) == 5
 
 
+def test_build_workout_json_n_minus_1_recovery_no_phantom_rest():
+    # 5×2 hard with 4×2 easy BETWEEN reps (none after the last) must build as
+    # 4×(work+recovery) + one final work step — never 5 full pairs, which adds
+    # a phantom recovery and inflates the watch total (35 → 37 min, 2026-08-13).
+    from garmin_sync import build_workout_json
+    segs = [
+        {"kind": "warmup", "minutes": 10},
+        {"kind": "work", "minutes": 2, "reps": 5, "hr": "≤165"},
+        {"kind": "recovery", "minutes": 2, "reps": 4},
+        {"kind": "cooldown", "minutes": 7},
+    ]
+    wj = build_workout_json("x", segs)
+    steps = wj["workoutSegments"][0]["workoutSteps"]
+    assert len(steps) == 4  # warmup, repeat(4), final work, cooldown
+    warmup, repeat, final_work, cooldown = steps
+    assert repeat["type"] == "RepeatGroupDTO" and repeat["numberOfIterations"] == 4
+    assert final_work["type"] == "ExecutableStepDTO"
+    assert final_work["stepType"]["stepTypeKey"] == "interval"
+    assert final_work["endConditionValue"] == 120.0
+    assert cooldown["stepType"]["stepTypeKey"] == "cooldown"
+
+    def _total(steps):
+        t = 0.0
+        for s in steps:
+            if s.get("type") == "RepeatGroupDTO":
+                t += s["numberOfIterations"] * sum(c["endConditionValue"] for c in s["workoutSteps"])
+            else:
+                t += s["endConditionValue"]
+        return t
+    assert _total(steps) == 35 * 60.0
+
+    orders = [warmup["stepOrder"], repeat["stepOrder"],
+              *[c["stepOrder"] for c in repeat["workoutSteps"]],
+              final_work["stepOrder"], cooldown["stepOrder"]]
+    assert orders == sorted(orders) and len(set(orders)) == len(orders)
+
+
 def test_build_workout_json_steady_hr_ceiling():
     from garmin_sync import build_workout_json
     wj = build_workout_json("x", [{"kind": "steady", "minutes": 50, "reps": 1, "hr": "≤135"}])
@@ -507,6 +544,33 @@ def test_push_stale_segments_json_mismatching_duration_falls_back(app_ctx):
     assert [p["day"] for p in res["pushed"]] == [1]
     steps = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"]
     assert len(steps) == 1 and steps[0]["endConditionValue"] == 2700.0
+
+
+def test_push_segments_json_contradicting_detail_uses_prose(app_ctx):
+    # The day card shows the detail prose; a stale segments_json that passes
+    # the duration check but STRUCTURALLY contradicts the parseable prose must
+    # lose to the prose — the watch may never contradict the card (2026-08-13:
+    # enforce_run_base rewrote detail to easy Z2 but left VO2 interval
+    # segments, and the watch got 5×2/2 repeats on a "35 min easy" day).
+    app_, db = app_ctx
+    from garmin_sync import push_week
+    import json as _json
+    u = _mk_user(db, "push10@test.com")
+    _mk_state(db, u.id, date(2026, 1, 5))
+    stale = [{"kind": "warmup", "minutes": 10},
+             {"kind": "work", "minutes": 2, "reps": 5, "hr": "≤165"},
+             {"kind": "recovery", "minutes": 2, "reps": 4},
+             {"kind": "cooldown", "minutes": 7}]  # sums to 35 — duration check passes
+    _mk_run_plan(db, u.id, 10, 1, "5 min warmup; 25 min steady (@ HR <=135); 5 min cooldown — why",
+                 "35 min", segments_json=_json.dumps(stale))
+    gc = FakeGC()
+    res = push_week(gc, u.id, 10, today=date(2026, 3, 2))
+    assert [p["day"] for p in res["pushed"]] == [1]
+    steps = gc.uploaded[0]["workoutSegments"][0]["workoutSteps"]
+    assert not any(s.get("type") == "RepeatGroupDTO" for s in steps)
+    assert [s["stepType"]["stepTypeKey"] for s in steps] == ["warmup", "interval", "cooldown"]
+    assert steps[1]["endConditionValue"] == 1500.0
+    assert steps[1]["targetValueTwo"] == 135
 
 
 def test_push_schedule_failure_keeps_workout_id_for_retry_cleanup(app_ctx):

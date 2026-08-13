@@ -41,6 +41,33 @@ def test_low_base_converts_hard_days_to_z2():
     assert int(gated[2]["duration"].split()[0]) <= 40
 
 
+def test_low_base_conversion_rewrites_segments_too():
+    # 2026-08-13: enforce_run_base rewrote label/duration/detail but left the
+    # coach's interval segments — segments_json summed to the same 35 min, so
+    # garmin_sync's duration check passed and the watch got 5×2/2 repeats on a
+    # day whose card said "35 min easy". The conversion must rewrite segments
+    # to the SAME easy structure the detail describes.
+    from coach_planning_runs import enforce_run_base
+    out = {
+        1: {"type": "vo2", "label": "VO2 5×2", "duration": "35 min",
+            "detail": "10 min warmup; 5×2 min hard @ HR ≤165 / 2 min easy between reps; 7 min cooldown",
+            "segments": [
+                {"kind": "warmup", "minutes": 10},
+                {"kind": "work", "minutes": 2, "reps": 5, "hr": "≤165"},
+                {"kind": "recovery", "minutes": 2, "reps": 4},
+                {"kind": "cooldown", "minutes": 7},
+            ]},
+    }
+    gated = enforce_run_base(out, weekly_minutes=70.0)
+    segs = gated[1]["segments"]
+    assert segs is not None
+    kinds = [s["kind"] for s in segs]
+    assert "work" not in kinds and "recovery" not in kinds
+    assert kinds == ["warmup", "steady", "cooldown"]
+    total = sum(s["minutes"] * s.get("reps", 1) for s in segs)
+    assert f"{total} min" == gated[1]["duration"]  # structure == headline, always
+
+
 def test_adequate_base_leaves_plan_alone():
     from coach_planning_runs import enforce_run_base
     out = {1: {"type": "threshold", "label": "Threshold", "duration": "34 min",

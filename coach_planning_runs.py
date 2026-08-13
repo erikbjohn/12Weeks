@@ -350,7 +350,16 @@ def enforce_run_base(out: dict, weekly_minutes: float) -> dict:
             steady = max(10, mins - 10)
             p["type"] = "z2"
             p["label"] = "Zone 2 Easy"
-            p["duration"] = f"{mins} min"
+            # duration is the sum of the parts (steady floors at 10), and the
+            # SEGMENTS are rewritten to the same easy structure the detail
+            # describes — leaving the coach's interval segments behind pushed
+            # 5×2/2 repeats to the watch on a "35 min easy" day (2026-08-13)
+            p["duration"] = f"{steady + 10} min"
+            p["segments"] = [
+                {"kind": "warmup", "minutes": 5},
+                {"kind": "steady", "minutes": steady, "hr": "<=135"},
+                {"kind": "cooldown", "minutes": 5},
+            ]
             p["detail"] = (
                 f"5 min warmup; {steady} min steady (@ HR <=135); 5 min cooldown — "
                 f"converted from a higher-intensity session: current run volume "
