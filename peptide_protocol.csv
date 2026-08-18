@@ -26,10 +26,10 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-08-17,07:00,Injection,TB-500,2.5,25u,Thigh (opposite),Loading phase
 2026-08-18,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-08-18,07:00,Oral,Enclomiphene,6.25,-,-,Take with breakfast
+2026-08-18,16:00,Injection,GHK-Cu,4,20u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-08-19,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-08-19,07:00,Oral,Enclomiphene,6.25,-,-,Take with breakfast
 2026-08-19,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
-2026-08-19,16:00,Injection,GHK-Cu,4,20u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-08-20,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-08-20,07:00,Oral,Enclomiphene,6.25,-,-,Take with breakfast
 2026-08-20,07:00,Injection,TB-500,2.5,25u,Thigh (opposite),Loading phase
