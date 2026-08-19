@@ -118,6 +118,32 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "log_bodyweight",
+        "description": (
+            "Record the athlete's body weight for the day. CALL THIS whenever "
+            "the athlete tells you their weight (morning check-in, weigh-in, "
+            "'scale said 211.4', etc.) — saying it in chat does NOT save it; "
+            "only this tool writes it to the log that Stats/Progress read. "
+            "Same-day repeat calls overwrite (latest reading wins)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "weight_lbs": {
+                    "type": "number", "minimum": 50, "maximum": 600,
+                    "description": "Body weight in pounds",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "ISO date (YYYY-MM-DD). Omit for today "
+                                   "(athlete-local). Only pass when the athlete "
+                                   "names a different day ('yesterday I was 212').",
+                },
+            },
+            "required": ["weight_lbs"],
+        },
+    },
+    {
         "name": "consult_nutritionist",
         "description": (
             "Consult the Nutritionist specialist. Use when the question "
@@ -452,6 +478,34 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     }, default=str)
 
 
+def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = None) -> str:
+    from models import BodyWeight, db
+    try:
+        w = float(weight_lbs)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "weight_lbs must be a number"})
+    # Same rails as the /api/bodyweight endpoint.
+    if not (50 <= w <= 600):
+        return json.dumps({"error": "Weight must be between 50 and 600 lbs"})
+    if date:
+        from datetime import date as _date
+        try:
+            d = _date.fromisoformat(date)
+        except ValueError:
+            return json.dumps({"error": f"Bad date {date!r}, expected YYYY-MM-DD"})
+    else:
+        d = _user_local_today(user_id)
+    row = BodyWeight.query.filter_by(user_id=user_id, log_date=d).first()
+    if row:
+        row.weight_lbs = w
+    else:
+        row = BodyWeight(log_date=d, weight_lbs=w, user_id=user_id)
+        db.session.add(row)
+    db.session.commit()
+    return json.dumps({"ok": True, "date": d.isoformat(), "weight_lbs": w,
+                       "note": "Saved to the body-weight log (Stats/Progress read this)."})
+
+
 def _tool_consult_nutritionist(user_id: int, brief: str) -> str:
     from coach_specialists.nutritionist import consult
     return consult(brief=brief, user_id=user_id)
@@ -474,6 +528,7 @@ _DISPATCH = {
     "get_body_state": _tool_get_body_state,
     "get_today_status": _tool_get_today_status,
     "get_protocol_status": _tool_get_protocol_status,
+    "log_bodyweight": _tool_log_bodyweight,
     "consult_nutritionist": _tool_consult_nutritionist,
     "consult_strength": _tool_consult_strength,
     "consult_running": _tool_consult_running,
