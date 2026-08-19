@@ -25,7 +25,7 @@ def _csv_rows():
 def test_protocol_compounds_has_all_seven_with_required_keys():
     from protocol import PROTOCOL_COMPOUNDS, CONFIRM_WITH_DOCTOR
     expected = {"Enclomiphene", "BPC-157", "KPV", "Retatrutide", "TB-500",
-                "GHK-Cu", "Tesamorelin"}
+                "GHK-Cu", "Tesamorelin", "Cagrilintide"}
     assert set(PROTOCOL_COMPOUNDS.keys()) == expected
     for name, c in PROTOCOL_COMPOUNDS.items():
         assert set(c.keys()) == {"what", "mechanism", "effects", "watch_fors",

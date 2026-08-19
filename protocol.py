@@ -168,6 +168,22 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
         "late_window_hours": None,
     },
+    "Cagrilintide": {
+        "what": "Long-acting amylin analog used off-label for weight loss, stacked here alongside retatrutide.",
+        "mechanism": "Mimics amylin: slows gastric emptying, promotes satiety via hindbrain signaling, and blunts post-meal glucagon — complementary to incretin-pathway agonists.",
+        "effects": [
+            "Additional appetite suppression on top of retatrutide",
+            "Earlier satiety at meals",
+            "Supports fat-mass loss when stacked with GLP-1-class compounds",
+        ],
+        "watch_fors": [
+            "Nausea or constipation, especially after a titration step — this gates whether the dose steps up",
+            "Compounded appetite suppression with retatrutide — protein intake and hydration can quietly collapse",
+            "Injection-site reaction",
+        ],
+        "missed_dose_rule": CONFIRM_WITH_DOCTOR,
+        "late_window_hours": None,
+    },
     "TB-500": {
         "what": "Synthetic fragment of thymosin beta-4, used off-label for tissue repair and recovery.",
         "mechanism": "Upregulates actin regulation and cell migration, supporting angiogenesis and reducing inflammation in injured tissue.",

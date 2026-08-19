@@ -197,7 +197,7 @@ class TestCSVIntegrityGuard:
 
     def test_peptide_protocol_csv_integrity(self):
         """
-        - 292 data rows (1 header + 292 rows = 293 total lines)
+        - 312 data rows (1 header + 312 rows = 293 total lines)
         - Zero duplicate (Date, Compound) pairs
         - Enclomiphene always 6.25 mg
         - Retatrutide doses only in {2.0, 3.0, 4.0} mg
@@ -210,8 +210,8 @@ class TestCSVIntegrityGuard:
             reader = csv.DictReader(f)
             rows = list(reader)
 
-        assert len(rows) == 292, (
-            f"Expected 292 data rows, got {len(rows)}"
+        assert len(rows) == 312, (
+            f"Expected 312 data rows, got {len(rows)}"
         )
 
         # Check for duplicate (Date, Compound) pairs
