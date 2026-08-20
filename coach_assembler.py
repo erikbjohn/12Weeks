@@ -705,6 +705,7 @@ def _build_runs():
     return {"run_history": [{
         "date": r.log_date.isoformat() if r.log_date else None,
         "distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
+        "duration_min": r.duration_min,
         "elevation_ft": r.elevation_ft, "week": r.week,
     } for r in rows]}
 
