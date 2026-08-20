@@ -455,22 +455,18 @@ def _build_workout_today():
                          "time": rp.duration, "detail": rp.detail or ""}
     except Exception:
         pass
-    # Merge RunOverride on top — UI does the same in buildRunSubsection,
-    # without this the coach prescribes the base plan while the user sees the override.
+    # Attach the override's REASON only. The override's duration/type are no
+    # longer merged over the plan: the [RUN] marker codifies every coach change
+    # straight into WeeklyRunPlan (above), so re-merging the override row
+    # produced a THIRD version of the run — old label, old detail, new duration —
+    # and that is exactly what the athlete saw contradicting itself on the card.
     try:
         from models import RunOverride
         ov = RunOverride.query.filter_by(
             user_id=current_user.id, week=week, day_idx=today_idx
         ).first()
-        if ov and wt:
-            base = wt.get("run") or {}
-            wt["run"] = {
-                "type": ov.run_type or base.get("type"),
-                "label": ov.run_type or base.get("label") or "Run",
-                "time": ov.duration or base.get("time"),
-                "detail": base.get("detail") or "",
-                "override_reason": ov.reason or "",
-            }
+        if ov and ov.reason and wt and wt.get("run"):
+            wt["run"]["override_reason"] = ov.reason
     except Exception:
         pass
     try:
@@ -1747,7 +1743,7 @@ silently dropped and the change does NOT happen (you will have lied to the athle
 [PRESCRIPTION: week=N, day=N, exercise=Name, sets=N, reps=N, rest=60-90s, weight=N, reason=text] — rest/weight/reason optional; week defaults to the current week if omitted
 [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
 [WEIGHT: exercise=Name, new_weight=N, reason=text] — sets the exercise's target weight on this week's card
-[RUN: day=N, duration=40 min, type=zone2, reason=text]
+[RUN: day=N, duration=40 min, type=z2, label=Zone 2 Easy, detail=full prescription, reason=text] — type is one of z2, z2_long, tempo, vo2, hiit, race, rest. ALWAYS send label AND detail when you change a run: they REPLACE the card's title and description, and the athlete sees them. A change that omits them leaves the old session described on the card.
 [NUTRITION: day=N, meal_type=fast_day, reason=text] — change one day's meal plan
 [NUTRITION: daily_calories=N, reason=text] — change the daily calorie target
 [BMR_UPDATE: new_bmr=N, reason=text]
@@ -2214,7 +2210,24 @@ def _format_athlete_data(ctx, requires):
     if bw:
         latest = bw[-1]
         first = bw[0]
-        bw_line = f"Latest weight: {latest['weight']} lb ({latest['date']})."
+        # Say WHICH DAY the latest weigh-in belongs to in plain words. A bare ISO
+        # date let the coach treat a weight logged this morning as yesterday's
+        # number (2026-08-20). "TODAY" / "yesterday" / "N days ago" is relative to
+        # the athlete's local date, the same clock <today_status> uses.
+        try:
+            _lw_date = date.fromisoformat(latest['date'])
+            _days_ago = (_user_today() - _lw_date).days
+        except Exception:
+            _days_ago = None
+        if _days_ago == 0:
+            _when = "logged TODAY"
+        elif _days_ago == 1:
+            _when = "logged yesterday — NOT today; no weigh-in logged today yet"
+        elif _days_ago and _days_ago > 1:
+            _when = f"logged {_days_ago} days ago — no weigh-in logged today yet"
+        else:
+            _when = "date unknown"
+        bw_line = f"Latest weight: {latest['weight']} lb ({latest['date']}, {_when})."
         total_delta = latest['weight'] - first['weight']
         if len(bw) >= 2:
             direction = "down" if total_delta < 0 else "up" if total_delta > 0 else "flat"

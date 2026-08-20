@@ -10051,6 +10051,20 @@ function liftTitleHtml(d) {
   return '';
 }
 
+// Map a run_type onto a CSS pill class. Only a handful of classes exist; a type
+// with no class (vo2, z2_long, logged, or a raw coach token like "zone2") used to
+// render an unstyled, colorless pill — the run looked unplanned when it wasn't.
+var RUN_PILL_CLASS = {
+  z2: 'run-z2', z2_long: 'run-long', long: 'run-long',
+  tempo: 'run-tempo', vo2: 'run-tempo', hiit: 'run-hiit',
+  race: 'run-long', logged: 'run-z2', rest: 'run-z2',
+};
+function runPillClass(run) {
+  if (!run) return 'run-z2';
+  var t = String(run.type || '').toLowerCase().replace(/[\s-]/g, '_');
+  return RUN_PILL_CLASS[t] || 'run-z2';
+}
+
 // Fail-loud run pill: the static template is never shown as the plan. When a
 // run has no real coach/engine plan (runStatus 'unplanned' or run missing),
 // render a loud marker instead of a fabricated duration.
@@ -10058,7 +10072,7 @@ function runPillHtml(d) {
   if (!d || !d.run || d.runStatus === 'unplanned') {
     return '<span class="run-pill run-unplanned">&#9888; Run not planned</span>';
   }
-  return '<span class="run-pill run-' + d.run.type + '">' + d.run.label + ' &middot; ' + d.run.time + '</span>';
+  return '<span class="run-pill ' + runPillClass(d.run) + '">' + d.run.label + ' &middot; ' + d.run.time + '</span>';
 }
 
 function renderDayGrid() {
@@ -11350,25 +11364,21 @@ function closeProtocolCalendar() {
 }
 
 function buildRunSubsection(d, runClass) {
-    // Check for run override
+    // A coach run change (the [RUN] marker) is CODIFIED into WeeklyRunPlan, which
+    // is what d.run already carries — so the override row is only an audit trail
+    // of WHY the day changed, never a second copy of the prescription.
+    //
+    // This used to return early with an override-only box: it rendered the stale
+    // base detail next to the new duration, titled the run with a raw type token
+    // ("zone2"), and — because it returned before the log form — left the athlete
+    // no way to enter distance/duration/HR for the run they were about to do.
     var runOv = _runOverrides.find(function(o) { return o.day_idx === currentDay; });
-    if (runOv) {
-        var ovLabel = runOv.run_type || (d.run && d.run.label) || 'Run';
-        var ovTime = runOv.duration || (d.run && d.run.time) || '';
-        var ovDetail = runOv.detail || (d.run && d.run.detail) || '';
-        var ovClass = runOv.run_type ? 'run-' + runOv.run_type.toLowerCase().replace(/\s+/g, '') : runClass;
-        return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
-            '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
-            '<div style="color:var(--coach);font-size:12px;margin-bottom:8px">' +
-                '&#127939; Run adjusted by coach' + (runOv.notes ? ' — ' + runOv.notes : '') +
-            '</div>' +
-            '<div class="run-detail-box">' +
-                '<div class="rdl">Type</div>' +
-                '<div class="rdt"><span class="run-pill ' + ovClass + '">' + ovLabel + ' &middot; ' + ovTime + '</span></div>' +
-                (ovDetail ? '<div class="rdd" style="margin-top:8px">' + ovDetail + '</div>' : '') +
-            '</div>' +
-        '</div>';
-    }
+    var adjustedNote = runOv
+        ? '<div style="color:var(--coach);font-size:12px;margin-bottom:8px">' +
+              '&#127939; Run adjusted by coach' +
+              (runOv.reason ? ' — ' + escapeHtml(runOv.reason) : '') +
+          '</div>'
+        : '';
 
     // FAIL LOUD: no static template run. If the coach hasn't planned this run,
     // say so and offer to generate — never show a fabricated duration.
@@ -11423,9 +11433,10 @@ function buildRunSubsection(d, runClass) {
     }
     return '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">' +
         '<h4 style="font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px">Run</h4>' +
+        adjustedNote +
         '<div class="run-detail-box">' +
             '<div class="rdl">Type</div>' +
-            '<div class="rdt"><span class="run-pill ' + runClass + '">' + d.run.label + ' &middot; ' + d.run.time + '</span></div>' +
+            '<div class="rdt"><span class="run-pill ' + runPillClass(d.run) + '">' + d.run.label + ' &middot; ' + d.run.time + '</span></div>' +
             '<div class="rdd" style="margin-top:8px">' + d.run.detail + '</div>' +
         '</div>' +
         hiitBtn +
@@ -11720,7 +11731,7 @@ async function renderDetail() {
   if (!weekData) return;
   const d = weekData.days[currentDay];
   if (!d) return;
-  const runClass = d.run ? `run-${d.run.type}` : 'run-z2';
+  const runClass = runPillClass(d.run);
   const isTraveling = _stateCache && _stateCache.traveling;
 
   // Check for schedule override — skip day shows rest message

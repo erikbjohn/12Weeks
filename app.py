@@ -706,6 +706,48 @@ def _exercise_at_slot(user_id, week, day_idx, exercise_idx, _cache=None):
     return exercises[exercise_idx].get("name")
 
 
+# Canonical run_type tokens. Everything downstream keys off these: the pill CSS
+# class (.run-z2 / .run-tempo / ...), the HIIT-timer button (type == 'hiit'), the
+# Garmin push, and coach_rules' label fallback. The coach writes prose-ish types
+# ("zone2", "easy", "threshold"), so normalize at the ONE write point rather than
+# letting a token like "zone2" reach the UI and lose its styling.
+_RUN_TYPE_ALIASES = {
+    'z2': 'z2', 'zone2': 'z2', 'zone 2': 'z2', 'zone-2': 'z2', 'easy': 'z2',
+    'recovery': 'z2', 'jog': 'z2', 'aerobic': 'z2', 'steady': 'z2', 'min': 'z2',
+    'long': 'z2_long', 'z2_long': 'z2_long', 'long_run': 'z2_long',
+    'longrun': 'z2_long', 'z2 long': 'z2_long',
+    'tempo': 'tempo', 'threshold': 'tempo',
+    'vo2': 'vo2', 'vo2max': 'vo2', 'intervals': 'vo2',
+    'hiit': 'hiit', 'hills': 'hiit', 'hill': 'hiit', 'hill_repeats': 'hiit',
+    'race': 'race', 'rest': 'rest', 'off': 'rest',
+}
+
+# Honest default labels — used ONLY when the coach changed a run but did not
+# supply a label. Never keep the previous label: that is what left "Hill Repeats
+# 5x90s" on the chip after the coach downgraded the day to 36 min of zone 2.
+_RUN_TYPE_LABELS = {
+    'z2': 'Zone 2 Easy', 'z2_long': 'Long Easy Run', 'tempo': 'Threshold',
+    'vo2': 'VO2 Intervals', 'hiit': 'HIIT', 'race': 'Race', 'rest': 'Rest',
+}
+
+
+def normalize_run_type(raw):
+    """Map a coach-written run type onto a canonical token. Unknown values fall
+    back to 'z2' — an unrecognized token must never reach the UI, where it would
+    silently drop the pill color and the HIIT-timer branch."""
+    key = (raw or '').strip().lower().replace('-', '_')
+    return _RUN_TYPE_ALIASES.get(key) or _RUN_TYPE_ALIASES.get(key.replace('_', ' ')) or 'z2'
+
+
+def run_label_for(run_type, explicit=None):
+    """Label to display for a run. Prefer the coach's own words; otherwise a
+    plain type name. Deliberately NOT a fabricated structure ('5x90s') — we only
+    state what the coach actually prescribed."""
+    if explicit and explicit.strip():
+        return explicit.strip()[:30]
+    return _RUN_TYPE_LABELS.get(run_type, 'Run')
+
+
 def _parse_coach_markers(text, user_id, week):
     """Parse structured markers from coach response and apply them."""
     import re
@@ -895,41 +937,64 @@ def _parse_coach_markers(text, user_id, week):
     # the same reply don't create two concurrent push_week calls on the same week
     # (duplicate scheduled workouts, orphaned workout ids).
     _garmin_weeks_to_push = set()
-    # Canonical (CORE_PROMPT <markers>): [RUN: day=N, duration=40 min, type=zone2, reason=text]
-    # Tolerated: `day_idx=` alias, duration/type in either order, missing reason.
+    # Canonical (CORE_PROMPT <markers>):
+    #   [RUN: day=N, duration=40 min, type=z2, label=Zone 2 Easy, detail=..., reason=text]
+    # Tolerated: `day_idx=` alias, duration/type in either order, missing
+    # label/detail/reason.
     for m in re.finditer(
         r'\[RUN:\s*day(?:_idx)?=(\d+),\s*'
         r'(?:duration=([^,\]]+),\s*type=([^,\]]+)|type=([^,\]]+),\s*duration=([^,\]]+))'
-        r'(?:,\s*reason=([^\]]+))?\]',
+        r'(?:,\s*label=([^,\]]+))?'
+        r'(?:,\s*detail=([^\]]+?))?'
+        r'(?:,\s*reason=([^\]]+?))?\]',
         text,
     ):
         try:
             day_idx = int(m.group(1))
             duration = (m.group(2) or m.group(5)).strip()
-            run_type = (m.group(3) or m.group(4)).strip()
-            reason = (m.group(6) or '').strip()
+            raw_type = (m.group(3) or m.group(4)).strip()
+            run_type = normalize_run_type(raw_type)
+            label = run_label_for(run_type, m.group(6))
+            detail_txt = (m.group(7) or '').strip()
+            reason = (m.group(8) or '').strip()
             existing = RunOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
             if existing:
                 existing.duration = duration
-                existing.run_type = run_type
+                existing.run_type = raw_type
                 existing.reason = reason
             else:
-                db.session.add(RunOverride(user_id=user_id, week=week, day_idx=day_idx, duration=duration, run_type=run_type, reason=reason))
+                db.session.add(RunOverride(user_id=user_id, week=week, day_idx=day_idx, duration=duration, run_type=raw_type, reason=reason))
             # CODIFY, don't just advise: update the canonical WeeklyRunPlan row the
             # day card + regen actually read, so the coach's stated run change is
             # really applied (the bug where "holding at 40" left the plan at 38).
+            #
+            # label and detail are REWRITTEN, never preserved. A run change that
+            # updates only duration/type leaves the chip and the description
+            # describing the OLD session — the 2026-08-20 bug where the coach
+            # downgraded Thursday to 36 min zone 2 and the card still read
+            # "Hill Repeats 5x90s / 5x2 min hard @ HR >=165".
+            new_detail = detail_txt or (
+                f"{duration} {label.lower()}" + (f" — {reason}" if reason else "")
+            )
+            if not detail_txt:
+                logging.warning(
+                    "RUN marker for user %s wk %s day %s carried no detail= — "
+                    "wrote a plain description; the coach should supply one.",
+                    user_id, week, day_idx,
+                )
             wrp = WeeklyRunPlan.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
             if wrp:
                 wrp.duration = duration
-                if run_type:
-                    wrp.run_type = run_type
+                wrp.run_type = run_type
+                wrp.label = label
+                wrp.detail = new_detail
                 wrp.source = 'coach'
                 wrp.segments_json = None  # duration changed — old structure is void
             else:
                 db.session.add(WeeklyRunPlan(
                     user_id=user_id, week=week, day_idx=day_idx,
-                    run_type=run_type or 'z2', label=run_type or 'Run',
-                    duration=duration, detail=reason, source='coach'))
+                    run_type=run_type, label=label,
+                    duration=duration, detail=new_detail, source='coach'))
             db.session.commit()
             _garmin_weeks_to_push.add(week)
         except Exception:

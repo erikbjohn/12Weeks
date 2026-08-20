@@ -57,7 +57,7 @@ class TestPromptTeachesParseableFormats:
             "[PRESCRIPTION: week=N, day=N, exercise=Name, sets=N, reps=N, rest=60-90s, weight=N, reason=text]",
             "[SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]",
             "[WEIGHT: exercise=Name, new_weight=N, reason=text]",
-            "[RUN: day=N, duration=40 min, type=zone2, reason=text]",
+            "[RUN: day=N, duration=40 min, type=z2, label=Zone 2 Easy, detail=full prescription, reason=text]",
             "[NUTRITION: day=N, meal_type=fast_day, reason=text]",
             "[NUTRITION: daily_calories=N, reason=text]",
             "[BMR_UPDATE: new_bmr=N, reason=text]",
@@ -212,6 +212,52 @@ class TestRunMarker:
             ov = RunOverride.query.filter_by(user_id=u.id, week=1, day_idx=3).first()
         assert wrp is not None and wrp.duration == "40 min" and wrp.source == "coach"
         assert ov is not None and ov.run_type == "zone2"
+        # The raw coach token is normalized before it reaches the UI.
+        assert wrp.run_type == "z2"
+
+    def test_run_change_rewrites_label_and_detail(self, app_ctx, user_factory):
+        """THE 2026-08-20 bug: the coach downgraded Thursday to 36 min of zone 2,
+        but the card chip still read 'Hill Repeats 5x90s' and the description still
+        described 5x2 min hard @ HR >=165. A run change must replace BOTH."""
+        app, db = app_ctx
+        from models import WeeklyRunPlan
+        u = user_factory()
+        with app.app_context():
+            db.session.add(WeeklyRunPlan(
+                user_id=u.id, week=1, day_idx=3, run_type="hiit",
+                label="Hill Repeats 5x90s",
+                detail="10 min warmup; 5x2 min hard @ HR >=165; 8 min cooldown",
+                duration="36 min", segments_json="[{}]", source="coach"))
+            db.session.commit()
+        _parse(app, "[RUN: day=3, duration=36 min, type=zone2, label=Zone 2 Easy, "
+                    "detail=36 min steady, reason=HRV in the tank]", u.id)
+        with app.app_context():
+            wrp = WeeklyRunPlan.query.filter_by(user_id=u.id, week=1, day_idx=3).first()
+        assert wrp.run_type == "z2"
+        assert wrp.label == "Zone 2 Easy"
+        assert "Hill" not in (wrp.label or "")
+        assert wrp.detail == "36 min steady"
+        assert "165" not in (wrp.detail or ""), "stale interval structure survived"
+        assert wrp.segments_json is None, "old watch structure must be voided"
+
+    def test_run_change_without_label_still_drops_the_stale_one(self, app_ctx, user_factory):
+        """Even a bare marker must never leave the OLD session described."""
+        app, db = app_ctx
+        from models import WeeklyRunPlan
+        u = user_factory()
+        with app.app_context():
+            db.session.add(WeeklyRunPlan(
+                user_id=u.id, week=1, day_idx=2, run_type="hiit",
+                label="Hill Repeats 5x90s", detail="5x2 min hard @ HR >=165",
+                duration="36 min", source="coach"))
+            db.session.commit()
+        _parse(app, "[RUN: day=2, duration=36 min, type=zone2, reason=HRV low]", u.id)
+        with app.app_context():
+            wrp = WeeklyRunPlan.query.filter_by(user_id=u.id, week=1, day_idx=2).first()
+        assert "Hill" not in wrp.label
+        assert "165" not in wrp.detail
+        assert wrp.label == "Zone 2 Easy"
+        assert "HRV low" in wrp.detail
 
     def test_old_prompt_order_type_before_duration_still_parses(self, app_ctx, user_factory):
         # The OLD prompt taught [RUN: day_idx=N, type=..., duration=...] —
