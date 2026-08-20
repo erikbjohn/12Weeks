@@ -570,6 +570,7 @@ NAME_ALIASES = {
     # Only exact same-movement/same-equipment renames belong here; a genuine
     # variant (underhand row, seated calf raise) needs its own catalog entry.
     "Dumbbell Row (single arm)": "Single-Arm DB Row",
+    "Dumbbell Shoulder Press": "DB Overhead Press",
     "Dumbbell Bench Press": "DB Bench Press",
     "Dumbbell Curl": "DB Curl",
     "Dumbbell Fly": "DB Fly",
@@ -860,11 +861,67 @@ EXERCISES = {
         "equipment": ["leg_curl_ext"],
         "video": "lying leg curl machine form tutorial",
     },
+    # Had an EXERCISE_SWAPS entry but no catalog entry, so it was a swap KEY the
+    # app didn't recognise as an exercise. It's on the equipment list
+    # ("Leg Curl / Leg Extension"), so it gets a real entry.
+    "Leg Extension": {
+        "muscle_group": "quads",
+        "category": "isolation",
+        "equipment": ["leg_curl_ext"],
+        "video": "leg extension machine form tutorial",
+    },
     "Standing Calf Raise": {
         "muscle_group": "calves",
         "category": "isolation",
         "equipment": ["dumbbells"],
         "video": "standing calf raise proper form full ROM",
+    },
+    # Promoted from swap-menu-only names (2026-08-20). Non-catalog swap targets
+    # are now pruned from the menu, and dropping these would have left Standing
+    # Calf Raise, DB Shrug and Power Clean — all live in the coach's program —
+    # with ZERO alternatives. They are distinct movements with no catalog
+    # equivalent, so they get real entries instead of being dropped.
+    "Seated Calf Raise": {
+        "muscle_group": "calves",
+        "category": "isolation",
+        "equipment": ["dumbbells"],
+        "video": "seated calf raise dumbbell on knees form",
+    },
+    "Calf Raises (step)": {
+        "muscle_group": "calves",
+        "category": "isolation",
+        "equipment": [],
+        "video": "bodyweight calf raise on step full range of motion",
+    },
+    "Barbell Shrug": {
+        "muscle_group": "traps",
+        "category": "isolation",
+        "equipment": ["barbell"],
+        "video": "barbell shrug proper form trap exercise",
+    },
+    "Band Shrug": {
+        "muscle_group": "traps",
+        "category": "isolation",
+        "equipment": ["bands"],
+        "video": "resistance band shrug form",
+    },
+    "Hang Clean": {
+        "muscle_group": "full_body",
+        "category": "power",
+        "equipment": ["barbell"],
+        "video": "hang clean technique tutorial",
+    },
+    "KB Clean": {
+        "muscle_group": "full_body",
+        "category": "power",
+        "equipment": ["kettlebells"],
+        "video": "kettlebell clean technique single arm",
+    },
+    "DB Power Clean": {
+        "muscle_group": "full_body",
+        "category": "power",
+        "equipment": ["dumbbells"],
+        "video": "dumbbell power clean floor to shoulder explosive",
     },
     # ─── ARMS ──────────────────────────────────────────────
     "EZ-Bar Curl": {

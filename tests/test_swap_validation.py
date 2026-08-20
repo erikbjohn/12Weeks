@@ -41,16 +41,18 @@ class TestIsValidSwap:
 
     def test_constrains_when_original_is_alternative_only(self):
         # auto_swap_workout can substitute the original with an alternative-name
-        # exercise like "Glute Bridge (weighted)" that isn't a top-level catalog
-        # key. Earlier behaviour fail-opened any swap from such a name. Now we
-        # locate the parent entry (Barbell Hip Thrust) and constrain valid swaps
-        # to that entry's family — same muscle group, no cross-group leakage.
+        # exercise like "Seated Calf Raise" that isn't a top-level catalog key.
+        # Earlier behaviour fail-opened any swap from such a name. Now we locate
+        # the parent entry (Standing Calf Raise) and constrain valid swaps to
+        # that entry's family — same muscle group, no cross-group leakage.
         # The exact bug from the screenshot: Bent-Over Row appearing as a swap
         # for a Hip Thrust slot.
-        assert is_valid_swap("Glute Bridge (weighted)", "Barbell Bent-Over Row") is False
+        # (Fixture moved off "Glute Bridge (weighted)" when non-catalog swap
+        # targets were pruned — it is no longer offered anywhere.)
+        assert is_valid_swap("Seated Calf Raise", "Barbell Bent-Over Row") is False
         # Same family is still allowed.
-        assert is_valid_swap("Glute Bridge (weighted)", "Barbell Hip Thrust") is True
-        assert is_valid_swap("Glute Bridge (weighted)", "Single Leg Glute Bridge") is True
+        assert is_valid_swap("Seated Calf Raise", "Standing Calf Raise") is True
+        assert is_valid_swap("Seated Calf Raise", "Calf Raises (step)") is True
 
     def test_rejects_empty_inputs(self):
         assert is_valid_swap("", "Hammer Curl") is False
@@ -59,9 +61,10 @@ class TestIsValidSwap:
         assert is_valid_swap("Hammer Curl", None) is False
 
     def test_canonicalises_via_resolve_name(self):
-        # resolve_name maps "Kettlebell Swing" → "KB Swing" (catalog key),
-        # so the user-facing name still validates.
-        assert is_valid_swap("KB Swing", "Dumbbell Swing") is True
+        # resolve_name maps swap-menu spellings onto catalog keys, so the
+        # user-facing name still validates: "Dumbbell Curl" → "DB Curl".
+        assert is_valid_swap("Hammer Curl", "Dumbbell Curl") is True
+        assert is_valid_swap("Barbell Bent-Over Row", "Dumbbell Row (single arm)") is True
 
 
 class TestCatalogConsistency:
@@ -393,7 +396,7 @@ class TestApiWorkoutsSwapOverlay:
             # User has DB RDL history at 45 lb (light, real)
             for i in range(5):
                 db.session.add(SetLog(
-                    user_id=u.id, exercise_name="Dumbbell Romanian Deadlift",
+                    user_id=u.id, exercise_name="Hip Thrust",
                     week=4, day_idx=3, set_number=i + 1,
                     weight=45.0, reps=8, done=True,
                     logged_date=date.today() - timedelta(days=3),
@@ -401,7 +404,7 @@ class TestApiWorkoutsSwapOverlay:
             # User's explicit swap: Conv DL -> DB RDL on this slot
             db.session.add(ExerciseSwap(
                 user_id=u.id, week=5, day_idx=3, exercise_idx=0,
-                swapped_to="Dumbbell Romanian Deadlift",
+                swapped_to="Hip Thrust",
                 original_name="Conventional Deadlift",
             ))
             db.session.commit()
@@ -420,7 +423,7 @@ class TestApiWorkoutsSwapOverlay:
             ex = day["exercises"][0]
 
             # Name reflects the swap target
-            assert ex["name"] == "Dumbbell Romanian Deadlift"
+            assert ex["name"] == "Hip Thrust"
             # swapped_from set so client can render the badge
             assert ex.get("swapped_from") == "Conventional Deadlift"
             # target_weight must NOT be the original 175 lb. Engine should
@@ -449,9 +452,9 @@ class TestApiWorkoutsSwapOverlay:
         orig = "Conventional Deadlift"
         alt_entry = next(
             (a for a in EXERCISE_SWAPS[orig]["alternatives"]
-             if a["name"] == "Dumbbell Romanian Deadlift"), None,
+             if a["name"] == "Hip Thrust"), None,
         )
-        assert alt_entry, "test fixture assumes Conv DL has DB RDL alternative"
+        assert alt_entry, "test fixture assumes Conv DL has Hip Thrust alternative"
         expected_note = alt_entry["note"]
         with app.app_context():
             db.session.add(WeeklyPrescription(
@@ -462,7 +465,7 @@ class TestApiWorkoutsSwapOverlay:
             ))
             db.session.add(ExerciseSwap(
                 user_id=u.id, week=5, day_idx=3, exercise_idx=0,
-                swapped_to="Dumbbell Romanian Deadlift",
+                swapped_to="Hip Thrust",
                 original_name=orig,
             ))
             db.session.commit()
@@ -514,17 +517,37 @@ class TestSwapTargetsAreRealExercises:
             "the single-arm row's own logged history must be visible to the engine"
         )
 
-    def test_known_ghost_targets_do_not_grow(self):
-        """Pins the remaining unresolved swap targets so no NEW one is added
-        silently. Shrinking this list is always fine; growing it is the bug."""
+    def test_no_swap_target_is_a_ghost(self):
+        """Every offered alternative must be a real catalog exercise. Non-catalog
+        targets are pruned at load (Erik's call, 2026-08-20: offer only exercises
+        the app actually knows), so this must be empty — not merely small."""
         from equipment_swaps import unknown_swap_targets
-        ghosts = set(unknown_swap_targets())
-        fixed = {
-            "Dumbbell Row (single arm)", "Dumbbell Bench Press", "Dumbbell Curl",
-            "Dumbbell Fly", "Bodyweight Squat", "Rear Delt Fly (Dumbbells)",
-        }
-        assert not (ghosts & fixed), f"regressed: {ghosts & fixed}"
-        assert len(ghosts) <= 56, (
-            f"a new swap alternative is not a catalog exercise ({len(ghosts)} > 56). "
-            f"Add a NAME_ALIASES entry or a real EXERCISES entry."
+        ghosts = unknown_swap_targets()
+        assert ghosts == {}, (
+            f"swap menu offers {len(ghosts)} non-catalog exercises: {sorted(ghosts)}. "
+            f"Add a NAME_ALIASES entry (same lift, different spelling) or a real "
+            f"EXERCISES entry (distinct movement)."
         )
+
+    def test_every_swap_key_is_a_catalog_exercise(self):
+        from equipment_swaps import EXERCISE_SWAPS
+        from workout_data import EXERCISES, resolve_name
+        orphans = [k for k in EXERCISE_SWAPS if resolve_name(k) not in EXERCISES]
+        assert orphans == [], f"swap entries for non-catalog exercises: {orphans}"
+
+    def test_pruning_never_leaves_an_exercise_unswappable(self):
+        """Dropping ghosts must not strand a slot the other way — an exercise with
+        zero alternatives has the same dead-end menu the ghosts caused."""
+        from equipment_swaps import EXERCISE_SWAPS
+        empty = [k for k, v in EXERCISE_SWAPS.items() if not (v.get("alternatives") or [])]
+        assert empty == [], f"no swap options left for: {empty}"
+
+    def test_promoted_exercises_kept_their_slots_alive(self):
+        """These three are live in the coach's program and would have been left
+        with no alternatives by a straight drop, so their targets were promoted
+        to real catalog entries instead."""
+        from equipment_swaps import get_alternatives
+        eq = ["barbell", "dumbbells", "kettlebells", "bands", "leg_curl_ext",
+              "leg_press", "flat_bench"]
+        for name in ("Standing Calf Raise", "DB Shrug", "Power Clean"):
+            assert get_alternatives(name, eq), f"{name} lost all its alternatives"

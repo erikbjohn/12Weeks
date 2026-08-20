@@ -325,15 +325,10 @@ EXERCISE_SWAPS = {
     },
 
     # ─── ADDITIONAL EXERCISES ─────────────────────────────
-    "Dumbbell Shoulder Press": {
-        "muscle_group": "shoulders",
-        "requires": ["dumbbells"],
-        "alternatives": [
-            {"name": "Barbell OHP", "requires": ["barbell"], "note": "Heavier loading"},
-            {"name": "Pike Push-Ups", "requires": [], "note": "Bodyweight overhead press"},
-            {"name": "Arnold Press", "requires": ["dumbbells"], "note": "Rotation adds front delt work"},
-        ],
-    },
+    # "Dumbbell Shoulder Press" was a DUPLICATE entry for "DB Overhead Press"
+    # (a strict subset of its alternatives). Two swap entries for one exercise is
+    # how alternatives drift apart between spellings, so it is now a NAME_ALIASES
+    # entry pointing at "DB Overhead Press" and the duplicate is gone.
     "Romanian Deadlift": {
         "muscle_group": "hamstrings",
         "requires": ["barbell"],
@@ -471,10 +466,13 @@ EXERCISE_SWAPS = {
     "Leg Extension": {
         "muscle_group": "quads",
         "requires": ["leg_curl_ext"],
+        # Alternatives point at REAL catalog exercises. The previous three
+        # (Sissy Squat / Front Foot Elevated Split Squat / Wall Sit) were
+        # swap-menu-only names, so choosing one stranded the slot.
         "alternatives": [
-            {"name": "Sissy Squat", "requires": [], "note": "Bodyweight quad isolation"},
-            {"name": "Front Foot Elevated Split Squat", "requires": ["dumbbells"], "note": "DB in hands, front foot on plate"},
-            {"name": "Wall Sit", "requires": [], "note": "Isometric, burn city"},
+            {"name": "Leg Press", "requires": ["leg_press"], "note": "Machine, same quad emphasis, heavier loadable"},
+            {"name": "Bulgarian Split Squat", "requires": ["dumbbells"], "note": "Single leg, rear foot elevated"},
+            {"name": "Goblet Squat", "requires": ["dumbbells"], "note": "Upright torso keeps the load on the quads"},
         ],
     },
     "Lying Leg Curl": {
@@ -625,6 +623,42 @@ EXERCISE_SWAPS = {
         ],
     },
 }
+
+
+def _prune_non_catalog_alternatives():
+    """Drop swap alternatives that are not real catalog exercises.
+
+    A swap target with no EXERCISES entry is a dead end: it has no metadata, no
+    alternatives of its own (so the slot can never be swapped again), and no
+    SetLog history under its name — which makes the engine back-derive a weight
+    from the ORIGINAL lift times an equipment factor. That is how a single-arm
+    dumbbell row done at 45 lb was prescribed at 75 (2026-08-20).
+
+    Erik's call: offer only exercises the app actually knows. Names that were the
+    SAME lift respelled are handled by NAME_ALIASES (resolve_name below sees
+    through them); genuinely distinct movements that a live exercise depended on
+    were promoted to real EXERCISES entries. Everything else is pruned here, at
+    load, so get_alternatives / is_valid_swap / _get_equivalent_names all agree.
+
+    Returns the pruned {alternative_name: [exercises that offered it]} for logging.
+    """
+    from workout_data import EXERCISES, resolve_name
+    pruned = {}
+    for name, data in EXERCISE_SWAPS.items():
+        alts = data.get("alternatives") or []
+        keep = []
+        for alt in alts:
+            alt_name = alt.get("name", "")
+            if resolve_name(alt_name) in EXERCISES:
+                keep.append(alt)
+            else:
+                pruned.setdefault(alt_name, []).append(name)
+        if len(keep) != len(alts):
+            data["alternatives"] = keep
+    return pruned
+
+
+PRUNED_SWAP_TARGETS = _prune_non_catalog_alternatives()
 
 
 def get_alternatives(exercise_name, user_equipment=None):
