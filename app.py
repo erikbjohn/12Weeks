@@ -3625,11 +3625,15 @@ def _apply_exercise_swap_overlay(days, user_id, week):
     so the two endpoints can't disagree on a swapped slot."""
     try:
         from equipment_swaps import EXERCISE_SWAPS
-        from workout_data import EXERCISES
+        from workout_data import EXERCISES, resolve_name
         _swap_rows = ExerciseSwap.query.filter_by(
             user_id=user_id, week=week
         ).all()
-        _swap_map = {(s.day_idx, s.exercise_idx): (s.swapped_to, s.original_name)
+        # Resolve the stored target to its canonical catalog name at READ time so
+        # rows written before the swap-menu aliases existed stop rendering a ghost
+        # exercise (no metadata, no alternatives, orphan history). This heals old
+        # data without a migration.
+        _swap_map = {(s.day_idx, s.exercise_idx): (resolve_name(s.swapped_to), s.original_name)
                      for s in _swap_rows}
         if not _swap_map:
             return
@@ -11481,7 +11485,20 @@ def api_exercise_alternatives(exercise_name):
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
     user_equipment = eq.available_equipment if eq else []
     alts = get_alternatives(exercise_name, user_equipment)
-    return jsonify({"exercise": exercise_name, "alternatives": alts})
+    # Present alternatives under their CANONICAL names, and drop any that resolve
+    # to the exercise itself or to another entry already listed — otherwise the
+    # menu offers the same lift twice under two spellings ("Single-Arm DB Row"
+    # and "Dumbbell Row (single arm)"), which is what let the split-identity bug
+    # reach the athlete in the first place.
+    _seen = {exercise_name}
+    _out = []
+    for _a in alts:
+        _canon = resolve_name(_a.get("name", ""))
+        if not _canon or _canon in _seen:
+            continue
+        _seen.add(_canon)
+        _out.append({**_a, "name": _canon})
+    return jsonify({"exercise": exercise_name, "alternatives": _out})
 
 
 # ─── SHOPPING LIST ──────────────────────────────────────────────────────────

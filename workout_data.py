@@ -559,6 +559,22 @@ RUNS = {
 # Every exercise in the program should resolve to exactly one canonical name.
 
 NAME_ALIASES = {
+    # ── Swap-menu names that are the SAME lift under a different spelling ──
+    # equipment_swaps offers these as alternatives, but they are not catalog
+    # entries. Without an alias, swapping into one creates a ghost exercise:
+    # its own orphan SetLog history, no catalog metadata, NO further swap
+    # alternatives (the "I tried to swap out of it and it won't let me" bug),
+    # and a target weight the engine derives from the ORIGINAL lift's history
+    # times an equipment factor — which is how a single-arm dumbbell row the
+    # athlete does at 45 lb got prescribed at 75 lb (105 lb barbell row × 0.7).
+    # Only exact same-movement/same-equipment renames belong here; a genuine
+    # variant (underhand row, seated calf raise) needs its own catalog entry.
+    "Dumbbell Row (single arm)": "Single-Arm DB Row",
+    "Dumbbell Bench Press": "DB Bench Press",
+    "Dumbbell Curl": "DB Curl",
+    "Dumbbell Fly": "DB Fly",
+    "Bodyweight Squat": "Bodyweight Squats",
+    "Rear Delt Fly (Dumbbells)": "Rear Delt Fly",
     "Bench Press": "Barbell Bench Press",
     "Back Squat": "Barbell Back Squat",
     "Deadlift": "Conventional Deadlift",

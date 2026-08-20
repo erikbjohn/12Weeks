@@ -222,7 +222,10 @@ class TestParseCoachMarkers:
             _parse_coach_markers(marker, u.id, week=1)
             row = ExerciseSwap.query.filter_by(user_id=u.id).first()
         assert row is not None
-        assert row.swapped_to == "Dumbbell Curl"
+        # Stored CANONICAL: "Dumbbell Curl" is a swap-menu spelling of the catalog's
+        # "DB Curl". Storing the menu spelling created a ghost exercise with its own
+        # split history and no alternatives (see TestSwapTargetsAreRealExercises).
+        assert row.swapped_to == "DB Curl"
         # The fix: we now record what the slot held when the swap was created,
         # so cross-phase carry-forward can detect when the slot has shifted.
         assert row.original_name == "Hammer Curl"
@@ -473,4 +476,55 @@ class TestApiWorkoutsSwapOverlay:
         assert ex.get("note") == expected_note, (
             f"swap should surface alternative's catalog note "
             f"({expected_note!r}); got {ex.get('note')!r}"
+        )
+
+
+# ─── Ghost swap targets: the 2026-08-20 single-arm-row bug ──────────────────
+
+class TestSwapTargetsAreRealExercises:
+    """A swap alternative whose name is not a catalog exercise strands the slot.
+
+    Erik's Thursday led with "Dumbbell Row (single arm)" @ 75 lb — a lift he does
+    at 45 lb, and had done the day before. Root cause: that name is offered in the
+    swap menu but is NOT a catalog entry, while the real exercise is spelled
+    "Single-Arm DB Row". The ghost had (a) no catalog metadata, (b) no swap
+    alternatives of its own, so the slot could never be swapped back, and (c) no
+    SetLog history under that name, so the engine fell back to the ORIGINAL
+    barbell row (105 lb) times the barbell->dumbbell factor 0.7 = 73.5 -> 75.
+    """
+
+    def test_single_arm_row_spellings_are_one_exercise(self):
+        from workout_data import resolve_name, EXERCISES
+        assert resolve_name("Dumbbell Row (single arm)") == "Single-Arm DB Row"
+        assert resolve_name("Dumbbell Row (single arm)") in EXERCISES
+
+    def test_swapped_into_row_still_offers_alternatives(self):
+        """The 'I tried to swap out of it, it won't let me' symptom."""
+        from equipment_swaps import get_alternatives
+        from workout_data import resolve_name
+        eq = ["barbell", "dumbbells", "flat_bench", "cable_machine", "pull_up_bar"]
+        alts = get_alternatives(resolve_name("Dumbbell Row (single arm)"), eq)
+        assert alts, "a swapped-into row must still be swappable"
+
+    def test_engine_reads_the_athletes_own_history_not_a_scaled_barbell(self):
+        from training_engine import _get_equivalent_names
+        from workout_data import resolve_name
+        names = _get_equivalent_names(resolve_name("Dumbbell Row (single arm)"))
+        assert "Single-Arm DB Row" in names, (
+            "the single-arm row's own logged history must be visible to the engine"
+        )
+
+    def test_known_ghost_targets_do_not_grow(self):
+        """Pins the remaining unresolved swap targets so no NEW one is added
+        silently. Shrinking this list is always fine; growing it is the bug."""
+        from equipment_swaps import unknown_swap_targets
+        ghosts = set(unknown_swap_targets())
+        fixed = {
+            "Dumbbell Row (single arm)", "Dumbbell Bench Press", "Dumbbell Curl",
+            "Dumbbell Fly", "Bodyweight Squat", "Rear Delt Fly (Dumbbells)",
+        }
+        assert not (ghosts & fixed), f"regressed: {ghosts & fixed}"
+        assert len(ghosts) <= 56, (
+            f"a new swap alternative is not a catalog exercise ({len(ghosts)} > 56). "
+            f"Add a NAME_ALIASES entry or a real EXERCISES entry."
         )

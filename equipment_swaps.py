@@ -825,6 +825,31 @@ def is_valid_swap(original_name, swap_name):
     return True
 
 
+def unknown_swap_targets():
+    """Swap alternatives whose name is not a real catalog exercise.
+
+    Swapping into one of these produces a GHOST exercise: no catalog metadata,
+    its own orphan SetLog history split off from the real lift, no further swap
+    alternatives (so the slot can never be swapped again), and a target weight
+    the engine back-derives from the ORIGINAL lift scaled by an equipment factor.
+    That is how a single-arm dumbbell row done at 45 lb was prescribed at 75 lb
+    (2026-08-20). Fix each by adding a NAME_ALIASES entry when it is the same
+    lift renamed, or a real EXERCISES entry when it is a distinct movement.
+
+    Returns {alternative_name: [exercises offering it]}.
+    """
+    from workout_data import EXERCISES, resolve_name
+    ghosts = {}
+    for name, data in EXERCISE_SWAPS.items():
+        for alt in data.get("alternatives", []) or []:
+            alt_name = alt.get("name")
+            if not alt_name:
+                continue
+            if resolve_name(alt_name) not in EXERCISES:
+                ghosts.setdefault(alt_name, []).append(name)
+    return ghosts
+
+
 def validate_exercise_swaps():
     """Startup validation: warn about exercises with no alternatives.
     Returns list of exercise names with 0 alternatives."""
@@ -834,4 +859,11 @@ def validate_exercise_swaps():
         if not data.get("alternatives") or len(data["alternatives"]) < 2:
             missing.append(name)
             logging.warning(f"Exercise '{name}' has fewer than 2 alternatives")
+    ghosts = unknown_swap_targets()
+    if ghosts:
+        logging.warning(
+            "%d swap alternatives are not catalog exercises — swapping into one "
+            "strands the slot (no metadata, no further swaps, split history): %s",
+            len(ghosts), ", ".join(sorted(ghosts)[:10]),
+        )
     return missing

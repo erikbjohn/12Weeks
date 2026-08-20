@@ -5238,12 +5238,21 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
     if (swapContainer.innerHTML.trim()) { swapContainer.innerHTML = ''; return; }
     swapContainer.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">Loading...</div>';
 
-    // Always look up alternatives for the ORIGINAL exercise, not the current swap
+    // Always look up alternatives for the ORIGINAL exercise, not the current swap.
+    // The server applies swaps by REWRITING exercises[i].name to the swap target,
+    // and records the pre-swap name on `swapped_from`. Reading `.name` here meant
+    // an already-swapped slot asked for the alternatives of its own replacement —
+    // and a swap target that isn't itself a swap-menu key has none, so the menu
+    // said "No alternatives available" and the slot was stuck for good. It also
+    // offered "revert to" the swapped name, i.e. revert to itself.
     const weekData = workoutData[String(currentWeek)];
     const dayData = weekData ? weekData.days[currentDay] : null;
-    const originalName = dayData && dayData.exercises && dayData.exercises[exIdx] ? dayData.exercises[exIdx].name : exerciseName;
+    const slot = dayData && dayData.exercises ? dayData.exercises[exIdx] : null;
+    const originalName = (slot && (slot.swapped_from || slot.name)) || exerciseName;
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
-    const isCurrentlySwapped = !!swaps[`${currentWeek}_${currentDay}_${exIdx}`];
+    // Trust the server's swapped_from over sessionStorage, which is empty in a
+    // fresh tab — that alone hid the "revert to original" option after a reload.
+    const isCurrentlySwapped = !!(slot && slot.swapped_from) || !!swaps[`${currentWeek}_${currentDay}_${exIdx}`];
 
     try {
         const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(originalName));
@@ -13463,7 +13472,10 @@ async function showTransitionSwap(exIdx, exerciseName) {
   const weekData = workoutData[String(currentWeek)];
   const dayData = weekData ? weekData.days[currentDay] : null;
   const liftingIdx = exIdx - ((_workoutExercises || []).filter(e => e._isWarmup).length);
-  const originalName = dayData && dayData.exercises && dayData.exercises[liftingIdx] ? dayData.exercises[liftingIdx].name : exerciseName;
+  // Same swapped_from rule as showExerciseSwap: an already-swapped slot must ask
+  // for the ORIGINAL's alternatives, not its own replacement's (which has none).
+  const tSlot = dayData && dayData.exercises ? dayData.exercises[liftingIdx] : null;
+  const originalName = (tSlot && (tSlot.swapped_from || tSlot.name)) || exerciseName;
 
   try {
     const res = await fetch('/api/exercise/alternatives/' + encodeURIComponent(originalName));
