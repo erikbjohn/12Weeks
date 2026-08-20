@@ -1534,19 +1534,45 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
     return reason
 
 
+def _should_autoreconcile(exercise: str) -> bool:
+    """Does logging heavier than plan raise the plan for this movement?
+
+    The rule is COMPOUND vs ISOLATION, not barbell vs everything else. The
+    original barbell-only test read "isolations may be deliberately light" but
+    implemented "not spelled like a barbell lift", which quietly excluded every
+    dumbbell compound. That is how DB Bench Press sat at a prescribed 30 lb after
+    being logged at 40 — the card literally read "Last: 40 lb -> 30 lb"
+    (2026-08-20). Isolations stay excluded: they really are programmed light on
+    purpose, and force-raising them breaks the light-start rail.
+
+    Falls back to the barbell name heuristic when the catalog doesn't know the
+    movement, so an unrecognised name behaves exactly as it did before.
+    """
+    if not exercise:
+        return False
+    from workout_data import EXERCISES, resolve_name
+    category = (EXERCISES.get(resolve_name(exercise)) or {}).get("category")
+    if category == "isolation":
+        return False
+    if category in ("compound", "power"):
+        return True
+    return _is_barbell_movement(exercise)
+
+
 def _reconcile_prescription_to_logged(user_id, exercise, logged_weight, from_week):
-    """Auto-reconcile: when an athlete logs a BARBELL lift heavier than its
+    """Auto-reconcile: when an athlete logs a COMPOUND lift heavier than its
     prescription, raise the plan (this week + forward, skipping deload weeks
     4/8/12) up to the loadable logged weight — so the card never shows "plan 145"
     next to a logged 155. This is the same logic as /api/admin/heal-prescriptions,
     fired automatically at log time for ONE lift instead of by hand.
 
-    Barbell only: isolations may be deliberately light (new-movement light-starts)
-    and must NOT be force-raised. Never lowers a plan. Returns the changed rows.
+    Compounds only (see _should_autoreconcile): isolations may be deliberately
+    light (new-movement light-starts) and must NOT be force-raised. Never lowers
+    a plan. Returns the changed rows.
     """
     if not exercise or not logged_weight or logged_weight <= 0:
         return []
-    if not _is_barbell_movement(exercise):
+    if not _should_autoreconcile(exercise):
         return []
     target = _round_to_loadable(exercise, logged_weight)
     changed = []
@@ -12849,11 +12875,13 @@ def api_admin_heal_prescriptions():
         is_bb = _is_barbell_movement(rx.exercise_name)
         if w0 and w0 > 0:
             neww = _round_to_loadable(rx.exercise_name, w0)
-            # Floor below the logged top ONLY for barbell lifts. Non-barbell
-            # isolations (e.g. a Rear Delt Fly the coach deliberately starts
-            # light as a new movement) must NOT be force-raised by the heal —
-            # the write loop's new-movement light-start rule owns those.
-            if (is_bb and rx.week not in (4, 8, 12)
+            # Never floor a plan below the logged top for a COMPOUND lift. Only
+            # isolations (e.g. a Rear Delt Fly the coach deliberately starts light
+            # as a new movement) are exempt — the write loop's new-movement
+            # light-start rule owns those. This used to test "is barbell", which
+            # excluded every dumbbell compound and let DB Bench Press stay
+            # prescribed at 30 after being logged at 40.
+            if (_should_autoreconcile(rx.exercise_name) and rx.week not in (4, 8, 12)
                     and recent_top is not None and neww < recent_top):
                 neww = float(recent_top)
         really_new = (recent_top is None)
