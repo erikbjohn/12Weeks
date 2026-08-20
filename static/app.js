@@ -5290,6 +5290,39 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
     }
 }
 
+// Re-pull the server's view of the week after a swap write.
+//
+// The server APPLIES swaps itself — it rewrites exercises[i].name to the swap
+// target and recomputes target_weight/note against that exercise. The client
+// then renders `swaps[key] || ex.name` on top of that. Those two agree while a
+// swap exists, but on REVERT they disagree: the sessionStorage entry is gone,
+// so the render falls through to ex.name — which is still the swap target in the
+// cached payload. Result: "revert to Barbell Bent-Over Row" put Single-Arm DB Row
+// straight back on the card and looked completely stuck, even though the DB row
+// had in fact been deleted. Only a page reload showed the truth.
+//
+// Refetching after the write is what makes the card match the database.
+async function refreshWorkoutDataAfterSwap() {
+    try {
+        const [wRes, sRes] = await Promise.all([
+            fetch('/api/workouts'),
+            fetch('/api/exercise-swaps'),
+        ]);
+        if (wRes.ok) {
+            const fresh = await wRes.json();
+            window._exerciseNames = fresh._exerciseNames || window._exerciseNames || [];
+            delete fresh._exerciseNames;
+            workoutData = fresh;
+        }
+        // Re-sync the swap map too: it is loaded once per session behind
+        // _exerciseSwapsLoaded, so without this it keeps serving the pre-write
+        // answer for the rest of the session.
+        if (sRes.ok) sessionStorage.setItem('exercise_swaps', JSON.stringify(await sRes.json()));
+    } catch (e) {
+        console.error('Swap refresh failed:', e);
+    }
+}
+
 async function revertExerciseSwap(week, day, exIdx) {
     const key = week + '_' + day + '_' + exIdx;
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
@@ -5297,6 +5330,7 @@ async function revertExerciseSwap(week, day, exIdx) {
     sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
     // Also remove from DB — await so it's saved before user can close tab
     await apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: '' });
+    await refreshWorkoutDataAfterSwap();
     renderDetail();
 }
 
@@ -5364,6 +5398,10 @@ async function swapExercise(week, day, exIdx, newName) {
     sessionStorage.setItem('exercise_swaps', JSON.stringify(swaps));
     // Persist to DB — await so it's saved before user can close tab
     await apiPost('/api/exercise-swap', { week, day_idx: day, exercise_idx: exIdx, swapped_to: newName });
+    // Same refresh as revert: the server canonicalises the name (resolve_name) and
+    // recomputes the target weight from the swap target's own history, so the
+    // cached payload is stale the moment the write lands.
+    await refreshWorkoutDataAfterSwap();
     renderDetail();
 }
 
@@ -11874,19 +11912,28 @@ async function renderDetail() {
   const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
   const exRows = displayExercises.map((ex, i) => {
     const swapKey = currentWeek + '_' + currentDay + '_' + i;
-    const displayName = swaps[swapKey] || ex.name;
-    const isSwapped = !!swaps[swapKey];
+    // When the SERVER has already applied the swap (it sets swapped_from), its
+    // name wins. sessionStorage is a local mirror that can hold a stale or
+    // non-canonical value — it was rendering "Dumbbell Row (single arm)" in the
+    // header while the payload and the database both said "Single-Arm DB Row".
+    // The local map is only the fallback for a write the server hasn't echoed yet.
+    const displayName = ex.swapped_from ? ex.name : (swaps[swapKey] || ex.name);
+    const isSwapped = !!ex.swapped_from || !!swaps[swapKey];
     const done = isExDone(currentWeek, currentDay, i);
     let suggestion = getWeightForExercise(displayName, currentWeek);
     let lastWt = getLastWeight(displayName);
     // Fallback: if swapped exercise has no history, estimate from original exercise's weight
     // Scale down for equipment changes (cable→dumbbell, barbell→dumbbell, machine→free)
     if (isSwapped && suggestion.weight == null) {
-      var origSuggestion = getWeightForExercise(ex.name, currentWeek);
+      // The ORIGINAL is swapped_from once the server has applied the swap — ex.name
+      // is the target by then, and scaling a lift off itself is a no-op that
+      // silently produced no estimate at all.
+      var origName = ex.swapped_from || ex.name;
+      var origSuggestion = getWeightForExercise(origName, currentWeek);
       if (origSuggestion.weight != null) {
         // Mirrors equipment_swaps.scale_for_swap() — keep in sync.
-        var scale = scaleForSwap(ex.name, displayName);
-        suggestion = { weight: roundWeight(origSuggestion.weight * scale, displayName), reason: 'estimated from ' + ex.name };
+        var scale = scaleForSwap(origName, displayName);
+        suggestion = { weight: roundWeight(origSuggestion.weight * scale, displayName), reason: 'estimated from ' + origName };
       }
       if (!lastWt) lastWt = null; // Don't show original exercise's last weight — different movement
     }
