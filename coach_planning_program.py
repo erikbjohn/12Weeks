@@ -28,6 +28,12 @@ _EQUIP_MODIFIERS = re.compile(
     r'reverse[\s-]?grip|wide|close|narrow)\b', re.I)
 
 
+# Every prescribed exercise carries at least this many working sets — always,
+# deload weeks included (Erik, 2026-08-24). Deload = lighter loads / fewer
+# movements, never 1-2 set stubs.
+MIN_SETS = 3
+
+
 def _movement_key(name: str) -> str:
     """Canonical movement key: alias-resolve then strip equipment/grip
     qualifiers and normalize. 'Barbell Hip Thrust' == 'Hip Thrust',
@@ -101,7 +107,7 @@ def validate_program(parsed, catalog, available_equipment):
                 sets = 3
             if sets <= 0:
                 continue
-            sets = max(1, min(6, sets))
+            sets = max(MIN_SETS, min(6, sets))
             weight = it.get("weight")
             try:
                 weight = float(weight) if weight is not None else None
@@ -277,32 +283,59 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                     f"Floored day {d} to {len(items)} exercises (coach "
                     f"under-prescribed; restored {pit['exercise']}).")
 
-    # 3. volume ceiling — trim non-lead (accessory) sets first
+    # 2d. per-exercise set FLOOR — no exercise below MIN_SETS, deload weeks
+    #     included. A 2-set exercise is not a prescription (Erik, 2026-08-24).
+    for items in out.values():
+        for it in items:
+            if it["sets"] < MIN_SETS:
+                actions.append(
+                    f"Raised {it['exercise']} {it['sets']}->{MIN_SETS} sets (min sets rail).")
+                it["sets"] = MIN_SETS
+
+    # 3. volume ceiling — trim non-lead (accessory) sets first. An exercise
+    #    already at MIN_SETS is never decremented into a stub: it is dropped
+    #    whole instead (accessories before leads).
     def _total():
         return sum(it["sets"] for items in out.values() for it in items)
+
+    def _trim_candidate(include_leads):
+        # Prefer decrementing the fattest movement above the floor; if none,
+        # drop the accessory (or lead, as a last resort) with the fewest sets.
+        dec = None
+        for d, items in out.items():
+            for idx, it in enumerate(items):
+                if idx == 0 and not include_leads:
+                    continue  # protect the day's lead compound
+                if it["sets"] > MIN_SETS and (dec is None or it["sets"] > dec[1]["sets"]):
+                    dec = (d, it)
+        if dec:
+            return "dec", dec
+        drop = None
+        for d, items in out.items():
+            for idx, it in enumerate(items):
+                if idx == 0 and not include_leads:
+                    continue
+                if drop is None or it["sets"] < drop[1]["sets"]:
+                    drop = (d, it)
+        return ("drop", drop) if drop else (None, None)
 
     trimmed = False
     guard = 0
     while _total() > ceiling and guard < 1000:
         guard += 1
-        cand = None
-        for d, items in out.items():
-            for idx, it in enumerate(items):
-                if idx == 0:
-                    continue  # protect the day's lead compound
-                if cand is None or it["sets"] > cand[1]["sets"]:
-                    cand = (d, it)
+        kind, cand = _trim_candidate(include_leads=False)
         if cand is None:  # only leads remain — trim them as a last resort
-            for d, items in out.items():
-                for it in items:
-                    if cand is None or it["sets"] > cand[1]["sets"]:
-                        cand = (d, it)
+            kind, cand = _trim_candidate(include_leads=True)
         if cand is None:
             break
         d, it = cand
-        it["sets"] -= 1
         trimmed = True
-        if it["sets"] <= 0:
+        if kind == "dec":
+            it["sets"] -= 1
+        else:
+            actions.append(
+                f"Dropped {it['exercise']} (day {d}) whole rather than stub it below "
+                f"{MIN_SETS} sets (ceiling).")
             out[d] = [x for x in out[d] if x is not it]
     if trimmed:
         actions.append(f"Trimmed volume to ceiling of {ceiling} working sets.")
@@ -547,7 +580,10 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "   calorie deficit, so manage recovery through LOAD selection and exercise "
         "   choice — do NOT cut total volume to do it. Roughly "
         f"   {max(4, round(target_sets / max(1, train_days) / 3.5))}-6 exercises "
-        "   per lifting day. On a deload week use ~55% volume and lighter loads.\n"
+        "   per lifting day. On a deload week use ~55% volume via LIGHTER LOADS "
+        "   and FEWER MOVEMENTS — never fewer sets per movement.\n"
+        f"4b. EVERY exercise is AT LEAST {MIN_SETS} working sets — never 1 or 2, "
+        "   deload weeks included. A 2-set exercise is not a prescription.\n"
         "5. Cover the major muscle groups across the week (legs, chest, back, "
         "   shoulders, arms, posterior chain, core) WITHOUT overlapping the same "
         "   heavy pattern on back-to-back days (his legs also take the running "

@@ -19,9 +19,9 @@ def _total(prog):
 def _prog():
     return {
         0: [{"exercise": "Barbell Back Squat", "sets": 3, "reps": "5", "weight": 185, "rest": "150s"},
-            {"exercise": "Leg Curl", "sets": 2, "reps": "10", "weight": 60, "rest": "60s"}],
+            {"exercise": "Leg Curl", "sets": 3, "reps": "10", "weight": 60, "rest": "60s"}],
         1: [{"exercise": "Barbell Bench Press", "sets": 3, "reps": "5", "weight": 155, "rest": "150s"},
-            {"exercise": "Cable Fly", "sets": 2, "reps": "12", "weight": 30, "rest": "60s"}],
+            {"exercise": "Cable Fly", "sets": 3, "reps": "12", "weight": 30, "rest": "60s"}],
     }
 
 
@@ -50,14 +50,14 @@ def test_weekly_floor_exempt_on_deload():
     from coach_planning_program import enforce_safety
     out, _ = enforce_safety(_prog(), rest_day_idx=6, ceiling=40,
                             floor=30, deload=True, **_HIST)
-    assert _total(out) == 10  # no backfill on a deload week
+    assert _total(out) == 12  # no backfill on a deload week
 
 
 def test_weekly_floor_below_current_is_noop():
     from coach_planning_program import enforce_safety
     out, _ = enforce_safety(_prog(), rest_day_idx=6, ceiling=40,
                             floor=5, deload=False, **_HIST)
-    assert _total(out) == 10  # already above the floor -> unchanged
+    assert _total(out) == 12  # already above the floor -> unchanged
 
 
 def test_prev_nondeload_total_week_one_is_zero():

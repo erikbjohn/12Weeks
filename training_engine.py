@@ -342,7 +342,7 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
         return {
             "target_weight": _round_weight(last_weight),
             "target_reps": configured_reps or last_reps or 3,
-            "target_sets": configured_sets_peak or last_set_count or 2,
+            "target_sets": max(3, configured_sets_peak or last_set_count or 3),
             "adjustment_reason": "Week 12 peak — HOLD all knobs",
             "progression_indicator": "hold",
         }
