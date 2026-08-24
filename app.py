@@ -1353,6 +1353,14 @@ def _despiked_current_weight(user_id):
     return cut_guard.despiked_weight_for_week(user_id, _current_week())
 
 
+def _block_start_for(user_id):
+    """This block's start date (AppState.start_date) or None. The main-page
+    Stats accordion is PHASE-scoped to this (Erik, 2026-08-24); the Progress
+    overlay stays all-time by his call."""
+    st = AppState.query.filter_by(user_id=user_id).first()
+    return st.start_date if st and st.start_date else None
+
+
 def _current_week():
     """Compute current program week from start_date (not stale DB value).
 
@@ -6774,9 +6782,16 @@ def api_weight_detail(exercise_name):
     from body_stats import compute_1rm_percentile
 
     # Build weekly e1RM from per-set data (max e1RM per set per week)
-    sets = SetLog.query.filter_by(
+    # PHASE-scoped (Stats accordion is this block only): week numbers repeat
+    # across blocks, so without the date scope block-1 week 5 collides with
+    # block-3 week 5 and a June PR masquerades as this block's progress.
+    _wd_start = _block_start_for(current_user.id)
+    _sets_q = SetLog.query.filter_by(
         user_id=current_user.id, exercise_name=exercise_name, done=True
-    ).order_by(SetLog.week, SetLog.set_number).all()
+    )
+    if _wd_start is not None:
+        _sets_q = _sets_q.filter(SetLog.logged_date >= _wd_start)
+    sets = _sets_q.order_by(SetLog.week, SetLog.set_number).all()
 
     # Group by week, compute max e1RM per week
     weekly_e1rm = {}
@@ -6790,8 +6805,9 @@ def api_weight_detail(exercise_name):
             if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                 weekly_e1rm[wk] = e1rm
 
-    # Fallback: if SetLog is empty, compute from ExerciseLog
-    if not weekly_e1rm:
+    # Fallback: if SetLog is empty, compute from ExerciseLog (legacy, pre-block
+    # data — only when no block is defined; never leak it into a scoped view)
+    if not weekly_e1rm and _wd_start is None:
         ex_logs = ExerciseLog.query.filter_by(
             user_id=current_user.id, exercise_name=exercise_name
         ).order_by(ExerciseLog.week).all()
@@ -6806,9 +6822,13 @@ def api_weight_detail(exercise_name):
     # Merge in WeeklyPrescription target_weight as "scheduled" e1RM
     # so users see progression even before they've lifted at the new weight
     from models import WeeklyPrescription
-    prescriptions = WeeklyPrescription.query.filter_by(
+    _rx_q = WeeklyPrescription.query.filter_by(
         user_id=current_user.id, exercise_name=exercise_name
-    ).all()
+    )
+    if _wd_start is not None:
+        from datetime import datetime as _dt_wd
+        _rx_q = _rx_q.filter(WeeklyPrescription.created_at >= _dt_wd.combine(_wd_start, _dt_wd.min.time()))
+    prescriptions = _rx_q.all()
     prescribed_e1rm = {}  # week -> e1rm
     for p in prescriptions:
         if not p.target_weight or p.target_weight <= 0:
@@ -6868,8 +6888,11 @@ def api_weight_detail(exercise_name):
 
     # Baseline from legacy ExerciseLog test entries (frozen pre-April data),
     # else from week-0 SetLog rows (where /api/weights/baseline writes now).
-    baseline_entries = [l for l in logs if l.test_weight]
-    if baseline_entries:
+    baseline_entries = [] if _wd_start is not None else [l for l in logs if l.test_weight]
+    if _wd_start is not None and weekly_e1rm:
+        # Block-scoped baseline = this block's earliest logged week.
+        baseline_1rm = weekly_e1rm[min(weekly_e1rm.keys())]
+    elif baseline_entries:
         bl = baseline_entries[0]
         bl_reps = min(bl.test_reps or 10, 15)
         baseline_1rm = round(bl.test_weight * (1 + bl_reps / 30))
@@ -7265,6 +7288,12 @@ def api_measurements():
     query = BodyMeasurement.query.filter_by(user_id=current_user.id)
     if d:
         query = query.filter_by(log_date=date.fromisoformat(d))
+    else:
+        # PHASE-scoped: the Stats accordion's sparklines and "vs baseline"
+        # deltas are this block only (baseline = block day 0, not March).
+        _ms = _block_start_for(current_user.id)
+        if _ms is not None:
+            query = query.filter(BodyMeasurement.log_date >= _ms)
     entries = query.order_by(BodyMeasurement.log_date).all()
     return jsonify([{
         "date": e.log_date.isoformat(),

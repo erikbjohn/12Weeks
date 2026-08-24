@@ -2320,8 +2320,11 @@ function getLastWeight(exName) {
 
 function getWeightTrend(exName) {
   const data = getExerciseData(exName);
-  if (!data || !data.history || data.history.length < 2) return 'same';
-  const hist = data.history;
+  // Trend is PHASE-scoped: compare within this block only, never against a
+  // prior block's week with the same number.
+  const _bs = (_stateCache && _stateCache.start_date) || null;
+  const hist = ((data && data.history) || []).filter(h => !_bs || (h.date && h.date >= _bs));
+  if (hist.length < 2) return 'same';
   const last = hist[hist.length - 1].weight;
   for (let i = hist.length - 2; i >= 0; i--) {
     if (hist[i].week !== hist[hist.length - 1].week) {
@@ -12176,8 +12179,13 @@ async function renderDetail() {
       const exData = getExerciseData(name);
       let est1rm = '';
       let loggedRM = 0;
-      if (exData && exData.history && exData.history.length > 0) {
-        for (const h of exData.history) {
+      // PHASE-scoped: only this block's logged sets (date >= start_date).
+      // Week numbers repeat across blocks, so the week cap alone let a
+      // block-1 week-5 PR pose as this block's best (Erik, 2026-08-24).
+      const _blockStart = (_stateCache && _stateCache.start_date) || null;
+      const _blockHist = (exData && exData.history || []).filter(h => !_blockStart || (h.date && h.date >= _blockStart));
+      if (_blockHist.length > 0) {
+        for (const h of _blockHist) {
           const wkN = parseInt(h.week);
           if (!wkN || wkN < 1 || wkN > _maxWk) continue;
           const hw = h.weight || 0;
