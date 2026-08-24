@@ -55,6 +55,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-08-25,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-08-26,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-08-26,07:00,Injection,Cagrilintide,0.3,6u,Abdomen (rotate from Retatrutide site),Hold 0.3mg 2 weeks
+2026-08-29,07:00,Injection,Cagrilintide,0.3,6u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 08-26)
 2026-08-26,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-08-26,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-08-26,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -83,6 +84,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-09-01,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-09-02,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-09-02,07:00,Injection,Cagrilintide,0.6,12u,Abdomen (rotate from Retatrutide site),Step to 0.6mg
+2026-09-05,07:00,Injection,Cagrilintide,0.6,12u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 09-02)
 2026-09-02,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-09-02,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-09-02,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -111,6 +113,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-09-08,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-09-09,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-09-09,07:00,Injection,Cagrilintide,0.6,12u,Abdomen (rotate from Retatrutide site),Hold 0.6mg
+2026-09-12,07:00,Injection,Cagrilintide,0.6,12u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 09-09)
 2026-09-09,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-09-09,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-09-09,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -139,6 +142,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-09-15,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-09-16,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-09-16,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Step up only if no nausea
+2026-09-19,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 09-16)
 2026-09-16,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-09-16,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-09-16,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -167,6 +171,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-09-22,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-09-23,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-09-23,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Assess tolerance
+2026-09-26,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 09-23)
 2026-09-23,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-09-23,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-09-23,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -195,6 +200,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-09-29,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
 2026-09-30,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-09-30,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Assess tolerance
+2026-10-03,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 09-30)
 2026-09-30,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-09-30,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-09-30,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -225,6 +231,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-10-06,22:00,Injection,Tesamorelin,2,20u,Abdomen,Fasted - 2+ hours after last meal
 2026-10-07,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-10-07,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Hold if losing well
+2026-10-10,07:00,Injection,Cagrilintide,1.2,24u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 10-07)
 2026-10-07,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-10-07,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-10-07,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -260,6 +267,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-10-13,22:00,Injection,Tesamorelin,2,20u,Abdomen,Fasted - 2+ hours after last meal
 2026-10-14,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-10-14,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Step up only if stalled
+2026-10-17,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 10-14)
 2026-10-14,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-10-14,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-10-14,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -295,6 +303,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-10-20,22:00,Injection,Tesamorelin,2,20u,Abdomen,Fasted - 2+ hours after last meal
 2026-10-21,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-10-21,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Top dose
+2026-10-24,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 10-21)
 2026-10-21,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-10-21,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-10-21,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
@@ -330,6 +339,7 @@ Date,Time,Event_Type,Compound,Dose_mg,Syringe_Units,Site,Notes
 2026-10-27,22:00,Injection,Tesamorelin,2,20u,Abdomen,Fasted - 2+ hours after last meal
 2026-10-28,07:00,Injection,BPC-157,0.25,10u,Thigh,Fresh 31G syringe
 2026-10-28,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Top dose
+2026-10-31,07:00,Injection,Cagrilintide,2.4,48u,Abdomen (rotate from Retatrutide site),Second weekly dose (Sat) (matches Wed 10-28)
 2026-10-28,07:00,Oral,Enclomiphene,12.5,-,-,Take with breakfast
 2026-10-28,07:00,Injection,KPV,1,10u,Love handle,Separate syringe from BPC-157
 2026-10-28,07:00,Injection,GHK-Cu,1,5u,Abdomen,20mg/mL (50mg + 2.5mL BAC); topical serum after
