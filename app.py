@@ -4366,9 +4366,21 @@ def api_set_log():
             # today's completion. Without this, once the week clamps at 12 a
             # fully-logged slot from a prior cycle would complete the day after
             # ONE new set (the phantom-done class).
-            slot_rows = SetLog.query.filter_by(
+            # Block-scoped (>= this block's start_date), NOT same-local-date:
+            # a session's rows can straddle the date the day was finished, and
+            # the phantom-done class this guarded against (week clamped at 12
+            # re-using a prior cycle's rows) is already excluded by the block
+            # scope. 2026-08-24: the date gate is why Thu w2 never completed.
+            _ac_state = AppState.query.filter_by(user_id=current_user.id).first()
+            _ac_start = _ac_state.start_date if _ac_state and _ac_state.start_date else None
+            slot_rows_q = SetLog.query.filter_by(
                 user_id=current_user.id, week=week, day_idx=day_idx,
-            ).filter(SetLog.logged_date == _user_today()).all()
+            )
+            if _ac_start is not None:
+                slot_rows_q = slot_rows_q.filter(SetLog.logged_date >= _ac_start)
+            else:
+                slot_rows_q = slot_rows_q.filter(SetLog.logged_date == _user_today())
+            slot_rows = slot_rows_q.all()
             state = workout_state_from_rows(resolved.get("exercises") or [], slot_rows)
             if state == "complete":
                 dc = DayCompletion.query.filter_by(
@@ -4381,7 +4393,7 @@ def api_set_log():
                     ))
                     db.session.commit()
         except Exception:
-            pass  # Don't fail the set save if auto-complete errors
+            logging.exception("auto-complete day failed (set save still ok)")
 
     # Auto-reconcile the prescription UP when a barbell lift is COMPLETED heavier
     # than its plan, so the card never shows "plan 145" next to a logged 155.
@@ -7675,60 +7687,70 @@ def api_progress_dashboard():
         "notes": e.notes,
     } for e in BodyMeasurement.query.filter_by(user_id=uid).order_by(BodyMeasurement.log_date).all()]
 
-    # ── 3. Training stats ────────────────────────────────────────────────
+    # ── 3. Training stats — EVIDENCE-based (2026-08-24) ──────────────────
+    # A day counts as trained when its DayCompletion toggle says done, OR every
+    # prescribed set is performed (workout_status.workout_state_from_rows —
+    # the same rule the coach uses), OR the day prescribes no lifting and a
+    # run is logged. Sunday is a real day (Erik runs 7 days; the long run is
+    # not "rest"). Before this, only the toggle counted and Sunday was frozen
+    # out: Thu w2 (16/16 sets done, auto-complete silently failed) and Sun w2
+    # (90-min run) both read as missed.
+    from workout_status import completed_day_keys, streak_stats
     all_day_completions = DayCompletion.query.filter_by(user_id=uid).all()
     done_days = [d for d in all_day_completions if d.done]
-    days_completed = len(done_days)
-    days_scheduled = current_week * 6  # 6 workout days per week (Sunday rest)
+    toggled = {(d.week, d.day_idx) for d in done_days}
 
-    # Streak calculations — use (week, day_idx) tuples as sequential day keys
-    done_set = {(d.week, d.day_idx) for d in done_days}
-
-    # Build the full schedule of (week, day_idx) pairs up to today
-    all_possible = []
+    _today = _user_today()
+    today_idx = 6
+    if _block_start is not None:
+        today_idx = max(0, min(6, (_today - _block_start).days % 7))
+    schedule = []
     for w in range(1, current_week + 1):
-        max_day = 6 if w < current_week else 5  # day_idx 0-5 = Mon-Sat
+        max_day = 6 if w < current_week else today_idx
         for d in range(0, max_day + 1):
-            all_possible.append((w, d))
+            schedule.append((w, d))
+    days_scheduled = len(schedule)
 
-    # Current streak: anchor at the latest DONE day (not the latest scheduled day,
-    # which may be today/tomorrow and not yet logged — that would always zero the streak).
-    # Then count backwards through consecutive done days.
-    current_streak = 0
-    latest_done_idx = -1
-    for i in range(len(all_possible) - 1, -1, -1):
-        if all_possible[i] in done_set:
-            latest_done_idx = i
-            break
-    if latest_done_idx >= 0:
-        for i in range(latest_done_idx, -1, -1):
-            if all_possible[i] in done_set:
-                current_streak += 1
-            else:
-                break
+    # Block-scoped evidence: sets and runs logged since this block started.
+    _ev_sets_q = SetLog.query.filter_by(user_id=uid)
+    _ev_runs_q = RunLog.query.filter_by(user_id=uid)
+    if _block_start is not None:
+        _ev_sets_q = _ev_sets_q.filter(SetLog.logged_date >= _block_start)
+        _ev_runs_q = _ev_runs_q.filter(RunLog.log_date >= _block_start)
+    set_rows_by_slot = {}
+    for r in _ev_sets_q.all():
+        set_rows_by_slot.setdefault((r.week, r.day_idx), []).append(r)
+    run_days = {(r.week, r.day_idx) for r in _ev_runs_q.all()
+                if r.week is not None and r.day_idx is not None}
 
-    # Best streak: scan forward through all possible days
-    best_streak = 0
-    running = 0
-    for wd in all_possible:
-        if wd in done_set:
-            running += 1
-            if running > best_streak:
-                best_streak = running
-        else:
-            running = 0
+    # Resolve prescriptions only where evidence could change the answer
+    # (not toggled; has sets or a run) — keeps this cheap at week 12.
+    prescribed = {}
+    try:
+        from coach_assembler import _resolve_workout_for_day
+        for slot in schedule:
+            if slot in toggled or (slot not in set_rows_by_slot and slot not in run_days):
+                continue
+            resolved = _resolve_workout_for_day(*slot) or {}
+            prescribed[slot] = resolved.get("exercises") or []
+    except Exception:
+        logging.exception("dashboard: prescription resolve failed; toggle-only streak")
+    done_set = completed_day_keys(schedule, toggled, prescribed, set_rows_by_slot, run_days)
+    days_completed = len(done_set)
+    _st = streak_stats(schedule, done_set)
+    current_streak = _st["current_streak"]
+    best_streak = _st["best_streak"]
 
     # Total completed sets
     sets_logged = SetLog.query.filter_by(user_id=uid, done=True).count()
 
-    # Weekly adherence
+    # Weekly adherence — 7 real days per week
     weekly_adherence = []
     for w in range(1, current_week + 1):
-        w_done = sum(1 for d in done_days if d.week == w)
         weekly_adherence.append({
             "week": w,
-            "days_done": w_done,
-            "days_scheduled": 6,
+            "days_done": sum(1 for (ww, _) in done_set if ww == w),
+            "days_scheduled": sum(1 for (ww, _) in schedule if ww == w),
         })
 
     # PRs for key lifts (max weight from SetLog where done=True)
@@ -7849,7 +7871,7 @@ def api_progress_dashboard():
     weight_projection = goal.weight_projection if goal else None
 
     # Completed days: exact (week, day_idx) cells for accurate streak-grid placement.
-    completed_days = [{"week": d.week, "day_idx": d.day_idx} for d in done_days]
+    completed_days = [{"week": w, "day_idx": d} for (w, d) in sorted(done_set)]
 
     # ── 5b. Per-exercise weekly e1RM history for the Lift Progression card ──
     # Aggregate SetLog (preferred) else ExerciseLog into {exercise: [{week, weight, reps}, ...]}.

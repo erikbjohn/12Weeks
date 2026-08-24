@@ -90,3 +90,64 @@ def workout_state_from_rows(prescribed_exercises, set_rows):
         if performed.get(key, 0) < need:
             return "in_progress"
     return "complete"
+
+
+def completed_day_keys(schedule, toggled, prescribed, set_rows, run_days):
+    """EVIDENCE-based set of (week, day_idx) slots that count as trained.
+
+    schedule:   ordered list of (week, day_idx) slots up to today.
+    toggled:    set of slots whose DayCompletion row says done.
+    prescribed: {slot: [ {name, sets}, ... ]} — the resolved lifting
+                prescription; an empty list / missing key = no lifting
+                prescribed that day (rest / long-run day).
+    set_rows:   {slot: [SetLog-like rows]} for the slot (callers scope by block).
+    run_days:   set of slots with a logged run.
+
+    A slot is done when ANY of:
+      - it is toggled done;
+      - every prescribed set is performed (workout_state_from_rows == complete);
+      - no lifting is prescribed and a run is logged (a run-only day — Sunday's
+        long run counts; it is not "rest").
+    A lifting day where only a run was logged is NOT done (lifting skipped).
+    """
+    done = set()
+    for slot in schedule:
+        if slot in toggled:
+            done.add(slot)
+            continue
+        rx = prescribed.get(slot) or []
+        if rx:
+            if workout_state_from_rows(rx, set_rows.get(slot) or []) == "complete":
+                done.add(slot)
+        elif slot in run_days:
+            done.add(slot)
+    return done
+
+
+def streak_stats(schedule, done):
+    """{current_streak, best_streak} over an ORDERED schedule of slots.
+
+    current_streak anchors on the LATEST done slot (today may simply not be
+    logged yet — that must not zero the streak) and counts consecutive done
+    slots backwards. best_streak is the longest consecutive done run anywhere.
+    """
+    current = 0
+    latest = -1
+    for i in range(len(schedule) - 1, -1, -1):
+        if schedule[i] in done:
+            latest = i
+            break
+    if latest >= 0:
+        for i in range(latest, -1, -1):
+            if schedule[i] in done:
+                current += 1
+            else:
+                break
+    best = running = 0
+    for slot in schedule:
+        if slot in done:
+            running += 1
+            best = max(best, running)
+        else:
+            running = 0
+    return {"current_streak": current, "best_streak": best}

@@ -8917,7 +8917,7 @@ function _pdStreakGrid(training, startDate) {
   var today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Render a full 12-week frame (6 workout days + rest column).
+  // Render a full 12-week frame, 7 real days (Sunday = long run, not rest).
   var dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   var grid = '<div class="pd-streak-header">';
   for (var li = 0; li < 7; li++) {
@@ -8931,9 +8931,9 @@ function _pdStreakGrid(training, startDate) {
       var cellDate = new Date(startDt);
       cellDate.setDate(cellDate.getDate() + wi * 7 + dj);
       var cellClass = 'pd-streak-cell';
-      if (dj === 6) {
-        cellClass += ' pd-streak-rest';
-      } else if (cellDate > today) {
+      // Sunday is a REAL day (the long run counts) — the server decides
+      // done-ness from evidence; the client never marks a column "rest".
+      if (cellDate > today) {
         cellClass += ' pd-streak-future';
       } else if (doneCells[(wi + 1) + '_' + dj]) {
         cellClass += ' pd-streak-done';
@@ -10964,8 +10964,32 @@ function renderMeasurementsSection(measurements) {
     var latest = measurements[measurements.length - 1];
     // Delta vs BASELINE (first entry), not just vs previous week — shows total progress
     var baseline = measurements[0];
+    // WEIGHT comes from the DAILY weigh-in series (_bodyweightCache), not the
+    // weekly tape-measure row — otherwise it sat pegged to Sunday's check-in
+    // all week (Erik, 2026-08-24). Sparkline + delta over the daily series,
+    // tagged with its own date because it differs from the tape date.
+    var rows = '';
+    var bwSeries = Array.isArray(_bodyweightCache) ? _bodyweightCache.filter(function(e) {
+        return e && e.weight != null && (!_stateCache || !_stateCache.start_date || !e.date || e.date >= _stateCache.start_date);
+    }) : [];
+    if (bwSeries.length > 0) {
+        var bwLatest = bwSeries[bwSeries.length - 1];
+        var bwVals = bwSeries.map(function(e) { return e.weight; });
+        var bwDelta = '';
+        if (bwSeries.length > 1) {
+            var bd = bwLatest.weight - bwSeries[0].weight;
+            var bsign = bd > 0 ? '+' : '';
+            var bcolor = bd < 0 ? 'var(--lift)' : (bd > 0 ? '#ef4444' : 'var(--muted)');
+            bwDelta = '<span class="m-delta" style="color:' + bcolor + '">' + bsign + bd.toFixed(1) + '</span>';
+        }
+        rows += '<div class="m-row">' +
+            '<span class="m-label">Weight <span style="font-size:10px;color:var(--muted)">' + (bwLatest.date || '') + '</span></span>' +
+            '<span class="m-spark">' + _buildSparkline(bwVals, true) + '</span>' +
+            '<span class="m-val">' + Number(bwLatest.weight).toFixed(1) + ' lb</span>' +
+            bwDelta +
+        '</div>';
+    }
     var fields = [
-        { key: 'weight_lbs', label: 'Weight', unit: 'lb', lower: true },
         { key: 'waist', label: 'Waist', unit: 'in', lower: true },
         { key: 'chest', label: 'Chest', unit: 'in', lower: true },
         { key: 'hips', label: 'Hips', unit: 'in', lower: true },
@@ -10975,7 +10999,6 @@ function renderMeasurementsSection(measurements) {
         { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: true },
         { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: true },
     ];
-    var rows = '';
     for (var i = 0; i < fields.length; i++) {
         var f = fields[i];
         var cur = latest[f.key];
