@@ -356,10 +356,10 @@ def test_lift_trend_wired_into_expected_agents():
     for name in expected:
         assert "lift_trend" in AGENTS[name]["requires"], f"{name} missing lift_trend"
 
-    # Confirm no un-intended agent silently picked it up either.
-    for name, agent in AGENTS.items():
-        if name not in expected:
-            assert "lift_trend" not in agent.get("requires", []), f"{name} unexpectedly requires lift_trend"
+    # 2026-08-28: the old negative check here ("no other agent may see
+    # lift_trend") was the opting-out pattern that blinded agents five times
+    # over. Every athlete-facing agent now gets CORE_SECTIONS — see
+    # tests/test_core_sections_every_agent.py.
 
 
 # ── constants sanity ──────────────────────────────────────────────────────

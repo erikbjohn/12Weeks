@@ -4,128 +4,103 @@ Each agent specifies:
 - max_tokens: Token limit for the Claude response
 - temperature: Sampling temperature
 - requires: List of context sections to fetch (see coach_assembler.py)
+
+EVERY ATHLETE-FACING AGENT GETS EVERY SECTION (CORE_SECTIONS). This is the
+2026-04-30 ALL_SECTIONS design (e9696a4: "agent-specific opting-out caused
+the 15.6h-fast hallucination"), lost in the 2026-05-03 wholesale revert and
+re-learned by hand five times since — 2026-08-28 being the worst: the chat
+opener nagged for a weigh-in already logged, the reply agent said "I can't
+pull Garmin" with last night's row in the DB, and it conceded REAL HRV
+numbers were fabricated because it couldn't see what the morning agent saw.
+
+A missing section is NOT a blank. The persona rules (chase the scale, never
+hedge) turn it into a confident lie. Token cost is not a reason to blind the
+coach. tests/test_core_sections_every_agent.py fails if any builder is added
+without joining CORE, or any non-specialist agent drops a core section.
+
+Only the four SPECIALIST_AGENTS keep narrow slices: crisis (deliberately
+minimal) and the three consult-tool specialists, whose slices were tuned
+against an eval (2026-05-05: widening nutritionist regressed 80% -> 57%).
 """
+
+# Every registered @section_builder in coach_assembler.py except chat_history
+# (which stays per-agent: popups don't carry the thread, chat does).
+CORE_SECTIONS = [
+    "base", "checkins", "today_status", "today_sets",
+    "workout_today", "workout_tomorrow", "week_schedule", "next_week",
+    "exercise_history", "exercise_analysis", "exercise_deltas", "lift_trend",
+    "session_analysis", "runs", "physical", "equipment",
+    "bodyweight", "garmin", "cut_status", "protocol_status", "goal",
+    "meals_today", "fasting", "food_safety", "supplements",
+    "coach_memories", "user_rules", "overrides", "completed_days",
+    "missed_checkin", "intake",
+]
+
+SPECIALIST_AGENTS = ("crisis", "nutritionist", "strength_coach", "running_coach")
+
+_WITH_CHAT = ["chat_history"] + CORE_SECTIONS   # conversational moments
+_NO_CHAT = list(CORE_SECTIONS)                   # one-shot popups
 
 AGENTS = {
     "conversation": {
         "max_tokens": 800,
         "temperature": 0.6,
-        "requires": [
-            "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
-            "week_schedule", "meals_today", "bodyweight", "coach_memories", "goal",
-            "food_safety", "fasting", "user_rules",
-            "today_sets", "today_status", "cut_status", "protocol_status", "lift_trend",
-            "completed_days", "overrides", "exercise_deltas",
-            # 2026-08-28: "Read my garmin" -> "I can't pull Garmin" while last
-            # night's sleep sat in garmin_wellness; and the morning agent's REAL
-            # HRV numbers were conceded as "fabricated" because THIS agent
-            # couldn't see them. The garmin section is DB-first (zero API calls).
-            "garmin",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "morning_checkin": {
         "max_tokens": 300,
         "temperature": 0.6,
-        "requires": [
-            "base", "checkins", "chat_history", "workout_today", "workout_tomorrow",
-            "week_schedule", "bodyweight", "garmin", "coach_memories", "missed_checkin",
-            "food_safety", "fasting", "user_rules", "today_status",
-            # The cut is coached at the morning moment — react to the scale, run the
-            # gluten guard (CORE_PROMPT rule 21). Block 1's coach never saw cut_status
-            # here, so it never coached the cut.
-            "cut_status", "protocol_status", "goal", "lift_trend",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "morning_briefing": {
         "max_tokens": 200,
         "temperature": 0.6,
-        "requires": [
-            "base", "checkins", "workout_today", "garmin",
-            "fasting", "user_rules", "today_status",
-        ],
+        "requires": _NO_CHAT,
+
     },
     "weekly_planning": {
         "max_tokens": 1500,
         "temperature": 0.6,
-        "requires": [
-            "base", "checkins", "chat_history", "bodyweight", "workout_today",
-            "week_schedule", "exercise_history", "exercise_analysis",
-            "today_sets", "today_status", "runs", "physical", "meals_today",
-            "coach_memories", "goal", "food_safety", "fasting",
-            "completed_days", "overrides", "next_week",
-            "session_analysis", "equipment", "user_rules", "exercise_deltas",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "weekly_review": {
         "max_tokens": 1000,
         "temperature": 1.0,
-        "requires": [
-            "base", "checkins", "chat_history", "bodyweight", "workout_today",
-            "week_schedule", "exercise_history", "runs", "physical",
-            "meals_today", "coach_memories", "goal", "food_safety",
-            "completed_days", "session_analysis", "user_rules", "today_status",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "workout_feedback": {
         "max_tokens": 800,
         "temperature": 0.6,
-        "requires": [
-            "base", "chat_history", "workout_today", "today_sets", "today_status",
-            "exercise_history", "exercise_analysis",
-            "week_schedule", "next_week", "coach_memories",
-            "fasting", "user_rules", "exercise_deltas",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "run_complete": {
         "max_tokens": 400,
         "temperature": 0.6,
-        "requires": [
-            "base", "chat_history", "workout_today", "runs",
-            "coach_memories", "fasting", "user_rules", "today_status",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "meals_complete": {
         "max_tokens": 200,
         "temperature": 0.6,
-        "requires": [
-            "base", "meals_today", "goal", "food_safety",
-            "fasting", "user_rules", "today_status",
-            # See the cut at the meals moment too — adherence vs the deficit, and
-            # the gluten guard so a water spike doesn't read as a blown day.
-            "cut_status", "protocol_status", "bodyweight", "lift_trend",
-        ],
+        "requires": _NO_CHAT,
+
     },
     "end_of_day": {
         "max_tokens": 200,
         "temperature": 0.6,
-        "requires": [
-            "base", "workout_today", "week_schedule", "completed_days",
-            "next_week", "fasting", "user_rules", "today_status",
-            # 2026-08-26 end-of-day said "no weigh-in on record" with 203.8
-            # logged that morning — it never received the scale.
-            "bodyweight",
-            # Dose-night greetings ("Tesamorelin at 22:00 — take it, check it
-            # off, lights out") and the rule-6 late-hours carve-out both need
-            # protocol_status reachable at end-of-day, not just mid-day agents.
-            "protocol_status",
-        ],
+        "requires": _NO_CHAT,
+
     },
     "chat_opened": {
         "max_tokens": 300,
         "temperature": 0.6,
-        "requires": [
-            "base", "checkins", "chat_history", "workout_today",
-            "meals_today", "completed_days", "coach_memories",
-            "fasting", "user_rules",
-            "today_sets", "today_status", "overrides",
-            # Same dose-night reachability as end_of_day — chat can be opened
-            # at 22:00 too.
-            "protocol_status",
-            # 2026-08-27/28: the 7:40 AM opener said "no weigh-in on the board
-            # yet" twice with the weigh-in logged at 5 AM, then rule 21b made it
-            # nag. It had no scale, no cut pace, no Garmin. Now it does.
-            "bodyweight", "cut_status", "garmin",
-        ],
+        "requires": _WITH_CHAT,
+
     },
     "crisis": {
         "max_tokens": 300,
