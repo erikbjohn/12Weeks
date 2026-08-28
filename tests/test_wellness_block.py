@@ -352,8 +352,14 @@ class TestBuildGarminDbOnly:
             )
             out = _build_garmin()
 
-        assert out["garmin"] is None       # live client never queried successfully
-        assert out["readiness"] is None
+        # 2026-08-28: DB-FIRST. Today's synced row now feeds "garmin" directly
+        # (zero live calls) even though the live client is disconnected — the
+        # old `garmin is None` here was exactly the gap that made the coach
+        # say "I can't pull Garmin" with last night's row sitting in the DB.
+        assert out["garmin"]["hrv"]["lastNight"] == 61
+        assert out["garmin"]["sleep"]["score"] == 77
+        assert out["garmin"]["source"].startswith("garmin_wellness")
+        assert out["readiness"]["score"] is not None
         w = out["wellness"]
         assert w["dark"] is False
         assert w["days_with_data_7d"] == 7

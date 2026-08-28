@@ -59,6 +59,8 @@ Examples — call a tool:
 - "What's my squat 1RM?" → get_e1rm("Barbell Back Squat")
 - "How's the cut going?" → get_body_state()
 - "What's left today?" → get_today_status()
+- "How did I sleep?" / "Read my Garmin" / any HRV or recovery question → get_garmin_wellness() — sleep, HRV, body battery are auto-synced; NEVER ask the athlete for them and never say you can't access Garmin.
+- Athlete says a number you quoted is wrong or invented → re-check with the matching tool BEFORE conceding.
 - "Scale said 211.4 this morning" → log_bodyweight(weight_lbs=211.4) — a weight told to you in chat is NOT saved anywhere unless you call this; then acknowledge the logged number.
 
 If you call a tool, write a brief response after the data comes back — don't just dump the JSON. Cite the specific number from the tool result.

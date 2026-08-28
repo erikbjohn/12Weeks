@@ -87,6 +87,22 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_garmin_wellness",
+        "description": (
+            "Last night's sleep (hours + score), HRV, body battery, resting HR and "
+            "readiness for the last 7 days, AUTO-SYNCED from the athlete's Garmin. "
+            "Call this whenever sleep/recovery/HRV comes up, when the athlete says "
+            "'read my Garmin', or before conceding a Garmin number was wrong. "
+            "Never ask the athlete for these numbers — this tool has them."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "How many days back (default 7)."},
+            },
+        },
+    },
+    {
         "name": "get_today_status",
         "description": (
             "Summary of today: what workout/run is scheduled, what's been logged so far, "
@@ -442,6 +458,46 @@ def _tool_get_today_status(user_id: int) -> str:
     }, default=str)
 
 
+def _tool_get_garmin_wellness(user_id: int, days: int = 7) -> str:
+    """Synced GarminWellness rows, newest first. Zero Garmin API calls."""
+    from models import GarminWellness
+    today = _user_local_today(user_id)
+    try:
+        days = max(1, min(int(days), 30))
+    except (TypeError, ValueError):
+        days = 7
+    rows = (GarminWellness.query
+            .filter(GarminWellness.user_id == user_id,
+                    GarminWellness.date >= today - timedelta(days=days - 1),
+                    GarminWellness.date <= today)
+            .order_by(GarminWellness.date.desc()).all())
+    out_days = []
+    for r in rows:
+        if all(getattr(r, c, None) is None for c in
+               ("sleep_seconds", "sleep_score", "hrv_last_night", "body_battery", "resting_hr")):
+            continue  # all-NULL placeholder — nothing synced for that day
+        out_days.append({
+            "date": r.date.isoformat(),
+            "sleep_hours": round(r.sleep_seconds / 3600, 1) if r.sleep_seconds else None,
+            "sleep_score": r.sleep_score,
+            "hrv_last_night": r.hrv_last_night,
+            "hrv_weekly_avg": r.hrv_weekly_avg,
+            "hrv_status": r.hrv_status,
+            "body_battery": r.body_battery,
+            "resting_hr": r.resting_hr,
+            "training_readiness": r.training_readiness,
+            "synced_at": r.pulled_at.isoformat(timespec="minutes") if r.pulled_at else None,
+        })
+    today_synced = bool(out_days) and out_days[0]["date"] == today.isoformat()
+    note = ("Auto-synced from Garmin every ~30 min; never ask the athlete for these numbers."
+            if today_synced else
+            f"Last night ({today.isoformat()}) is NOT SYNCED yet — the watch hasn't uploaded "
+            "or the daemon hasn't ticked. Say so; do not ask the athlete to read it off the watch, "
+            "and do not invent it.")
+    return json.dumps({"today": today.isoformat(), "today_synced": today_synced,
+                       "days": out_days, "note": note}, default=str)
+
+
 def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     """Peptide-protocol dose history + adherence + upcoming escalation
     schedule. `days` bounds the dose-history window (ending today, default
@@ -527,6 +583,7 @@ _DISPATCH = {
     "get_e1rm": _tool_get_e1rm,
     "get_body_state": _tool_get_body_state,
     "get_today_status": _tool_get_today_status,
+    "get_garmin_wellness": _tool_get_garmin_wellness,
     "get_protocol_status": _tool_get_protocol_status,
     "log_bodyweight": _tool_log_bodyweight,
     "consult_nutritionist": _tool_consult_nutritionist,

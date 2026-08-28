@@ -10,6 +10,7 @@ Section builders query models directly and call existing formatters from coach.p
 They do NOT duplicate the queries — they ARE the queries (moved from _build_coach_context).
 """
 
+import json
 import logging
 from datetime import date, timedelta, datetime
 
@@ -291,6 +292,91 @@ def _build_bodyweight():
     return {"bodyweight": entries[-14:]}
 
 
+
+def recent_pace_lb_per_week(rows, window_days=7):
+    """Recent scale direction as an lb/wk SLOPE over the weigh-ins in the
+    last `window_days` (anchored on the latest weigh-in), least-squares.
+    Falls back to the last two rows when the window holds fewer than two.
+
+    Why a window and not "last 3 rows": at DAILY cadence three rows is a
+    2-day delta — 203.2 -> 203.8 -> 202.8 read as "-1.4 lb/wk" to an athlete
+    losing ~1 lb/day (2026-08-27). Rows may be any objects with .log_date /
+    .weight_lbs, any order. None when fewer than two usable rows."""
+    pts = sorted(
+        ((r.log_date, float(r.weight_lbs)) for r in (rows or [])
+         if getattr(r, "log_date", None) is not None
+         and getattr(r, "weight_lbs", None) is not None),
+        key=lambda t: t[0],
+    )
+    if len(pts) < 2:
+        return None
+    latest = pts[-1][0]
+    win = [p for p in pts if (latest - p[0]).days <= window_days]
+    if len(win) < 2:
+        win = pts[-2:]
+    xs = [(d - win[0][0]).days for d, _ in win]
+    ys = [w for _, w in win]
+    n = len(win)
+    mx, my = sum(xs) / n, sum(ys) / n
+    var = sum((x - mx) ** 2 for x in xs)
+    if var == 0:
+        return None
+    slope_per_day = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / var
+    return round(slope_per_day * 7, 2)
+
+
+def sodium_prep_note(weekday):
+    """Fri/Sat reminder ahead of SUNDAY MEASUREMENT day (waist + scale).
+    The old string said "Weigh-in tomorrow (or Sun)" — written for a weekly
+    weigh-in habit; Erik weighs daily and measures Sundays, so the coach
+    parroted a phantom weigh-in date (2026-08-28). None on other days."""
+    if weekday not in (4, 5):
+        return None
+    return ("Sunday is MEASUREMENT day (waist + scale). Cut sodium today and "
+            "tomorrow — plain water, no soy/cured/processed — so Sunday's "
+            "numbers read clean. Daily weigh-ins continue as normal; this is "
+            "not a separate weigh-in.")
+
+
+def garmin_today_from_wellness_row(row):
+    """Shape a synced GarminWellness row into the get_today_summary() dict
+    the prompt formatter and assess_readiness already read — so the coach
+    sees last night's sleep/HRV with ZERO Garmin API calls. None when the
+    row is missing or all-NULL (nothing synced yet for that day)."""
+    if row is None:
+        return None
+    raw = None
+    if getattr(row, "raw_json", None):
+        try:
+            raw = json.loads(row.raw_json)
+        except (TypeError, ValueError):
+            raw = None
+    if not isinstance(raw, dict):
+        raw = {}
+    has_cols = any(getattr(row, c, None) is not None
+                   for c in ("sleep_score", "hrv_last_night", "body_battery", "resting_hr"))
+    if not raw and not has_cols:
+        return None
+    out = {"date": row.date.isoformat() if getattr(row, "date", None) else None}
+    for k in ("hrv", "sleep", "bodyBattery", "trainingReadiness", "trainingStatus", "stress"):
+        out[k] = raw.get(k)
+    # Column fallbacks when raw_json is thin.
+    if not out.get("sleep") and getattr(row, "sleep_score", None) is not None:
+        out["sleep"] = {"score": row.sleep_score}
+        if getattr(row, "sleep_seconds", None):
+            out["sleep"]["durationHours"] = round(row.sleep_seconds / 3600, 1)
+    if not out.get("hrv") and getattr(row, "hrv_last_night", None) is not None:
+        out["hrv"] = {"lastNight": row.hrv_last_night,
+                      "weeklyAvg": getattr(row, "hrv_weekly_avg", None)}
+    if not out.get("bodyBattery") and getattr(row, "body_battery", None) is not None:
+        out["bodyBattery"] = {"current": row.body_battery}
+    out["restingHr"] = raw.get("restingHr", getattr(row, "resting_hr", None))
+    pa = getattr(row, "pulled_at", None)
+    out["synced_at"] = pa.isoformat(timespec="minutes") if pa else None
+    out["source"] = "garmin_wellness (auto-synced)"
+    return out
+
+
 @section_builder("garmin")
 def _build_garmin():
     from overtraining import assess_readiness
@@ -299,11 +385,24 @@ def _build_garmin():
     # (OAuth2 exchange + profile fetch) plus 6 uncached metric requests every
     # message, and forgot any rate-limit cooldown — the dominant Garmin
     # lockout driver. Lazy import: app.py imports this module at startup.
-    from app import _get_garmin
-    gc = _get_garmin(current_user.id)
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    garmin_data = gc.get_today_summary() if gc.connected else None
+    # DB-FIRST (2026-08-28): the auto-sync daemon already wrote today's
+    # sleep/HRV/body battery to garmin_wellness. Read that row — zero API
+    # calls, works for EVERY agent on every message. Only fall through to the
+    # live client when nothing has synced yet for today.
+    garmin_data = None
+    try:
+        from models import GarminWellness as _GW
+        _row = _GW.query.filter_by(user_id=current_user.id, date=_user_today()).first()
+        garmin_data = garmin_today_from_wellness_row(_row)
+    except Exception:
+        log.warning("garmin_wellness today-row read failed", exc_info=True)
+        garmin_data = None
+    if garmin_data is None:
+        from app import _get_garmin
+        gc = _get_garmin(current_user.id)
+        if not gc.connected:
+            gc.try_restore_tokens(current_user.id)
+        garmin_data = gc.get_today_summary() if gc.connected else None
     readiness = assess_readiness(garmin_data) if garmin_data else None
 
     # Wellness trend: DB-only read, ZERO Garmin API calls — works even when
@@ -773,10 +872,9 @@ def _build_cut_status():
     trend_reversal = False
     water_spike_suspected = False
     if len(bws) >= 2:
-        recent = bws[-3:] if len(bws) >= 3 else bws[-2:]
-        rdays = max(1, (recent[-1].log_date - recent[0].log_date).days)
-        recent_pace = round((recent[-1].weight_lbs - recent[0].weight_lbs) / (rdays / 7), 2)
-        if pace_per_week is not None and pace_per_week < 0 and recent_pace > 0:
+        # 7-day windowed slope, not a last-3-rows delta (see recent_pace_lb_per_week).
+        recent_pace = recent_pace_lb_per_week(bws)
+        if pace_per_week is not None and pace_per_week < 0 and (recent_pace or 0) > 0:
             trend_reversal = True  # overall losing, recently gaining
         # Acute spike: shares cut_guard.detect_water_spike with
         # app._despiked_current_weight, so the two can no longer drift out of
@@ -879,11 +977,7 @@ def _build_cut_status():
         "deficit_days_logged": days_logged,
         "tdee": tdee,
         "sodium_prep_active": sodium_prep_active,
-        "sodium_prep_note": (
-            "Weigh-in tomorrow (or Sun) — cut sodium today and tomorrow. "
-            "Plain water, no soy/cured/processed. Drops 2-3 lb water by Sun morning."
-            if sodium_prep_active else None
-        ),
+        "sodium_prep_note": sodium_prep_note(weekday),
         "curve_target_today": curve_target_today,
         "on_curve": on_curve,
     }}
@@ -1122,6 +1216,39 @@ def _build_today_status():
         run_label = None
         run_duration = None
 
+    # Which prescribed exercise is SHORT of its set count — so an in-progress
+    # session with every exercise touched ("Dead Bug 2/3") isn't reported as
+    # "not finished" with nothing named (2026-08-28).
+    from workout_status import parse_sets_count as _psc
+    _performed = {}
+    for _s in slot_sets:
+        if getattr(_s, "done", False) and not getattr(_s, "set_skipped", False):
+            _k = _norm(_s.exercise_name)
+            _performed[_k] = _performed.get(_k, 0) + 1
+    short_exercises = []
+    for _e in prescribed_exercises:
+        _need = _psc(_e.get("sets"))
+        _done = _performed.get(_norm(_e.get("name")), 0)
+        if 0 < _done < _need:
+            short_exercises.append({"name": _e.get("name"), "done": _done, "need": _need})
+
+    # Per-activity detail: RunLog is ONE row per day (doubles are summed), so
+    # a 40-min AM Z2 + a PM run read as "9.41mi/103min — ran long" (2026-08-27).
+    run_activities = []
+    try:
+        from models import GarminActivity as _GA
+        for _a in (_GA.query.filter_by(user_id=current_user.id, activity_date=today)
+                   .order_by(_GA.start_time_local.asc()).all()):
+            _st = (_a.start_time_local or "")
+            run_activities.append({
+                "start": _st[11:16] if len(_st) >= 16 else None,
+                "distance_miles": _a.distance_miles, "duration_min": _a.duration_min,
+                "avg_hr": _a.avg_hr,
+            })
+    except Exception:
+        log.warning("GarminActivity today read failed", exc_info=True)
+        run_activities = []
+
     return {"today_status": {
         "date": today.isoformat(),
         "weekday": today.strftime("%A"),
@@ -1140,6 +1267,8 @@ def _build_today_status():
         "run_distance_today": run_today_log.distance_miles if run_today_log else None,
         "run_duration_today": run_today_log.duration_min if run_today_log else None,
         "run_avg_hr_today": run_today_log.avg_hr if run_today_log else None,
+        "workout_short_exercises": short_exercises,
+        "run_activities_today": run_activities,
     }}
 
 
@@ -1194,6 +1323,10 @@ def _format_today_status_block(ts):
                  "they're 'done lifting'. Do NOT re-prescribe what's already logged.")
         if remaining:
             msg += f" Still open today: {remaining}."
+        short = ts.get("workout_short_exercises") or []
+        if short:
+            msg += " Short of prescribed sets: " + ", ".join(
+                f"{x['name']} {x['done']}/{x['need']}" for x in short) + "."
         lines.append(msg)
     else:  # not_started
         lines.append("  workout: PENDING (prescribed but not yet logged)")
@@ -1213,10 +1346,27 @@ def _format_today_status_block(ts):
         if hr:
             bits.append(f"avg_hr_full_session:{hr}")
         lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
+        acts = ts.get("run_activities_today") or []
+        if len(acts) > 1:
+            def _act(a):
+                b = []
+                if a.get("start"): b.append(a["start"])
+                if a.get("distance_miles"): b.append(f"{a['distance_miles']}mi")
+                if a.get("duration_min"): b.append(f"{a['duration_min']}min")
+                if a.get("avg_hr"): b.append(f"HR {a['avg_hr']}")
+                return " ".join(b)
+            lines.append(
+                f"  run_detail: the totals above are {len(acts)} separate runs summed — "
+                + " + ".join(_act(a) for a in acts)
+                + ". Judge the prescribed run against the matching activity only; "
+                  "do NOT describe the day's total as one run that 'ran long'.")
     elif ts.get("run_prescribed"):
         lines.append(
-            f"  run: PENDING — {ts.get('run_label') or ts.get('run_prescribed')} "
+            f"  run: NOT LOGGED YET — {ts.get('run_label') or ts.get('run_prescribed')} "
             f"{ts.get('run_duration') or ''}".rstrip()
+            + ". Runs arrive ONLY via Garmin auto-sync (up to ~30 min after the watch "
+              "uploads). If the athlete says they already ran, believe them: say it "
+              "hasn't synced yet — never tell them to go run."
         )
     else:
         lines.append("  run: REST (no run prescribed today)")
@@ -1734,6 +1884,7 @@ Intensity level: {anger_level_label}
     f) MISSED DOSES — state the compound's codified missed_dose_rule verbatim from protocol_status. Every compound ships with the placeholder rule: say EXACTLY "confirm with your doctor" and nothing more. Never improvise dosing advice, a "safe to take late" window, or a make-up dose schedule — rule 20 (never fabricate a rationale) applies to dosing exactly as it does to training data.
     g) GLP-1 HYGIENE — with Retatrutide active, emphasize fiber and hydration (gastric emptying is slowed). Flag alcohol explicitly: it hits much harder under delayed gastric emptying — treat it as a bigger violation than usual, not the same as an unmedicated week.
 </non_negotiable_rules>
+23. GARMIN IS AUTO-SYNCED — NEVER ASK FOR IT, NEVER DISOWN IT. Sleep, HRV, body battery, RHR and runs sync from the athlete's watch automatically into <athlete_data> ("Garmin today:", "wellness:", <today_status>) and the get_garmin_wellness tool. Never ask the athlete to report a sleep score, HRV, hours slept, or a run — never say "give me the Garmin number" or "I can't pull Garmin" / "I can't access Garmin". If a number isn't there yet, say exactly that: "last night hasn't synced yet" — and move on. When the athlete challenges a number you quoted ("are you hallucinating?"), RE-CHECK the data (get_garmin_wellness / get_body_state / get_today_status) BEFORE answering. If the number is in the data, stand on it and cite the source; only call a number fabricated if it is genuinely absent. Conceding real data was invented is as bad as inventing it — both destroy trust.
 
 <markers>
 When the athlete confirms a schedule or plan change, emit the corresponding marker on its own line.
@@ -2060,7 +2211,7 @@ def _format_athlete_data(ctx, requires):
         if cs.get("pace_per_week") is not None:
             cs_lines.append(f"  pace: {cs['pace_per_week']} lb/wk (overall, since wk 1)")
         if cs.get("recent_pace") is not None:
-            cs_lines.append(f"  recent_pace: {cs['recent_pace']} lb/wk (last ~3 weigh-ins — the live direction)")
+            cs_lines.append(f"  recent_pace: {cs['recent_pace']} lb/wk (slope over the last 7 days of weigh-ins — the live direction)")
         if cs.get("trend_reversal"):
             cs_lines.append("  TREND_REVERSAL: overall losing but RECENTLY GAINING — react to this, don't quote the stale overall pace as if on track.")
         if cs.get("water_spike_suspected"):

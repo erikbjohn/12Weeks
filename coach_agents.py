@@ -16,6 +16,11 @@ AGENTS = {
             "food_safety", "fasting", "user_rules",
             "today_sets", "today_status", "cut_status", "protocol_status", "lift_trend",
             "completed_days", "overrides", "exercise_deltas",
+            # 2026-08-28: "Read my garmin" -> "I can't pull Garmin" while last
+            # night's sleep sat in garmin_wellness; and the morning agent's REAL
+            # HRV numbers were conceded as "fabricated" because THIS agent
+            # couldn't see them. The garmin section is DB-first (zero API calls).
+            "garmin",
         ],
     },
     "morning_checkin": {
@@ -96,6 +101,9 @@ AGENTS = {
         "requires": [
             "base", "workout_today", "week_schedule", "completed_days",
             "next_week", "fasting", "user_rules", "today_status",
+            # 2026-08-26 end-of-day said "no weigh-in on record" with 203.8
+            # logged that morning — it never received the scale.
+            "bodyweight",
             # Dose-night greetings ("Tesamorelin at 22:00 — take it, check it
             # off, lights out") and the rule-6 late-hours carve-out both need
             # protocol_status reachable at end-of-day, not just mid-day agents.
@@ -113,6 +121,10 @@ AGENTS = {
             # Same dose-night reachability as end_of_day — chat can be opened
             # at 22:00 too.
             "protocol_status",
+            # 2026-08-27/28: the 7:40 AM opener said "no weigh-in on the board
+            # yet" twice with the weigh-in logged at 5 AM, then rule 21b made it
+            # nag. It had no scale, no cut pace, no Garmin. Now it does.
+            "bodyweight", "cut_status", "garmin",
         ],
     },
     "crisis": {

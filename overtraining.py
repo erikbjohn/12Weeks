@@ -68,7 +68,7 @@ def assess_readiness(garmin_data):
     sleep = garmin_data.get("sleep")
     if sleep:
         sleep_score = sleep.get("score")
-        duration_h = sleep.get("durationHours", 0)
+        duration_h = sleep.get("durationHours") or 0  # None from a thin row must not crash
 
         if sleep_score is not None:
             scores["sleep"] = min(sleep_score, 100)
