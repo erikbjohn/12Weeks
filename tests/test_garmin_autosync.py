@@ -53,6 +53,9 @@ class _StubGC:
     def oauth2_expired_in_memory(self):
         return False
 
+    def stored_token_is_newer(self, user_id=None):
+        return False
+
     def persist_tokens_if_changed(self):
         return False
 

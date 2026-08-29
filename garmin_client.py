@@ -75,6 +75,28 @@ class GarminClient:
         except Exception:
             return False
 
+    def oauth2_expires_at_in_memory(self):
+        """The in-memory session's OAuth2 expiry (epoch), or None without a
+        session. Zero HTTP."""
+        try:
+            exp = self.api.garth.oauth2_token.expires_at
+            return exp if isinstance(exp, (int, float)) else None
+        except Exception:
+            return None
+
+    def stored_token_is_newer(self, user_id=None):
+        """True when the DB holds a fresher OAuth2 than this session (by
+        expires_at). Prod runs gunicorn `--preload`: the autosync daemon lives
+        in the MASTER process while token uploads land in the WORKER, so two
+        in-memory clients coexist and the DB is the only shared truth. A
+        client that finds the DB newer must reload it (exchange-free) instead
+        of trusting — or persisting — what it holds (2026-08-28 clobber)."""
+        mine = self.oauth2_expires_at_in_memory()
+        if mine is None:
+            return False
+        stored = stored_oauth2_expires_at(user_id or self._user_id)
+        return bool(stored) and stored > mine
+
     def try_restore_tokens(self, user_id=None, allow_expired_exchange=False):
         """Try to restore a session from saved tokens.
 
@@ -158,6 +180,19 @@ class GarminClient:
             row = (GarminTokens.query.filter_by(user_id=uid).first()
                    if uid else GarminTokens.query.first())
             if row is None or not new_dump or new_dump == row.token_data:
+                return False
+            # MONOTONIC: never regress the row to an older OAuth2. With
+            # gunicorn --preload the daemon (master) and the request handlers
+            # (worker) hold separate clients; the master's persist used to
+            # overwrite every fresh laptop upload with its older token ≤30 min
+            # later, killing the daemon daily once that token expired
+            # (2026-08-28). Same-expiry re-serializations still write.
+            new_exp = _oauth2_expires_from_blob(new_dump)
+            stored_exp = _oauth2_expires_from_blob(row.token_data)
+            if new_exp and stored_exp and new_exp < stored_exp:
+                log.warning("Not persisting Garmin tokens for user %s: stored OAuth2 "
+                            "is newer (stored exp %s > in-memory %s) — reload it instead",
+                            uid, int(stored_exp), int(new_exp))
                 return False
             row.token_data = new_dump
             row.updated_at = datetime.now(timezone.utc)

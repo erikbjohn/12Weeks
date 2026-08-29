@@ -10254,10 +10254,13 @@ def _garmin_autosync_tick():
             gc = _get_garmin(uid)
             if getattr(gc, "_rate_limited_until", 0) > time.time():
                 continue  # in cooldown — stay silent
-            if gc.connected and gc.oauth2_expired_in_memory():
+            if gc.connected and (gc.oauth2_expired_in_memory()
+                                 or gc.stored_token_is_newer(uid)):
                 # The session's OAuth2 lapsed IN PLACE (connected stays True —
-                # data failures never flip it). If fresh tokens have landed in
-                # the DB (laptop refresher), reload them: exchange-free.
+                # data failures never flip it), OR the DB holds a fresher token
+                # than this process (gunicorn --preload: the daemon runs in the
+                # master, uploads land in the worker — 2026-08-28). Either way,
+                # if valid tokens are in the DB, reload them: exchange-free.
                 # Otherwise fall through — the data call below is this tick's
                 # one controlled exchange knock.
                 exp = stored_oauth2_expires_at(uid)
@@ -10336,11 +10339,14 @@ def garmin_sync_activities():
     # endpoint while it is rate-blocking us (2026-08-12 outage).
     _garmin_sync_attempt_last[current_user.id] = now
     gc = _get_garmin()
-    if gc.connected and gc.oauth2_expired_in_memory():
+    if gc.connected and (gc.oauth2_expired_in_memory()
+                         or gc.stored_token_is_newer(current_user.id)):
         # Session token lapsed IN PLACE — `connected` stays True but the next
-        # data call would re-run the blocked exchange, not fetch data. If the
-        # DB has fresh tokens (laptop refresher), reload them exchange-free
-        # and carry on; otherwise stay quiet like the disconnected case below.
+        # data call would re-run the blocked exchange, not fetch data — OR the
+        # DB holds a fresher token than this process (another process took
+        # the upload; gunicorn --preload, 2026-08-28). If the DB has valid
+        # tokens, reload them exchange-free and carry on; otherwise stay quiet
+        # like the disconnected case below.
         exp = stored_oauth2_expires_at(current_user.id)
         if exp and exp > now:
             gc.try_restore_tokens(current_user.id)

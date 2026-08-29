@@ -108,13 +108,14 @@ def main():
                 f.write(garth.client.dumps())
             os.chmod(p, 0o600)
 
-    # Upload whenever prod hasn't confirmed THIS dump — covers both a fresh
-    # refresh and a previous run whose upload failed.
+    # Upload on EVERY run. The marker is only this script's memory of what it
+    # last sent — prod can lose the token behind its back (2026-08-28: the
+    # gunicorn master's daemon overwrote the worker's fresh upload, and this
+    # script kept saying "prod already has this token" while prod was dead).
+    # The upload is idempotent, and prod syncs immediately on arrival.
     dump = garth.client.dumps()
-    already = os.path.exists(UPLOADED_MARKER) and open(UPLOADED_MARKER).read() == dump
-    if already:
-        _log("prod already has this token — nothing to upload")
-        return
+    if os.path.exists(UPLOADED_MARKER) and open(UPLOADED_MARKER).read() == dump:
+        _log("same token as last upload — re-sending anyway (prod is not trusted to keep it)")
     body = _upload(dump)
     if body is None:
         sys.exit("upload failed after retries — will retry on the next scheduled run")

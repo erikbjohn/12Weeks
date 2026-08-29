@@ -74,6 +74,9 @@ class StubGarminClient:
     def oauth2_expired_in_memory(self):
         return False
 
+    def stored_token_is_newer(self, user_id=None):
+        return False
+
     def persist_tokens_if_changed(self):
         return False
 
@@ -316,6 +319,7 @@ def test_sync_default_window_is_week_to_date(app_ctx, monkeypatch):
         _rate_limited_until = 0
         def try_restore_tokens(self, uid=None, allow_expired_exchange=False): return True
         def oauth2_expired_in_memory(self): return False
+        def stored_token_is_newer(self, uid=None): return False
         def persist_tokens_if_changed(self): return False
 
     def _fake_sync(gc, uid, days_back=3, today=None):
