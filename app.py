@@ -6033,6 +6033,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         _nutri_ctx["deload"] = bool(_deload_decision.get("deload"))
         if _runs_ctx["deload"] and _runs_ctx.get("target_weekly_miles"):
             _runs_ctx["target_weekly_miles"] = round(_runs_ctx["target_weekly_miles"] * 0.62)
+        _rr = _deload_decision.get("reduce_running")
+        if _rr and not _runs_ctx["deload"]:
+            # Lifting is protected: the strength coach trims RUN volume instead.
+            if _runs_ctx.get("target_weekly_miles"):
+                _runs_ctx["target_weekly_miles"] = round(_runs_ctx["target_weekly_miles"] * 0.75)
+            _runs_ctx["recovery_note"] = _rr.get("reason") or "strength coach trimmed run volume to protect lifting"
         _f_run = _ex_pool.submit(_call_runs)
         _f_meal = _ex_pool.submit(_call_meals)
         try:

@@ -400,13 +400,22 @@ class GarminClient:
             data = self.api.get_body_battery(day)
             if not data:
                 return None
-            # Body battery is a list of readings
+            # Body battery: "current" is the watch's LAST reported LEVEL from
+            # bodyBatteryValuesArray ([ts, status, level, version?]), never
+            # charged-minus-drained — that is the daily NET and it went
+            # NEGATIVE in prod, and the coach argued a hold from it
+            # (2026-08-30; audit S038). No levels → honest None.
             if isinstance(data, list) and len(data) > 0:
-                latest = data[-1] if data else {}
                 charged = max((d.get("charged", 0) for d in data), default=0)
                 drained = max((d.get("drained", 0) for d in data), default=0)
+                current = None
+                for d in data:
+                    for entry in (d.get("bodyBatteryValuesArray") or []):
+                        if isinstance(entry, (list, tuple)) and len(entry) >= 3 \
+                                and isinstance(entry[2], (int, float)):
+                            current = int(entry[2])
                 return {
-                    "current": latest.get("charged", 0) - latest.get("drained", 0),
+                    "current": current,
                     "charged": charged,
                     "drained": drained,
                 }

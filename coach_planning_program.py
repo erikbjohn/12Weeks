@@ -587,6 +587,11 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "   per lifting day. There are NO scheduled deload weeks — if YOU call a "
         "   deload (DELOAD DECISION block), use ~55% of the target via LIGHTER LOADS "
         "   and FEWER MOVEMENTS — never fewer sets per movement.\n"
+        "4c. LIFTING VOLUME IS PROTECTED during this cut (athlete directive "
+        "   2026-08-30): when fatigue needs managing, cut RUNNING volume FIRST via "
+        "   reduce_running below and manage lifting through LOAD selection — a "
+        "   lifting deload is the LAST resort, and the athlete may veto it (his "
+        "   veto is final).\n"
         f"4b. EVERY exercise is AT LEAST {MIN_SETS} working sets — never 1 or 2, "
         "   deload weeks included. A 2-set exercise is not a prescription.\n"
         "5. Cover the major muscle groups across the week (legs, chest, back, "
@@ -609,7 +614,9 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         '"weight": <num|0>, "rest": "<single value, e.g. 90s or 2 min — never a '
         'range>", "why": "<one sentence: load + rest rationale>"}. The object MUST '
         'also carry the key "deload": {"call": <true|false>, "reason": "<one sentence '
-        'citing the evidence>"}. JSON only, no prose.'
+        'citing the evidence>"} and MAY carry "reduce_running": {"call": <true|false>, '
+        '"reason": "<one sentence>"} to trim easy-run volume instead of lifting. '
+        'JSON only, no prose.'
     )
     layoff = _layoff_days(user_id)
     layoff_block = ""
@@ -678,7 +685,12 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         reason = (str(raw_dec.get("reason") or "").strip() or None)
     else:
         deload, reason = False, None
-    decision = {"deload": deload, "reason": reason}
+    raw_rr = parsed.pop("reduce_running", None) if isinstance(parsed, dict) else None
+    reduce_running = None
+    if isinstance(raw_rr, dict) and raw_rr.get("call"):
+        reduce_running = {"call": True,
+                          "reason": (str(raw_rr.get("reason") or "").strip() or None)}
+    decision = {"deload": deload, "reason": reason, "reduce_running": reduce_running}
     if deload:
         log.info("strength coach called a DELOAD for week %s: %s", week, reason)
 

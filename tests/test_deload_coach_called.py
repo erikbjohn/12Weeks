@@ -212,7 +212,8 @@ def test_generate_week_program_returns_coach_deload_decision(app_ctx, monkeypatc
         clean, notes, decision = cpp.generate_week_program(
             uid, 5, {"phase": 3, "goal_type": "cut", "target_weekly_sets": 96,
                      "current_weight": 210, "target_weight": 195, "train_days": 6})
-    assert decision == {"deload": True, "reason": "HRV 7d 41 vs 28d 52; bench and squat e1RM down 6%"}
+    assert decision == {"deload": True, "reason": "HRV 7d 41 vs 28d 52; bench and squat e1RM down 6%",
+                        "reduce_running": None}
     assert "deload" not in clean, "the decision key must not leak into the day map"
 
 

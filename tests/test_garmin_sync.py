@@ -623,7 +623,9 @@ class _FakeApi:
                                   "sleepScores": {"overall": {"value": 82},
                                                   "quality": {"qualifierKey": "GOOD"}}}}
     def get_body_battery(self, day):
-        return [{"charged": 80, "drained": 22}]
+        return [{"charged": 80, "drained": 22,
+                 "bodyBatteryValuesArray": [[1749600000000, "MEASURED", 74, 1.0],
+                                            [1749640000000, "MEASURED", 58, 1.0]]}]
     def get_training_readiness(self, day):
         return {"score": 71, "level": "HIGH"}
     def get_training_status(self, day):
@@ -647,7 +649,7 @@ def test_get_wellness_for_day_aggregates_all_metrics():
     w = gc.get_wellness_for_day("2026-06-11")
     assert w["hrv"]["lastNight"] == 52 and w["hrv"]["weeklyAvg"] == 55
     assert w["sleep"]["durationSeconds"] == 26640 and w["sleep"]["score"] == 82
-    assert w["bodyBattery"]["current"] == 58  # 80 charged - 22 drained
+    assert w["bodyBattery"]["current"] == 58  # last MEASURED level, never charged-drained
     assert w["trainingReadiness"]["score"] == 71
     assert w["trainingStatus"]["vo2max"] == 48.0
     assert w["stress"]["overall"] == 31

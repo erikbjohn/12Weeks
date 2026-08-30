@@ -482,10 +482,22 @@ def generate_week_runs(
         '}'
     )
 
+    _recovery_line = (
+
+        f"- RECOVERY: the strength coach trimmed this week's run volume to "
+
+        f"protect lifting — {user_context['recovery_note']}. Cut easy/Z2 "
+
+        f"minutes, keep every day runnable.\n"
+
+        if user_context.get('recovery_note') else "")
+
+
     user_prompt = (
         f"ATHLETE CONTEXT:\n"
         f"- Goal: {goal_type}, currently {current_wt} lb → target {target_wt} lb\n"
         f"- Phase: {phase}{' (DELOAD)' if deload else ''}\n"
+        f"{_recovery_line}"
         f"- Week being prescribed: {week}\n"
         f"- Target weekly miles: {target_miles or 'unspecified'}\n\n"
         f"TEMPLATE RUN STRUCTURE (you pick load):\n{template_block}\n\n"
