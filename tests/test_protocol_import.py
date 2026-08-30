@@ -88,9 +88,9 @@ def _get_row(db, user_id, d, compound):
     return PeptideDose.query.filter_by(user_id=user_id, date=d, compound=compound).first()
 
 
-# ── (a) fresh import: 312 rows, per-compound counts match the real CSV ──────
+# ── (a) fresh import: 381 rows, per-compound counts match the real CSV ──────
 
-def test_fresh_import_312_rows_per_compound_counts(app_ctx, monkeypatch):
+def test_fresh_import_381_rows_per_compound_counts(app_ctx, monkeypatch):
     app_, db = app_ctx
     u = _fresh_user(app_, db, "import-fresh@test.com")
     _set_today(monkeypatch, date(2026, 8, 10))  # earliest CSV date — nothing is past
@@ -100,8 +100,8 @@ def test_fresh_import_312_rows_per_compound_counts(app_ctx, monkeypatch):
     assert r.status_code == 200, r.get_data(as_text=True)
     body = r.get_json()
 
-    assert body["row_count"] == 312
-    assert body["imported"] == 312
+    assert body["row_count"] == 381
+    assert body["imported"] == 381
     assert body["updated"] == 0
     assert body["deleted"] == 0
     assert body["skipped"] == []
@@ -113,7 +113,7 @@ def test_fresh_import_312_rows_per_compound_counts(app_ctx, monkeypatch):
     assert body["per_compound"] == dict(expected)
 
     from models import PeptideDose
-    assert PeptideDose.query.filter_by(user_id=u.id).count() == 312
+    assert PeptideDose.query.filter_by(user_id=u.id).count() == 381
 
 
 # ── (b) idempotent re-import: unchanged CSV is a no-op ──────────────────────
@@ -134,10 +134,10 @@ def test_idempotent_reimport_is_a_noop(app_ctx, monkeypatch):
     assert body2["updated"] == 0
     assert body2["deleted"] == 0
     assert body2["skipped"] == []
-    assert body2["row_count"] == 312
+    assert body2["row_count"] == 381
 
     from models import PeptideDose
-    assert PeptideDose.query.filter_by(user_id=u.id).count() == 312
+    assert PeptideDose.query.filter_by(user_id=u.id).count() == 381
 
 
 # ── (c) midday re-import: today's dose checked + a FUTURE dose_mg changed ──
@@ -555,7 +555,7 @@ def test_row_count_matches_csv_and_duplicate_path_writes_nothing(app_ctx, monkey
 
     r = _post_import(client, u.email, csv_path=REAL_CSV_PATH)
     assert r.status_code == 200
-    assert r.get_json()["row_count"] == 312
+    assert r.get_json()["row_count"] == 381
 
     u2 = _fresh_user(app_, db, "import-integrity-dup@test.com")
     _set_today(monkeypatch, date(2026, 8, 20))

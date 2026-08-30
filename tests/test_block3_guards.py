@@ -197,7 +197,7 @@ class TestCSVIntegrityGuard:
 
     def test_peptide_protocol_csv_integrity(self):
         """
-        - 312 data rows (1 header + 312 rows = 293 total lines)
+        - 381 data rows (2026-08-30: Tesamorelin replanned — started early, 1 mg/40u M-F, weekends off)
         - Zero duplicate (Date, Compound) pairs
         - Enclomiphene always 6.25 mg
         - Retatrutide doses only in {2.0, 3.0, 4.0} mg
@@ -210,8 +210,8 @@ class TestCSVIntegrityGuard:
             reader = csv.DictReader(f)
             rows = list(reader)
 
-        assert len(rows) == 312, (
-            f"Expected 312 data rows, got {len(rows)}"
+        assert len(rows) == 381, (
+            f"Expected 381 data rows, got {len(rows)}"
         )
 
         # Check for duplicate (Date, Compound) pairs
@@ -227,12 +227,12 @@ class TestCSVIntegrityGuard:
             f"Found {len(duplicates)} duplicate (Date, Compound) pairs: {duplicates}"
         )
 
-        # Check Enclomiphene dose
+        # Check Enclomiphene dose (12.5 mg daily for the whole protocol — 7fc9106)
         for row in rows:
             if row['Compound'] == 'Enclomiphene':
                 dose = float(row['Dose_mg'])
-                assert dose == 6.25, (
-                    f"Enclomiphene dose must be 6.25 mg, got {dose} on {row['Date']}"
+                assert dose == 12.5, (
+                    f"Enclomiphene dose must be 12.5 mg, got {dose} on {row['Date']}"
                 )
 
         # Check Retatrutide doses
