@@ -1638,6 +1638,35 @@ _MUSCLE_LABELS = {
 }
 
 
+def _scrub_deload_label(text):
+    """Remove the word 'Deload' (and its '(light)' qualifiers) from a day
+    title. The word is a VERDICT — it may only appear when the week's
+    persisted flag says so (deload.py), never as template residue."""
+    import re as _re
+    if not text:
+        return text
+    out = _re.sub(r"(?i)\s*deload\s*[—–-]?\s*", " ", text)
+    out = _re.sub(r"(?i)\s*\(light\)", "", out)
+    out = _re.sub(r"(?i)\blight\b", "", out)
+    out = _re.sub(r"\s{2,}", " ", out).strip(" —–-\t ")
+    return out or None
+
+
+def _schedule_day_title(template_name, coach_exercise_names, is_deload=False):
+    """The day title written to WeeklyDaySchedule at generation. Prefers a name
+    derived from the COACH'S exercises (the template label goes stale the moment
+    the coach redesigns the day — audit S079, 'Deload — Lower' over a squat
+    progression); scrubs 'Deload' unless the coach actually called one."""
+    base = template_name
+    if coach_exercise_names:
+        base = _derive_lift_name(coach_exercise_names) or template_name
+    if is_deload or not base:
+        return base
+    if "deload" in base.lower():
+        base = _scrub_deload_label(base) or _derive_lift_name(coach_exercise_names) or "Training"
+    return base
+
+
 def _derive_lift_name(exercise_names):
     """Build an ACCURATE day title from the muscle groups the day actually
     trains. The template's day label ("HEAVY Lower", "Shoulder/Arms") goes stale
@@ -1671,14 +1700,19 @@ def _derive_lift_name(exercise_names):
     return name
 
 
-def _reconcile_lift_name(current, exercise_names):
+def _reconcile_lift_name(current, exercise_names, is_deload=False):
     """Keep a curated day title when it matches the movements; replace it with a
     muscle-derived title only when it names the WRONG region (a Lower title over
     an all-upper list) OR omits the day's DOMINANT muscle while naming specific
     others ("Shoulder/Arms" on a back-dominant day). Region/pattern labels
-    ("HEAVY Lower", "Full Body", "Pull + Lat") that match are trusted as-is."""
+    ("HEAVY Lower", "Full Body", "Pull + Lat") that match are trusted as-is.
+    'Deload' in a title is a VERDICT: unless the week's persisted flag says so
+    (is_deload), it is scrubbed before any other logic (2026-08-30: four served
+    week-4 titles still read 'Deload — …' on a vetoed progression week)."""
     from collections import Counter
     from workout_data import EXERCISES, resolve_name
+    if not is_deload and current and "deload" in current.lower():
+        current = _scrub_deload_label(current) or _derive_lift_name(exercise_names) or "Training"
     derived = _derive_lift_name(exercise_names)
     if not derived or not current:
         return current
@@ -3808,7 +3842,8 @@ def api_workouts():
                         # accurate curated label, fix a wrong-region/omitted one).
                         days[day_idx]["liftName"] = _reconcile_lift_name(
                             days[day_idx].get("liftName"),
-                            [e.get("name") for e in exercises])
+                            [e.get("name") for e in exercises],
+                            is_deload=_deload.is_deload_week(current_user.id, week))
 
         for day in days:
             if "exercises" in day:
@@ -3922,7 +3957,8 @@ def api_workouts():
         for _d in days:
             if not _d.get("isRest") and _d.get("exercises"):
                 _d["liftName"] = _reconcile_lift_name(
-                    _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
+                    _d.get("liftName"), [e.get("name") for e in _d["exercises"]],
+                    is_deload=_deload.is_deload_week(current_user.id, week))
 
         # FAIL LOUD: strip any leftover template content for domains with no
         # real coach/engine plan so the static skeleton never reaches the UI as
@@ -4112,7 +4148,8 @@ def api_week(week):
     for _d in days:
         if not _d.get("isRest") and _d.get("exercises"):
             _d["liftName"] = _reconcile_lift_name(
-                _d.get("liftName"), [e.get("name") for e in _d["exercises"]])
+                _d.get("liftName"), [e.get("name") for e in _d["exercises"]],
+                is_deload=_deload.is_deload_week(current_user.id, week))
 
     # FAIL LOUD: strip leftover template content for unplanned domains (run +
     # lifts + meals). Mirrors /api/workouts.
@@ -6675,6 +6712,11 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             day_data = template_days[day_idx] if day_idx < len(template_days) else {}
             lift_name = day_data.get("liftName", "Rest")
             is_rest = "rest" in lift_name.lower() and not day_data.get("exercises")
+            if not is_rest:
+                _cn = [it.get("exercise") for it in (_coach_program.get(day_idx) or [])
+                       if it.get("exercise")]
+                lift_name = _schedule_day_title(
+                    lift_name, _cn, _deload_decision.get("deload")) or lift_name
 
             # Extract muscle groups from the day's exercises
             muscle_groups = set()

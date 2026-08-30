@@ -294,3 +294,35 @@ def test_volume_ceiling_never_below_the_floor():
     assert floor2 == 86 and ceiling2 == 101  # 0.92*93 floor; normal ceiling
     floor3, ceiling3 = _volume_rails(93, 105, deload=True)
     assert floor3 == 0, "a coach-called deload has no floor"
+
+
+# ── 8. "Deload" can never appear in a day title on an unflagged week ─────
+
+def test_reconcile_scrubs_deload_from_titles_on_normal_weeks():
+    """2026-08-30: after the athlete's veto rebuilt week 4 as a progression
+    week, four served day titles still said 'Deload — Pull' etc. because the
+    template's names region-matched. The word is a verdict, not a label."""
+    from app import _reconcile_lift_name
+    pull_day = ["Barbell Bent-Over Row", "DB Bench Press", "Goblet Squat",
+                "Hammer Curl", "Cable Tricep Pushdown", "Rear Delt Fly"]
+    kept = _reconcile_lift_name("Deload — Pull", pull_day, is_deload=True)
+    assert "Deload" in kept, "a real coach-called deload keeps its label"
+    scrubbed = _reconcile_lift_name("Deload — Pull", pull_day, is_deload=False)
+    assert scrubbed and "deload" not in scrubbed.lower()
+    assert "light" not in scrubbed.lower()
+    default_off = _reconcile_lift_name("Deload — Full Body Light", pull_day)
+    assert "deload" not in (default_off or "").lower(), "default must be the safe path"
+
+
+def test_schedule_day_title_prefers_coach_exercises():
+    """The write loop used to store the TEMPLATE's day name regardless of what
+    the coach designed (audit S079) — that's how 'Deload — Lower' got onto a
+    squat-progression card."""
+    from app import _schedule_day_title
+    coach_day = ["Barbell Back Squat", "Barbell Bench Press", "Cable Seated Row"]
+    t = _schedule_day_title("Deload — Lower", coach_day, is_deload=False)
+    assert t and "deload" not in t.lower()
+    t2 = _schedule_day_title("Deload — Lower", [], is_deload=False)
+    assert t2 and "deload" not in t2.lower(), "even with no coach day, the word goes"
+    t3 = _schedule_day_title("HEAVY Lower", [], is_deload=False)
+    assert t3 == "HEAVY Lower", "clean template names pass through untouched"
