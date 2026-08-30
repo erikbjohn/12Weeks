@@ -79,6 +79,18 @@ def test_core_prompt_makes_deload_override_final():
     assert "argue it ONCE" in CORE_PROMPT
 
 
+def test_rule24_closes_the_hold_loophole():
+    """2026-08-30 evening: the chat coach dodged rule 24 by calling the reduction
+    a 'hold week' instead of a deload, kept narrating loads that were NOT on the
+    card, and threatened the Poacher lockout to defend it."""
+    from coach_assembler import CORE_PROMPT
+    r24 = CORE_PROMPT[CORE_PROMPT.index("DELOAD IS THE ATHLETE'S FINAL CALL"):
+                      CORE_PROMPT.rindex("<markers>")]
+    assert "hold" in r24, "renaming the reduction must not escape the rule"
+    assert "lockout" in r24.lower(), "the lockout may never defend a load cut he refused"
+    assert "card" in r24, "never narrate loads that differ from the served card"
+
+
 # ── 3. lifting is protected; fatigue comes out of running first ──────────
 
 class _CapturingMessages:

@@ -160,6 +160,31 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "log_measurements",
+        "description": (
+            "Record the athlete's tape measurements (inches). CALL THIS whenever "
+            "the athlete gives you ANY tape number in chat — waist, chest, hips, "
+            "neck, bicep, thigh — saying 'logged' without calling this is a lie: "
+            "nothing is saved and Stats keeps showing the old row (2026-08-29). "
+            "Pass only the fields given; a single bicep/thigh value applies to "
+            "both sides; same-day repeat calls update without blanking the rest."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "waist": {"type": "number"}, "chest": {"type": "number"},
+                "hips": {"type": "number"}, "neck": {"type": "number"},
+                "bicep": {"type": "number", "description": "both sides"},
+                "bicep_left": {"type": "number"}, "bicep_right": {"type": "number"},
+                "thigh": {"type": "number", "description": "both sides"},
+                "thigh_left": {"type": "number"}, "thigh_right": {"type": "number"},
+                "date": {"type": "string",
+                         "description": "ISO date (YYYY-MM-DD). Omit for today "
+                                        "(athlete-local)."},
+            },
+        },
+    },
+    {
         "name": "consult_nutritionist",
         "description": (
             "Consult the Nutritionist specialist. Use when the question "
@@ -562,6 +587,60 @@ def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = Non
                        "note": "Saved to the body-weight log (Stats/Progress read this)."})
 
 
+_MEAS_FIELDS = {  # tool arg -> (model attr(s), sane inches range)
+    "waist": (("waist_inches",), (20, 70)),
+    "chest": (("chest",), (25, 70)),
+    "hips": (("hips",), (25, 70)),
+    "neck": (("neck",), (10, 25)),
+    "bicep": (("bicep_left", "bicep_right"), (8, 25)),
+    "bicep_left": (("bicep_left",), (8, 25)),
+    "bicep_right": (("bicep_right",), (8, 25)),
+    "thigh": (("thigh_left", "thigh_right"), (15, 40)),
+    "thigh_left": (("thigh_left",), (15, 40)),
+    "thigh_right": (("thigh_right",), (15, 40)),
+}
+
+
+def _tool_log_measurements(user_id: int, date: str | None = None, **vals) -> str:
+    """Upsert one BodyMeasurement row from whatever tape values the athlete
+    gave. Partial by design: unmentioned fields keep their stored values."""
+    from models import BodyMeasurement, db
+    updates = {}
+    for key, (attrs, (lo, hi)) in _MEAS_FIELDS.items():
+        v = vals.get(key)
+        if v is None:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return json.dumps({"error": f"{key} must be a number"})
+        if not (lo <= v <= hi):
+            return json.dumps({"error": f"{key}={v} looks like a bad tape read "
+                                        f"(expected {lo}-{hi} in) — re-measure"})
+        for a in attrs:
+            updates[a] = v
+    if not updates:
+        return json.dumps({"error": "no measurements given — pass at least one of "
+                                    "waist/chest/hips/neck/bicep/thigh"})
+    if date:
+        from datetime import date as _date
+        try:
+            d = _date.fromisoformat(date)
+        except ValueError:
+            return json.dumps({"error": f"Bad date {date!r}, expected YYYY-MM-DD"})
+    else:
+        d = _user_local_today(user_id)
+    row = BodyMeasurement.query.filter_by(user_id=user_id, log_date=d).first()
+    if not row:
+        row = BodyMeasurement(user_id=user_id, log_date=d)
+        db.session.add(row)
+    for a, v in updates.items():
+        setattr(row, a, v)
+    db.session.commit()
+    return json.dumps({"ok": True, "date": d.isoformat(), "saved": updates,
+                       "note": "Saved to the measurement log (Stats/Progress read this)."})
+
+
 def _tool_consult_nutritionist(user_id: int, brief: str) -> str:
     from coach_specialists.nutritionist import consult
     return consult(brief=brief, user_id=user_id)
@@ -586,6 +665,7 @@ _DISPATCH = {
     "get_garmin_wellness": _tool_get_garmin_wellness,
     "get_protocol_status": _tool_get_protocol_status,
     "log_bodyweight": _tool_log_bodyweight,
+    "log_measurements": _tool_log_measurements,
     "consult_nutritionist": _tool_consult_nutritionist,
     "consult_strength": _tool_consult_strength,
     "consult_running": _tool_consult_running,

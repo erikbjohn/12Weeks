@@ -10993,15 +10993,17 @@ function renderMeasurementsSection(measurements) {
             bwDelta +
         '</div>';
     }
+    // lower:true = shrinking is good (fat sites); muscle sites growing is GOOD
+    // in a recomp — matches the Progress body-comp grid (was flipped; S087).
     var fields = [
         { key: 'waist', label: 'Waist', unit: 'in', lower: true },
-        { key: 'chest', label: 'Chest', unit: 'in', lower: true },
+        { key: 'chest', label: 'Chest', unit: 'in', lower: false },
         { key: 'hips', label: 'Hips', unit: 'in', lower: true },
         { key: 'neck', label: 'Neck', unit: 'in', lower: true },
-        { key: 'bicep_left', label: 'Bicep L', unit: 'in', lower: true },
-        { key: 'bicep_right', label: 'Bicep R', unit: 'in', lower: true },
-        { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: true },
-        { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: true },
+        { key: 'bicep_left', label: 'Bicep L', unit: 'in', lower: false },
+        { key: 'bicep_right', label: 'Bicep R', unit: 'in', lower: false },
+        { key: 'thigh_left', label: 'Thigh L', unit: 'in', lower: false },
+        { key: 'thigh_right', label: 'Thigh R', unit: 'in', lower: false },
     ];
     for (var i = 0; i < fields.length; i++) {
         var f = fields[i];
