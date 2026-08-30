@@ -278,3 +278,19 @@ def test_deload_evidence_with_no_data_is_honest(app_ctx):
         txt = deload_evidence_text(uid, 5, date(2026, 9, 6))
     assert "no deload" in txt.lower()
     assert "no data" in txt.lower() or "dark" in txt.lower()
+
+
+# ── 7. the ceiling never undercuts the anti-taper floor ──────────────────
+
+def test_volume_ceiling_never_below_the_floor():
+    """2026-08-30: week 3 prescribed 105 sets; week 4's curve target was 93 so
+    the ceiling (93+8=101) sat BELOW the floor (105) and the replan shipped 101
+    — a 4-set taper Erik caught immediately. The floor always wins."""
+    from coach_planning_program import _volume_rails
+    floor, ceiling = _volume_rails(93, 105, deload=False)
+    assert floor == 105, "anti-taper floor = last non-deload week"
+    assert ceiling >= floor + 6, "room above the floor, never below it"
+    floor2, ceiling2 = _volume_rails(93, 80, deload=False)
+    assert floor2 == 86 and ceiling2 == 101  # 0.92*93 floor; normal ceiling
+    floor3, ceiling3 = _volume_rails(93, 105, deload=True)
+    assert floor3 == 0, "a coach-called deload has no floor"

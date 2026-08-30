@@ -466,6 +466,22 @@ def _prev_program_by_day(user_id: int, week: int) -> dict:
 # the persisted flag (deload.is_deload_week) is the only truth.
 
 
+def _volume_rails(target_sets: int, prev_nondeload_total: int, *, deload: bool):
+    """(floor, ceiling) for the weekly working-set count.
+
+    FLOOR — the anti-taper rail: never below 0.92*target and never below the
+    last NON-deload week's prescribed total (volume trends UP — Erik). Week 1
+    has no prior week -> prev total 0 -> the 0.92 clause alone.
+    CEILING — normally target+8, but it may NEVER sit below the floor: when a
+    prior week out-prescribed this week's curve value, the floor wins and the
+    ceiling moves above it (2026-08-30: 93+8=101 capped week 4 under week 3's
+    105 and shipped a 4-set taper). A coach-called deload has no floor.
+    """
+    floor = 0 if deload else max(round(0.92 * target_sets), prev_nondeload_total)
+    ceiling = max(target_sets + 8, floor + 6)
+    return floor, ceiling
+
+
 def _prev_nondeload_total(user_id: int, week: int) -> int:
     """Total prescribed working sets of the most recent prior NON-deload week
     (< `week`, within this block, skipping weeks 4/8/12). This is the anti-taper
@@ -710,14 +726,9 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
             k = _movement_key(resolve_name(r.exercise_name))
             hist_top[k] = max(hist_top.get(k, 0), r.weight)
     rest_day = 6 if train_days <= 6 else -1  # Sunday is the long-run/rest day
-    ceiling = int(target_sets) + 8
-    # Weekly volume FLOOR — the anti-taper rail. Never below 0.92*target, and
-    # never below the last NON-deload week's prescribed total (so a post-deload
-    # week can't anchor on the deload's low number and stall the climb). Week 1
-    # has no prior week -> _prev_nondeload_total returns 0, so the floor is just
-    # the 0.92*target clause (no throw, no zero-floor).
-    floor = 0 if deload else max(round(0.92 * int(target_sets)),
-                                 _prev_nondeload_total(user_id, week))
+    floor, ceiling = _volume_rails(int(target_sets),
+                                   _prev_nondeload_total(user_id, week),
+                                   deload=deload)
     clean, actions = enforce_safety(
         clean, rest_day_idx=rest_day, ceiling=ceiling,
         history_exercises=hist_ex, history_max_weight=hist_max,
