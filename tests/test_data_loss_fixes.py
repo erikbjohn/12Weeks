@@ -139,7 +139,7 @@ def test_force_regen_keeps_existing_plan_when_coaches_fail(gen_ctx, monkeypatch)
 
     # Every coach fails (API outage)
     monkeypatch.setattr(coach_planning_program, "generate_week_program",
-                        lambda **k: ({}, []))
+                        lambda **k: ({}, [], {"deload": False, "reason": None}))
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs",
                         lambda **k: {})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals",

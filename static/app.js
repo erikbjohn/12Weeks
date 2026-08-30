@@ -259,7 +259,7 @@ function _exerciseRole(name) {
   return 'accessory';
 }
 
-function _isDeloadWeek(week) { return week === 4 || week === 8; }
+function _isDeloadWeek(week) { return isDeloadWeek(week); }
 
 function exerciseWhy(name, ex, prev, week) {
   var role = _exerciseRole(name);
@@ -1640,10 +1640,11 @@ function getProgressionIncrement(exName) {
 }
 
 function isDeloadWeek(week) {
-  // Weeks 4 & 8 only — week 12 is a PEAK in the engine (training_engine
-  // _is_peak_week==12), not a deload. Labeling 12 "Deload/60%" contradicted the
-  // full-weight prescription the engine/coach actually generate.
-  return week === 4 || week === 8;
+  // 2026-08-30: no scheduled deload weeks. The strength coach calls a deload
+  // from the data at planning and the server serves the persisted flag on the
+  // week payload (deload / deload_reason). Never a week number.
+  var wd = (typeof workoutData !== 'undefined' && workoutData) ? (workoutData[String(week)] || workoutData[week]) : null;
+  return !!(wd && wd.deload);
 }
 
 // ─── WEIGHT DATA HELPERS (cache-based) ─────────────────────────────────────
@@ -10005,7 +10006,7 @@ function renderTodayNav() {
   }).join('');
 
   const info = weekData.phaseInfo || {};
-  const isDeload = currentWeek === 4 || currentWeek === 8 || currentWeek === 12;
+  const isDeload = !!weekData.deload;
 
   el.innerHTML = `
     <div class="tn-week-row">
@@ -10084,7 +10085,7 @@ function renderWeekTabs() {
   const weeks = currentPhase === 1 ? [1,2,3,4] : currentPhase === 2 ? [5,6,7,8] : [9,10,11,12];
   const el = document.getElementById('week-tabs');
   el.innerHTML = weeks.map(w => {
-    const isDeload = w === 4 || w === 8 || w === 12;
+    const isDeload = !!((workoutData[String(w)] || workoutData[w] || {}).deload);
     return `<button class="week-tab${isDeload?' deload':''}${w===currentWeek?' active':''}" onclick="setWeek(${w})">
       Wk ${w}${isDeload ? ' Deload' : ''}
     </button>`;

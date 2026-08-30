@@ -167,7 +167,7 @@ def test_deload_week_may_drop(ctx):
     with app.app_context():
         out = _apply_run_regression_floor(
             {1: {"type": "hiit", "label": "VO2", "duration": "28 min", "detail": ""}},
-            uid, 8)  # week 8 is a deload
+            uid, 8, deload=True)  # a coach-called deload (never a week number)
     assert out[1]["duration"] == "28 min", "deload week may legitimately reduce"
 
 

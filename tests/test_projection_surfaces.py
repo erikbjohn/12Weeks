@@ -535,7 +535,7 @@ def test_weekly_gen_required_weekly_uses_curve_delta_under_block3_flag(app_ctx, 
     _set_block3_flags(app_, db)
     monkeypatch.setattr(appmod, "_user_today", lambda: today)
     # No real LLM calls -- deterministic empty coach output.
-    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, []))
+    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, [], {"deload": False, "reason": None}))
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs", lambda **k: {})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **k: {})
 
@@ -556,7 +556,7 @@ def test_regression_weekly_gen_required_weekly_is_legacy_without_flag(app_ctx, c
     today = START + timedelta(days=6)
     _set_weights(app_, db, uid, [(START, 220.0), (today, 218.0)])
     monkeypatch.setattr(appmod, "_user_today", lambda: today)
-    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, []))
+    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, [], {"deload": False, "reason": None}))
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs", lambda **k: {})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **k: {})
 

@@ -13,20 +13,18 @@ the ~106 peak governor).
 
 def test_target_weekly_sets_climbs_across_block():
     from app import _target_weekly_sets
-    deloads = {4, 8, 12}
-    nondeload = [w for w in range(1, 13) if w not in deloads]
-    vals = [_target_weekly_sets(w) for w in nondeload]
-    # strictly increasing across every non-deload week — the anti-taper guarantee
+    # 2026-08-30: no scheduled deloads — the climb is strictly increasing through
+    # week 11 (the peak); week 12 holds. Coach-called deloads are a per-week flag.
+    vals = [_target_weekly_sets(w) for w in range(1, 12)]
     assert vals == sorted(vals), vals
     assert len(set(vals)) == len(vals), vals  # no flat stretches
 
 
-def test_deload_weeks_dip_below_neighbors():
+def test_no_scheduled_deload_notches():
     from app import _target_weekly_sets
     for d in (4, 8, 12):
-        for n in (d - 1, d + 1):
-            if 1 <= n <= 12:
-                assert _target_weekly_sets(d) < _target_weekly_sets(n), (d, n)
+        assert _target_weekly_sets(d) >= _target_weekly_sets(d - 1), d
+    assert _target_weekly_sets(4, deload=True) == round(0.55 * _target_weekly_sets(4))
 
 
 def test_aggressive_peak_at_week_eleven():

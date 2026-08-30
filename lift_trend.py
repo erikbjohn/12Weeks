@@ -47,7 +47,8 @@ KEY_LIFTS = [
     "Barbell Bench Press", "Barbell Back Squat", "Conventional Deadlift",
     "Barbell OHP", "Barbell Bent-Over Row",
 ]
-DELOAD_WEEKS = {4, 8, 12}
+# DELOAD_WEEKS is gone (2026-08-30): deloads are coach-called per-user flags —
+# _weeks_with_data excludes weeks flagged via deload.is_deload_week.
 
 E1RM_DECLINE_PCT = 5.0
 TONNAGE_DECLINE_PCT = 10.0
@@ -66,10 +67,9 @@ def _weeks_with_data(user_id, upto_week):
                     SetLog.done.is_(True),
                     SetLog.set_skipped.isnot(True))
             .all())
-    weeks = {
-        r.week for r in rows
-        if r.week is not None and r.week <= upto_week and r.week not in DELOAD_WEEKS
-    }
+    from deload import is_deload_week
+    weeks = {r.week for r in rows if r.week is not None and r.week <= upto_week}
+    weeks = {w for w in weeks if not is_deload_week(user_id, w)}
     return sorted(weeks)
 
 

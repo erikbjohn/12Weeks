@@ -1891,6 +1891,7 @@ When the athlete confirms a schedule or plan change, emit the corresponding mark
 These formats are EXACT — the app parses them mechanically. A marker in any other shape is
 silently dropped and the change does NOT happen (you will have lied to the athlete):
 [SCHEDULE: day=N, time=3:00 PM, notes=text] — day is 0-indexed (0=Monday); notes optional
+[DELOAD: week=N, call=true|false, reason=text] — there are NO scheduled deload weeks; the strength coach calls one from the data at planning, and this marker codifies the athlete's veto or request for week N (a call=false on an already-built light week needs 'Plan this week' re-run to rebuild volume)
 [PRESCRIPTION: week=N, day=N, exercise=Name, sets=N, reps=N, rest=60-90s, weight=N, reason=text] — rest/weight/reason optional; week defaults to the current week if omitted
 [SWAP: day_idx=N, exercise_idx=N, old=Name, new=Name, reason=text]
 [WEIGHT: exercise=Name, new_weight=N, reason=text] — sets the exercise's target weight on this week's card

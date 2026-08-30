@@ -263,7 +263,7 @@ def _segments_to_detail(segments) -> str:
     return "; ".join(parts)
 
 
-def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
+def _apply_run_regression_floor(out: dict, user_id: int, week: int, deload: bool = False) -> dict:
     """Code-enforced anti-regression rail (mirrors the lift 'floor at top set').
 
     A run's prescribed duration may NOT drop below last week's same-day,
@@ -272,7 +272,7 @@ def _apply_run_regression_floor(out: dict, user_id: int, week: int) -> dict:
     Only floors when units AND run type match, so it never wrongly compares a
     VO2 day against a Z2 day or minutes against miles.
     """
-    if week in (4, 8, 12):  # deload weeks may legitimately reduce volume
+    if deload:  # a coach-called deload may legitimately reduce volume
         return out
     try:
         from models import WeeklyRunPlan
@@ -402,7 +402,7 @@ def generate_week_runs(
     template_block = "\n".join(template_lines) if template_lines else "(no runs in template)"
 
     phase = user_context.get("phase", "?")
-    deload = user_context.get("deload", False)
+    deload = bool(user_context.get("deload"))  # strength coach's call (or athlete override), never a week number
     goal_type = user_context.get("goal_type", "recomp")
     target_miles = user_context.get("target_weekly_miles")
     current_wt = user_context.get("current_weight")
@@ -446,7 +446,7 @@ def generate_week_runs(
         "   LAST WEEK'S PRESCRIPTION (shown below) from the real data. A change "
         "   with no data-grounded reason is a hard fail.\n"
         "2. Do NOT regress below last week's same-type run (shorter total, fewer "
-        "   reps, less work) unless it is a deload week (4/8/12) or you state an "
+        "   reps, less work) unless the strength coach called a deload THIS week (Phase line says DELOAD) or you state an "
         "   explicit, data-grounded taper. A short LOGGED run does NOT justify "
         "   cutting the PRESCRIPTION.\n"
         "3. Hit the target weekly miles (a FLOOR): sum durations × ~9 min/mi; if "
@@ -521,7 +521,7 @@ def generate_week_runs(
         # Floor the fills against last week too — the failure path must not
         # ship a same-day, same-type regression either.
         return _apply_run_regression_floor(
-            _ensure_seven_day_runs({}, week), user_id, week)
+            _ensure_seven_day_runs({}, week, deload=deload), user_id, week, deload=deload)
 
     out: dict[int, dict] = {}
     for k, v in parsed.items():
@@ -560,10 +560,10 @@ def generate_week_runs(
     # MUST run BEFORE the regression floor so a backfilled static 28-min Z2 on a
     # day the coach omitted is itself floored against last week's same-day Z2
     # (fill-after-floor shipped a 40→28 min same-type regression unchecked).
-    out = _ensure_seven_day_runs(out, week)
+    out = _ensure_seven_day_runs(out, week, deload=deload)
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
-    out = _apply_run_regression_floor(out, user_id, week)
+    out = _apply_run_regression_floor(out, user_id, week, deload=deload)
     # Aerobic-base rail: no quality sessions off a thin base — deterministic,
     # runs AFTER the regression floor so a floored hard day still converts.
     out = enforce_run_base(out, weekly_run_minutes(user_id))
@@ -573,12 +573,11 @@ def generate_week_runs(
     return out
 
 
-def _ensure_seven_day_runs(out: dict, week: int) -> dict:
+def _ensure_seven_day_runs(out: dict, week: int, deload: bool = False) -> dict:
     """7-day run floor. Every day_idx 0-6 must carry a run — least of all Monday
     (day 0, the heavy-lower day), which the generator has left blank before.
     A missing day gets an easy Zone 2 recovery run; deload weeks run shorter."""
-    deload = week in (4, 8, 12)
-    mins = 22 if deload else 28
+    mins = 22 if deload else 28  # deload = coach-called flag, never a week number
     for d in range(7):
         if not out.get(d):
             out[d] = {

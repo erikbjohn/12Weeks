@@ -91,5 +91,10 @@ def test_prev_nondeload_total_skips_deload_week(app_ctx):
                                           exercise_name=ex, sets=sets, reps="5",
                                           rest="120s", source="coach"))
     db.session.commit()
+    from models import WeeklyDaySchedule
+    for d in range(7):  # week 4 is a deload only because the coach flagged it
+        db.session.add(WeeklyDaySchedule(user_id=u.id, week=4, day_idx=d, lift_name='x',
+                                         deload=True, deload_reason='coach call'))
+    db.session.commit()
     from coach_planning_program import _prev_nondeload_total
     assert _prev_nondeload_total(u.id, 5) == 9

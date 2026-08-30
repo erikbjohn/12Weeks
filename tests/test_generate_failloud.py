@@ -52,7 +52,7 @@ def test_coach_failure_writes_no_engine_or_template_rows(ctx, monkeypatch):
     import coach_planning_program, coach_planning_runs, coach_planning_meals
     # All coaches "fail" (return empty). Program coach returns (prog, notes).
     monkeypatch.setattr(coach_planning_program, "generate_week_program",
-                        lambda **k: ({}, []))
+                        lambda **k: ({}, [], {"deload": False, "reason": None}))
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs",
                         lambda **k: {})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals",
@@ -90,7 +90,7 @@ def test_coach_success_writes_coach_rows(ctx, monkeypatch):
                      for ex in (days[di].get("exercises", []) or [])]
             if items:
                 prog[di] = items
-        return (prog, [])
+        return (prog, [], {"deload": False, "reason": None})
 
     def fake_runs(**k):
         return {6: {"type": "z2", "label": "Z2 base", "duration": "60 min",
@@ -187,7 +187,7 @@ def test_rest_of_week_regen_preserves_today_and_earlier(ctx, monkeypatch):
                      for ex in (get_workouts(k["week"])[di].get("exercises", []) or [])]
             if items:
                 prog[di] = items
-        return (prog, [])
+        return (prog, [], {"deload": False, "reason": None})
 
     monkeypatch.setattr(coach_planning_program, "generate_week_program", fake_program)
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs",

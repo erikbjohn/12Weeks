@@ -358,9 +358,19 @@ def test_lift_block_matches_lift_trend_output_on_a_real_decline(app_ctx, clean_b
     # Reference weeks 1-3: 3 sets x 200 x 5 = 3000 tonnage/week.
     for wk in (1, 2, 3):
         _add_sets(app_, db, uid, wk, "Barbell Bench Press", 200.0, 5, 3)
-    # Week 4 is a deload week -- EXCLUDED entirely; give it a huge tonnage to
-    # prove it is never picked up as "recent" or as part of the reference.
+    # Week 4 is a COACH-CALLED deload (flag, not week number — 2026-08-30):
+    # EXCLUDED entirely; give it a huge tonnage to prove it is never picked up
+    # as "recent" or as part of the reference.
     _add_sets(app_, db, uid, 4, "Barbell Bench Press", 500.0, 10, 5)
+
+    def _flag_wk4():
+        from models import WeeklyDaySchedule
+        for d in range(7):
+            db.session.add(WeeklyDaySchedule(user_id=uid, week=4, day_idx=d,
+                                             lift_name="x", deload=True,
+                                             deload_reason="coach call"))
+        db.session.commit()
+    _do(app_, _flag_wk4)
     # Recent weeks 5-6: 3 sets x 150 x 5 = 2250 tonnage/week -> -25% vs 3000.
     for wk in (5, 6):
         _add_sets(app_, db, uid, wk, "Barbell Bench Press", 150.0, 5, 3)

@@ -699,6 +699,10 @@ class WeeklyDaySchedule(db.Model):
     is_rest = db.Column(db.Boolean, default=False)
     source = db.Column(db.String(20), default='engine')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Coach-called deload (2026-08-30): the ONLY source of truth for "is this a
+    # deload week" — see deload.py. Written for all 7 rows of the week.
+    deload = db.Column(db.Boolean, default=False)
+    deload_reason = db.Column(db.Text, nullable=True)
 
 
 class CoachFeedback(db.Model):

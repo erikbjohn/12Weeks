@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import deload as _deload
 import threading
 import time
 import uuid
@@ -262,6 +263,8 @@ with app.app_context():
 
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
+        ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
+        ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),
         ("physical_assessment", "chest_inches", "FLOAT"),
         ("physical_assessment", "bicep_inches", "FLOAT"),
@@ -797,6 +800,20 @@ def _parse_coach_markers(text, user_id, week):
             logging.exception("Coach SWAP marker failed")
             db.session.rollback()
 
+    # [DELOAD: week=N, call=true|false, reason=...] — the athlete's veto/request,
+    # codified onto the week's schedule rows (deload.py). Reason is prefixed
+    # 'athlete:' so regeneration treats it as an instruction, not evidence.
+    for m in re.finditer(r'\[DELOAD:\s*week=(\d+),\s*call=(true|false)(?:,\s*reason=([^\]]+))?\]', text, re.I):
+        try:
+            _wk = int(m.group(1))
+            _call = m.group(2).lower() == "true"
+            _why = (m.group(3) or "").strip() or ("deload requested" if _call else "deload vetoed")
+            _n = _deload.persist_deload_decision(user_id, _wk, {"deload": _call, "reason": f"athlete: {_why}"})
+            logging.info("[DELOAD] marker week %s call=%s (%s rows)", _wk, _call, _n)
+        except Exception:
+            logging.exception("Coach DELOAD marker failed")
+            db.session.rollback()
+
     # [SCHEDULE: day=X, time=3:00 PM, notes=...]  (canonical — CORE_PROMPT <markers>)
     # `day_idx=` accepted as an alias for `day=`.
     for m in re.finditer(r'\[SCHEDULE:\s*day(?:_idx)?=(\d+),\s*time=([^,]+)(?:,\s*notes=([^\]]+))?\]', text):
@@ -884,7 +901,7 @@ def _parse_coach_markers(text, user_id, week):
             # (performed sets only — a typed-but-not-done weight proves nothing).
             from coach_planning_program import _layoff_days as _lo_days, LAYOFF_MODERATE as _LO_MOD
             _lo = _lo_days(user_id)
-            if (new_weight > 0 and week not in (4, 8)
+            if (new_weight > 0 and not _deload.is_deload_week(user_id, week)
                     and (_lo is None or _lo < _LO_MOD)):
                 top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == user_id,
@@ -1064,7 +1081,7 @@ def _parse_coach_markers(text, user_id, week):
             # never drop below proven capacity outside a deload.
             from coach_planning_program import _layoff_days as _plo_days, LAYOFF_MODERATE as _PLO_MOD
             _plo = _plo_days(user_id)
-            if (p_weight is not None and p_weight > 0 and p_week not in (4, 8)
+            if (p_weight is not None and p_weight > 0 and not _deload.is_deload_week(user_id, p_week)
                     and (_plo is None or _plo < _PLO_MOD)):
                 top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == user_id,
@@ -1285,18 +1302,22 @@ def _utcnow():
 
 # Block-2 CLIMBING weekly working-set target. Block 1 ran a FLAT 81 and the
 # coach obeyed "more is not better" at the low end, so volume tapered 163->48.
-# This curve makes volume climb across the block — non-deload weeks strictly
-# increase; weeks 4/8/12 notch down (deload/test). Peak ~106 at wk11 is Erik's
-# explicit "aggressive" governor call (2026-06-29 debrief). The real anti-taper
-# enforcement is the FLOOR rail in coach_planning_program.enforce_safety; this
-# sets the target/ceiling the floor ratchets toward.
-_BLOCK_WEEKLY_SETS = {1: 84, 2: 87, 3: 90, 4: 52, 5: 93, 6: 96,
-                      7: 99, 8: 56, 9: 102, 10: 104, 11: 106, 12: 58}
+# This curve makes volume climb across the block with NO scheduled notches
+# (2026-08-30: deloads are coach-called from the data — deload.py; a called
+# deload targets DELOAD_VOLUME_FACTOR of that week's climb value). Peak ~106 at
+# wk11 is Erik's explicit "aggressive" governor call (2026-06-29 debrief); wk12
+# holds the peak. The real anti-taper enforcement is the FLOOR rail in
+# coach_planning_program.enforce_safety; this sets the target/ceiling the floor
+# ratchets toward.
+_BLOCK_WEEKLY_SETS = {1: 84, 2: 87, 3: 90, 4: 93, 5: 96, 6: 99,
+                      7: 101, 8: 103, 9: 104, 10: 105, 11: 106, 12: 106}
 
 
-def _target_weekly_sets(week):
-    """Climbing weekly working-set target for the given program week (1-12)."""
-    return _BLOCK_WEEKLY_SETS.get(int(week), 84)
+def _target_weekly_sets(week, deload=False):
+    """Climbing weekly working-set target for the given program week (1-12);
+    ~55% of it when the coach has called a deload for that week."""
+    base = _BLOCK_WEEKLY_SETS.get(int(week), 84)
+    return round(_deload.DELOAD_VOLUME_FACTOR * base) if deload else base
 
 
 def _block3_mode(user_id):
@@ -1590,7 +1611,7 @@ def _reconcile_prescription_to_logged(user_id, exercise, logged_weight, from_wee
         WeeklyPrescription.week >= from_week,
     ).all()
     for rx in rows:
-        if rx.week in (4, 8, 12):  # deload weeks stay light
+        if _deload.is_deload_week(user_id, rx.week):  # coach-called deload weeks stay light
             continue
         if rx.target_weight is None or rx.target_weight <= 0:
             continue
@@ -3921,6 +3942,8 @@ def api_workouts():
             "week": week,
             "phase": phase,
             "phaseInfo": PHASES[phase],
+            "deload": _deload.is_deload_week(current_user.id, week),
+            "deload_reason": _deload.deload_reason(current_user.id, week),
             "days": days,
         }
     try:
@@ -4106,6 +4129,8 @@ def api_week(week):
     return jsonify({
         "week": week, "phase": phase,
         "phaseInfo": PHASES[phase],
+        "deload": _deload.is_deload_week(current_user.id, week),
+        "deload_reason": _deload.deload_reason(current_user.id, week),
         "days": days,
     })
 
@@ -4504,7 +4529,7 @@ def _enrich_program_with_whys(user_id, target_week, program, run_summary,
         phase = get_phase(target_week)
         user_context = {
             "phase": phase,
-            "deload": target_week in (4, 8, 12),
+            "deload": _deload.is_deload_week(user_id, target_week),
             "goal_type": goal.goal_type if goal and goal.goal_type else "recomp",
             "current_weight": bw.weight_lbs if bw else None,
             "target_weight": goal.target_weight if goal else None,
@@ -4571,17 +4596,15 @@ def _runs_context_for_week(user_id, target_week):
           .order_by(BodyWeight.log_date.desc()).first())
     ctx = {
         "phase": get_phase(target_week),
-        "deload": target_week in (4, 8, 12),
+        "deload": _deload.is_deload_week(user_id, target_week),
         "goal_type": goal.goal_type if goal and goal.goal_type else "recomp",
         "current_weight": bw.weight_lbs if bw else None,
         "target_weight": goal.target_weight if goal else None,
         "weeks_remaining": max(0, 12 - target_week + 1),
     }
     peak = max(float(getattr(goal, 'target_weekly_miles', None) or 48), 40)
-    if target_week in (4, 8):
+    if ctx["deload"]:  # coach-called deload (persisted flag) — never a week number
         ctx["target_weekly_miles"] = round(peak * 0.62)
-    elif target_week == 12:
-        ctx["target_weekly_miles"] = round(peak * 0.73)
     elif target_week >= 11:
         ctx["target_weekly_miles"] = round(peak)
     elif target_week >= 9:
@@ -5854,7 +5877,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
     _despiked_wt, _water_spike = _despiked_current_weight(current_user.id)
     _common_ctx = {
         "phase": phase,
-        "deload": target_week in (4, 8, 12),
+        "deload": None,  # the strength coach decides from the data (deload.py); athlete [DELOAD] override applied below
         "goal_type": _goal.goal_type if _goal and _goal.goal_type else "recomp",
         "current_weight": (_despiked_wt if _despiked_wt is not None
                            else (_bw.weight_lbs if _bw else None)),
@@ -5903,11 +5926,9 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
     # used as a flat target instead of a ramp anchor.
     _peak_miles = float(getattr(_goal, 'target_weekly_miles', None) or 48)
     _peak_miles = max(_peak_miles, 40)  # never under 40 for race prep
-    if target_week == 8 or target_week == 4:
-        _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.62)  # deload ~30
-    elif target_week == 12:
-        _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.73)  # taper ~35
-    elif target_week >= 11:
+    # No scheduled deload/taper notches (2026-08-30): a coach-called deload
+    # scales this target after the strength coach decides (see the executor).
+    if target_week >= 11:
         _runs_ctx["target_weekly_miles"] = round(_peak_miles)         # peak
     elif target_week >= 9:
         _runs_ctx["target_weekly_miles"] = round(_peak_miles * 0.94)  # ~45
@@ -5943,18 +5964,27 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
     _program_ctx["target_weekly_sets"] = _target_weekly_sets(target_week)
     _program_ctx["train_days"] = 6
 
+    # Athlete override via the codified [DELOAD] marker survives regeneration
+    # as an INSTRUCTION to the coach; otherwise the coach decides from the data.
+    _ov = _deload.athlete_override(current_user.id, target_week)
+    if _ov:
+        _program_ctx["deload"] = _ov["deload"]
+        _program_ctx["deload_override_reason"] = _ov["reason"]
+    _program_ctx["today"] = _user_today()
+    _deload_decision = {"deload": False, "reason": None}
+
     def _call_program():
         try:
             with _flask_app.app_context():
-                _prog, _notes = _gen_program(
+                _prog, _notes, _dec = _gen_program(
                     user_id=_captured_user_id, week=target_week,
                     user_context=_program_ctx,
                 )
-                return _prog
+                return _prog, _dec
         except Exception as _exc:
             import logging
             logging.warning("program-coach call exception: %s", _exc, exc_info=True)
-            return {}
+            return {}, None
 
     def _call_runs():
         try:
@@ -5988,14 +6018,23 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                   "Consulting your strength, running & nutrition coaches — "
                   "designing the week from your history and last week's plan…")
     with _cf.ThreadPoolExecutor(max_workers=3) as _ex_pool:
+        # Strength coach FIRST: its deload call is an input to the running and
+        # nutrition coaches, so the three can never disagree about the week.
         _f_str = _ex_pool.submit(_call_program)
-        _f_run = _ex_pool.submit(_call_runs)
-        _f_meal = _ex_pool.submit(_call_meals)
         try:
-            _coach_program = _f_str.result(timeout=90) or {}
+            _prog_res = _f_str.result(timeout=90) or ({}, None)
+            _coach_program = _prog_res[0] or {}
+            if _prog_res[1]:
+                _deload_decision = _prog_res[1]
         except Exception as _e:
             import logging
             logging.warning("program-coach failed: %s", _e)
+        _runs_ctx["deload"] = bool(_deload_decision.get("deload"))
+        _nutri_ctx["deload"] = bool(_deload_decision.get("deload"))
+        if _runs_ctx["deload"] and _runs_ctx.get("target_weekly_miles"):
+            _runs_ctx["target_weekly_miles"] = round(_runs_ctx["target_weekly_miles"] * 0.62)
+        _f_run = _ex_pool.submit(_call_runs)
+        _f_meal = _ex_pool.submit(_call_meals)
         try:
             _coach_runs_parallel = _f_run.result(timeout=60) or {}
         except Exception as _e:
@@ -6069,7 +6108,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             if (weight is not None and weight > 0
                     and not _it.get("new")
                     and (_lo is None or _lo < LAYOFF_MODERATE)
-                    and target_week not in (4, 8, 12)):
+                    and not _deload_decision.get("deload")):
                 _top = db.session.query(db.func.max(SetLog.weight)).filter(
                     SetLog.user_id == current_user.id,
                     SetLog.exercise_name == exercise_name,
@@ -6660,6 +6699,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             })
 
         db.session.commit()
+        try:
+            _deload.persist_deload_decision(current_user.id, target_week, _deload_decision)
+        except Exception:
+            logging.exception("persisting the deload decision failed")
     except Exception:
         db.session.rollback()
 
@@ -12938,7 +12981,7 @@ def api_admin_heal_prescriptions():
             # light-start rule owns those. This used to test "is barbell", which
             # excluded every dumbbell compound and let DB Bench Press stay
             # prescribed at 30 after being logged at 40.
-            if (_should_autoreconcile(rx.exercise_name) and rx.week not in (4, 8, 12)
+            if (_should_autoreconcile(rx.exercise_name) and not _deload.is_deload_week(rx.user_id, rx.week)
                     and recent_top is not None and neww < recent_top):
                 neww = float(recent_top)
         really_new = (recent_top is None)

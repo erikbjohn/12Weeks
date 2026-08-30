@@ -479,7 +479,7 @@ def test_weekly_generate_future_week_resolves_date_from_target_week(app_ctx, mon
     _add_bodyweight(app_, db, uid, today)
     _add_dose(app_, db, uid, week2_monday, "22:00")
 
-    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, []))
+    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **k: ({}, [], {"deload": False, "reason": None}))
     monkeypatch.setattr(coach_planning_runs, "generate_week_runs", lambda **k: {})
     monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **k: {})
 

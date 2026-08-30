@@ -106,7 +106,10 @@ def _get_phase(week):
 
 
 def _is_deload(week):
-    return week in (4, 8)
+    # 2026-08-30: there are no scheduled deload weeks. Deloads are coach-called
+    # per-user flags (deload.is_deload_week); this engine-era helper has no user
+    # context, so it never claims a deload by week number.
+    return False
 
 
 def _is_peak_week(week):

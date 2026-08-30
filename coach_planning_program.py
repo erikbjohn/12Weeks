@@ -462,7 +462,8 @@ def _prev_program_by_day(user_id: int, week: int) -> dict:
     return out
 
 
-_DELOAD_WEEKS = {4, 8, 12}
+# No scheduled deload weeks (2026-08-30) — the coach calls them from the data;
+# the persisted flag (deload.is_deload_week) is the only truth.
 
 
 def _prev_nondeload_total(user_id: int, week: int) -> int:
@@ -480,7 +481,8 @@ def _prev_nondeload_total(user_id: int, week: int) -> int:
     try:
         from models import WeeklyPrescription
         for w in range(week - 1, 0, -1):
-            if w in _DELOAD_WEEKS:
+            from deload import is_deload_week
+            if is_deload_week(user_id, w):
                 continue
             rows = WeeklyPrescription.query.filter_by(user_id=user_id, week=w).all()
             if rows:
@@ -531,7 +533,9 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
     injuries = _injury_block(user_id)
 
     phase = user_context.get("phase", "?")
-    deload = user_context.get("deload", False)
+    # True/False = the athlete already decided (codified [DELOAD] marker); None = the
+    # coach decides from the evidence block below (deload.py).
+    deload_forced = user_context.get("deload")
     goal_type = user_context.get("goal_type", "recomp")
     target_sets = user_context.get("target_weekly_sets", 80)
     current_wt = user_context.get("current_weight")
@@ -580,7 +584,8 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "   calorie deficit, so manage recovery through LOAD selection and exercise "
         "   choice — do NOT cut total volume to do it. Roughly "
         f"   {max(4, round(target_sets / max(1, train_days) / 3.5))}-6 exercises "
-        "   per lifting day. On a deload week use ~55% volume via LIGHTER LOADS "
+        "   per lifting day. There are NO scheduled deload weeks — if YOU call a "
+        "   deload (DELOAD DECISION block), use ~55% of the target via LIGHTER LOADS "
         "   and FEWER MOVEMENTS — never fewer sets per movement.\n"
         f"4b. EVERY exercise is AT LEAST {MIN_SETS} working sets — never 1 or 2, "
         "   deload weeks included. A 2-set exercise is not a prescription.\n"
@@ -602,7 +607,9 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         "Output ONE JSON object mapping `<day_idx>` to a list of "
         '{"exercise": "<exact catalog name>", "sets": <int>, "reps": "<str>", '
         '"weight": <num|0>, "rest": "<single value, e.g. 90s or 2 min — never a '
-        'range>", "why": "<one sentence: load + rest rationale>"}. JSON only, no prose.'
+        'range>", "why": "<one sentence: load + rest rationale>"}. The object MUST '
+        'also carry the key "deload": {"call": <true|false>, "reason": "<one sentence '
+        'citing the evidence>"}. JSON only, no prose.'
     )
     layoff = _layoff_days(user_id)
     layoff_block = ""
@@ -618,11 +625,26 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
             f"specialization. Say in each why that this is a return ramp and "
             f"loads rebuild over 2-3 weeks. A deterministic rail will cap any "
             f"load above {int(frac * 100)}% of a movement's recent top.\n")
+    from deload import deload_evidence_text, DELOAD_VOLUME_FACTOR
+    from datetime import date as _date
+    try:
+        _evidence = deload_evidence_text(user_id, week, user_context.get("today") or _date.today())
+    except Exception:
+        log.warning("deload evidence failed", exc_info=True)
+        _evidence = "DELOAD DECISION — yours; evidence unavailable. Default = NORMAL week."
+    if deload_forced is None:
+        _deload_block = _evidence
+    else:
+        _deload_block = (
+            f"DELOAD DECISION — ALREADY MADE BY THE ATHLETE: deload={'true' if deload_forced else 'false'} "
+            f"({user_context.get('deload_override_reason') or 'athlete decision'}). Obey it and echo it in "
+            f"the \"deload\" key." + (f" Use ~{int(DELOAD_VOLUME_FACTOR * 100)}% of the volume target." if deload_forced else ""))
     user_prompt = (
         f"ATHLETE:\n- Goal {goal_type}, {current_wt} lb → {target_wt} lb\n"
-        f"- Week {week}, phase {phase} ({phase_intent}){' — DELOAD WEEK' if deload else ''}\n"
+        f"- Week {week}, phase {phase} ({phase_intent})\n"
         f"- Injuries/limits: {injuries}\n"
         f"{layoff_block}\n"
+        f"{_deload_block}\n\n"
         f"ALLOWED EXERCISES (equipment-filtered — use these exact names):\n{catalog_str}\n\n"
         f"RECENT TOP SETS (last 4 weeks):\n{history}\n\n"
         f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
@@ -646,7 +668,19 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         parsed = json.loads(text)
     except Exception as e:
         log.warning("generate_week_program failed: %s", e)
-        return {}, []
+        return {}, [], {"deload": False, "reason": None}
+    raw_dec = parsed.pop("deload", None) if isinstance(parsed, dict) else None
+    if deload_forced is not None:
+        deload = bool(deload_forced)
+        reason = user_context.get("deload_override_reason") or "athlete decision"
+    elif isinstance(raw_dec, dict):
+        deload = bool(raw_dec.get("call"))
+        reason = (str(raw_dec.get("reason") or "").strip() or None)
+    else:
+        deload, reason = False, None
+    decision = {"deload": deload, "reason": reason}
+    if deload:
+        log.info("strength coach called a DELOAD for week %s: %s", week, reason)
 
     clean, dropped = validate_program(parsed, catalog, available)
 
@@ -683,4 +717,4 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
     notes = dropped + actions
     if notes:
         log.info("program coach adjustments: %s", notes[:8])
-    return clean, notes
+    return clean, notes, decision

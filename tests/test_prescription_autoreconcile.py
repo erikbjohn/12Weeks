@@ -63,6 +63,11 @@ def test_barbell_overlift_raises_this_week_and_forward_skipping_deload(app_ctx):
         _set_rx(db, uid, 11, 1, "Barbell Bench Press", 145)   # forward
         _set_rx(db, uid, 12, 1, "Barbell Bench Press", 145)   # forward DELOAD
         _set_rx(db, uid, 9, 1, "Barbell Bench Press", 145)    # PAST — must not change
+        from models import WeeklyDaySchedule
+        for d in range(7):  # week 12 is a deload only because the coach flagged it
+            db.session.add(WeeklyDaySchedule(user_id=uid, week=12, day_idx=d, lift_name="x",
+                                             deload=True, deload_reason="coach call"))
+        db.session.commit()
 
         changed = _reconcile_prescription_to_logged(uid, "Barbell Bench Press", 155, 10)
 

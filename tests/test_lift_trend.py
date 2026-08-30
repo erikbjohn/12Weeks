@@ -182,6 +182,15 @@ def test_deload_week_in_the_window_is_skipped_not_counted(app_ctx):
     # — either as part of the reference or as one of the "2 most recent").
     _seed_all_key_lifts(app_, db, uid, 8, weight=50, reps=5, n_sets=3)
 
+    def _flag_wk8():  # 2026-08-30: a deload is a coach-called flag, not a week number
+        from models import WeeklyDaySchedule
+        for d in range(7):
+            db.session.add(WeeklyDaySchedule(user_id=uid, week=8, day_idx=d,
+                                             lift_name="x", deload=True,
+                                             deload_reason="coach call"))
+        db.session.commit()
+    _app_do(app_, _flag_wk8)
+
     # Weeks 9,10 — the true 2 most recent non-deload weeks, back at
     # baseline (no real decline).
     for wk in (9, 10):
@@ -369,4 +378,4 @@ def test_key_lifts_and_deload_weeks_constants():
         "Barbell Bench Press", "Barbell Back Squat", "Conventional Deadlift",
         "Barbell OHP", "Barbell Bent-Over Row",
     ]
-    assert lift_trend.DELOAD_WEEKS == {4, 8, 12}
+    assert not hasattr(lift_trend, "DELOAD_WEEKS")  # 2026-08-30: deloads are coach-called flags, not week numbers
