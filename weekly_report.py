@@ -160,7 +160,8 @@ def compute_weekly_metrics(week_num, user_id=None):
                     if despiked_wt is not None:
                         from goal_engine import pace_status
                         eval_date = block3_start + timedelta(days=7 * week_num)
-                        status = pace_status(despiked_wt, anchor, block3_start, eval_date)
+                        from goal_engine import user_rates as _ur
+                        status = pace_status(despiked_wt, anchor, block3_start, eval_date, _ur(user_id))
                         # pace_status's 3 states are on_pace/ahead/behind;
                         # this field's existing vocabulary is
                         # on_track/ahead/behind — map, don't rename.

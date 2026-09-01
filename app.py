@@ -6605,11 +6605,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                 # delta (today -> today+7), not a straight-line recompute off
                 # current weight — the curve is the single authority every
                 # other surface reads (dashboard on_pace, cut_status.on_curve).
-                from goal_engine import curve_value as _curve_value
+                from goal_engine import curve_value as _curve_value, user_rates as _b3_ur
+                _b3_rates = _b3_ur(current_user.id)
                 _b3_today = _user_today()
                 required_weekly = (
-                    _curve_value(_b3_anchor, _b3_start, _b3_today)
-                    - _curve_value(_b3_anchor, _b3_start, _b3_today + timedelta(days=7))
+                    _curve_value(_b3_anchor, _b3_start, _b3_today, _b3_rates)
+                    - _curve_value(_b3_anchor, _b3_start, _b3_today + timedelta(days=7), _b3_rates)
                 )
             else:
                 required_weekly = (current_weight - target_weight_val) / weeks_remaining
@@ -8298,7 +8299,8 @@ def api_progress_dashboard():
             despiked_wt, _spiked = _despiked_current_weight(uid)
             weight_for_pace = despiked_wt if despiked_wt is not None else current_weight
             if weight_for_pace is not None:
-                on_pace = pace_status(weight_for_pace, anchor, block3_start, today) != "behind"
+                from goal_engine import user_rates as _ur
+                on_pace = pace_status(weight_for_pace, anchor, block3_start, today, _ur(uid)) != "behind"
     elif projected_final_weight is not None and target_weight is not None:
         tol = 1.5  # lb tolerance so tiny rounding differences don't flip the badge
         if start_weight is not None and target_weight < start_weight:
@@ -8407,8 +8409,10 @@ def api_progress_dashboard():
         _sb_curve_target = None
         _sb_on_curve = None
         if _sb_anchor is not None and _sb_start is not None and _sb_despiked is not None:
-            _sb_curve_target = _sb_curve_value(_sb_anchor, _sb_start, today)
-            _sb_on_curve = _sb_pace_status(_sb_despiked, _sb_anchor, _sb_start, today)
+            from goal_engine import user_rates as _ur2
+            _sb_rates = _ur2(uid)
+            _sb_curve_target = _sb_curve_value(_sb_anchor, _sb_start, today, _sb_rates)
+            _sb_on_curve = _sb_pace_status(_sb_despiked, _sb_anchor, _sb_start, today, _sb_rates)
 
         _sb_lt = _sb_lift_decline(uid, current_week)
 
@@ -12745,6 +12749,57 @@ def api_admin_debug_patch_set():
     db.session.commit()
     return jsonify({"ok": True, "id": s.id, "before": before,
                     "after": {"reps": s.reps, "weight": s.weight}})
+
+
+@app.route("/api/admin/block3-reanchor", methods=["POST"])
+@admin_required
+def api_admin_block3_reanchor():
+    """S074: ONE-SHOT endpoint-preserving re-anchor. Keeps the accrued past,
+    rescales the remaining weekly rates so the curve still lands on 195.0 at
+    start+84, writes per-user rates (SystemFlag block3_rates:<uid>) and the
+    new weight_projection. Guarded by block3_reanchored:<uid> (spec: exactly
+    once). Body: {email, dry_run?}. Run on a Monday morning for an exact fit."""
+    from goal_engine import reanchor_block3, user_rates, build_block3_projection, curve_value
+    import cut_guard as _cg
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    user = User.query.filter(db.func.lower(User.email) == email).first() if email else None
+    if not user:
+        return jsonify({"error": "email required / unknown"}), 404
+    if SystemFlag.query.filter_by(key=f"block3_reanchored:{user.id}").first():
+        return jsonify({"error": "already re-anchored once for this user (spec: exactly once)"}), 409
+    anchor, start = _cg._block3_anchor_and_start(user.id)
+    if anchor is None or start is None:
+        return jsonify({"error": "no block-3 anchor/start for this user"}), 400
+    today = _user_today_for(user)
+    wt, spiked = _cg.despiked_weight_for_week(user.id, program_week(start, today))
+    if wt is None:
+        return jsonify({"error": "no weigh-in to re-anchor on"}), 400
+    old_rates = user_rates(user.id)
+    new_rates = reanchor_block3(wt, today, start, old_rates)
+    # the curve is re-based so that curve(today) == today's despiked weight:
+    # anchor' = wt + (loss accrued under the NEW table over the elapsed days)
+    elapsed = max(0, min((today - start).days, 84))
+    accrued = sum(new_rates[min(12, (d // 7) + 1)] / 7.0 for d in range(elapsed))  # day→rate-week, not a program week
+    new_anchor = round(wt + accrued, 4)
+    projection = build_block3_projection(new_anchor, start, new_rates)
+    out = {"dry_run": bool(data.get("dry_run")), "on_date": today.isoformat(), "despiked_weight": wt,
+           "spiked": spiked, "old_rates": old_rates, "new_rates": new_rates,
+           "new_anchor": new_anchor, "curve_end": projection[-1]["projected"], "projection": projection,
+           "note": "run on a Monday morning for an exact fit" if today.weekday() != 0 else None}
+    if data.get("dry_run"):
+        return jsonify(out)
+    goal = TrainingGoal.query.filter_by(user_id=user.id).order_by(TrainingGoal.id.desc()).first()
+    if goal:
+        goal.weight_projection = projection
+    db.session.add(SystemFlag(key=f"block3_rates:{user.id}", value=json.dumps({str(k): v for k, v in new_rates.items()})))
+    _af = SystemFlag.query.filter_by(key=f"block3_anchor:{user.id}").first()
+    if _af:
+        _af.value = str(new_anchor)
+    db.session.add(SystemFlag(key=f"block3_reanchored:{user.id}", value=today.isoformat()))
+    db.session.commit()
+    _admin_audit("block3-reanchor", user.id, {"weight": wt, "new_anchor": new_anchor})
+    return jsonify(out)
 
 
 @app.route("/api/admin/debug/regenerate-projection", methods=["POST"])

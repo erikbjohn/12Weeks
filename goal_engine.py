@@ -710,34 +710,84 @@ BLOCK3_WEEKLY_RATES = {1: 1.25, 2: 1.25, 3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0,
 CURVE_TOLERANCE_LB = 1.5
 
 
-def build_block3_projection(anchor_weight, start_date):
+BLOCK3_TARGET_LB = 195.0
+BLOCK3_DAYS = 84
+
+
+def user_rates(user_id):
+    """Per-user weekly rates: the global table unless a one-shot re-anchor
+    (S074) rescaled the REMAINING weeks for this user (SystemFlag
+    block3_rates:<uid>, JSON {week: rate}). Falls back to the global table."""
+    try:
+        import json as _json
+        from models import SystemFlag
+        flag = SystemFlag.query.filter_by(key=f"block3_rates:{user_id}").first()
+        if flag and flag.value:
+            raw = _json.loads(flag.value)
+            return {int(k): float(v) for k, v in raw.items()}
+    except Exception:
+        pass
+    return BLOCK3_WEEKLY_RATES
+
+
+def reanchor_block3(current_weight, on_date, start_date, rates=None):
+    """S074: endpoint-preserving re-anchor. Keeps the accrued past exactly
+    as-is and rescales the REMAINING weekly rates proportionally so the curve
+    still lands on BLOCK3_TARGET_LB at start+84 days. Returns the new
+    {week: rate} table (weeks already elapsed keep their old rates)."""
+    rates = dict(rates or BLOCK3_WEEKLY_RATES)
+    elapsed = max(0, min((on_date - start_date).days, BLOCK3_DAYS))
+    remaining_days = BLOCK3_DAYS - elapsed
+    if remaining_days <= 0:
+        return rates
+    need = float(current_weight) - BLOCK3_TARGET_LB
+    # per-day capacity of the remaining schedule at the current rates
+    cap = 0.0
+    for d in range(elapsed, BLOCK3_DAYS):
+        cap += rates[min(12, d // 7 + 1)] / 7.0
+    k = need / cap if cap > 0 else 1.0
+    new = dict(rates)
+    first_partial_week = min(12, elapsed // 7 + 1)
+    for week in range(first_partial_week, 13):
+        new[week] = round(rates[week] * k, 4)
+    # The week in progress mixes old (elapsed) days and new days; curve_value
+    # handles that by rate-per-day, so a single per-week rate is an
+    # approximation only for that one week. Re-anchoring should happen on a
+    # Monday morning (day 0 of a week) for an exact fit — the endpoint
+    # checks this.
+    return new
+
+
+def build_block3_projection(anchor_weight, start_date, rates=None):
     """12 end-of-week targets [{"week", "projected"}] — the stored
     TrainingGoal.weight_projection shape weekly_report/app.js already read."""
+    rates = rates or BLOCK3_WEEKLY_RATES
     out, w = [], anchor_weight
     for week in range(1, 13):
-        w -= BLOCK3_WEEKLY_RATES[week]
+        w -= rates[week]
         out.append({"week": week, "projected": round(w, 2)})
     return out
 
 
-def curve_value(anchor_weight, start_date, on_date):
+def curve_value(anchor_weight, start_date, on_date, rates=None):
     """Piecewise-linear DAILY interpolation, morning-weigh-in convention:
     curve(D) is the target at the MORNING of D — loss accrued over the
     elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
     curve(start) == anchor exactly; 195.0 is reached at start+84 days (the
     morning after the block's final day) and clamps thereafter."""
+    rates = rates or BLOCK3_WEEKLY_RATES
     elapsed = (on_date - start_date).days
     elapsed = max(0, min(elapsed, 84))
     w = anchor_weight
     for d in range(elapsed):
         week = min(12, d // 7 + 1)
-        w -= BLOCK3_WEEKLY_RATES[week] / 7.0
+        w -= rates[week] / 7.0
     return round(w, 4)
 
 
-def pace_status(weight, anchor_weight, start_date, on_date):
+def pace_status(weight, anchor_weight, start_date, on_date, rates=None):
     """3-state judgment vs curve_value with the ONE tolerance."""
-    target = curve_value(anchor_weight, start_date, on_date)
+    target = curve_value(anchor_weight, start_date, on_date, rates)
     if weight > target + CURVE_TOLERANCE_LB:
         return "behind"
     if weight < target - CURVE_TOLERANCE_LB:

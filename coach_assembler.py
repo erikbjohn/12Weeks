@@ -1009,8 +1009,10 @@ def _build_cut_status():
             _curve_weight, _ = cut_guard.detect_water_spike(
                 list(reversed(bws))[:20], _expected_loss)
             if _curve_weight is not None:
-                curve_target_today = curve_value(_anchor, _block3_start, today)
-                on_curve = pace_status(_curve_weight, _anchor, _block3_start, today)
+                from goal_engine import user_rates as _ur
+                _rates = _ur(current_user.id)
+                curve_target_today = curve_value(_anchor, _block3_start, today, _rates)
+                on_curve = pace_status(_curve_weight, _anchor, _block3_start, today, _rates)
 
     return {"cut_status": {
         "current_weight": current_weight,

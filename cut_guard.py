@@ -178,7 +178,7 @@ def expected_weekly_loss_for(user_id, week):
     if not _block3_mode(user_id):
         return 0.0
     import goal_engine
-    return goal_engine.BLOCK3_WEEKLY_RATES.get(week, 0.0)
+    return goal_engine.user_rates(user_id).get(week, 0.0)
 
 
 def despiked_weight_for_week(user_id, week):

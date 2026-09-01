@@ -431,8 +431,9 @@ def _tool_get_body_state(user_id: int) -> str:
                 wt, spiked = cut_guard.despiked_weight_for_week(user_id, _current_week())
                 if wt is not None:
                     today = _date.today()
-                    curve = {"curve_target_today": round(curve_value(anchor, start, today), 1),
-                             "on_curve": pace_status(wt, anchor, start, today),
+                    from goal_engine import user_rates as _ur
+                    curve = {"curve_target_today": round(curve_value(anchor, start, today, _ur(user_id)), 1),
+                             "on_curve": pace_status(wt, anchor, start, today, _ur(user_id)),
                              "despiked_weight": wt, "water_spike_suspected": spiked}
     except Exception:
         curve = None
