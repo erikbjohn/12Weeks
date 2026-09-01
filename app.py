@@ -3826,9 +3826,12 @@ def api_workouts():
                 # isBodyweightPrescription detection would fail.
                 if getattr(rx, 'target_weight', None) is not None:
                     ex_dict["target_weight"] = rx.target_weight
-                ex_info = EXERCISES.get(rx.exercise_name, {})
+                from workout_data import resolve_name as _rn
+                ex_info = EXERCISES.get(_rn(rx.exercise_name), {}) or EXERCISES.get(rx.exercise_name, {})
                 if ex_info.get("video"):
                     ex_dict["video"] = ex_info["video"]
+                if ex_info.get("category"):
+                    ex_dict["category"] = ex_info["category"]  # S081: Stats picks THIS block's compounds
                 rx_by_day[rx.day_idx].append(ex_dict)
 
             for day_idx, exercises in rx_by_day.items():

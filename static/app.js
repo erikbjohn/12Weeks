@@ -12519,7 +12519,28 @@ async function renderDetail() {
 
   // Weight summary dashboard
   let weightSummaryHtml = '';
-  const summaryLifts = ['Barbell Bench Press', 'Barbell Back Squat', 'Conventional Deadlift', 'DB Overhead Press', 'Barbell Bent-Over Row', 'Barbell Hip Thrust'];
+  // S081: the lifts in THIS block's program (compound/power, ordered by first
+  // appearance), not a hardcoded template list that hid DB Bench Press and
+  // Single-Arm DB Row and blanked the whole panel when none matched.
+  const summaryLifts = (function() {
+    const out = [];
+    const seen = {};
+    const maxWk = getActualProgramWeek() || currentWeek || 12;
+    for (let w = 1; w <= maxWk; w++) {
+      const wk = workoutData && workoutData[String(w)];
+      const days = (wk && wk.days) || [];
+      for (const day of days) {
+        for (const ex of ((day && day.exercises) || [])) {
+          const nm = ex.name || ex.exercise;
+          if (!nm || seen[nm]) continue;
+          if (ex.category && ex.category !== 'compound' && ex.category !== 'power') continue;
+          if (!ex.category) continue;
+          seen[nm] = true; out.push(nm);
+        }
+      }
+    }
+    return out.length ? out : ['Barbell Bench Press', 'Barbell Back Squat', 'Conventional Deadlift', 'DB Overhead Press', 'Barbell Bent-Over Row', 'Barbell Hip Thrust'];
+  })();
   const weights = loadWeights();
   const hasSomeWeights = summaryLifts.some(n => weights[n] && weights[n].current);
   if (hasSomeWeights) {
@@ -12603,13 +12624,16 @@ async function renderDetail() {
         }
         prescribedRM = estimate1RM(latestTarget, r);
       }
-      const oneRM = Math.max(loggedRM, prescribedRM);
+      // Logged beats prescribed: a number the athlete has never lifted is a
+      // plan, not an estimate. Prescribed e1RM is the fallback only.
+      const oneRM = loggedRM > 0 ? loggedRM : prescribedRM;
       if (oneRM > 0) est1rm = oneRM;
       const displayVal = est1rm || wt;
+      const _srcTag = loggedRM > 0 ? '' : ' <span style="font-size:10px;color:var(--muted)">(planned)</span>';
       wsRows += `<div class="ws-row-wrap">
   <div class="ws-row" onclick="toggleWeightDetail('${name}', this)">
     <span class="ws-name">${shortName}</span>
-    <span class="ws-val">${displayVal} lb ${trendIcon}</span>
+    <span class="ws-val">${displayVal} lb${_srcTag} ${trendIcon}</span>
   </div>
   <div class="ws-detail" id="ws-detail-${name.replace(/\s/g, '-')}" style="display:none"></div>
 </div>`;

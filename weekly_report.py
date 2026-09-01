@@ -64,14 +64,30 @@ def compute_weekly_metrics(week_num, user_id=None):
     week_end = today
     week_start = today - timedelta(days=6)
 
-    # Workouts completed
-    q = DayCompletion.query.filter(
-        DayCompletion.done == True,
-        DayCompletion.week == week_num,
-    )
+    # Workouts completed — EVIDENCE-based and block-scoped (S076), the same
+    # definition as the dashboard streak (toggle OR all sets OR a run on a
+    # run-only day). Toggle-only counting made the Sunday recap grade a
+    # fully-logged week as missed.
+    completions = None
     if user_id is not None:
-        q = q.filter(DayCompletion.user_id == user_id)
-    completions = q.count()
+        try:
+            from workout_status import evidence_done_slots
+            from models import AppState
+            _st = AppState.query.filter_by(user_id=user_id).first()
+            _bs = _st.start_date if _st and _st.start_date else None
+            slots = [(week_num, d) for d in range(7)]
+            from coach_assembler import _resolve_workout_for_day
+            completions = len(evidence_done_slots(user_id, _bs, slots, _resolve_workout_for_day))
+        except Exception:
+            completions = None
+    if completions is None:
+        q = DayCompletion.query.filter(
+            DayCompletion.done == True,
+            DayCompletion.week == week_num,
+        )
+        if user_id is not None:
+            q = q.filter(DayCompletion.user_id == user_id)
+        completions = q.count()
 
     # Weight trend
     q = BodyWeight.query.filter(

@@ -151,3 +151,35 @@ def streak_stats(schedule, done):
         else:
             running = 0
     return {"current_streak": current, "best_streak": best}
+
+
+def evidence_done_slots(user_id, block_start, slots, resolve_day):
+    """S076: evidence-based done slots for `slots` (list of (week, day_idx)),
+    block-scoped like the dashboard streak — toggle OR every prescribed set
+    OR a run on a run-only day. `resolve_day(week, day_idx)` returns the
+    resolved day dict (coach_assembler._resolve_workout_for_day). Shared by
+    the dashboard and the weekly report so 'Workouts: X/Y' can't disagree
+    with the streak."""
+    from models import DayCompletion, SetLog, RunLog
+    slots = list(slots)
+    weeks = {w for w, _ in slots}
+    toggled = {(d.week, d.day_idx) for d in DayCompletion.query.filter_by(user_id=user_id, done=True).all()
+               if d.week in weeks}
+    sq = SetLog.query.filter(SetLog.user_id == user_id, SetLog.week.in_(weeks))
+    rq = RunLog.query.filter(RunLog.user_id == user_id, RunLog.week.in_(weeks))
+    if block_start is not None:
+        sq = sq.filter(SetLog.logged_date >= block_start)
+        rq = rq.filter(RunLog.log_date >= block_start)
+    set_rows = {}
+    for r in sq.all():
+        set_rows.setdefault((r.week, r.day_idx), []).append(r)
+    run_days = {(r.week, r.day_idx) for r in rq.all() if r.week is not None and r.day_idx is not None}
+    prescribed = {}
+    for slot in slots:
+        if slot in toggled or (slot not in set_rows and slot not in run_days):
+            continue
+        try:
+            prescribed[slot] = (resolve_day(*slot) or {}).get("exercises") or []
+        except Exception:
+            prescribed[slot] = []
+    return completed_day_keys(slots, toggled, prescribed, set_rows, run_days)
