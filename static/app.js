@@ -1023,6 +1023,52 @@ function resolveSetKey(setData, week, day, exName, origName) {
   return null;
 }
 
+// S020: every coach stream reads through this. A non-OK response (429 rate
+// limit, 5xx, proxy HTML) used to be handed to the SSE loop as if it were a
+// stream — it yielded no `data:` lines and rendered the literal "(Coach
+// returned an empty response — check server logs)". Now it becomes one
+// well-formed `data: [ERROR: …]` frame that every reader already handles.
+var SSE_IDLE_MS = 45000;
+function sseReader(res) {
+  if (res && res.ok && res.body) {
+    // Idle guard: a stream that stops mid-reply (proxy drop, dead worker)
+    // ends with an [ERROR] frame after SSE_IDLE_MS instead of spinning forever.
+    var real = res.body.getReader();
+    var timedOut = false;
+    return {
+      read: function() {
+        if (timedOut) return Promise.resolve({ done: true, value: undefined });
+        return new Promise(function(resolve, reject) {
+          var t = setTimeout(function() {
+            timedOut = true;
+            try { real.cancel(); } catch (e) {}
+            resolve({ done: false, value: new TextEncoder().encode('data: [ERROR: The coach stopped responding — try again.]\n\n') });
+          }, SSE_IDLE_MS);
+          real.read().then(function(r) { clearTimeout(t); resolve(r); }, function(e) { clearTimeout(t); reject(e); });
+        });
+      },
+      cancel: function() { return real.cancel(); },
+    };
+  }
+  var status = res ? res.status : 0;
+  var msgP = (res && status === 429)
+    ? Promise.resolve('Too fast — wait a moment and try again.')
+    : (res ? res.clone().json().then(function(j){ return (j && j.error) || ('HTTP ' + status); })
+                          .catch(function(){ return 'HTTP ' + status; })
+           : Promise.resolve('No response from the server.'));
+  var sent = false;
+  return {
+    read: function() {
+      if (sent) return Promise.resolve({ done: true, value: undefined });
+      sent = true;
+      return msgP.then(function(m) {
+        return { done: false, value: new TextEncoder().encode('data: [ERROR: ' + m + ']\n\n') };
+      });
+    },
+    cancel: function() { return Promise.resolve(); },
+  };
+}
+
 function apiPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -6175,13 +6221,13 @@ async function _startSundayReviewStream(trigger) {
     messagesEl.appendChild(bubble);
 
     var fullText = '';
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
+    var reader = sseReader(res);
+    var decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       var result = await reader.read();
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
-      var lines = chunk.split('\n');
+      _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
@@ -6325,14 +6371,15 @@ async function _startMcChat() {
     messagesEl.appendChild(bubble);
 
     let fullText = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    const reader = sseReader(res);
+    const decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
       let stop = false;
-      for (const line of chunk.split('\n')) {
+      _sseBuf += chunk; const lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
+      for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') { stop = true; break; }
@@ -6421,14 +6468,15 @@ async function sendMcChat() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     let fullText = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    const reader = sseReader(res);
+    const decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
       let stop = false;
-      for (const line of chunk.split('\n')) {
+      _sseBuf += chunk; const lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
+      for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') { stop = true; break; }
@@ -6631,14 +6679,14 @@ async function sendMorningCoachReply() {
     }
 
     let fullText = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    const reader = sseReader(res);
+    const decoder = new TextDecoder(); var _sseBuf = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      _sseBuf += chunk; const lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       let stop = false;
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -7063,15 +7111,15 @@ async function sendChatMessage(inputId, containerId) {
             container.scrollTop = container.scrollHeight;
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
+        const reader = sseReader(res);
+        const decoder = new TextDecoder(); var _sseBuf = '';
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
+            _sseBuf += chunk; const lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
             let stop = false;
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -8099,13 +8147,13 @@ async function _fetchRunCoachOpener(triggerMsg) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     if (bubble) bubble.innerHTML = '';
     var fullText = '';
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
+    var reader = sseReader(res);
+    var decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       var result = await reader.read();
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
-      var lines = chunk.split('\n');
+      _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
@@ -8168,13 +8216,13 @@ async function sendRunCoachMsg() {
     });
     typingBubble.innerHTML = '';
     var fullText = '';
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
+    var reader = sseReader(res);
+    var decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       var result = await reader.read();
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
-      var lines = chunk.split('\n');
+      _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
@@ -10608,13 +10656,13 @@ async function launchWeeklyPlanning(weekOverride) {
         var bubble = messagesEl ? messagesEl.querySelector('.chat-bubble.coach') : null;
         if (bubble) bubble.innerHTML = '';
         var fullText = '';
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
+        var reader = sseReader(res);
+        var decoder = new TextDecoder(); var _sseBuf = '';
         while (true) {
             var result = await reader.read();
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
-            var lines = chunk.split('\n');
+            _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
             var stop = false;
             for (var li = 0; li < lines.length; li++) {
                 if (lines[li].startsWith('data: ')) {
@@ -10676,13 +10724,13 @@ async function _fetchInlineCoachOpener() {
         var bubble = messagesEl.querySelector('.chat-bubble.coach');
         if (bubble) bubble.innerHTML = '';
         var fullText = '';
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
+        var reader = sseReader(res);
+        var decoder = new TextDecoder(); var _sseBuf = '';
         while (true) {
             var result = await reader.read();
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
-            var lines = chunk.split('\n');
+            _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
             var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
@@ -10807,13 +10855,13 @@ async function sendInlineCoachMsg() {
         });
         typingBubble.innerHTML = '';
         var fullText = '';
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
+        var reader = sseReader(res);
+        var decoder = new TextDecoder(); var _sseBuf = '';
         while (true) {
             var result = await reader.read();
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
-            var lines = chunk.split('\n');
+            _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
             var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
@@ -10885,8 +10933,8 @@ async function sendInlineCoachMsg() {
                         var _mel = document.getElementById('coach-inline-messages');
                         if (_mel) { _mel.appendChild(_fbBubble); }
                         var _fbFull = '';
-                        var _fbReader = r.body.getReader();
-                        var _fbDec = new TextDecoder();
+                        var _fbReader = sseReader(r);
+                        var _fbDec = new TextDecoder(); var _sseBuf = '';
                         (function _readFb() {
                             _fbReader.read().then(function(res) {
                                 if (res.done) {
@@ -10896,7 +10944,7 @@ async function sendInlineCoachMsg() {
                                     return;
                                 }
                                 var ch = _fbDec.decode(res.value, { stream: true });
-                                var ls = ch.split('\n');
+                                _sseBuf += ch; var ls = _sseBuf.split('\n'); _sseBuf = ls.pop();
                                 var fbStop = false;
                                 for (var li = 0; li < ls.length; li++) {
                                     if (ls[li].startsWith('data: ')) {
@@ -10941,13 +10989,13 @@ async function _refreshCoachAccordionMsg() {
             body: JSON.stringify({ message: trigger }),
         });
         var fullText = '';
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
+        var reader = sseReader(res);
+        var decoder = new TextDecoder(); var _sseBuf = '';
         while (true) {
             var result = await reader.read();
             if (result.done) break;
             var chunk = decoder.decode(result.value, { stream: true });
-            var lines = chunk.split('\n');
+            _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
             var stop = false;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith('data: ')) {
@@ -12938,13 +12986,13 @@ async function _fetchLiftCoachOpener(triggerMsg) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     if (bubble) bubble.innerHTML = '';
     var fullText = '';
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
+    var reader = sseReader(res);
+    var decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       var result = await reader.read();
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
-      var lines = chunk.split('\n');
+      _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
@@ -13007,13 +13055,13 @@ async function sendLiftCoachMsg() {
     });
     typingBubble.innerHTML = '';
     var fullText = '';
-    var reader = res.body.getReader();
-    var decoder = new TextDecoder();
+    var reader = sseReader(res);
+    var decoder = new TextDecoder(); var _sseBuf = '';
     while (true) {
       var result = await reader.read();
       if (result.done) break;
       var chunk = decoder.decode(result.value, { stream: true });
-      var lines = chunk.split('\n');
+      _sseBuf += chunk; var lines = _sseBuf.split('\n'); _sseBuf = lines.pop();
       var stop = false;
       for (var i = 0; i < lines.length; i++) {
         if (lines[i].startsWith('data: ')) {
