@@ -52,6 +52,31 @@ from protocol import (
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+# Cookie hardening (S015). Secure only on Render so local http dev still works.
+app.config.update(
+    SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER")),
+    REMEMBER_COOKIE_SAMESITE="Lax", REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SECURE=bool(os.environ.get("RENDER")),
+)
+
+
+@app.before_request
+def _csrf_origin_guard():
+    """Refuse state-changing /api/ requests that a browser marks as
+    cross-site. Same-origin fetches from the app carry Sec-Fetch-Site:
+    same-origin; curl/launchd admin callers send neither header and are
+    unaffected."""
+    if request.method == "GET" or not request.path.startswith("/api/"):
+        return None
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return jsonify({"error": "cross-site request refused"}), 403
+    origin = request.headers.get("Origin")
+    if origin:
+        from urllib.parse import urlsplit
+        if urlsplit(origin).netloc and urlsplit(origin).netloc != request.host:
+            return jsonify({"error": "cross-site request refused"}), 403
+    return None
 
 # ─── MODEL CONSTANTS ──────────────────────────────────────────────────────
 CLAUDE_OPUS = "claude-opus-4-7"
@@ -230,19 +255,9 @@ def _migrate_block3_flags_to_keyed():
 
 
 with app.app_context():
-    # Drop and recreate psych_intake if it's missing the locked_until column
-    try:
-        inspector = sa_inspect(db.engine)
-        tables = inspector.get_table_names()
-        # Drop and recreate tables missing critical columns
-        for tbl, required_col in [("psych_intake", "locked_until"), ("physical_assessment", "chest_inches")]:
-            if tbl in tables:
-                cols = {c["name"] for c in inspector.get_columns(tbl)}
-                if required_col not in cols:
-                    db.session.execute(text(f"DROP TABLE {tbl}"))
-                    db.session.commit()
-    except Exception:
-        pass
+    # No destructive DDL at boot. A missing column is added in place by the
+    # _migrations list below (S044: this block used to DROP psych_intake /
+    # physical_assessment wholesale on any inspector anomaly, silently).
     try:
         db.create_all()
     except Exception as e:
@@ -278,6 +293,7 @@ with app.app_context():
 
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
+        ("psych_intake", "locked_until", "DATE"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),
@@ -3495,78 +3511,6 @@ def service_worker():
     response.headers['Expires'] = '0'
     response.headers['Service-Worker-Allowed'] = '/'
     return response
-
-
-@app.route("/restart-plan")
-@login_required
-def restart_plan():
-    """Reset plan_accepted and redirect to index with action param."""
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    if goal:
-        goal.plan_accepted = False
-        db.session.commit()
-    return redirect("/?action=restart-plan")
-
-
-@app.route("/redo-measurements")
-@login_required
-def redo_measurements():
-    """Reset physical assessment so user can re-enter measurements."""
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if pa:
-        pa.completed = False
-        db.session.commit()
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    if goal:
-        goal.plan_accepted = False
-        db.session.commit()
-    return redirect("/")
-
-
-@app.route("/redo-equipment")
-@login_required
-def redo_equipment():
-    """Reset equipment inventory so user can re-select."""
-    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
-    if eq:
-        eq.completed = False
-        db.session.commit()
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    if goal:
-        goal.plan_accepted = False
-        db.session.commit()
-    return redirect("/")
-
-
-@app.route("/reset-onboarding")
-@login_required
-def reset_onboarding():
-    """Reset all onboarding data for current user. Keeps the account."""
-    uid = current_user.id
-    for model in [ChatMessage, MorningCheckIn, PsychIntake, PhysicalAssessment,
-                  ExerciseLog, ExerciseCompletion, DayCompletion, BodyWeight,
-                  BodyMeasurement, WeeklyCheckIn, MealLog, SupplementLog,
-                  ProgressPhoto, UserConstraints, TrainingGoal,
-                  UserFoodSelections, WeeklyReport]:
-        try:
-            model.query.filter_by(user_id=uid).delete()
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-    # Reset app state
-    state = AppState.query.filter_by(user_id=uid).first()
-    if state:
-        state.baseline_done = False
-        state.current_week = 1
-        state.start_date = None
-        db.session.commit()
-    # Also reset equipment
-    try:
-        UserEquipment.query.filter_by(user_id=uid).delete()
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-    return redirect("/")
 
 
 # ─── WORKOUT DATA ───────────────────────────────────────────────────────────
