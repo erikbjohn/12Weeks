@@ -99,7 +99,7 @@ def test_hardcoded_swap_cleanup_token_no_longer_works(app_ctx):
 
 def test_admin_key_rejected_as_query_param_accepted_as_header(app_ctx, monkeypatch):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "sekrit-test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "sekrit-test-key-long-enough-to-pass-0123")
     _user_id(app_, db, "erik-test@test.com")
     client = app_.test_client()
     # Query param must NOT authenticate (it leaks into access logs).
@@ -108,9 +108,22 @@ def test_admin_key_rejected_as_query_param_accepted_as_header(app_ctx, monkeypat
     # Header must authenticate.
     r = client.get(
         "/api/debug/show-sets?email=erik-test@test.com",
-        headers={"X-Admin-Key": "sekrit-test-key"},
+        headers={"X-Admin-Key": "sekrit-test-key-long-enough-to-pass-0123"},
     )
     assert r.status_code == 200
+
+
+def test_leaked_or_weak_admin_key_never_authenticates(app_ctx, monkeypatch):
+    """The literal that was committed to git for months must be dead even if
+    someone sets it back in the env; so must any short key."""
+    app_, db = app_ctx
+    _user_id(app_, db, "erik-test@test.com")
+    client = app_.test_client()
+    for weak in ("12weeks-debug-2026", "short-key"):
+        monkeypatch.setenv("ADMIN_API_KEY", weak)
+        r = client.get("/api/debug/show-sets?email=erik-test@test.com",
+                       headers={"X-Admin-Key": weak})
+        assert r.status_code in (401, 403), weak
 
 
 def test_test_create_user_requires_admin(app_ctx):

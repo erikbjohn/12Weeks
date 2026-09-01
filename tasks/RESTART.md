@@ -76,7 +76,7 @@ Model: Opus 4.8 (`coach.py` CLAUDE_OPUS, `coach_with_tools.py`).
 - Read-only audit (no LLM cost), `?email=erik@placemetry.com`:
   `/api/debug/today-status`, `/api/debug/full-day-state`,
   `/api/debug/api-workouts-as-user`, `/api/debug/show-sets`
-- Admin (header `X-Admin-Key: 12weeks-debug-2026`): `/api/admin/debug/sql` (SELECT),
+- Admin (header `X-Admin-Key: $(cat ~/.12weeks_admin_key)`): `/api/admin/debug/sql` (SELECT),
   `/api/admin/debug/exec` (UPDATE/INSERT/DELETE), `/api/admin/heal-prescriptions`
 - Your athlete account: `erik@placemetry.com` (user_id 1). Currently **week 11**,
   start_date 2026-03-30.

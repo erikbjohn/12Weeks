@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import hmac
 import deload as _deload
 import threading
 import time
@@ -98,6 +99,15 @@ def unauthorized():
         return jsonify({"error": "Login required"}), 401
     return redirect(url_for('login', next=request.url))
 
+_LEAKED_ADMIN_KEYS = {"12weeks-debug-2026", "swap-cleanup-2026-04-30"}
+
+
+def _admin_key_is_strong(key: str) -> bool:
+    """A header key must be long and not one of the literals that were
+    committed to git / pasted into transcripts before the 2026-09-01 rotation."""
+    return bool(key) and len(key) >= 24 and key not in _LEAKED_ADMIN_KEYS
+
+
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -105,8 +115,13 @@ def admin_required(f):
         # Header ONLY: accepting the key as a query param would leak it into
         # server/proxy access logs, browser history, and Referer headers.
         api_key = request.headers.get('X-Admin-Key')
-        expected_key = os.environ.get('ADMIN_API_KEY')
-        if api_key and expected_key and api_key == expected_key:
+        expected_key = os.environ.get('ADMIN_API_KEY') or ''
+        # Header auth is honoured only for a key that is not trivially
+        # guessable: the original literal was committed to git and pasted
+        # into transcripts for months (rotated 2026-09-01). A weak/absent key
+        # leaves session-admin auth as the only path.
+        if (api_key and _admin_key_is_strong(expected_key)
+                and hmac.compare_digest(api_key, expected_key)):
             return f(*args, **kwargs)
         # Fall back to session auth
         if not current_user or not current_user.is_authenticated:
