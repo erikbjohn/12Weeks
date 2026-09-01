@@ -535,6 +535,11 @@ class TrainingGoal(db.Model):
     tdee = db.Column(db.Integer, nullable=True)
     phase_plan = db.Column(db.JSON, nullable=True)
     calorie_by_day_type = db.Column(db.JSON, nullable=True)
+    # Coach's codified cut directive ([NUTRITION: daily_calories]) —
+    # {calories, reason, week, set_on}. Weekly recalibration honours it for
+    # the week it was set (S026); otherwise the marker lasted ≤1 week and
+    # never reached a meal card.
+    calorie_override = db.Column(db.JSON, nullable=True)
     fasting_protocol = db.Column(db.String(20), nullable=True)
     electrolyte_supplementation = db.Column(db.Boolean, default=False)
     weight_projection = db.Column(db.JSON, nullable=True)

@@ -315,6 +315,7 @@ with app.app_context():
     _migrations = [
         ("psych_intake", "locked_until", "DATE"),
         ("day_completion", "source", "VARCHAR(10)"),
+        ("training_goal", "calorie_override", "JSON"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),
@@ -931,7 +932,22 @@ def _parse_coach_markers(text, user_id, week):
             goal = TrainingGoal.query.filter_by(user_id=user_id).first()
             if goal:
                 goal.daily_calories = new_cals
+                goal.calorie_override = {
+                    "calories": new_cals, "reason": (m.group(2) or "").strip()[:200],
+                    "week": week, "set_on": _user_today_for(db.session.get(User, user_id)).isoformat(),
+                }
                 db.session.commit()
+                # S026: the directive must reach the served meal cards, not
+                # just TrainingGoal — regenerate the rest of this week's
+                # unlogged days at the new number (same protections as the
+                # protocol rail: logged/past days untouched).
+                _u = db.session.get(User, user_id)
+                _t = _user_today_for(_u)
+                _rest_of_week = [_t + timedelta(days=i) for i in range(0, 7 - _t.weekday())]
+                _regen = _reconcile_meal_rail(_u, _rest_of_week)
+                db.session.commit()
+                _marker_outcome(user_id, week, "NUTRITION", m.group(0), "applied",
+                                f"{new_cals} kcal; regenerated day_idx {_regen}")
         except Exception as _me:
             logging.exception("Coach NUTRITION (daily_calories) marker failed")
             _marker_outcome(user_id, week, "NUTRITION", m.group(0), "failed", str(_me))
@@ -6412,6 +6428,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                                               target_weight=target_weight_val, weeks=weeks_remaining)
                 old_cal = goal.daily_calories
                 old_protein = goal.protein_grams
+                _ov = goal.calorie_override or {}
+                if _ov.get("calories") and _ov.get("week") in (target_week, target_week - 1):
+                    # Coach directive for this window stands; log the
+                    # reconciliation instead of silently overwriting it (S026).
+                    logging.info("recalibration: keeping coach calorie override %s (wk %s) over computed %s",
+                                 _ov.get("calories"), _ov.get("week"), new_targets["calories"])
+                    new_targets["calories"] = int(_ov["calories"])
                 goal.daily_calories = new_targets["calories"]
                 goal.protein_grams = new_targets["protein"]
                 goal.carb_grams = new_targets["carbs"]
