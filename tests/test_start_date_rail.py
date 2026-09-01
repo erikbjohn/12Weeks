@@ -62,7 +62,8 @@ def test_completion_toggles_are_idempotent_with_explicit_done(app_ctx):
     app_, db = app_ctx
     from models import User, ExerciseCompletion, DayCompletion
     u = User(email="idem@test.com", password_hash="x"); db.session.add(u); db.session.commit()
-    c = _client(app_, u.id)
+    uid = u.id
+    c = _client(app_, uid)
     for _ in range(2):
         r = c.post("/api/completions/exercise", json={"week": 1, "day_idx": 0, "exercise_idx": 2, "done": True})
         assert r.status_code == 200 and r.get_json()["done"] is True
@@ -70,7 +71,7 @@ def test_completion_toggles_are_idempotent_with_explicit_done(app_ctx):
         r = c.post("/api/completions/day", json={"week": 1, "day_idx": 0, "done": True})
         assert r.status_code == 200
     db.session.remove()  # the day toggle's swallowed analysis error can leave the scoped session dirty
-    assert ExerciseCompletion.query.filter_by(user_id=u.id, week=1, day_idx=0, exercise_idx=2).first().done is True
-    assert DayCompletion.query.filter_by(user_id=u.id, week=1, day_idx=0).first().done is True
+    assert ExerciseCompletion.query.filter_by(user_id=uid, week=1, day_idx=0, exercise_idx=2).first().done is True
+    assert DayCompletion.query.filter_by(user_id=uid, week=1, day_idx=0).first().done is True
     r = c.post("/api/completions/exercise", json={"week": 1, "day_idx": 0, "exercise_idx": 2})
     assert r.get_json()["done"] is False
