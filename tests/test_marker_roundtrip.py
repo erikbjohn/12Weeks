@@ -314,3 +314,19 @@ def test_fast_day_marker_does_not_skip_the_workout(app_ctx, user_factory):
     _parse(app, "[NUTRITION: day=2, meal_type=fast_day, reason=protocol]", u.id, week=3)
     assert MealPlanOverride.query.filter_by(user_id=u.id, week=3, day_idx=2, meal_type="fast_day").first()
     assert not WeeklyScheduleOverride.query.filter_by(user_id=u.id, week=3, day_idx=2, skip_day=True).first()
+
+
+def test_exception_and_commitment_markers_persist_memories(app_ctx, user_factory):
+    """S049: granted exceptions and commitments are deterministic memories."""
+    from models import CoachMemory
+    app, db = app_ctx
+    u = user_factory()
+    _parse(app, "Fine. [EXCEPTION: scope=Saturday trail race replaces the long run, through=2026-09-06, reason=pre-committed] "
+                "[COMMITMENT: log every weigh-in this week, by=2026-09-07]", u.id, week=4)
+    ex = CoachMemory.query.filter_by(user_id=u.id, memory_type="exception").first()
+    cm = CoachMemory.query.filter_by(user_id=u.id, memory_type="commitment").first()
+    assert ex and "trail race" in ex.content and "2026-09-06" in ex.content
+    assert cm and "weigh-in" in cm.content and "2026-09-07" in cm.content
+    # idempotent: the same marker again does not duplicate
+    _parse(app, "[EXCEPTION: scope=Saturday trail race replaces the long run, through=2026-09-06, reason=pre-committed]", u.id, week=4)
+    assert CoachMemory.query.filter_by(user_id=u.id, memory_type="exception").count() == 1

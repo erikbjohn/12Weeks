@@ -1091,6 +1091,32 @@ def _parse_coach_markers(text, user_id, week):
             _marker_outcome(user_id, week, "WEIGHT", m.group(0), "failed", str(_me))
             db.session.rollback()
 
+    # [EXCEPTION: scope=text, through=YYYY-MM-DD, reason=text]
+    # [COMMITMENT: text, by=YYYY-MM-DD]
+    # S049: the ONLY path from "enjoy the wedding Saturday" to a memory the
+    # coach honours next week was a best-effort Sonnet extraction that
+    # returned [] on any error and died with a deploy. These are deterministic.
+    for m in re.finditer(r'\[EXCEPTION:\s*scope=([^,\]]+)(?:,\s*through=(\d{4}-\d{2}-\d{2}))?(?:,\s*reason=([^\]]+))?\]', text, re.I):
+        try:
+            scope = m.group(1).strip(); through = m.group(2); reason = (m.group(3) or "").strip()
+            content = f"Exception granted: {scope}" + (f" through {through}" if through else "") + (f" — {reason}" if reason else "")
+            _persist_memories(user_id, week, [{"type": "exception", "content": content[:300]}])
+            _marker_outcome(user_id, week, "EXCEPTION", m.group(0), "applied", content[:120])
+        except Exception as _me:
+            logging.exception("Coach EXCEPTION marker failed")
+            _marker_outcome(user_id, week, "EXCEPTION", m.group(0), "failed", str(_me))
+            db.session.rollback()
+    for m in re.finditer(r'\[COMMITMENT:\s*([^,\]]+?)(?:,\s*by=(\d{4}-\d{2}-\d{2}))?\]', text, re.I):
+        try:
+            what = m.group(1).strip(); by = m.group(2)
+            content = f"Commitment: {what}" + (f" by {by}" if by else "")
+            _persist_memories(user_id, week, [{"type": "commitment", "content": content[:300]}])
+            _marker_outcome(user_id, week, "COMMITMENT", m.group(0), "applied", content[:120])
+        except Exception as _me:
+            logging.exception("Coach COMMITMENT marker failed")
+            _marker_outcome(user_id, week, "COMMITMENT", m.group(0), "failed", str(_me))
+            db.session.rollback()
+
     # [SCALE_EVENT: date=YYYY-MM-DD, kind=gluten|sodium|travel|illness, reason=text]
     # S025: a glutening the athlete reports becomes a CODIFIED event on the
     # weigh-in row; cut_guard, the badge, the scoreboard and the weekly
@@ -10895,6 +10921,28 @@ def _morning_brief_body(uid, local_date):
     return " · ".join(parts)
 
 
+def _chase_body(uid, local_date):
+    """Body for the 09:30 chase push, or None (no send) when nothing is owed:
+    a missing weigh-in and/or morning (before noon) doses still unchecked."""
+    parts = []
+    try:
+        if not BodyWeight.query.filter_by(user_id=uid, log_date=local_date).first():
+            parts.append("No weigh-in yet.")
+    except Exception:
+        pass
+    try:
+        rows = PeptideDose.query.filter(
+            PeptideDose.user_id == uid, PeptideDose.date == local_date,
+            PeptideDose.dose_mg > 0, PeptideDose.taken_at.is_(None),
+            PeptideDose.time < "12:00").order_by(PeptideDose.time).all()
+        if rows:
+            names = ", ".join(r.compound for r in rows)
+            parts.append(f"{len(rows)} dose{'s' if len(rows) != 1 else ''} unchecked: {names}.")
+    except Exception:
+        pass
+    return " ".join(parts) if parts else None
+
+
 def _has_dose_night_due(uid, local_date):
     """Cheap existence check for _push_scheduler_tick's dose_night gate:
     is there an untaken, non-held, >=21:00 PeptideDose row for `uid` on
@@ -11078,6 +11126,13 @@ def _push_scheduler_tick():
                 if _push_window_send(uid, "morning", local_date, "12 Weeks",
                                       lambda uid=uid, d=local_date: _morning_brief_body(uid, d)):
                     fired.append((uid, "morning"))
+
+            # S046: an evidence-gated follow-up. The 06:30 brief fires blind;
+            # nothing followed a missing weigh-in or an unchecked 07:00 stack.
+            if _in_window(t, _dtime(9, 30), _dtime(10, 30)):
+                if _push_window_send(uid, "chase", local_date, "12 Weeks",
+                                      lambda uid=uid, d=local_date: _chase_body(uid, d)):
+                    fired.append((uid, "chase"))
 
             if _in_window(t, _dtime(21, 45), _dtime(22, 30)) and _has_dose_night_due(uid, local_date):
                 if _push_window_send(uid, "dose_night", local_date, "12 Weeks",

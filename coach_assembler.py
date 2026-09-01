@@ -2000,6 +2000,8 @@ silently dropped and the change does NOT happen (you will have lied to the athle
 [LOCKOUT_WARNING: count=N, reason=text]
 [SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
 [SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
+[EXCEPTION: scope=text, through=YYYY-MM-DD, reason=text] — emit WHENEVER you grant permission to deviate (a race, a wedding, a rest evening). It becomes a dated memory you must honour later; an ungranted exception you later "remember" is a fabrication.
+[COMMITMENT: text, by=YYYY-MM-DD] — emit when the athlete promises something or you set a dated expectation. You will be shown it and expected to follow up.
 [SCALE_EVENT: date=YYYY-MM-DD, kind=gluten, reason=text] — emit (or call log_bodyweight with event=) the moment the athlete reports a glutening, sodium load, travel bloat or illness. This CODIFIES the event: the badge, scoreboard, weekly report and nutritionist then treat the readings as water. Saying "hold the deficit" without it changes nothing.
 </markers>
 
