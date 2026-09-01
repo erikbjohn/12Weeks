@@ -31,8 +31,14 @@ def _format_goal(goal):
 def _format_exercise_history(history):
     if not history:
         return "EXERCISE HISTORY: No lifts logged yet."
-    lines = ["EXERCISE HISTORY (raw log for reference — see EXERCISE ANALYSIS for authoritative interpretation):"]
-    for name, entries in sorted(history.items()):
+    lines = ["EXERCISE HISTORY (raw log for reference — see COACH PRESCRIPTION for the direction):"]
+    # S106: cap by RECENCY, not alphabetically — the old sorted()[:30] cut
+    # every lift after ~'S' (Single-Arm Row, Squat variants, Trap Bar…) out
+    # of the coach's view. The builder already orders lifts most-recent-first.
+    MAX_LIFTS = 40
+    items = list(history.items())
+    omitted = max(0, len(items) - MAX_LIFTS)
+    for name, entries in items[:MAX_LIFTS]:
         if isinstance(entries, dict):
             entries = [entries]  # Legacy single-entry format
         session_strs = []
@@ -42,15 +48,17 @@ def _format_exercise_history(history):
             reps = e.get('reps_completed', '')
             session_strs.append(f"wk{e.get('week','?')}:{wt}lb{'x'+str(reps) if reps else ''}{rpe_str}")
         lines.append(f"  {name}: {' → '.join(session_strs)}")
-    return '\n'.join(lines[:30])  # Cap to prevent prompt bloat
+    if omitted:
+        lines.append(f"  ({omitted} older lifts omitted — use get_recent_sets(name) for any of them)")
+    return '\n'.join(lines)
 
 
 def _format_exercise_analysis(analysis):
     """Format the training engine's pre-computed analysis for each exercise."""
     if not analysis:
         return ""
-    lines = ["EXERCISE ANALYSIS (from training engine — authoritative, do NOT re-interpret raw data):"]
-    indicators = {"up": "PROGRESS", "hold": "HOLD", "deload": "DELOAD", "weak": "CAUTIOUS", "down": "REDUCE"}
+    lines = ["COACH PRESCRIPTION (this week vs last — direction derived from the two prescriptions; the reason after the dash is the coach's own):"]
+    indicators = {"up": "PROGRESS", "hold": "HOLD", "deload": "DELOAD", "weak": "CAUTIOUS", "down": "REDUCE", "new": "NEW"}
     for name, data in sorted(analysis.items()):
         ind = indicators.get(data.get("progression_indicator", "hold"), "HOLD")
         # target_weight=0 is the valid BODYWEIGHT sentinel — render "BW", not
@@ -130,6 +138,10 @@ def _format_runs(runs):
                 parts.append(f"avg_hr_full_session:{r['avg_hr']}")
             if r.get('max_hr'):
                 parts.append(f"max_hr_peak:{r['max_hr']}")
+            if r.get('activity_type'):
+                parts.append(f"type:{r['activity_type']}")
+            if r.get('followed_plan'):
+                parts.append("ran the pushed watch workout")
             if r.get('elevation_ft'):
                 parts.append(f"elev:{r['elevation_ft']}ft")
             lines.append(f"  {r.get('date','?')}: {' '.join(parts)}")
@@ -194,9 +206,29 @@ def _format_measurements(m):
         return f"LATEST MEASUREMENTS ({m.get('date', '?')}): waist {m.get('waist', '?')}\""
     if not isinstance(m, list) or len(m) == 0:
         return ""
-    lines = ["BODY MEASUREMENTS (recent trend):"]
-    for entry in reversed(m):  # Oldest first for trend readability
-        lines.append(f"  {entry.get('date', '?')}: waist {entry.get('waist', '?')}\"")
+    lines = ["BODY MEASUREMENTS (recent trend — every tape field logged):"]
+    labels = [("waist_inches", "waist"), ("chest", "chest"), ("hips", "hips"),
+              ("neck", "neck"), ("bicep_left", "bicep L"), ("bicep_right", "bicep R"),
+              ("thigh_left", "thigh L"), ("thigh_right", "thigh R"), ("weight_lbs", "weight lb")]
+    ordered = list(reversed(m))  # Oldest first for trend readability
+    prev = None
+    for entry in ordered:
+        bits = []
+        for k, lab in labels:
+            v = entry.get(k) if k != "waist_inches" else (entry.get("waist_inches") or entry.get("waist"))
+            if v is None:
+                continue
+            delta = ""
+            if prev is not None:
+                pv = prev.get(k) if k != "waist_inches" else (prev.get("waist_inches") or prev.get("waist"))
+                if pv is not None:
+                    d = round(float(v) - float(pv), 2)
+                    delta = f" ({'+' if d > 0 else ''}{d:g})" if d else " (=)"
+            bits.append(f"{lab} {v:g}{delta}" if isinstance(v, (int, float)) else f"{lab} {v}")
+        if entry.get("notes"):
+            bits.append(f"note: {entry['notes']}")
+        lines.append(f"  {entry.get('date', '?')}: " + ", ".join(bits))
+        prev = entry
     return '\n'.join(lines)
 
 

@@ -694,6 +694,20 @@ def _build_exercise_analysis():
         user_id=current_user.id, week=week
     ).all()
     if rx_list:
+        # S116: the coach-designed write loop stores progression_indicator=None,
+        # so every lift read [HOLD] even when EXERCISE DELTAS said 'up' in the
+        # same prompt. Derive it from last week's prescription instead.
+        _last = {}
+        if week > 1:
+            for prx in WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week - 1).all():
+                _last[resolve_name(prx.exercise_name)] = (getattr(prx, "target_weight", None),
+                                                          int(prx.reps) if prx.reps and str(prx.reps).isdigit() else None)
+        _is_deload = False
+        try:
+            import deload as _dl
+            _is_deload = bool(_dl.is_deload_week(current_user.id, week))
+        except Exception:
+            pass
         for rx in rx_list:
             name = resolve_name(rx.exercise_name)
             # `is not None` — target_weight=0 is the valid BODYWEIGHT sentinel
@@ -701,12 +715,27 @@ def _build_exercise_analysis():
             # BW lifts from the analysis entirely, so the coach claimed it had
             # no number for a lift the card displays with full sets/reps.
             if name not in analysis and getattr(rx, 'target_weight', None) is not None:
+                ind = getattr(rx, 'progression_indicator', None)
+                if not ind:
+                    _reps = int(rx.reps) if rx.reps and str(rx.reps).isdigit() else None
+                    if name not in _last:
+                        ind = "new"
+                    else:
+                        ltw, lreps = _last[name]
+                        if ltw is not None and rx.target_weight > ltw:
+                            ind = "up"
+                        elif ltw is not None and rx.target_weight < ltw:
+                            ind = "deload" if _is_deload else "down"
+                        elif _reps is not None and lreps is not None and _reps > lreps:
+                            ind = "up"
+                        else:
+                            ind = "hold"
                 analysis[name] = {
                     "target_weight": rx.target_weight,
                     "target_reps": int(rx.reps) if rx.reps and rx.reps.isdigit() else 10,
                     "target_sets": rx.sets,
                     "adjustment_reason": getattr(rx, 'adjustment_reason', '') or '',
-                    "progression_indicator": getattr(rx, 'progression_indicator', 'hold') or 'hold',
+                    "progression_indicator": ind,
                     "coach_alert": None,
                 }
     # No prescriptions -> EMPTY analysis (unplanned week). Never fall back to a
@@ -800,6 +829,8 @@ def _build_runs():
     return {"run_history": [{
         "date": r.log_date.isoformat() if r.log_date else None,
         "distance_miles": r.distance_miles, "avg_hr": r.avg_hr, "max_hr": getattr(r, "max_hr", None),
+        "activity_type": getattr(r, "activity_type", None),
+        "followed_plan": bool((getattr(r, "activity_name", None) or "").startswith("12W Wk")),
         "duration_min": r.duration_min,
         "elevation_ft": r.elevation_ft, "week": r.week,
     } for r in rows]}
@@ -1462,7 +1493,16 @@ def _build_physical():
     recent = BodyMeasurement.query.filter_by(
         user_id=current_user.id
     ).order_by(BodyMeasurement.log_date.desc()).limit(4).all()
-    measurements = [{"date": m.log_date.isoformat(), "waist": m.waist_inches} for m in recent] if recent else []
+    # S098: every Sunday tape field, not just waist — the SUNDAY_REVIEW asks
+    # the coach to compare per body part and it only ever saw the waist.
+    _fields = ("waist_inches", "chest", "bicep_left", "bicep_right",
+               "thigh_left", "thigh_right", "hips", "neck", "weight_lbs", "notes")
+    measurements = [
+        {"date": m.log_date.isoformat(),
+         "waist": m.waist_inches,
+         **{f: getattr(m, f, None) for f in _fields if getattr(m, f, None) is not None}}
+        for m in recent
+    ] if recent else []
     return {"physical_assessment": physical, "body_measurements": measurements}
 
 
@@ -1737,8 +1777,11 @@ def _build_overrides():
     except Exception:
         result["meal_overrides"] = []
     try:
+        # S125: RunOverride is AUDIT-ONLY (memory: run-change-propagation) —
+        # WeeklyRunPlan is the run card's single source. Only the reason
+        # travels; duration/type here contradicted the FULL WEEK block.
         result["run_overrides"] = [
-            {"day_idx": o.day_idx, "duration": o.duration, "run_type": o.run_type, "reason": o.reason}
+            {"day_idx": o.day_idx, "reason": o.reason}
             for o in RunOverride.query.filter_by(user_id=uid, week=week).all()]
     except Exception:
         result["run_overrides"] = []
@@ -2686,11 +2729,31 @@ def _format_athlete_data(ctx, requires):
     if ctx.get("scheduled_activities"):
         parts.append(ctx["scheduled_activities"])
 
-    # Overrides
-    for key in ("schedule_overrides", "meal_overrides", "run_overrides", "active_swaps"):
-        items = ctx.get(key, [])
-        if items:
-            parts.append(f"{key.upper()}: {items}")
+    # Overrides — labeled lines, not Python reprs (S125)
+    _dn = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    def _dname(i):
+        try:
+            return _dn[int(i)]
+        except Exception:
+            return str(i)
+    _ov_lines = []
+    for o in ctx.get("schedule_overrides", []) or []:
+        bits = []
+        if o.get("workout_time"): bits.append(f"lift at {o['workout_time']}")
+        if o.get("skip_day"): bits.append("no lifting (coach-skipped)")
+        if o.get("notes"): bits.append(o["notes"])
+        _ov_lines.append(f"  Schedule {_dname(o.get('day_idx'))}: " + ("; ".join(bits) or "override"))
+    for o in ctx.get("meal_overrides", []) or []:
+        _ov_lines.append(f"  Meals {_dname(o.get('day_idx'))}: {o.get('meal_type')}"
+                         + (f" — {o['reason']}" if o.get("reason") else ""))
+    for o in ctx.get("run_overrides", []) or []:
+        _ov_lines.append(f"  Run {_dname(o.get('day_idx'))} adjusted by the coach"
+                         + (f" — reason: {o['reason']}" if o.get("reason") else "")
+                         + " (the prescription itself is in FULL WEEK PROGRAM)")
+    for o in ctx.get("active_swaps", []) or []:
+        _ov_lines.append(f"  Swap {_dname(o.get('day_idx'))} #{o.get('exercise_idx')} → {o.get('swapped_to')}")
+    if _ov_lines:
+        parts.append("ACTIVE OVERRIDES THIS WEEK:\n" + "\n".join(_ov_lines))
 
     # FULL WEEK PROGRAM — all 7 days inline so the model can't conflate days.
     # Stops the "Monday is Back Squat 4×5 @ 160" hallucination (Friday's scheme

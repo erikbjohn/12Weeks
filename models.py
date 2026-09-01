@@ -220,6 +220,10 @@ class RunLog(db.Model):
     distance_miles = db.Column(db.Float)
     avg_hr = db.Column(db.Integer)
     max_hr = db.Column(db.Integer)  # S047: peak HR — the only interval-execution signal Garmin gives us
+    # S121: what kind of run it was (trail/treadmill/…) and Garmin's activity
+    # name — '12W Wk4 Tue — …' means the pushed workout was followed.
+    activity_type = db.Column(db.String(40))
+    activity_name = db.Column(db.Text)
     elevation_ft = db.Column(db.Integer)
     duration_min = db.Column(db.Integer)
     notes = db.Column(db.Text)

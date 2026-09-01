@@ -335,6 +335,8 @@ with app.app_context():
         ("body_weight", "event", "VARCHAR(20)"),
         ("body_weight", "note", "TEXT"),
         ("run_log", "max_hr", "INTEGER"),
+        ("run_log", "activity_type", "VARCHAR(40)"),
+        ("run_log", "activity_name", "TEXT"),
         ("garmin_activity", "max_hr", "INTEGER"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
@@ -8322,15 +8324,24 @@ def api_progress_dashboard():
     # ── 5b. Per-exercise weekly e1RM history for the Lift Progression card ──
     # Aggregate SetLog (preferred) else ExerciseLog into {exercise: [{week, weight, reps}, ...]}.
     lifts_data = {}
+    # S107: ordered by DATE, and each entry carries `date` + a chronological
+    # `seq`. Ordering by week put June's parked block-1 rows (weeks 25-36)
+    # AFTER this block's, so every sparkline ended on June and 'latest' lied.
     all_sets = (SetLog.query
                 .filter_by(user_id=uid, done=True)
                 .filter(SetLog.weight > 0)
-                .order_by(SetLog.week, SetLog.set_number)
+                .order_by(SetLog.logged_date, SetLog.week, SetLog.set_number)
                 .all())
+    _seq_by_date = {}
     for s in all_sets:
         name = s.exercise_name
+        dkey = s.logged_date.isoformat() if s.logged_date else f"wk{s.week or 1}"
+        if dkey not in _seq_by_date:
+            _seq_by_date[dkey] = len(_seq_by_date)
         lifts_data.setdefault(name, []).append({
             "week": s.week or 1,
+            "date": dkey,
+            "seq": _seq_by_date[dkey],
             "weight": s.weight,
             "reps_completed": s.reps or 0,
         })

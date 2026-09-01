@@ -379,6 +379,14 @@ def sync_activities(gc, user_id, days_back=3, today=None):
         existing.duration_min = agg["duration_min"]
         existing.avg_hr = agg["avg_hr"]
         existing.max_hr = agg.get("max_hr")
+        # S121: dominant (longest) activity's type + name
+        try:
+            _dom = max(rows, key=lambda r: (r.duration_min or 0))
+            existing.activity_type = _dom.type_key
+            _raw = json.loads(_dom.raw_summary) if _dom.raw_summary else {}
+            existing.activity_name = (_raw.get("activityName") or "")[:200] or None
+        except Exception:
+            pass
         existing.elevation_ft = agg["elevation_ft"]
         existing.source = "garmin"
         result["days_filled"].append(key)

@@ -9170,10 +9170,14 @@ function _pdLiftProgression(lifts) {
     if (!hist) continue;
     var entries = Array.isArray(hist) ? hist : (hist.history || []);
     if (entries.length === 0) continue;
-    var weekMap = {};
+    // S107: key the series by chronological seq (server-assigned, date
+    // order) when present; week numbers repeat across blocks (June sits at
+    // weeks 25-36) and sorted numerically put the past AFTER the present.
+    var weekMap = {}, weekLabel = {};
     for (var ei = 0; ei < entries.length; ei++) {
       var e = entries[ei];
-      var w = e.week || 1;
+      var w = (e.seq != null) ? e.seq : (e.week || 1);
+      weekLabel[w] = e.week || 1;
       var e1rm;
       if (e.estimated1RM) {
         // Baseline entries have a properly computed e1RM — use it directly
@@ -9192,7 +9196,7 @@ function _pdLiftProgression(lifts) {
     }
     var weeks = Object.keys(weekMap).map(Number).sort(function(a, b) { return a - b; });
     if (weeks.length === 0) continue;
-    var weekVals = weeks.map(function(wk) { return { week: wk, e1rm: weekMap[wk] }; });
+    var weekVals = weeks.map(function(wk) { return { week: weekLabel[wk] || wk, e1rm: weekMap[wk] }; });
     var maxE1rm = Math.max.apply(null, weekVals.map(function(v) { return v.e1rm; }));
     liftEntries.push({ name: name, data: weekVals, maxE1rm: maxE1rm });
   }
