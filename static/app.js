@@ -5697,8 +5697,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       _mealsCache[todayStr()] = mealsW.data;
     }
 
-    // Warm-up completions
-    try { const wuRes = await fetch('/api/warmup-completions'); _warmupCache = await wuRes.json(); } catch(e) { _warmupCache = {}; }
+    // S073: independent caches fetched IN PARALLEL (they were awaited one
+    // after another: warmups → run logs → wellness, plus a duplicate wellness
+    // and run-log fetch inside the Garmin sync chain below).
+    const [wuRes, rlRes, wRes] = await Promise.all([
+      fetch('/api/warmup-completions').catch(() => null),
+      fetch('/api/run-log').catch(() => null),
+      fetch('/api/garmin/wellness?days=7').catch(() => null),
+    ]);
+    try { _warmupCache = wuRes && wuRes.ok ? await wuRes.json() : {}; } catch(e) { _warmupCache = {}; }
+    try { _runLogCache = rlRes && rlRes.ok ? await rlRes.json() : {}; } catch(e) { _runLogCache = {}; }
+    try {
+      const w = wRes && wRes.ok ? await wRes.json() : [];
+      _wellnessToday = (w && w.length) ? w[0] : null;
+      renderGarminBar();
+    } catch(e) { _wellnessToday = null; }
 
     // Garmin auto-pull (server throttles to 15 min). Fire-and-forget; if new
     // runs landed, refresh the cache + card. 401 (not connected) is silent.
@@ -5720,19 +5733,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
       .catch(() => {});
 
-    // Run logs
-    try { const rlRes = await fetch('/api/run-log'); _runLogCache = await rlRes.json(); } catch(e) { _runLogCache = {}; }
-
-    // Wellness strip data (DB-only). Pull the last 7 days and use the most
-    // recent row — today's if synced, otherwise the latest reading (tagged with
-    // its date in the strip) so the strip never blanks out just because today's
-    // Garmin sync hasn't landed yet.
-    try {
-      const wRes = await fetch('/api/garmin/wellness?days=7');
-      const w = wRes.ok ? await wRes.json() : [];
-      _wellnessToday = (w && w.length) ? w[0] : null;
-      renderGarminBar();
-    } catch(e) { _wellnessToday = null; }
+    // (run logs + wellness fetched above, in parallel — S073)
 
     // Per-set completion cache — loaded per-day in renderDetail()
     _setCache = {};
@@ -5821,13 +5822,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // /api/prescription/seed call here silently converted it into a static
     // template week the coach never designed.
 
-    // Load chat history BEFORE rendering so coach has messages
-    await loadChatHistory();
+    // Load chat history BEFORE rendering so coach has messages — in parallel
+    // with today's measurements and the retest gate (S073).
+    const [, measRes, rtResP] = await Promise.all([
+      loadChatHistory(),
+      fetch('/api/measurements?date=' + todayStr()).catch(() => null),
+      fetch('/api/bodyweight-retest/status').catch(() => null),
+    ]);
 
     // Load today's measurements if already submitted (for Sunday display)
     try {
-      var measRes = await fetch('/api/measurements?date=' + todayStr());
-      if (measRes.ok) {
+      if (measRes && measRes.ok) {
         var measData = await measRes.json();
         if (measData && measData.length > 0) {
           var latest = measData[measData.length - 1];
@@ -5852,8 +5857,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Bodyweight retest gate — weeks 6 and 12
     try {
-      const rtRes = await fetch('/api/bodyweight-retest/status');
-      if (rtRes.ok) {
+      const rtRes = rtResP;
+      if (rtRes && rtRes.ok) {
         const rtData = await rtRes.json();
         if (rtData && rtData.due_and_pending) {
           showBodyweightRetestIntro(rtData.due_week);
