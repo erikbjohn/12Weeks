@@ -223,14 +223,14 @@ def _seed_full_fixture(app_, db, email, goal_target=185.0):
 
 # ── HTTP + DB helpers ────────────────────────────────────────────────────
 
-def _post_transition(app_, email, anchor, dry_run=False, admin_key="test-key"):
+def _post_transition(app_, email, anchor, dry_run=False, admin_key="test-key-long-enough-for-admin-guard-01"):
     with app_.test_client() as c:
         return c.post("/api/admin/block3-transition", json={
             "email": email, "anchor_weight": anchor, "dry_run": dry_run,
         }, headers={"X-Admin-Key": admin_key})
 
 
-def _post_rollback(app_, email, admin_key="test-key"):
+def _post_rollback(app_, email, admin_key="test-key-long-enough-for-admin-guard-01"):
     with app_.test_client() as c:
         return c.post("/api/admin/block3-rollback", json={"email": email},
                        headers={"X-Admin-Key": admin_key})
@@ -271,7 +271,7 @@ def _range_count(app_, model_name, uid, lo, hi):
 
 def test_dry_run_mutates_nothing(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-dryrun@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -294,7 +294,7 @@ def test_dry_run_mutates_nothing(app_ctx, monkeypatch, clean_block3_flags):
 
 def test_transition_shifts_blocks_and_rehomes_today(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-main@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -377,7 +377,7 @@ def test_transition_shifts_blocks_and_rehomes_today(app_ctx, monkeypatch, clean_
 
 def test_destination_not_empty_guard(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-conflict@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -417,7 +417,7 @@ def test_week7_purity_guard_unconstrained_table(app_ctx, monkeypatch, clean_bloc
     on week/day_idx — the silent-merge risk) must abort with 409 before
     any write, not silently succeed with two days merged into one."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-week7-unconstrained@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -447,7 +447,7 @@ def test_week7_purity_guard_constrained_table(app_ctx, monkeypatch, clean_block3
     — the mid-transaction IntegrityError risk) must abort with a clean 409
     from the pre-flight assert, never reach the re-home UPDATE at all."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-week7-constrained@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -476,7 +476,7 @@ def test_week7_purity_guard_happy_path_still_rehomes(app_ctx, monkeypatch, clean
     and today's day-0 rows still re-home to week 1, day 0 (the scoped
     re-home filter doesn't regress the happy path)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-week7-happy@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -493,7 +493,7 @@ def test_week7_purity_guard_happy_path_still_rehomes(app_ctx, monkeypatch, clean
 
 def test_block3_work_then_rollback_restores_prestate(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-rollback@test.com"
     uid = _seed_full_fixture(app_, db, email)
 
@@ -599,7 +599,7 @@ def test_block3_work_then_rollback_restores_prestate(app_ctx, monkeypatch, clean
 
 def test_transition_requires_cut_goal(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-nogoal@test.com"
 
     def _seed_no_goal():
@@ -618,7 +618,7 @@ def test_transition_requires_cut_goal(app_ctx, monkeypatch, clean_block3_flags):
 
 def test_transition_idempotency_guard(app_ctx, monkeypatch, clean_block3_flags):
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
     email = "block3-idempotent@test.com"
     _seed_full_fixture(app_, db, email)
 

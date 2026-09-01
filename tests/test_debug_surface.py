@@ -122,14 +122,14 @@ def _seed_user_with_protocol(email):
 def test_serve_as_user_allowlisted_path(app_ctx, monkeypatch):
     """serve-as-user with allowlisted path returns real payload."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-1@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-1@test.com&path=/api/workouts",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -143,12 +143,12 @@ def test_serve_as_user_allowlisted_path(app_ctx, monkeypatch):
 def test_serve_as_user_non_allowlisted_path_403(app_ctx, monkeypatch):
     """serve-as-user rejects non-allowlisted paths with 403."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-2@test.com&path=/api/admin/something",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403
@@ -159,7 +159,7 @@ def test_serve_as_user_non_allowlisted_path_403(app_ctx, monkeypatch):
 def test_serve_as_user_path_prefix_matching(app_ctx, monkeypatch):
     """serve-as-user allows query strings with allowlisted prefix."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-3@test.com")
 
@@ -167,7 +167,7 @@ def test_serve_as_user_path_prefix_matching(app_ctx, monkeypatch):
         # /api/progress is in the allowlist
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-3@test.com&path=/api/progress?some_param=value",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -176,12 +176,12 @@ def test_serve_as_user_path_prefix_matching(app_ctx, monkeypatch):
 def test_serve_as_user_unknown_email_404(app_ctx, monkeypatch):
     """serve-as-user returns 404 for unknown email."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=nonexistent@test.com&path=/api/workouts",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 404
@@ -205,12 +205,12 @@ def test_serve_as_user_no_admin_key_401(app_ctx):
 def test_serve_as_user_invalid_path_prefix_403(app_ctx, monkeypatch):
     """serve-as-user rejects path not matching any allowlist prefix."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-5@test.com&path=/etc/passwd",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403
@@ -221,7 +221,7 @@ def test_serve_as_user_invalid_path_prefix_403(app_ctx, monkeypatch):
 def test_coach_context_cut_status_non_null(app_ctx, monkeypatch):
     """coach-context returns non-null cut_status for seeded cut-goal user."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "coach-cut@test.com"
     _seed_user_with_data(email)
@@ -229,7 +229,7 @@ def test_coach_context_cut_status_non_null(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -245,7 +245,7 @@ def test_coach_context_cut_status_non_null(app_ctx, monkeypatch):
 def test_coach_context_protocol_status_non_null(app_ctx, monkeypatch):
     """coach-context returns protocol_status block for seeded PeptideDose rows."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "coach-protocol@test.com"
     _seed_user_with_protocol(email)
@@ -253,7 +253,7 @@ def test_coach_context_protocol_status_non_null(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -267,7 +267,7 @@ def test_coach_context_protocol_status_non_null(app_ctx, monkeypatch):
 def test_coach_context_protocol_status_none_when_empty(app_ctx, monkeypatch):
     """coach-context returns protocol_status: None when no protocol rows."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     # Create a fresh user with no protocol data
     email = "coach-no-protocol@test.com"
@@ -281,7 +281,7 @@ def test_coach_context_protocol_status_none_when_empty(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -294,7 +294,7 @@ def test_coach_context_protocol_status_none_when_empty(app_ctx, monkeypatch):
 def test_coach_context_includes_all_builders(app_ctx, monkeypatch):
     """coach-context includes all required builder blocks."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "coach-all@test.com"
     _seed_user_with_data(email)
@@ -302,7 +302,7 @@ def test_coach_context_includes_all_builders(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -316,7 +316,7 @@ def test_coach_context_includes_all_builders(app_ctx, monkeypatch):
 def test_coach_context_builder_error_handling(app_ctx, monkeypatch):
     """coach-context wraps builder exceptions in error objects, returns 200."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "coach-error@test.com"
     from models import User
@@ -340,7 +340,7 @@ def test_coach_context_builder_error_handling(app_ctx, monkeypatch):
         with app_.test_client() as c:
             r = c.get(
                 f"/api/debug/coach-context?email={email}",
-                headers={"X-Admin-Key": "test-key"}
+                headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
             )
 
         assert r.status_code == 200  # Should NOT be 500
@@ -360,12 +360,12 @@ def test_coach_context_builder_error_handling(app_ctx, monkeypatch):
 def test_coach_context_unknown_email_404(app_ctx, monkeypatch):
     """coach-context returns 404 for unknown email."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/coach-context?email=nonexistent-coach@test.com",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 404
@@ -386,12 +386,12 @@ def test_coach_context_no_admin_key_401(app_ctx):
 def test_serve_as_user_post_405(app_ctx, monkeypatch):
     """serve-as-user rejects POST with 405."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.post(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/workouts",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 405
@@ -400,12 +400,12 @@ def test_serve_as_user_post_405(app_ctx, monkeypatch):
 def test_coach_context_post_405(app_ctx, monkeypatch):
     """coach-context rejects POST with 405."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.post(
             "/api/debug/coach-context?email=test@test.com",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 405
@@ -416,14 +416,14 @@ def test_coach_context_post_405(app_ctx, monkeypatch):
 def test_serve_as_user_allowlist_exact_match(app_ctx, monkeypatch):
     """serve-as-user allows exact allowlist match."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, _ = _login_via_session(app_, "boundary-exact@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=boundary-exact@test.com&path=/api/workouts",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200
@@ -432,14 +432,14 @@ def test_serve_as_user_allowlist_exact_match(app_ctx, monkeypatch):
 def test_serve_as_user_allowlist_with_query_string(app_ctx, monkeypatch):
     """serve-as-user allows path with query string (?pattern)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, _ = _login_via_session(app_, "boundary-query@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=boundary-query@test.com&path=/api/workouts?week=6",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -448,12 +448,12 @@ def test_serve_as_user_allowlist_with_query_string(app_ctx, monkeypatch):
 def test_serve_as_user_allowlist_rejects_substring_match(app_ctx, monkeypatch):
     """serve-as-user rejects substring matches like /api/workoutsEVIL."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/workoutsEVIL",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403
@@ -465,12 +465,12 @@ def test_serve_as_user_allowlist_rejects_superpath(app_ctx, monkeypatch):
     and not a substring/prefix match against the now-allowlisted
     /api/progress/dashboard either)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/progress/dashboardx",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     # /api/progress/dashboardx is neither /api/progress nor /api/progress/dashboard
@@ -484,14 +484,14 @@ def test_serve_as_user_allowlist_rejects_superpath(app_ctx, monkeypatch):
 def test_serve_as_user_protocol_calendar_path(app_ctx, monkeypatch):
     """serve-as-user proxies /api/protocol/calendar for a seeded user."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-calendar@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-calendar@test.com&path=/api/protocol/calendar",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -544,7 +544,7 @@ def test_serve_as_user_progress_dashboard_path(app_ctx, monkeypatch):
     allowlist previously rejected this path entirely, making the mandated
     post-deploy served-check of the block-3 scoreboard impossible)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "serve-test-dashboard@test.com"
     _seed_block3_scoreboard_user(db, email)
@@ -553,7 +553,7 @@ def test_serve_as_user_progress_dashboard_path(app_ctx, monkeypatch):
         with app_.test_client() as c:
             r = c.get(
                 f"/api/debug/serve-as-user?email={email}&path=/api/progress/dashboard",
-                headers={"X-Admin-Key": "test-key"}
+                headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
             )
 
         assert r.status_code == 200, r.get_json()
@@ -577,14 +577,14 @@ def test_serve_as_user_progress_dashboard_path(app_ctx, monkeypatch):
 def test_serve_as_user_aerobic_efficiency_path(app_ctx, monkeypatch):
     """serve-as-user proxies /api/stats/aerobic-efficiency for a seeded user."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-aerobic@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-aerobic@test.com&path=/api/stats/aerobic-efficiency",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -597,14 +597,14 @@ def test_serve_as_user_aerobic_efficiency_path(app_ctx, monkeypatch):
 def test_serve_as_user_run_log_path(app_ctx, monkeypatch):
     """serve-as-user proxies /api/run-log for a seeded user."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-runlog@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-runlog@test.com&path=/api/run-log",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -617,14 +617,14 @@ def test_serve_as_user_run_log_path(app_ctx, monkeypatch):
 def test_serve_as_user_sunday_recap_path(app_ctx, monkeypatch):
     """serve-as-user proxies /api/sunday-recap for a seeded user."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     u, client = _login_via_session(app_, "serve-test-recap@test.com")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=serve-test-recap@test.com&path=/api/sunday-recap",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -637,12 +637,12 @@ def test_serve_as_user_sunday_recap_path(app_ctx, monkeypatch):
 def test_serve_as_user_allowlist_rejects_run_log_suffix(app_ctx, monkeypatch):
     """serve-as-user rejects /api/run-logx (prefix-only match on /api/run-log)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/run-logx",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403, r.get_json()
@@ -652,12 +652,12 @@ def test_serve_as_user_allowlist_rejects_run_log_suffix(app_ctx, monkeypatch):
 def test_serve_as_user_allowlist_rejects_protocol_calendar_superpath(app_ctx, monkeypatch):
     """serve-as-user rejects /api/protocol/calendar/evil (not exact-or-query)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/protocol/calendar/evil",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403, r.get_json()
@@ -667,12 +667,12 @@ def test_serve_as_user_allowlist_rejects_non_allowlisted_sibling(app_ctx, monkey
     """serve-as-user rejects /api/push/vapid-public-key (never allowlisted; confirms
     the Task 9 additions didn't accidentally widen matching)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     with app_.test_client() as c:
         r = c.get(
             "/api/debug/serve-as-user?email=test@test.com&path=/api/push/vapid-public-key",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 403, r.get_json()
@@ -683,7 +683,7 @@ def test_serve_as_user_allowlist_rejects_non_allowlisted_sibling(app_ctx, monkey
 def test_coach_context_garmin_db_only_with_wellness(app_ctx, monkeypatch):
     """coach-context returns populated wellness from GarminWellness DB rows (DB-only, no live calls)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "garmin-db-only@test.com"
     from models import User, GarminWellness
@@ -711,7 +711,7 @@ def test_coach_context_garmin_db_only_with_wellness(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     assert r.status_code == 200, r.get_json()
@@ -733,7 +733,7 @@ def test_coach_context_garmin_db_only_with_wellness(app_ctx, monkeypatch):
 def test_coach_context_garmin_no_live_client_calls(app_ctx, monkeypatch):
     """coach-context does NOT call live Garmin client (even if it would raise)."""
     app_, db = app_ctx
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-long-enough-for-admin-guard-01")
 
     email = "garmin-no-live@test.com"
     from models import User
@@ -755,7 +755,7 @@ def test_coach_context_garmin_no_live_client_calls(app_ctx, monkeypatch):
     with app_.test_client() as c:
         r = c.get(
             f"/api/debug/coach-context?email={email}",
-            headers={"X-Admin-Key": "test-key"}
+            headers={"X-Admin-Key": "test-key-long-enough-for-admin-guard-01"}
         )
 
     # Should be 200, not 500 (live client was NOT called)

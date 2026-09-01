@@ -50,12 +50,12 @@ def _set_today(monkeypatch, d):
     monkeypatch.setattr(appmod, "_user_today_for", lambda user: d)
 
 
-def _client(app_, monkeypatch, admin_key="test-admin-key"):
+def _client(app_, monkeypatch, admin_key="test-admin-key-long-enough-for-guard-01"):
     monkeypatch.setenv("ADMIN_API_KEY", admin_key)
     return app_.test_client()
 
 
-def _post_import(client, email, admin_key="test-admin-key", **body):
+def _post_import(client, email, admin_key="test-admin-key-long-enough-for-guard-01", **body):
     return client.post(
         f"/api/admin/import-protocol?email={email}",
         json=body,
@@ -575,7 +575,7 @@ def test_row_count_matches_csv_and_duplicate_path_writes_nothing(app_ctx, monkey
 def test_import_requires_admin_key(app_ctx, monkeypatch):
     app_, db = app_ctx
     u = _fresh_user(app_, db, "import-noauth@test.com")
-    monkeypatch.setenv("ADMIN_API_KEY", "sekrit-test-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "sekrit-test-key-long-enough-to-pass-0123")
     client = app_.test_client()
     r = client.post(f"/api/admin/import-protocol?email={u.email}", json={"csv_path": REAL_CSV_PATH})
     assert r.status_code in (401, 403)

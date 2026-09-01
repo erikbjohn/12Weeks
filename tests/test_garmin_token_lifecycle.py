@@ -335,7 +335,7 @@ def test_admin_save_tokens_clears_cooldown_and_syncs_now(app_ctx, monkeypatch):
     import garmin_sync as gs
     import garminconnect
     uid = _make_user(app_, db, "lifecycle-save@test.com")
-    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key-long-enough-for-guard-01")
 
     class _FakeGarth:
         def dumps(self):
@@ -370,7 +370,7 @@ def test_admin_save_tokens_clears_cooldown_and_syncs_now(app_ctx, monkeypatch):
     client = app_.test_client()
     r = client.post("/api/admin/garmin/save-tokens",
                     json={"email": "lifecycle-save@test.com", "tokens": _blob(time.time() + 70000)},
-                    headers={"X-Admin-Key": "test-admin-key"})
+                    headers={"X-Admin-Key": "test-admin-key-long-enough-for-guard-01"})
     assert r.status_code == 200
     data = r.get_json()
     assert data["connected"] is True

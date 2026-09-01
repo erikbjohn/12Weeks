@@ -96,7 +96,7 @@ def _set_now(monkeypatch, dt):
     monkeypatch.setattr(appmod, "_utcnow", lambda: dt)
 
 
-def _admin_client(app_, monkeypatch, admin_key="test-admin-key"):
+def _admin_client(app_, monkeypatch, admin_key="test-admin-key-long-enough-for-guard-01"):
     monkeypatch.setenv("ADMIN_API_KEY", admin_key)
     return app_.test_client(), admin_key
 

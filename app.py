@@ -9132,6 +9132,16 @@ def api_chat():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
 
+    # Codify structured markers ([PRESCRIPTION]/[WEIGHT]/[RUN]/[SCHEDULE]...).
+    # This endpoint still carries the Sunday 'Continue to Weekly Planning'
+    # trigger and every popup trigger; only the stream path parsed markers
+    # before, so a change the coach announced here never reached the card.
+    try:
+        _parse_coach_markers(response_text, current_user.id, context.get("week", 1))
+    except Exception:
+        import logging
+        logging.exception("api_chat: coach marker parsing failed")
+
     # Fire compliance events
     try:
         from coach_state import update_anger_level

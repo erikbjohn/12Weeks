@@ -347,7 +347,7 @@ def test_regenerate_projection_rebuilds_curve_from_stored_anchor(app_ctx, clean_
     _seed_goal_and_state(app_, db, uid, stale)
     _set_block3_flags(app_, db)
 
-    admin_key = "test-admin-key-b3"
+    admin_key = "test-admin-key-b3-long-enough-for-guard"
     monkeypatch.setenv("ADMIN_API_KEY", admin_key)
     r = client.post(
         "/api/admin/debug/regenerate-projection",
