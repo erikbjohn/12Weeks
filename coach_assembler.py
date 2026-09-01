@@ -12,7 +12,7 @@ They do NOT duplicate the queries — they ARE the queries (moved from _build_co
 
 import json
 import logging
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 
 from flask_login import current_user
 
@@ -981,6 +981,23 @@ def _build_cut_status():
         "curve_target_today": curve_target_today,
         "on_curve": on_curve,
     }}
+
+
+@section_builder("marker_outcomes")
+def _build_marker_outcomes():
+    """Structured coach changes that FAILED to persist in the last 7 days
+    (S029) — the coach must re-state these, never assert them as done."""
+    from models import CoachMarkerLog
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    rows = (CoachMarkerLog.query
+            .filter(CoachMarkerLog.user_id == current_user.id,
+                    CoachMarkerLog.status == "failed",
+                    CoachMarkerLog.created_at >= since)
+            .order_by(CoachMarkerLog.created_at.desc()).limit(10).all())
+    return {"marker_outcomes": [{
+        "when": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "?",
+        "marker": r.raw_marker, "detail": r.detail,
+    } for r in rows]}
 
 
 @section_builder("protocol_status")
@@ -2269,6 +2286,18 @@ def _format_athlete_data(ctx, requires):
     # Absent entirely (no <protocol_status> block) when the athlete has no
     # PeptideDose rows imported — silence reads as "no protocol", never a
     # fabricated empty block.
+    mo = ctx.get("marker_outcomes")
+    if mo:
+        mo_lines = ["<marker_outcomes>"]
+        for r in mo:
+            mo_lines.append(f"  FAILED {r['when']}: {r['marker']} — {r.get('detail') or 'save failed'}")
+        mo_lines.append("</marker_outcomes>")
+        mo_lines.append(
+            "These changes were announced but did NOT persist. Do not claim them as done: "
+            "re-issue the marker if still intended, and tell the athlete the card was not updated."
+        )
+        parts.append("\n".join(mo_lines))
+
     ps = ctx.get("protocol_status")
     if ps:
         ps_lines = ["<protocol_status>"]

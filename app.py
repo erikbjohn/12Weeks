@@ -803,6 +803,20 @@ def run_label_for(run_type, explicit=None):
     return _RUN_TYPE_LABELS.get(run_type, 'Run')
 
 
+def _marker_outcome(user_id, week, marker_type, raw, status, detail=None):
+    """Record a marker's outcome in its own short transaction (after any
+    rollback the failing handler did). Never raises."""
+    try:
+        from models import CoachMarkerLog
+        db.session.add(CoachMarkerLog(user_id=user_id, marker_type=marker_type,
+                                      raw_marker=(raw or "")[:500], status=status,
+                                      detail=(detail or "")[:300]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logging.exception("marker outcome log failed")
+
+
 def _parse_coach_markers(text, user_id, week):
     """Parse structured markers from coach response and apply them."""
     import re
@@ -848,8 +862,9 @@ def _parse_coach_markers(text, user_id, week):
                     original_name=original_name,
                 ))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach SWAP marker failed")
+            _marker_outcome(user_id, week, "SWAP", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [DELOAD: week=N, call=true|false, reason=...] — the athlete's veto/request,
@@ -862,8 +877,9 @@ def _parse_coach_markers(text, user_id, week):
             _why = (m.group(3) or "").strip() or ("deload requested" if _call else "deload vetoed")
             _n = _deload.persist_deload_decision(user_id, _wk, {"deload": _call, "reason": f"athlete: {_why}"})
             logging.info("[DELOAD] marker week %s call=%s (%s rows)", _wk, _call, _n)
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach DELOAD marker failed")
+            _marker_outcome(user_id, week, "DELOAD", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [SCHEDULE: day=X, time=3:00 PM, notes=...]  (canonical — CORE_PROMPT <markers>)
@@ -879,8 +895,9 @@ def _parse_coach_markers(text, user_id, week):
             else:
                 db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, workout_time=workout_time, notes=notes))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach SCHEDULE marker failed")
+            _marker_outcome(user_id, week, "SCHEDULE", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [NUTRITION: day=X, meal_type=fast_day, reason=...]
@@ -902,8 +919,9 @@ def _parse_coach_markers(text, user_id, week):
                 else:
                     db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, skip_day=True, notes='Fast day \u2014 no workout'))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach NUTRITION (meal_type) marker failed")
+            _marker_outcome(user_id, week, "NUTRITION", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [NUTRITION: daily_calories=XXXX, reason=...]
@@ -914,8 +932,9 @@ def _parse_coach_markers(text, user_id, week):
             if goal:
                 goal.daily_calories = new_cals
                 db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach NUTRITION (daily_calories) marker failed")
+            _marker_outcome(user_id, week, "NUTRITION", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [WEIGHT: exercise=Name, new_weight=N, reason=text]  (canonical — CORE_PROMPT <markers>)
@@ -976,8 +995,9 @@ def _parse_coach_markers(text, user_id, week):
                 if _wx_reason:
                     r.adjustment_reason = _wx_reason
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach WEIGHT marker failed")
+            _marker_outcome(user_id, week, "WEIGHT", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [SORENESS: area=shoulders, level=moderate]
@@ -997,8 +1017,9 @@ def _parse_coach_markers(text, user_id, week):
             # Also save as a coach memory for future reference
             db.session.add(CoachMemory(user_id=user_id, content=f'Athlete reports {level} soreness/tightness in {area}', memory_type='observation', week=week))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach SORENESS marker failed")
+            _marker_outcome(user_id, week, "SORENESS", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [RUN: day=X, duration=50 min, type=zone2, reason=...]
@@ -1066,8 +1087,9 @@ def _parse_coach_markers(text, user_id, week):
                     duration=duration, detail=new_detail, source='coach'))
             db.session.commit()
             _garmin_weeks_to_push.add(week)
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach RUN marker failed")
+            _marker_outcome(user_id, week, "RUN", m.group(0), "failed", str(_me))
             db.session.rollback()
     # Re-push all affected weeks to Garmin in a single off-thread serial pass:
     # up to 3 Garmin HTTP calls must not block the SSE worker; the per-user lock
@@ -1092,8 +1114,9 @@ def _parse_coach_markers(text, user_id, week):
                 if pa:
                     pa.actual_bmr = new_bmr
                     db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach BMR_UPDATE marker failed")
+            _marker_outcome(user_id, week, "BMR_UPDATE", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [LOCKOUT_WARNING: count=X, reason=...]
@@ -1103,8 +1126,9 @@ def _parse_coach_markers(text, user_id, week):
             cm = CoachMemory(user_id=user_id, memory_type='lockout_warning', content=f'Warning {count}: {reason}', week=week)
             db.session.add(cm)
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach LOCKOUT_WARNING marker failed")
+            _marker_outcome(user_id, week, "LOCKOUT_WARNING", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [PRESCRIPTION: week=X, day=Y, exercise=Name, sets=4, reps=10, rest=60-90s, weight=110, reason=text]
@@ -1176,8 +1200,9 @@ def _parse_coach_markers(text, user_id, week):
                     target_weight=p_weight, adjustment_reason=p_reason,
                 ))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach PRESCRIPTION marker failed")
+            _marker_outcome(user_id, week, "PRESCRIPTION", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [DAY_SCHEDULE: day=X, lift_name=Upper A - Chest & Back, muscle_groups=chest,back,triceps, is_rest=false]
@@ -1196,8 +1221,9 @@ def _parse_coach_markers(text, user_id, week):
             else:
                 db.session.add(WeeklyDaySchedule(user_id=user_id, week=week, day_idx=day_idx, lift_name=lift_name, muscle_groups=muscle_groups, is_rest=is_rest, source='coach'))
             db.session.commit()
-        except Exception:
+        except Exception as _me:
             logging.exception("Coach DAY_SCHEDULE marker failed")
+            _marker_outcome(user_id, week, "DAY_SCHEDULE", m.group(0), "failed", str(_me))
             db.session.rollback()
 
 
@@ -9501,6 +9527,25 @@ def api_coach_today_history():
             'type': getattr(m, 'message_type', 'chat') or 'chat',
             'time': m.created_at.strftime('%I:%M %p') if m.created_at else None,
         })
+    # S029: a coach change that failed to persist is shown once, in place,
+    # so the athlete never trusts a card the coach said it changed.
+    try:
+        from models import CoachMarkerLog
+        failed = (CoachMarkerLog.query
+                  .filter_by(user_id=current_user.id, status="failed", surfaced=False)
+                  .order_by(CoachMarkerLog.created_at.asc()).all())
+        for f in failed:
+            result.append({
+                'role': 'system',
+                'content': f"⚠ Coach change NOT applied: {f.raw_marker} — {f.detail or 'save failed'}",
+                'type': 'flag',
+                'time': f.created_at.strftime('%I:%M %p') if f.created_at else None,
+            })
+            f.surfaced = True
+        if failed:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
     return jsonify(result)
 
 

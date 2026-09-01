@@ -33,7 +33,7 @@ CORE_SECTIONS = [
     "bodyweight", "garmin", "cut_status", "protocol_status", "goal",
     "meals_today", "fasting", "food_safety", "supplements",
     "coach_memories", "user_rules", "overrides", "completed_days",
-    "missed_checkin", "intake",
+    "missed_checkin", "intake", "marker_outcomes",
 ]
 
 SPECIALIST_AGENTS = ("crisis", "nutritionist", "strength_coach", "running_coach")

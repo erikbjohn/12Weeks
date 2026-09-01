@@ -53,6 +53,25 @@ class CoachMemory(db.Model):
     week = db.Column(db.Integer)  # Which week this was recorded
 
 
+class CoachMarkerLog(db.Model):
+    """Outcome of every structured coach marker ([RUN]/[SWAP]/[PRESCRIPTION]…)
+    the parser tried to apply (S029). Before this, a failed write was a
+    log line nobody read: the coach had already told the athlete the change
+    was made, the card kept the old value, and the coach's next turn (built
+    from chat text) still believed it. Failed rows are surfaced in chat and
+    in the coach's <marker_outcomes> block so it re-states, never asserts."""
+    __tablename__ = "coach_marker_log"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    # no `week` column: audit rows are dated, not block-shifted (transition_block3 census)
+    marker_type = db.Column(db.String(20), nullable=False)
+    raw_marker = db.Column(db.Text)
+    status = db.Column(db.String(10), nullable=False)  # applied | failed
+    detail = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    surfaced = db.Column(db.Boolean, default=False)  # shown in chat once
+
+
 class CoachRule(db.Model):
     """Per-user coaching rules — persistent directives that override default coach behavior.
     Created when user corrects the coach or manually adds a rule via /rule command."""
