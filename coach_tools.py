@@ -11,6 +11,7 @@ calls them when needed, gets structured data back, then writes its reply.
 from __future__ import annotations
 
 import json
+from sqlalchemy.exc import IntegrityError
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -602,7 +603,14 @@ def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = Non
     else:
         row = BodyWeight(log_date=d, weight_lbs=w, user_id=user_id)
         db.session.add(row)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:  # lost a check-then-insert race (S043) — update the winner
+        db.session.rollback()
+        row = BodyWeight.query.filter_by(user_id=user_id, log_date=d).first()
+        if row:
+            row.weight_lbs = w
+            db.session.commit()
     return json.dumps({"ok": True, "date": d.isoformat(), "weight_lbs": w,
                        "note": "Saved to the body-weight log (Stats/Progress read this)."})
 

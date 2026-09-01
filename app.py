@@ -291,6 +291,26 @@ with app.app_context():
         except Exception:
             db.session.rollback()
 
+    # S043: per-user unique keys on the plan tables and weigh-ins. Prod was
+    # deduped by hand 2026-09-01 (parked block-1 'historical' vs 'actual'
+    # rows, 'engine' vs 'coach' schedules) before these went in. A failure
+    # here (e.g. a duplicate slipped in) is logged loudly, never hidden.
+    for _uq in [
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeklyprescription_key ON weekly_prescription (user_id, week, day_idx, exercise_order)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeklyrunplan_key ON weekly_run_plan (user_id, week, day_idx)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeklymealplan_key ON weekly_meal_plan (user_id, week, day_idx)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeklywarmup_key ON weekly_warmup (user_id, week, day_idx)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_weeklydayschedule_key ON weekly_day_schedule (user_id, week, day_idx)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bodyweight_key ON body_weight (user_id, log_date)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bodymeasurement_key ON body_measurement (user_id, log_date)",
+    ]:
+        try:
+            db.session.execute(text(_uq))
+            db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            logging.error("[schema] unique index failed (duplicates present?): %s — %s", _uq, _e)
+
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
         ("psych_intake", "locked_until", "DATE"),
@@ -4742,6 +4762,9 @@ def _fill_missing_week_runs(user_id, target_week):
         if not cr:
             failures.append({"domain": "run", "day": di})
             continue
+        _existing = WeeklyRunPlan.query.filter_by(user_id=user_id, week=target_week, day_idx=di).first()
+        if _existing:
+            continue  # a concurrent fill already wrote this slot (unique key)
         db.session.add(WeeklyRunPlan(
             user_id=user_id, week=target_week, day_idx=di,
             run_type=cr["type"], label=cr["label"], duration=cr["duration"],
@@ -4753,7 +4776,10 @@ def _fill_missing_week_runs(user_id, target_week):
             "duration": cr["duration"],
             "prev_duration": _prev_runs.get(di),
         })
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()  # lost a race to another fill — its rows stand
     return run_summary, failures
 
 
@@ -4967,6 +4993,12 @@ def admin_replan_week():
     uid = user.id
     key = (uid, week)
     with _GEN_JOBS_LOCK:
+        _job = _GEN_JOBS.get(key)
+        if _job and _job.get("status") == "running" and \
+                time.time() - (_job.get("started_at") or 0) < GEN_JOB_STALE_S:
+            # S043: two regens for one week both passed the atomic-swap delete
+            # and both inserted; mirror the user route's guard.
+            return jsonify({"status": "started", "week": week, "note": "already running"})
         _GEN_JOBS[key] = {"status": "running", "started_at": time.time()}
 
     def _bg():
@@ -7347,6 +7379,14 @@ def api_bodyweight_record():
         db.session.add(bw)
     try:
         db.session.commit()
+    except IntegrityError:
+        # Lost a check-then-insert race (unique user_id+log_date, S043):
+        # re-read and update the row that won.
+        db.session.rollback()
+        bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
+        if bw:
+            bw.weight_lbs = weight
+            db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500

@@ -264,6 +264,8 @@ class BodyWeight(db.Model):
     weight_lbs = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'log_date', name="uq_bodyweight_key"),)
+
 
 
 class BodyMeasurement(db.Model):
@@ -282,6 +284,8 @@ class BodyMeasurement(db.Model):
     neck = db.Column(db.Float, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'log_date', name="uq_bodymeasurement_key"),)
+
 
 
 class ProgressPhoto(db.Model):
@@ -646,6 +650,8 @@ class WeeklyPrescription(db.Model):
     note = db.Column(db.Text)
     source = db.Column(db.String(20), default='template')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'week', 'day_idx', 'exercise_order', name="uq_weeklyprescription_key"),)
+
 
 
 class WeeklyMealPlan(db.Model):
@@ -661,6 +667,8 @@ class WeeklyMealPlan(db.Model):
     day_type = db.Column(db.String(20))
     source = db.Column(db.String(20), default='generator')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'week', 'day_idx', name="uq_weeklymealplan_key"),)
+
 
 
 class WeeklyRunPlan(db.Model):
@@ -677,6 +685,8 @@ class WeeklyRunPlan(db.Model):
     segments_json = db.Column(db.Text)  # coach's structured segments [{kind,minutes,reps,hr,note}]
     source = db.Column(db.String(20), default='engine')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'week', 'day_idx', name="uq_weeklyrunplan_key"),)
+
 
 
 class WeeklyWarmup(db.Model):
@@ -689,6 +699,8 @@ class WeeklyWarmup(db.Model):
     warmup_data = db.Column(db.JSON)  # Same shape as WARMUPS entries
     source = db.Column(db.String(20), default='engine')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'week', 'day_idx', name="uq_weeklywarmup_key"),)
+
 
 
 class WeeklyDaySchedule(db.Model):
@@ -707,6 +719,8 @@ class WeeklyDaySchedule(db.Model):
     # deload week" — see deload.py. Written for all 7 rows of the week.
     deload = db.Column(db.Boolean, default=False)
     deload_reason = db.Column(db.Text, nullable=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'week', 'day_idx', name="uq_weeklydayschedule_key"),)
+
 
 
 class CoachFeedback(db.Model):
