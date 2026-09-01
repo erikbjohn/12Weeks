@@ -370,7 +370,22 @@ def current_dose_mg(dose_rows: list, today, compound: str = "Retatrutide") -> Op
 
 # ── Adherence ─────────────────────────────────────────────────────────
 
-def is_late(row) -> bool:
+def _taken_local_date(row, tz=None):
+    """taken_at is stored naive-UTC; compare it as the ATHLETE's calendar
+    date (S092: a retro-mark of yesterday's 07:00 dose tapped after 17:00
+    PT lands on UTC date+2 and read as late)."""
+    ta = row.taken_at
+    if tz:
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import timezone as _tz
+            ta = ta.replace(tzinfo=_tz.utc).astimezone(ZoneInfo(tz))
+        except Exception:
+            pass
+    return ta.date()
+
+
+def is_late(row, tz=None) -> bool:
     """True iff an already-taken row's `taken_at` (UTC) date is more than
     one calendar day after its own `date` — see the module docstring's
     "Date-authority semantics" section for why the boundary sits at
@@ -378,10 +393,10 @@ def is_late(row) -> bool:
     midnight, and a next-morning retro-mark, are both on-time; only a tap
     landing two or more UTC calendar days after `date` is late. Returns
     False for untaken rows (`taken_at is None`)."""
-    return row.taken_at is not None and row.taken_at.date() > row.date + timedelta(days=1)
+    return row.taken_at is not None and _taken_local_date(row, tz) > row.date + timedelta(days=1)
 
 
-def adherence_7d(dose_rows: list, today) -> dict:
+def adherence_7d(dose_rows: list, today, tz=None) -> dict:
     """7-day adherence window [today-6, today]. A row counts as TAKEN iff
     `taken_at is not None` (never inferred from taken_at's own date — see
     module docstring). "late" subclassifies already-taken rows via
@@ -392,7 +407,7 @@ def adherence_7d(dose_rows: list, today) -> dict:
     window_rows = [r for r in dose_rows if start <= r.date <= today]
     scheduled = len(window_rows)
     taken = sum(1 for r in window_rows if r.taken_at is not None)
-    late = sum(1 for r in window_rows if is_late(r))
+    late = sum(1 for r in window_rows if is_late(r, tz))
     missed = [{"date": r.date, "compound": r.compound}
               for r in window_rows if r.taken_at is None and r.date < today]
     pct = round(taken / scheduled * 100, 1) if scheduled else None

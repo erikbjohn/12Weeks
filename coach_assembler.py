@@ -1095,7 +1095,7 @@ def _build_protocol_status():
         "current_cagrilintide_mg": current_cagrilintide_mg,
         "next_escalation": next_esc,
         "escalation_window": esc_window_active,
-        "adherence_7d": adherence_7d(all_rows, today),
+        "adherence_7d": adherence_7d(all_rows, today, getattr(current_user, "timezone", None) or "UTC"),
         "missed": missed_line(all_rows, today),
         "vial_flags": vial_flags,
         "labs_due": labs_due,
@@ -1177,12 +1177,22 @@ def _build_today_status():
     # otherwise re-find an OLD week-12 Monday session and report it as done TODAY
     # (Erik's 2026-06-29 phantom "you trained today"). The run side already
     # filters on log_date==today — workout-done must do the same.
-    slot_sets = SetLog.query.filter(
+    # S108: the SAME block-scope gate the server's auto-complete uses
+    # (app.py api_set_log, 2026-08-24): a session's rows can straddle the
+    # date the day was finished; the phantom-done class is excluded by the
+    # block scope (start_date). Same-date only when there is no start_date.
+    from models import AppState as _AppState
+    _ts_state = _AppState.query.filter_by(user_id=current_user.id).first()
+    _ts_q = SetLog.query.filter(
         SetLog.user_id == current_user.id,
         SetLog.week == week,
         SetLog.day_idx == today_idx,
-        SetLog.logged_date == today,
-    ).all()
+    )
+    if _ts_state and _ts_state.start_date:
+        _ts_q = _ts_q.filter(SetLog.logged_date >= _ts_state.start_date)
+    else:
+        _ts_q = _ts_q.filter(SetLog.logged_date == today)
+    slot_sets = _ts_q.all()
     workout_logged_any = len(slot_sets) > 0
 
     def _norm(n):
@@ -1236,9 +1246,13 @@ def _build_today_status():
     run_plan = WeeklyRunPlan.query.filter_by(
         user_id=current_user.id, week=week, day_idx=today_idx,
     ).first()
-    run_today_log = RunLog.query.filter_by(
-        user_id=current_user.id, log_date=today,
-    ).order_by(RunLog.id.desc()).first()
+    # S120: today's run is the row for TODAY'S SLOT (week, day_idx) — a run
+    # logged for a past slot used to be stamped log_date=today and read as
+    # today's run here. Fall back to log_date only for legacy rows.
+    run_today_log = (RunLog.query.filter_by(user_id=current_user.id, week=week, day_idx=today_idx)
+                     .order_by(RunLog.id.desc()).first()
+                     or RunLog.query.filter_by(user_id=current_user.id, log_date=today, week=None)
+                     .order_by(RunLog.id.desc()).first())
 
     # COACH-OR-NOTHING: no WeeklyRunPlan row means NO run is prescribed. The old
     # fallback to the static template's run made the coach say "today's run is

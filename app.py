@@ -2094,7 +2094,15 @@ def api_regenerate_meals():
         # checked off, the prescription view becomes a record of what was
         # consumed; regenerating would wipe that.
         today = _user_today()
-        week_monday = today - timedelta(days=today.weekday())
+        # S093: dates come from the PROGRAM calendar for target_week, not
+        # today's calendar Monday — the client passes the viewed week, so
+        # 'Recompute Calories' on next week deleted next week's rows using
+        # THIS week's protected days and fasted-dose rail.
+        _st = _get_state()
+        if _st and _st.start_date:
+            week_monday = day_date(_st.start_date, target_week, 0)
+        else:
+            week_monday = today - timedelta(days=today.weekday())
         protected_dates = set()
         for d_idx in range(7):
             d_date = week_monday + timedelta(days=d_idx)
@@ -3872,6 +3880,7 @@ def api_workouts():
     has_gym = pa.has_gym if pa else True
 
     all_weeks = {}
+    _overlay_errors = []  # S119: failed overlay queries are reported, never silently 'unplanned'
     for week in range(1, 13):
         phase = get_phase(week)
         if has_gym:
@@ -3956,8 +3965,9 @@ def api_workouts():
                         days[day_idx]["mealPlan"] = meal_data
                         days[day_idx]["mealType"] = meal_data.get("label", "custom")
                         mealplan_day_set.add(day_idx)
-        except Exception:
-            pass  # No coach meals resolved — finalize_day_plan strips the template ones
+        except Exception as _oe:
+            logging.exception("[WORKOUTS] meal_plan overlay failed wk%s", week)
+            _overlay_errors.append({"week": week, "domain": "meal_plan", "error": type(_oe).__name__})
 
         # Run plan overlay
         try:
@@ -3967,8 +3977,11 @@ def api_workouts():
                 for rp in run_plans:
                     if rp.day_idx < len(days):
                         days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
-        except Exception:
-            pass
+        except Exception as _oe:
+            # S119: a failed overlay query used to render the card as "not
+            # planned" with no trace. Log it and mark the domain as errored.
+            logging.exception("[WORKOUTS] %s overlay failed wk%s", "run_plan", week)
+            _overlay_errors.append({"week": week, "domain": "run_plan", "error": type(_oe).__name__})
 
         # LOGGED-RUN overlay: a day the athlete already RAN but has no plan row
         # should show their logged run — not a red "not planned" flag.
@@ -4004,8 +4017,9 @@ def api_workouts():
                     "logged": True,
                 }
                 runplan_day_set.add(di)
-        except Exception:
-            pass
+        except Exception as _oe:
+            logging.exception("[WORKOUTS] logged_runs overlay failed wk%s", week)
+            _overlay_errors.append({"week": week, "domain": "logged_runs", "error": type(_oe).__name__})
 
         # Warmup overlay
         try:
@@ -4014,8 +4028,11 @@ def api_workouts():
                 for wu in warmups:
                     if wu.day_idx < len(days) and wu.warmup_data:
                         days[wu.day_idx]["warmup"] = wu.warmup_data
-        except Exception:
-            pass
+        except Exception as _oe:
+            # S119: a failed overlay query used to render the card as "not
+            # planned" with no trace. Log it and mark the domain as errored.
+            logging.exception("[WORKOUTS] %s overlay failed wk%s", "warmup", week)
+            _overlay_errors.append({"week": week, "domain": "warmup", "error": type(_oe).__name__})
 
         # Day schedule overlay
         try:
@@ -4027,8 +4044,11 @@ def api_workouts():
                         if ds.is_rest:
                             days[ds.day_idx]["isRest"] = True
                             days[ds.day_idx]["exercises"] = []
-        except Exception:
-            pass
+        except Exception as _oe:
+            # S119: a failed overlay query used to render the card as "not
+            # planned" with no trace. Log it and mark the domain as errored.
+            logging.exception("[WORKOUTS] %s overlay failed wk%s", "day_schedule", week)
+            _overlay_errors.append({"week": week, "domain": "day_schedule", "error": type(_oe).__name__})
 
         # FINAL day-title reconciliation — AFTER the schedule overlay (which
         # carries a stale label) so the title shown on the dashboard/detail
@@ -4046,6 +4066,7 @@ def api_workouts():
         # the user's plan — meals included (a hardcoded has_mealplan=True let
         # static template meals ship labeled 'planned' on never-planned weeks).
         from plan_overlay import finalize_day_plan
+        _errored_domains = {e["domain"] for e in _overlay_errors if e["week"] == week}
         for _di, _day in enumerate(days):
             finalize_day_plan(
                 _day,
@@ -4053,6 +4074,10 @@ def api_workouts():
                 has_runplan=(_di in runplan_day_set),
                 has_mealplan=(_di in mealplan_day_set),
             )
+            if _errored_domains & {"run_plan", "logged_runs"} and _day.get("runStatus") == "unplanned":
+                _day["runStatus"] = "error"  # the query failed — we do NOT know it's unplanned
+            if "meal_plan" in _errored_domains and not _day.get("mealPlan"):
+                _day["mealStatus"] = "error"
 
         days = _filter_meals_by_food_selections(days, user_food_ids)
         all_weeks[str(week)] = {
@@ -4072,6 +4097,8 @@ def api_workouts():
     except Exception:
         all_weeks["_exerciseNames"] = []
         all_weeks["_aliasMap"] = {}
+    if _overlay_errors:
+        all_weeks["_overlay_errors"] = _overlay_errors
     response = jsonify(all_weeks)
     # Force fresh — iOS PWA + Cloudflare have layered caches that have
     # been serving stale workout data after server-side template/prescription
@@ -6095,6 +6122,10 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         "target_weight": _goal.target_weight if _goal else None,
         "weeks_remaining": max(0, 12 - target_week + 1),
         "water_spike_suspected": _water_spike,
+        # S110: computed on the request thread. The executor threads have no
+        # request context, so current_user-bound _user_today() there returned
+        # the server-UTC date (a day ahead every evening).
+        "today": _user_today(),
     }
     # S058/S077: the planners never saw recovery data or standing
     # commitments — 28 days of GarminWellness and the check-ins existed and
@@ -13686,7 +13717,8 @@ def api_run_log():
             user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx"),
             distance_miles=data.get("distance_miles"), avg_hr=data.get("avg_hr"),
             elevation_ft=data.get("elevation_ft"), duration_min=data.get("duration_min"),
-            notes=data.get("notes"), log_date=_user_today(), source="manual",
+            notes=data.get("notes"), log_date=_run_slot_date(data.get("week"), data.get("day_idx")),
+            source="manual",
         )
         db.session.add(existing)
     try:
@@ -13695,6 +13727,19 @@ def api_run_log():
         db.session.rollback()
         return jsonify({"error": "Save failed"}), 500
     return jsonify({"ok": True, "id": existing.id})
+
+
+def _run_slot_date(week, day_idx):
+    """S120: a run logged for a PAST slot is dated to that slot, never to
+    today (it used to become 'today's run' in today_status and the recap)."""
+    today = _user_today()
+    try:
+        st = _get_state()
+        if st and st.start_date and week is not None and day_idx is not None:
+            return min(day_date(st.start_date, int(week), int(day_idx)), today)
+    except Exception:
+        pass
+    return today
 
 
 @app.route("/api/run-log")

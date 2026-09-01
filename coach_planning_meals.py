@@ -31,12 +31,12 @@ def _anthropic_client():
     )
 
 
-def _build_weight_trend_block(user_id: int, lookback_weeks: int = 6) -> str:
-    """Recent body-weight log so the coach sees trajectory."""
+def _build_weight_trend_block(user_id: int, lookback_weeks: int = 6, today=None) -> str:
+    """Recent body-weight log so the coach sees trajectory. `today` is the
+    athlete-local date from the caller (S110: executor thread, no request)."""
     from models import BodyWeight
-    from datetime import timedelta
-    from coach_assembler import _user_today
-    cutoff = _user_today() - timedelta(weeks=lookback_weeks)
+    from datetime import timedelta, date as _date
+    cutoff = (today or _date.today()) - timedelta(weeks=lookback_weeks)
     rows = (BodyWeight.query
             .filter(BodyWeight.user_id == user_id)
             .filter(BodyWeight.log_date >= cutoff)
@@ -89,7 +89,7 @@ def generate_week_meals(
     Returns: {day_idx: {day_type, calories, protein, carbs, fat,
                         rationale}}
     """
-    weight_block = _build_weight_trend_block(user_id)
+    weight_block = _build_weight_trend_block(user_id, today=user_context.get("today"))
     macros_block = _build_recent_macros_block(user_id, week)
 
     workout_lines = "\n".join(

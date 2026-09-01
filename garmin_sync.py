@@ -656,9 +656,22 @@ def sync_wellness(gc, user_id, today=None):
         if row is None:
             row = GarminWellness(user_id=user_id, date=d)
             db.session.add(row)
+        # S094: never downgrade. A transient per-metric fetch failure yields
+        # None for that metric; writing it over a real value made the coach
+        # read 'no sleep score' for a day that had one. Only non-None values
+        # land; raw_json is merged per key.
+        _any_metric = any(v is not None for v in fields.values())
         for k, v in fields.items():
-            setattr(row, k, v)
-        row.raw_json = json.dumps({k: data.get(k) for k in _WELLNESS_KEYS})  # Fix 5: single source
+            if v is not None:
+                setattr(row, k, v)
+        if _any_metric:
+            try:
+                _prev_raw = json.loads(row.raw_json) if row.raw_json else {}
+            except Exception:
+                _prev_raw = {}
+            _new_raw = {k: data.get(k) for k in _WELLNESS_KEYS}
+            row.raw_json = json.dumps({k: (_new_raw[k] if _new_raw.get(k) is not None else _prev_raw.get(k))
+                                       for k in _WELLNESS_KEYS})
         row.pulled_at = datetime.now(timezone.utc)
         result["wellness_upserted"] += 1
         if d != today:

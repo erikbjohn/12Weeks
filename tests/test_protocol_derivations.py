@@ -506,3 +506,15 @@ def test_fasted_dose_time_20_59_does_not_count():
     from protocol import fasted_dose_time
     rows = [Row(date=date(2026, 9, 1), time="20:59", compound="Tesamorelin", dose_mg=2.0, taken_at=None)]
     assert fasted_dose_time(rows, date(2026, 9, 1)) is None
+
+
+def test_is_late_uses_the_athletes_local_date():
+    """S092: a retro-mark of yesterday's dose tapped at 18:00 PT is UTC
+    date+2 but LOCAL date+1 — on time."""
+    from datetime import datetime
+    from types import SimpleNamespace
+    from protocol import is_late
+    row = SimpleNamespace(date=date(2026, 8, 30), time="07:00",
+                          taken_at=datetime(2026, 9, 1, 1, 30))  # 2026-08-31 18:30 PT
+    assert is_late(row) is True            # naive UTC read (legacy)
+    assert is_late(row, "America/Los_Angeles") is False

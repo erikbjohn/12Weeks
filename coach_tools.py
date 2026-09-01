@@ -559,8 +559,10 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     `days` so the coach never misses a near-term schedule change even when
     asked for a short history window.
     """
-    from models import PeptideDose
+    from models import PeptideDose, User, db
     from protocol import adherence_7d, next_escalation, escalation_dates, is_late
+    _u = db.session.get(User, user_id)
+    _tz = getattr(_u, "timezone", None) or "UTC"
     today = _user_local_today(user_id)
     all_rows = PeptideDose.query.filter_by(user_id=user_id).all()
     days = int(days)
@@ -573,7 +575,7 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
         {
             "date": str(r.date), "time": r.time, "compound": r.compound,
             "dose_mg": r.dose_mg, "taken": r.taken_at is not None,
-            "late": is_late(r),
+            "late": is_late(r, _tz),
         }
         for r in window_rows
     ]
@@ -582,7 +584,7 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     return json.dumps({
         "window_days": days,
         "dose_history": history,
-        "adherence_7d": adherence_7d(all_rows, today),
+        "adherence_7d": adherence_7d(all_rows, today, _tz),
         "next_escalation": next_escalation(all_rows, today),
         "escalation_dates_next_14d": upcoming,
     }, default=str)

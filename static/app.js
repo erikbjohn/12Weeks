@@ -10363,6 +10363,9 @@ function runPillClass(run) {
 // run has no real coach/engine plan (runStatus 'unplanned' or run missing),
 // render a loud marker instead of a fabricated duration.
 function runPillHtml(d) {
+  if (d && d.runStatus === 'error') {
+    return '<span class="run-pill run-unplanned">&#9888; Run plan unavailable (server error) — reload</span>';
+  }
   if (!d || !d.run || d.runStatus === 'unplanned') {
     return '<span class="run-pill run-unplanned">&#9888; Run not planned</span>';
   }

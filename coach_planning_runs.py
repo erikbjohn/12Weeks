@@ -31,13 +31,14 @@ def _anthropic_client():
 
 
 def _build_run_history_block(user_id: int, current_week: int,
-                              lookback_weeks: int = 4) -> str:
+                              lookback_weeks: int = 4, today=None) -> str:
     """Recent RunLog summary — distance, duration, HR, type. Coach uses this
-    to set pace/distance/HR for the upcoming week."""
+    to set pace/distance/HR for the upcoming week. `today` must be the
+    athlete-local date from the caller (S110: this runs in an executor
+    thread with no request context)."""
     from models import RunLog
-    from datetime import timedelta
-    from coach_assembler import _user_today
-    cutoff = _user_today() - timedelta(weeks=lookback_weeks)
+    from datetime import timedelta, date as _date
+    cutoff = (today or _date.today()) - timedelta(weeks=lookback_weeks)
     runs = (RunLog.query
             .filter(RunLog.user_id == user_id)
             .filter(RunLog.log_date >= cutoff)
@@ -405,7 +406,7 @@ def generate_week_runs(
     if not template_runs:
         return {}
 
-    history_block = _build_run_history_block(user_id, week)
+    history_block = _build_run_history_block(user_id, week, today=user_context.get("today"))
     prev_block = _prev_prescription_block(user_id, week)
     template_lines = []
     for r in template_runs:
