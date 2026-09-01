@@ -90,7 +90,7 @@ def _csrf_origin_guard():
     return None
 
 # ─── MODEL CONSTANTS ──────────────────────────────────────────────────────
-CLAUDE_OPUS = "claude-opus-4-7"
+from llm_client import OPUS as CLAUDE_OPUS  # S071
 CLAUDE_SONNET = "claude-sonnet-4-6"
 
 

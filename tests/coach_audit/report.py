@@ -102,7 +102,7 @@ def _call_clustering_llm(failures: list[dict]) -> list[dict]:
         for f in failures
     ], indent=2)
     resp = client.messages.create(
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
         max_tokens=1500,
         system=CLUSTER_SYSTEM,
         messages=[{"role": "user", "content": user_payload}],

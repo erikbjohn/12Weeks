@@ -722,12 +722,8 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         )
         text = "".join(b.text for b in resp.content
                         if getattr(b, "type", None) == "text").strip()
-        if text.startswith("```"):
-            text = text.split("```", 2)[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-        parsed = json.loads(text)
+        from llm_client import parse_json_reply
+        parsed = parse_json_reply(text)
     except Exception as e:
         log.warning("generate_week_program failed: %s", e)
         return {}, [], {"deload": False, "reason": None}

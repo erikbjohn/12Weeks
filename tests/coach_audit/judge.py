@@ -7,7 +7,7 @@ import time
 from .types import PromptCase, JudgeResult
 
 
-JUDGE_MODEL = "claude-opus-4-7"
+JUDGE_MODEL = "claude-opus-4-8"
 MAX_TOKENS = 1500           # Headroom for verbose violation lists.
 
 # Keys present in every JudgeResult.scores dict — even when the model errors

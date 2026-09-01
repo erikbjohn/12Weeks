@@ -577,12 +577,8 @@ def generate_week_runs(
         text = "".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
-        if text.startswith("```"):
-            text = text.split("```", 2)[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-        parsed = json.loads(text)
+        from llm_client import parse_json_reply
+        parsed = parse_json_reply(text)
     except Exception as e:
         # Even on total LLM/parse failure, never leave the week runless — the
         # 7-day floor still applies (Erik runs every day). Returning {} here would

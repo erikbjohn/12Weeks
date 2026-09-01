@@ -9,7 +9,7 @@ what it takes to hit the goal.
 
 import math
 
-CLAUDE_SONNET = "claude-sonnet-4-20250514"
+from llm_client import SONNET as CLAUDE_SONNET  # S071: was a stale id the API rejects
 
 # ---------------------------------------------------------------------------
 # Actor lookup table

@@ -134,12 +134,8 @@ def prescribe_starting_weight(
         log.warning("lifting_agent: API call failed: %s", e)
         return None
 
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-        text = text.strip()
+    from llm_client import strip_fence
+    text = strip_fence(text)  # S071: one fence parser
     # Find first { ... }
     try:
         start = text.index("{")

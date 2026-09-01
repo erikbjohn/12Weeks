@@ -7,7 +7,7 @@ from program_calendar import program_week
 
 log = logging.getLogger(__name__)
 
-CLAUDE_OPUS = "claude-opus-4-20250514"
+from llm_client import OPUS as CLAUDE_OPUS  # S071: was a stale id the API rejects
 
 REPORT_PROMPT = """You are Erik — high-performance coach. Lombardi voice. Direct. Invested. Blunt. Never cruel.
 
