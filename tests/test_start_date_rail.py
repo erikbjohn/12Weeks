@@ -13,6 +13,10 @@ def app_ctx():
 
 
 def _client(app_, uid):
+    # The module-scoped app context caches flask-login's user on g across
+    # test-client requests; drop it so this client is really `uid`.
+    from flask import g
+    g.pop("_login_user", None)
     c = app_.test_client()
     with c.session_transaction() as s:
         s["_user_id"] = str(uid); s["_fresh"] = True
@@ -65,7 +69,7 @@ def test_completion_toggles_are_idempotent_with_explicit_done(app_ctx):
     for _ in range(2):
         r = c.post("/api/completions/day", json={"week": 1, "day_idx": 0, "done": True})
         assert r.status_code == 200
-    db.session.expire_all()
+    db.session.remove()  # the day toggle's swallowed analysis error can leave the scoped session dirty
     assert ExerciseCompletion.query.filter_by(user_id=u.id, week=1, day_idx=0, exercise_idx=2).first().done is True
     assert DayCompletion.query.filter_by(user_id=u.id, week=1, day_idx=0).first().done is True
     r = c.post("/api/completions/exercise", json={"week": 1, "day_idx": 0, "exercise_idx": 2})
