@@ -661,6 +661,34 @@ def _prune_non_catalog_alternatives():
 PRUNED_SWAP_TARGETS = _prune_non_catalog_alternatives()
 
 
+def _lookup_swap(exercise_name):
+    """THE EXERCISE_SWAPS lookup (S131): exact → '(pump)' stripped → legacy
+    '1RM test/max weight' + Barbell/DB/… prefix stripped → substring scan.
+    The substring step exists for legacy test labels ONLY: a real catalog
+    exercise never fuzzy-matches (it mapped 'DB Fly' to 'Incline Cable Fly'
+    and 'Single-Arm DB Row' to a barbell row). Returns
+    (key, entry, match) with match in {'exact', 'alias', 'fuzzy', None}."""
+    import re
+    from workout_data import resolve_name, EXERCISES
+    if not exercise_name:
+        return None, None, None
+    name = resolve_name(exercise_name)
+    if name in EXERCISE_SWAPS:
+        return name, EXERCISE_SWAPS[name], "exact"
+    clean = re.sub(r'\s*\(pump\)\s*$', '', name).strip()
+    if clean in EXERCISE_SWAPS:
+        return clean, EXERCISE_SWAPS[clean], "alias"
+    if name in EXERCISES or clean in EXERCISES:
+        return None, None, None  # a catalog exercise with no swap entry — never guess
+    clean = re.sub(r'\s*[-–]\s*(1RM test|max weight|pump)$', '', clean).strip()
+    clean = re.sub(r'^(Barbell|DB|Dumbbell|Heavy|Cable)\s+', '', clean).strip()
+    if clean:
+        for key in EXERCISE_SWAPS:
+            if clean.lower() in key.lower() or key.lower() in clean.lower():
+                return key, EXERCISE_SWAPS[key], "fuzzy"
+    return None, None, None
+
+
 def get_alternatives(exercise_name, user_equipment=None):
     """Get swap options for an exercise based on available equipment.
 
@@ -671,28 +699,9 @@ def get_alternatives(exercise_name, user_equipment=None):
     Returns:
         list of alternative dicts, or empty list if no swaps needed/available
     """
-    import re
     from workout_data import resolve_name
     exercise_name = resolve_name(exercise_name)
-
-    swap = EXERCISE_SWAPS.get(exercise_name)
-
-    # Strip pump/test suffixes — e.g. "Goblet Squat (pump)" -> "Goblet Squat"
-    if not swap:
-        clean = re.sub(r'\s*\(pump\)\s*$', '', exercise_name).strip()
-        swap = EXERCISE_SWAPS.get(clean)
-    else:
-        clean = exercise_name
-
-    if not swap:
-        # Fuzzy match — strip common prefixes/suffixes like "1RM test", "max weight"
-        # Operates on the pump-stripped name so "(pump)" doesn't interfere
-        clean = re.sub(r'\s*[-–]\s*(1RM test|max weight|pump)$', '', clean).strip()
-        clean = re.sub(r'^(Barbell|DB|Dumbbell|Heavy|Cable)\s+', '', clean).strip()
-        for key in EXERCISE_SWAPS:
-            if clean.lower() in key.lower() or key.lower() in clean.lower():
-                swap = EXERCISE_SWAPS[key]
-                break
+    _, swap, _ = _lookup_swap(exercise_name)
 
     if not swap:
         return []
@@ -720,25 +729,7 @@ def check_exercise_available(exercise_name, user_equipment):
 
     Returns True if equipment is available or exercise is not in the swap map.
     """
-    import re
-    from workout_data import resolve_name
-    exercise_name = resolve_name(exercise_name)
-
-    swap = EXERCISE_SWAPS.get(exercise_name)
-
-    if not swap:
-        clean = re.sub(r'\s*\(pump\)\s*$', '', exercise_name).strip()
-        swap = EXERCISE_SWAPS.get(clean)
-    else:
-        clean = exercise_name
-
-    if not swap:
-        clean = re.sub(r'\s*[-–]\s*(1RM test|max weight|pump)$', '', clean).strip()
-        clean = re.sub(r'^(Barbell|DB|Dumbbell|Heavy|Cable)\s+', '', clean).strip()
-        for key in EXERCISE_SWAPS:
-            if clean.lower() in key.lower() or key.lower() in clean.lower():
-                swap = EXERCISE_SWAPS[key]
-                break
+    _, swap, _ = _lookup_swap(exercise_name)
 
     if not swap:
         return True  # Unknown exercise, assume available
@@ -795,17 +786,11 @@ def auto_swap_workout(exercises, user_equipment):
 
 
 def find_swap_entry(exercise_name):
-    """Locate the EXERCISE_SWAPS catalog entry for an exercise.
-
-    Mirrors the lookup chain used by get_alternatives — direct hit, pump-suffix strip,
-    test/prefix fuzzy match — so write-time validation matches the alternatives the UI
-    shows at read time. Returns (catalog_key, swap_dict) or (None, None) when no entry
-    can be located.
-    """
-    import re
-    from workout_data import resolve_name
-    if not exercise_name:
-        return None, None
+    """Locate the EXERCISE_SWAPS catalog entry for an exercise — the same
+    chain the UI's alternatives use (_lookup_swap), so write-time validation
+    matches read time. Returns (catalog_key, swap_dict) or (None, None)."""
+    key, entry, _ = _lookup_swap(exercise_name)
+    return key, entry
     name = resolve_name(exercise_name)
     if name in EXERCISE_SWAPS:
         return name, EXERCISE_SWAPS[name]
