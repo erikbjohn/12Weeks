@@ -70,7 +70,7 @@ def test_completion_toggles_are_idempotent_with_explicit_done(app_ctx):
     for _ in range(2):
         r = c.post("/api/completions/day", json={"week": 1, "day_idx": 0, "done": True})
         assert r.status_code == 200
-    db.session.remove()  # the day toggle's swallowed analysis error can leave the scoped session dirty
+    db.session.expire_all()
     assert ExerciseCompletion.query.filter_by(user_id=uid, week=1, day_idx=0, exercise_idx=2).first().done is True
     assert DayCompletion.query.filter_by(user_id=uid, week=1, day_idx=0).first().done is True
     r = c.post("/api/completions/exercise", json={"week": 1, "day_idx": 0, "exercise_idx": 2})
