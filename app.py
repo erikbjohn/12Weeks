@@ -3885,6 +3885,12 @@ def api_workouts():
                 for rp in run_plans:
                     if rp.day_idx < len(days):
                         days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
+                        # S063: structured segments for the timer (prose stays canonical for the card)
+                        if rp.segments_json:
+                            try:
+                                days[rp.day_idx]["run"]["segments"] = json.loads(rp.segments_json)
+                            except Exception:
+                                pass
         except Exception as _oe:
             # S119: a failed overlay query used to render the card as "not
             # planned" with no trace. Log it and mark the domain as errored.
@@ -4105,6 +4111,11 @@ def api_week(week):
             for rp in run_plans:
                 if rp.day_idx < len(days):
                     days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
+                    if rp.segments_json:  # S063
+                        try:
+                            days[rp.day_idx]["run"]["segments"] = json.loads(rp.segments_json)
+                        except Exception:
+                            pass
     except Exception:
         pass
 

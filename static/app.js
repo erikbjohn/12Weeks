@@ -11848,12 +11848,19 @@ function _parseHiitDetail(detail, totalTime) {
     var warmupMatch = detail.match(/(\d+)\s*min\s*warm/i);
     if (warmupMatch) warmup = parseInt(warmupMatch[1]) * 60;
 
+    // Coach segment prose: "5×3 min hard / 2 min easy" (unicode × or x, minutes)
+    var coachMatch = detail.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*min\s*hard(?:[^/]*?)\/\s*(\d+(?:\.\d+)?)\s*min\s*easy/i);
+    if (coachMatch) {
+        rounds = parseInt(coachMatch[1]);
+        work = Math.round(parseFloat(coachMatch[2]) * 60);
+        rest = Math.round(parseFloat(coachMatch[3]) * 60);
+    }
     // Parse work:rest ratio from "30:90" format (most reliable)
-    var ratioMatch = detail.match(/(\d+):(\d+)/);
+    var ratioMatch = !coachMatch && detail.match(/(\d+):(\d+)/);
     if (ratioMatch) {
         work = parseInt(ratioMatch[1]);
         rest = parseInt(ratioMatch[2]);
-    } else {
+    } else if (!coachMatch) {
         // Fallback: "30 sec all-out / 90 sec walk"
         var workMatch = detail.match(/(\d+)\s*sec\s*all/i);
         if (workMatch) work = parseInt(workMatch[1]);
@@ -11862,8 +11869,10 @@ function _parseHiitDetail(detail, totalTime) {
     }
 
     // Parse rounds: prefer the "Nx D:D" format adjacent to the ratio
-    var roundMatch = detail.match(/(\d+)\s*x\s*\d+\s*:\s*\d+/);
-    if (roundMatch) {
+    var roundMatch = !coachMatch && detail.match(/(\d+)\s*x\s*\d+\s*:\s*\d+/);
+    if (coachMatch) {
+        // rounds already set from the coach prose
+    } else if (roundMatch) {
         rounds = parseInt(roundMatch[1]);
     } else {
         // Fallback: first "Nx" in the string
@@ -11918,6 +11927,11 @@ function startHiitTimer() {
     var d = weekData.days[currentDay];
     if (!d || !d.run || d.run.type !== 'hiit') return;
 
+    // S063: prefer the coach's structured segments (served alongside the
+    // prose); fall back to parsing the prose, which now also accepts the
+    // coach's own "5×3 min hard / 2 min easy" format.
+    var phases = _phasesFromSegments(d.run.segments, d.run.time);
+    if (phases) return _runHiitPhases(phases);
     var cfg = _parseHiitDetail(d.run.detail || '', d.run.time || '');
     if (!cfg) {
         // FAIL LOUD: never run a fabricated default (8x30:90) that differs from
@@ -11937,7 +11951,52 @@ function startHiitTimer() {
         phases.push({ name: 'RECOVERY', round: r + 1, total: cfg.rounds, duration: cfg.rest, color: '#22c55e' });
     }
     if (cfg.cooldown > 0) phases.push({ name: 'COOLDOWN', duration: cfg.cooldown, color: '#3b82f6' });
+    return _runHiitPhases(phases);
+}
 
+// Segments → timer phases. Sum must equal the labeled duration (HIIT
+// terminology memory: phases sum == label time; last phase is RECOVERY/
+// COOLDOWN, never "walk"). Returns null when segments are absent/unusable.
+function _phasesFromSegments(segments, timeLabel) {
+    if (!Array.isArray(segments) || !segments.length) return null;
+    var phases = [];
+    var i = 0;
+    while (i < segments.length) {
+        var sg = segments[i] || {};
+        var kind = String(sg.kind || 'steady').toLowerCase();
+        var secs = Math.round((parseFloat(sg.minutes) || 0) * 60);
+        var reps = parseInt(sg.reps) || 1;
+        if (secs <= 0) return null;
+        if (kind === 'work') {
+            var nxt = segments[i + 1] || null;
+            var rec = (nxt && String(nxt.kind || '').toLowerCase() === 'recovery') ? nxt : null;
+            var recSecs = rec ? Math.round((parseFloat(rec.minutes) || 0) * 60) : 0;
+            var recReps = rec ? (parseInt(rec.reps) || reps) : 0;
+            for (var r = 0; r < reps; r++) {
+                phases.push({ name: 'ALL OUT', round: r + 1, total: reps, duration: secs, color: '#ef4444' });
+                if (rec && (r < recReps)) phases.push({ name: 'RECOVERY', round: r + 1, total: reps, duration: recSecs, color: '#22c55e' });
+            }
+            if (rec) i++;
+        } else if (kind === 'warmup') {
+            phases.push({ name: 'WARMUP', duration: secs * reps, color: '#3b82f6' });
+        } else if (kind === 'cooldown') {
+            phases.push({ name: 'COOLDOWN', duration: secs * reps, color: '#3b82f6' });
+        } else if (kind === 'recovery') {
+            for (var q = 0; q < reps; q++) phases.push({ name: 'RECOVERY', duration: secs, color: '#22c55e' });
+        } else {
+            phases.push({ name: 'STEADY', duration: secs * reps, color: '#3b82f6' });
+        }
+        i++;
+    }
+    if (!phases.length) return null;
+    // Honesty check: the phases must add up to the label; otherwise the card and the timer disagree.
+    var labelMin = parseInt(String(timeLabel || '').match(/(\d+)/) ? String(timeLabel).match(/(\d+)/)[1] : '0');
+    var total = phases.reduce(function(a, p) { return a + p.duration; }, 0);
+    if (labelMin && Math.abs(total - labelMin * 60) > 60) return null;
+    return phases;
+}
+
+function _runHiitPhases(phases) {
     var phaseIdx = 0;
     var paused = false;
     var pausedAt = 0;
