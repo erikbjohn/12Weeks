@@ -551,3 +551,26 @@ class TestSwapTargetsAreRealExercises:
               "leg_press", "flat_bench"]
         for name in ("Standing Calf Raise", "DB Shrug", "Power Clean"):
             assert get_alternatives(name, eq), f"{name} lost all its alternatives"
+
+
+class TestEveryCatalogExerciseHasAMenu:
+    def test_every_catalog_exercise_has_a_menu_with_full_gym(self):
+        """S078: 35 catalog exercises had no swap entry → 'No alternatives'
+        on the card and is_valid_swap accepted ANY target for them."""
+        from workout_data import EXERCISES
+        from equipment_swaps import get_alternatives, EQUIPMENT_CATALOG
+        all_eq = list(EQUIPMENT_CATALOG.keys()) if isinstance(EQUIPMENT_CATALOG, dict) else [e["id"] for e in EQUIPMENT_CATALOG]
+        missing = [n for n in EXERCISES if not get_alternatives(n, all_eq)]
+        assert not missing, missing
+
+    def test_swap_targets_are_catalog_exercises(self):
+        from workout_data import EXERCISES, resolve_name
+        from equipment_swaps import EXERCISE_SWAPS
+        bad = [(k, a["name"]) for k, e in EXERCISE_SWAPS.items() for a in e["alternatives"]
+               if resolve_name(a["name"]) not in EXERCISES]
+        assert not bad, bad[:10]
+
+    def test_catalog_exercise_rejects_arbitrary_swap(self):
+        from equipment_swaps import is_valid_swap
+        assert is_valid_swap("Front Squat", "Goblet Squat") is True
+        assert is_valid_swap("Front Squat", "Plank") is False

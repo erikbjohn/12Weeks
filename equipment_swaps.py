@@ -841,6 +841,13 @@ def is_valid_swap(original_name, swap_name):
     if family:
         return swap in family
 
+    # S078: a CATALOG exercise with no swap family cannot accept any target
+    # — the old `return True` let the [SWAP] marker and POST /api/exercise-swap
+    # accept anything for it. Only a name outside the catalog (legacy
+    # labels) keeps the permissive fallback.
+    from workout_data import EXERCISES as _EX
+    if orig in _EX:
+        return False
     return True
 
 
@@ -886,3 +893,41 @@ def validate_exercise_swaps():
             len(ghosts), ", ".join(sorted(ghosts)[:10]),
         )
     return missing
+
+# ── S078: every catalog exercise has a swap menu (catalog-only targets) ──
+
+EXERCISE_SWAPS['DB Fly'] = {'muscle_group': 'chest', 'requires': ['dumbbells', 'flat_bench'], 'alternatives': [{'name': 'Cable Chest Fly', 'requires': ['cable_machine'], 'note': 'Constant tension, same pattern'}, {'name': 'Push-Ups', 'requires': [], 'note': 'Bodyweight chest, elevate feet for load'}]}
+EXERCISE_SWAPS['Ring Row'] = {'muscle_group': 'back', 'requires': ['trx'], 'alternatives': [{'name': 'Inverted Row', 'requires': [], 'note': 'Same pull, bar instead of rings'}, {'name': 'Band Row', 'requires': ['resistance_band'], 'note': 'Band tension, any anchor'}]}
+EXERCISE_SWAPS['Pull-Ups'] = {'muscle_group': 'back', 'requires': ['pull_up_bar'], 'alternatives': [{'name': 'Lat Pulldown', 'requires': ['lat_pulldown'], 'note': 'Same vertical pull, loadable'}, {'name': 'Inverted Row', 'requires': [], 'note': 'Horizontal pull when no bar'}]}
+EXERCISE_SWAPS['Weighted Pull-Up'] = {'muscle_group': 'back', 'requires': ['pull_up_bar'], 'alternatives': [{'name': 'Pull-Ups', 'requires': ['pull_up_bar'], 'note': 'Bodyweight, add reps'}, {'name': 'Lat Pulldown', 'requires': ['lat_pulldown'], 'note': 'Loadable vertical pull'}]}
+EXERCISE_SWAPS['Landmine Press'] = {'muscle_group': 'shoulders', 'requires': ['barbell'], 'alternatives': [{'name': 'DB Overhead Press', 'requires': ['dumbbells'], 'note': 'Free-weight overhead press'}, {'name': 'Push Press', 'requires': ['barbell'], 'note': 'Barbell overhead with leg drive'}]}
+EXERCISE_SWAPS['Reverse Pec Deck'] = {'muscle_group': 'rear_delts', 'requires': ['chest_press_machine'], 'alternatives': [{'name': 'Rear Delt Fly', 'requires': ['dumbbells'], 'note': 'Dumbbell rear delts'}, {'name': 'Band Reverse Fly', 'requires': ['resistance_band'], 'note': 'Band rear delts, anywhere'}]}
+EXERCISE_SWAPS['Front Squat'] = {'muscle_group': 'quads', 'requires': ['barbell'], 'alternatives': [{'name': 'Goblet Squat', 'requires': ['dumbbells'], 'note': 'Anterior-loaded squat, dumbbell'}, {'name': 'Barbell Back Squat', 'requires': ['barbell'], 'note': 'Bar on the back, same pattern'}]}
+EXERCISE_SWAPS['Seated Calf Raise'] = {'muscle_group': 'calves', 'requires': ['dumbbells'], 'alternatives': [{'name': 'Standing Calf Raise', 'requires': ['dumbbells'], 'note': 'Standing, dumbbells'}, {'name': 'Calf Raises (step)', 'requires': [], 'note': 'Bodyweight on a step'}]}
+EXERCISE_SWAPS['Calf Raises (step)'] = {'muscle_group': 'calves', 'requires': [], 'alternatives': [{'name': 'Standing Calf Raise', 'requires': ['dumbbells'], 'note': 'Loaded standing raise'}, {'name': 'Seated Calf Raise', 'requires': ['dumbbells'], 'note': 'Seated, soleus bias'}]}
+EXERCISE_SWAPS['Barbell Shrug'] = {'muscle_group': 'traps', 'requires': ['barbell'], 'alternatives': [{'name': 'DB Shrug', 'requires': ['dumbbells'], 'note': 'Dumbbell shrug'}, {'name': 'Band Shrug', 'requires': ['bands'], 'note': 'Band shrug, anywhere'}]}
+EXERCISE_SWAPS['Band Shrug'] = {'muscle_group': 'traps', 'requires': ['bands'], 'alternatives': [{'name': 'DB Shrug', 'requires': ['dumbbells'], 'note': 'Dumbbell shrug'}, {'name': 'Barbell Shrug', 'requires': ['barbell'], 'note': 'Heaviest option'}]}
+EXERCISE_SWAPS['Hang Clean'] = {'muscle_group': 'full_body', 'requires': ['barbell'], 'alternatives': [{'name': 'KB Clean', 'requires': ['kettlebells'], 'note': 'Kettlebell clean'}, {'name': 'DB Power Clean', 'requires': ['dumbbells'], 'note': 'Dumbbell power clean'}, {'name': 'KB Swing', 'requires': ['kettlebells'], 'note': 'Hip-hinge power without the catch'}]}
+EXERCISE_SWAPS['KB Clean'] = {'muscle_group': 'full_body', 'requires': ['kettlebells'], 'alternatives': [{'name': 'DB Power Clean', 'requires': ['dumbbells'], 'note': 'Dumbbell version'}, {'name': 'KB Swing', 'requires': ['kettlebells'], 'note': 'Hinge power, no catch'}]}
+EXERCISE_SWAPS['DB Power Clean'] = {'muscle_group': 'full_body', 'requires': ['dumbbells'], 'alternatives': [{'name': 'KB Clean', 'requires': ['kettlebells'], 'note': 'Kettlebell version'}, {'name': 'Hang Clean', 'requires': ['barbell'], 'note': 'Barbell version'}]}
+EXERCISE_SWAPS['Diamond Push-Ups'] = {'muscle_group': 'triceps', 'requires': [], 'alternatives': [{'name': 'Cable Tricep Pushdown', 'requires': ['cable_machine'], 'note': 'Cable triceps'}, {'name': 'Overhead Tricep Extension', 'requires': ['dumbbells'], 'note': 'Dumbbell triceps'}, {'name': 'Band Tricep Extension', 'requires': ['resistance_band'], 'note': 'Band triceps'}]}
+EXERCISE_SWAPS['Dips'] = {'muscle_group': 'chest_triceps', 'requires': ['dip_station'], 'alternatives': [{'name': 'Weighted Dips', 'requires': ['dip_station'], 'note': 'Add load'}, {'name': 'Decline Push-Ups', 'requires': ['flat_bench'], 'note': 'Bodyweight lower-chest/triceps'}]}
+EXERCISE_SWAPS['Band Pull-Apart'] = {'muscle_group': 'rear_delts', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Face Pull', 'requires': ['cable_machine'], 'note': 'Cable rear delts'}, {'name': 'Rear Delt Fly', 'requires': ['dumbbells'], 'note': 'Dumbbell rear delts'}]}
+EXERCISE_SWAPS['Band Curl'] = {'muscle_group': 'biceps', 'requires': ['resistance_band'], 'alternatives': [{'name': 'DB Curl', 'requires': ['dumbbells'], 'note': 'Dumbbell curl'}, {'name': 'EZ-Bar Curl', 'requires': ['ez_bar'], 'note': 'Bar curl'}]}
+EXERCISE_SWAPS['Bodyweight Squats'] = {'muscle_group': 'quads', 'requires': [], 'alternatives': [{'name': 'Goblet Squat', 'requires': ['dumbbells'], 'note': 'Add a dumbbell'}, {'name': 'Walking Lunge', 'requires': ['dumbbells'], 'note': 'Unilateral, dumbbells'}]}
+EXERCISE_SWAPS['Single-Leg Glute Bridge'] = {'muscle_group': 'glutes', 'requires': [], 'alternatives': [{'name': 'Hip Thrust', 'requires': ['flat_bench'], 'note': 'Bilateral, bench'}, {'name': 'Barbell Hip Thrust', 'requires': ['barbell', 'flat_bench'], 'note': 'Loaded'}]}
+EXERCISE_SWAPS['Single-Leg Romanian Deadlift'] = {'muscle_group': 'hamstrings', 'requires': ['dumbbells'], 'alternatives': [{'name': 'Romanian Deadlift', 'requires': ['barbell'], 'note': 'Bilateral barbell hinge'}, {'name': 'Nordic Hamstring Curl', 'requires': [], 'note': 'Bodyweight hamstrings'}]}
+EXERCISE_SWAPS['Squat Jump'] = {'muscle_group': 'power', 'requires': [], 'alternatives': [{'name': 'Box Jump', 'requires': [], 'note': 'Jump to a box'}, {'name': 'KB Swing', 'requires': ['kettlebells'], 'note': 'Hip power, low impact'}]}
+EXERCISE_SWAPS['Band Reverse Fly'] = {'muscle_group': 'rear_delts', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Rear Delt Fly', 'requires': ['dumbbells'], 'note': 'Dumbbell rear delts'}, {'name': 'Face Pull', 'requires': ['cable_machine'], 'note': 'Cable rear delts'}]}
+EXERCISE_SWAPS['Pike Push-Ups'] = {'muscle_group': 'shoulders', 'requires': [], 'alternatives': [{'name': 'DB Overhead Press', 'requires': ['dumbbells'], 'note': 'Dumbbell overhead press'}, {'name': 'Push-Ups', 'requires': [], 'note': 'Chest-dominant fallback'}]}
+EXERCISE_SWAPS['Decline Push-Ups'] = {'muscle_group': 'chest', 'requires': ['flat_bench'], 'alternatives': [{'name': 'Push-Ups', 'requires': [], 'note': 'Flat version'}, {'name': 'DB Bench Press', 'requires': ['dumbbells', 'flat_bench'], 'note': 'Loaded flat press'}]}
+EXERCISE_SWAPS['Band Lateral Raise'] = {'muscle_group': 'shoulders', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Lateral Raise', 'requires': ['dumbbells'], 'note': 'Dumbbell lateral raise'}, {'name': 'Cable Lateral Raise', 'requires': ['cable_machine'], 'note': 'Cable version'}]}
+EXERCISE_SWAPS['Dead Bug'] = {'muscle_group': 'core', 'requires': [], 'alternatives': [{'name': 'Plank', 'requires': [], 'note': 'Isometric core'}, {'name': 'Hollow Hold', 'requires': [], 'note': 'Isometric, harder'}]}
+EXERCISE_SWAPS['Mountain Climbers'] = {'muscle_group': 'core', 'requires': [], 'alternatives': [{'name': 'Plank', 'requires': [], 'note': 'Static core'}, {'name': 'Burpees', 'requires': [], 'note': 'Full-body conditioning'}]}
+EXERCISE_SWAPS['Hollow Hold'] = {'muscle_group': 'core', 'requires': [], 'alternatives': [{'name': 'Plank', 'requires': [], 'note': 'Easier isometric'}, {'name': 'Dead Bug', 'requires': [], 'note': 'Dynamic anti-extension'}]}
+EXERCISE_SWAPS['Step-Up'] = {'muscle_group': 'quads', 'requires': ['flat_bench'], 'alternatives': [{'name': 'Walking Lunge', 'requires': ['dumbbells'], 'note': 'Unilateral, dumbbells'}, {'name': 'Bulgarian Split Squat', 'requires': ['dumbbells'], 'note': 'Unilateral, harder'}]}
+EXERCISE_SWAPS['Hip Thrust'] = {'muscle_group': 'glutes', 'requires': ['flat_bench'], 'alternatives': [{'name': 'Barbell Hip Thrust', 'requires': ['barbell', 'flat_bench'], 'note': 'Loaded'}, {'name': 'Single-Leg Glute Bridge', 'requires': [], 'note': 'No bench'}]}
+EXERCISE_SWAPS['Band Row'] = {'muscle_group': 'back', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Cable Seated Row', 'requires': ['cable_machine'], 'note': 'Cable row'}, {'name': 'Inverted Row', 'requires': [], 'note': 'Bodyweight horizontal pull'}]}
+EXERCISE_SWAPS['Band Face Pull'] = {'muscle_group': 'rear_delts', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Face Pull', 'requires': ['cable_machine'], 'note': 'Cable face pull'}, {'name': 'Band Pull-Apart', 'requires': ['resistance_band'], 'note': 'Band rear delts'}]}
+EXERCISE_SWAPS['Band Tricep Extension'] = {'muscle_group': 'triceps', 'requires': ['resistance_band'], 'alternatives': [{'name': 'Cable Tricep Pushdown', 'requires': ['cable_machine'], 'note': 'Cable triceps'}, {'name': 'Overhead Tricep Extension', 'requires': ['dumbbells'], 'note': 'Dumbbell triceps'}]}
+EXERCISE_SWAPS['Burpees'] = {'muscle_group': 'full_body', 'requires': [], 'alternatives': [{'name': 'Mountain Climbers', 'requires': [], 'note': 'Lower impact'}, {'name': 'Squat Jump', 'requires': [], 'note': 'Legs-only power'}]}
