@@ -156,6 +156,14 @@ TOOLS: list[dict[str, Any]] = [
                                    "(athlete-local). Only pass when the athlete "
                                    "names a different day ('yesterday I was 212').",
                 },
+                "event": {
+                    "type": "string", "enum": ["gluten", "sodium", "travel", "illness"],
+                    "description": "CODIFY a scale event the athlete reports ('got "
+                                   "glutened', 'sushi night', 'travel bloat'). A gluten "
+                                   "event makes every surface treat the reading as water, "
+                                   "not fat. Saying 'hold the deficit' in prose does nothing.",
+                },
+                "note": {"type": "string", "description": "Short context for the event."},
             },
             "required": ["weight_lbs"],
         },
@@ -580,7 +588,8 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
     }, default=str)
 
 
-def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = None) -> str:
+def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = None,
+                         event: str | None = None, note: str | None = None) -> str:
     from models import BodyWeight, db
     try:
         w = float(weight_lbs)
@@ -597,12 +606,18 @@ def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = Non
             return json.dumps({"error": f"Bad date {date!r}, expected YYYY-MM-DD"})
     else:
         d = _user_local_today(user_id)
+    if event and event not in ("gluten", "sodium", "travel", "illness"):
+        return json.dumps({"error": f"unknown event {event!r}"})
     row = BodyWeight.query.filter_by(user_id=user_id, log_date=d).first()
     if row:
         row.weight_lbs = w
     else:
         row = BodyWeight(log_date=d, weight_lbs=w, user_id=user_id)
         db.session.add(row)
+    if event:
+        row.event = event
+    if note:
+        row.note = str(note)[:300]
     try:
         db.session.commit()
     except IntegrityError:  # lost a check-then-insert race (S043) — update the winner

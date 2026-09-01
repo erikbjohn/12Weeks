@@ -887,11 +887,18 @@ def _build_cut_status():
     # Latest weigh-in note (e.g. "glutened at dinner") — surfaces context the coach
     # would otherwise never see.
     latest_note = None
+    scale_event = None
     try:
-        from models import BodyMeasurement
+        from models import BodyMeasurement, BodyWeight as _BW
         bm = (BodyMeasurement.query.filter_by(user_id=current_user.id)
               .order_by(BodyMeasurement.log_date.desc()).first())
         latest_note = bm.notes if bm and getattr(bm, "notes", None) else None
+        # S025: a codified scale event in the last 14 days
+        _ev = (_BW.query.filter(_BW.user_id == current_user.id, _BW.event.isnot(None),
+                                _BW.log_date >= today - timedelta(days=14))
+               .order_by(_BW.log_date.desc()).first())
+        if _ev:
+            scale_event = {"date": _ev.log_date.isoformat(), "kind": _ev.event, "note": _ev.note}
     except Exception:
         latest_note = None
 
@@ -971,6 +978,7 @@ def _build_cut_status():
         "trend_reversal": trend_reversal,
         "water_spike_suspected": water_spike_suspected,
         "latest_note": latest_note,
+        "scale_event": scale_event,
         "weeks_to_target": weeks_to_target,
         "projected_week_12_weight": proj_at_week_12,
         "weekly_deficit_estimate": weekly_deficit,
@@ -1933,6 +1941,7 @@ silently dropped and the change does NOT happen (you will have lied to the athle
 [LOCKOUT_WARNING: count=N, reason=text]
 [SHOW_NEXT_DAY] — emit this when the athlete confirms a day looks good during weekly planning. The app will display the next day's exercise list.
 [SORENESS: area=shoulders, level=moderate] — emit when athlete reports soreness/tightness. The app adds targeted stretching to next week's warmups.
+[SCALE_EVENT: date=YYYY-MM-DD, kind=gluten, reason=text] — emit (or call log_bodyweight with event=) the moment the athlete reports a glutening, sodium load, travel bloat or illness. This CODIFIES the event: the badge, scoreboard, weekly report and nutritionist then treat the readings as water. Saying "hold the deficit" without it changes nothing.
 </markers>
 
 <format>
@@ -2248,6 +2257,11 @@ def _format_athlete_data(ctx, requires):
             cs_lines.append("  TREND_REVERSAL: overall losing but RECENTLY GAINING — react to this, don't quote the stale overall pace as if on track.")
         if cs.get("water_spike_suspected"):
             cs_lines.append("  WATER_SPIKE_SUSPECTED: last weigh-in jumped 3-8 lb on a downtrend = gluten/water/inflammation, NOT fat. HOLD the deficit, do NOT deepen, do NOT call it a blown cut. Expect it to flush in 1-2 wks.")
+        if cs.get("scale_event"):
+            _se = cs["scale_event"]
+            cs_lines.append(f"  SCALE_EVENT: {_se['kind']} on {_se['date']}"
+                            + (f" — {_se['note']}" if _se.get('note') else "")
+                            + " (codified; readings since are judged as water, not fat)")
         if cs.get("latest_note"):
             cs_lines.append(f"  latest_weigh_in_note: {cs['latest_note']}")
         if cs.get("on_curve") is not None:

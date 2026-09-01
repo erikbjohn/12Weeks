@@ -6089,6 +6089,13 @@ async function showMorningCheckinOverlay() {
       '<label style="color:var(--text);font-size:15px;font-weight:600;flex:1">Morning weigh-in</label>' +
       '<input type="number" inputmode="decimal" id="mc-weight" class="weight-input" style="width:90px;font-size:16px" placeholder="lbs" step="0.1">' +
       '<button class="btn btn-primary" style="min-height:44px;padding:10px 16px" onclick="logMorningWeight()">Log</button>' +
+    '</div>' +
+    // S025: one tap codifies a glutening on today's row — every surface then
+    // judges the reading as water. Toggle; sent with the weight.
+    '<div id="mc-event-row" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:6px 0 10px;border-bottom:1px solid var(--border)">' +
+      '<span style="color:var(--muted);font-size:13px;flex:1">Scale event?</span>' +
+      '<button id="mc-ev-gluten" class="btn" style="min-height:40px;padding:8px 14px;font-size:14px" onclick="toggleScaleEvent(\'gluten\')">Glutened</button>' +
+      '<button id="mc-ev-sodium" class="btn" style="min-height:40px;padding:8px 14px;font-size:14px" onclick="toggleScaleEvent(\'sodium\')">Sodium</button>' +
     '</div>';
 
   el.innerHTML = `<div class="morning-checkin-overlay">
@@ -6440,18 +6447,33 @@ async function _startMcChat() {
   if (input) setTimeout(() => input.focus(), 100);
 }
 
+var _mcScaleEvent = null;
+function toggleScaleEvent(kind) {
+  _mcScaleEvent = (_mcScaleEvent === kind) ? null : kind;
+  ['gluten', 'sodium'].forEach(function(k) {
+    var b = document.getElementById('mc-ev-' + k);
+    if (b) b.classList.toggle('btn-primary', _mcScaleEvent === k);
+  });
+}
+
 async function logMorningWeight() {
   var inp = document.getElementById('mc-weight');
   var v = parseFloat(inp && inp.value);
   if (!v || v < 60 || v > 500) { if (inp) inp.focus(); return; }
   var row = document.getElementById('mc-weigh-row');
+  var evRow = document.getElementById('mc-event-row');
   try {
-    await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ date: todayStr(), weight: v }) });
-    if (Array.isArray(_bodyweightCache)) _bodyweightCache.push({ date: todayStr(), weight: v });
-    if (row) row.innerHTML = '<div style="color:var(--accent);font-size:15px;padding:2px 0">&#10003; ' + v + ' lb logged</div>';
+    var body = { date: todayStr(), weight: v };
+    if (_mcScaleEvent) body.event = _mcScaleEvent;
+    var res = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (Array.isArray(_bodyweightCache)) _bodyweightCache.push({ date: todayStr(), weight: v, event: _mcScaleEvent });
+    if (row) row.innerHTML = '<div style="color:var(--accent);font-size:15px;padding:2px 0">&#10003; ' + v + ' lb logged'
+      + (_mcScaleEvent ? ' &middot; ' + _mcScaleEvent + ' event recorded (judged as water)' : '') + '</div>';
+    if (evRow) evRow.style.display = 'none';
   } catch(e) {
-    if (row) row.innerHTML = '<div style="color:var(--muted);font-size:14px">Save failed &mdash; use Stats to log weight.</div>';
+    if (row) row.innerHTML = '<div style="color:var(--muted);font-size:14px">Save failed &mdash; tell the coach your weight in chat and it will log it.</div>';
   }
 }
 

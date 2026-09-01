@@ -283,6 +283,11 @@ class BodyWeight(db.Model):
     weight_lbs = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    # S025: a scale event is CODIFIED, not just discussed. 'gluten' (5-8 lb
+    # of water for a week-plus, never fat), 'sodium', 'travel', 'illness'.
+    # cut_guard treats a gluten event as an authoritative spike.
+    event = db.Column(db.String(20), nullable=True)
+    note = db.Column(db.Text, nullable=True)
     __table_args__ = (db.UniqueConstraint('user_id', 'log_date', name="uq_bodyweight_key"),)
 
 

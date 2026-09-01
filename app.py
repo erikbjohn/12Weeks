@@ -316,6 +316,8 @@ with app.app_context():
         ("psych_intake", "locked_until", "DATE"),
         ("day_completion", "source", "VARCHAR(10)"),
         ("training_goal", "calorie_override", "JSON"),
+        ("body_weight", "event", "VARCHAR(20)"),
+        ("body_weight", "note", "TEXT"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),
@@ -804,6 +806,9 @@ def run_label_for(run_type, explicit=None):
     return _RUN_TYPE_LABELS.get(run_type, 'Run')
 
 
+SCALE_EVENTS = {"gluten", "sodium", "travel", "illness"}
+
+
 def _marker_outcome(user_id, week, marker_type, raw, status, detail=None):
     """Record a marker's outcome in its own short transaction (after any
     rollback the failing handler did). Never raises."""
@@ -1014,6 +1019,38 @@ def _parse_coach_markers(text, user_id, week):
         except Exception as _me:
             logging.exception("Coach WEIGHT marker failed")
             _marker_outcome(user_id, week, "WEIGHT", m.group(0), "failed", str(_me))
+            db.session.rollback()
+
+    # [SCALE_EVENT: date=YYYY-MM-DD, kind=gluten|sodium|travel|illness, reason=text]
+    # S025: a glutening the athlete reports becomes a CODIFIED event on the
+    # weigh-in row; cut_guard, the badge, the scoreboard and the weekly
+    # report then all treat that reading as water — no prose-only "hold".
+    for m in re.finditer(r'\[SCALE_EVENT:\s*(?:date=(\d{4}-\d{2}-\d{2}),\s*)?kind=(\w+)(?:,\s*reason=([^\]]+))?\]', text, re.I):
+        try:
+            kind = m.group(2).strip().lower()
+            if kind not in SCALE_EVENTS:
+                raise ValueError(f"unknown scale event kind {kind!r}")
+            _u = db.session.get(User, user_id)
+            d = date.fromisoformat(m.group(1)) if m.group(1) else _user_today_for(_u)
+            row = BodyWeight.query.filter_by(user_id=user_id, log_date=d).first()
+            if not row:
+                # no weigh-in that day yet: carry the last known weight so the
+                # event has a row to live on (the next weigh-in overwrites it)
+                prev = (BodyWeight.query.filter_by(user_id=user_id)
+                        .filter(BodyWeight.log_date < d)
+                        .order_by(BodyWeight.log_date.desc()).first())
+                if not prev:
+                    raise ValueError("no prior weigh-in to attach the event to")
+                row = BodyWeight(user_id=user_id, log_date=d, weight_lbs=prev.weight_lbs)
+                db.session.add(row)
+            row.event = kind
+            if m.group(3):
+                row.note = m.group(3).strip()[:300]
+            db.session.commit()
+            _marker_outcome(user_id, week, "SCALE_EVENT", m.group(0), "applied", f"{kind} on {d}")
+        except Exception as _me:
+            logging.exception("Coach SCALE_EVENT marker failed")
+            _marker_outcome(user_id, week, "SCALE_EVENT", m.group(0), "failed", str(_me))
             db.session.rollback()
 
     # [SORENESS: area=shoulders, level=moderate]
@@ -7487,12 +7524,20 @@ def api_bodyweight_record():
     if not weight or weight < 50 or weight > 600:
         return jsonify({"error": "Weight must be between 50 and 600 lbs"}), 400
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
+    event = data.get("event") or None
+    if event and event not in SCALE_EVENTS:
+        return jsonify({"error": f"event must be one of {sorted(SCALE_EVENTS)}"}), 400
+    note = (data.get("note") or "").strip() or None
     bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bw:
         bw.weight_lbs = weight
     else:
         bw = BodyWeight(log_date=d, weight_lbs=weight, user_id=current_user.id)
         db.session.add(bw)
+    if "event" in data:
+        bw.event = event
+    if note:
+        bw.note = note
     try:
         db.session.commit()
     except IntegrityError:
@@ -7502,6 +7547,8 @@ def api_bodyweight_record():
         bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
         if bw:
             bw.weight_lbs = weight
+            if "event" in data:
+                bw.event = event
             db.session.commit()
     except Exception as e:
         db.session.rollback()

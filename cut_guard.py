@@ -47,9 +47,18 @@ def detect_water_spike(rows, expected_weekly_loss=0.0):
       - spiked True: the pre-spike BASELINE carried forward along the
         expected-loss slope to the latest date — the de-spiked anchor.
     """
-    if len(rows) < 3:
-        return (rows[0].weight_lbs if rows else None), False
+    if not rows:
+        return None, False
     latest = rows[0]
+    # S025: a CODIFIED gluten event is authoritative — no inference needed.
+    # Anchor on the last clean reading before the event, carried down the
+    # expected-loss curve; the window and clear rules are the same as an
+    # inferred spike.
+    ev = _codified_event(rows, expected_weekly_loss)
+    if ev is not None:
+        return ev
+    if len(rows) < 3:
+        return latest.weight_lbs, False
     rows = [r for r in rows if r.weight_lbs is not None]
     if len(rows) < 3:
         return latest.weight_lbs, False
@@ -78,6 +87,27 @@ def detect_water_spike(rows, expected_weekly_loss=0.0):
             return baseline_trend, True
         return latest.weight_lbs, False  # jumped, then flushed back to trend
     return latest.weight_lbs, False
+
+
+def _codified_event(rows, expected_weekly_loss):
+    """(anchor, True) while a recorded gluten event (BodyWeight.event) sits
+    inside the window and the weight is still above the baseline trend;
+    None when no event applies."""
+    latest = rows[0]
+    for i, r in enumerate(rows):
+        if (latest.log_date - r.log_date).days > SPIKE_WINDOW_DAYS:
+            break
+        if getattr(r, "event", None) != "gluten":
+            continue
+        base = next((b for b in rows[i + 1:] if b.weight_lbs is not None), None)
+        if base is None or latest.weight_lbs is None:
+            return latest.weight_lbs, True  # event with no baseline: still not fat
+        days = (latest.log_date - base.log_date).days
+        trend = base.weight_lbs - expected_weekly_loss * (days / 7)
+        if latest.weight_lbs > trend + SPIKE_CLEAR_TOLERANCE_LB:
+            return trend, True
+        return latest.weight_lbs, False
+    return None
 
 
 def _flag_value(base_key, user_id):
