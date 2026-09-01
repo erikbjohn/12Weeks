@@ -47,7 +47,7 @@ from models import (
     PushSubscription, PushSent,
 )
 from protocol import (
-    missed_line, vial_status, fasted_dose_time, PROTOCOL_COMPOUNDS,
+    missed_line, vial_status, fasted_dose_time, fasted_meal_cutoff, PROTOCOL_COMPOUNDS,
     CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
 )
 
@@ -5203,8 +5203,18 @@ def _fasted_window_override(user_id, day_date):
     h12 = hh % 12 or 12
     friendly_time = f"{h12}{suffix}" if mm == "00" else f"{h12}:{mm}{suffix}"
 
-    note = f"{who} at {friendly_time} requires 2h fasted — last meal ends by 8pm"
-    return "7:30pm", note
+    # S052: ONE cutoff derived from the dose time (banner 'fasting_bound' =
+    # cutoff; the last meal is TIMED 30 min before it so it ENDS by the
+    # cutoff; the note quotes the same cutoff).
+    cut = fasted_meal_cutoff(dose_time)          # "20:00" for a 22:00 dose
+    ch, cm = (int(x) for x in cut.split(":"))
+    def _fr(h, m):
+        return f"{h % 12 or 12}{':' + f'{m:02d}' if m else ''}{'am' if h < 12 else 'pm'}"
+    cut_friendly = _fr(ch, cm)
+    start_total = max(0, ch * 60 + cm - 30)
+    start_friendly = _fr(start_total // 60, start_total % 60)
+    note = f"{who} at {friendly_time} requires 2h fasted — last meal ends by {cut_friendly}"
+    return start_friendly, note
 
 
 def _reconcile_meal_rail(user, changed_dates):
@@ -5745,7 +5755,8 @@ def protocol_today():
         # only meaningful on the today card.
         "missed": missed if view_date == today else [],
         "vials": vials_out,
-        "fasting_bound": "20:00" if fasted_dose_time(all_rows, view_date) else None,
+        "fasting_bound": (fasted_meal_cutoff(fasted_dose_time(all_rows, view_date))
+                          if fasted_dose_time(all_rows, view_date) else None),
         "labs_due": labs_due if view_date == today else [],
     })
 
@@ -11779,7 +11790,10 @@ def api_goal_compute():
     aggressive_request. Safety guardrails (BMI >= 25 → cut, overweight
     ceiling at current weight, min healthy weight floor) always apply.
     """
-    data = request.get_json() or {}
+    # S113: only the user-facing keys pass through; override_projection_mode
+    # (which bypasses the block-3 projection guard) is admin-only.
+    _USER_GOAL_KEYS = {"target_weight", "target_bf", "goal_type", "aggressive_request"}
+    data = {k: v for k, v in (request.get_json(silent=True) or {}).items() if k in _USER_GOAL_KEYS}
     result, status = _compute_goal_for_user(current_user, overrides=data)
     return jsonify(result), status
 

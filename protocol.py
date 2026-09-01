@@ -561,6 +561,17 @@ def missed_line(dose_rows: list, today, rules: Optional[dict] = None) -> list[di
 
 # ── Fasted dose lookup ────────────────────────────────────────────────
 
+def fasted_meal_cutoff(dose_time_hhmm: str, lead_h: float = 2.0) -> str:
+    """The last-meal cutoff for a fasted dose: dose time minus `lead_h`,
+    rounded DOWN to the half hour — one number for the banner, the meal
+    generator and the rail note (S052: they disagreed at 8:00 / 7:30 / 7:00)."""
+    hh, mm = (int(x) for x in dose_time_hhmm.split(":"))
+    total = hh * 60 + mm - int(lead_h * 60)
+    total -= total % 30
+    total = max(0, total)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
 def fasted_dose_time(dose_rows: list, on_date) -> Optional[str]:
     """Time string ("HH:MM") of a dose scheduled at or after 21:00 on
     `on_date`, else None. HH:MM zero-padded strings compare correctly as

@@ -12866,7 +12866,13 @@ async function refreshPushToggleUI() {
   if (!textEl || !btnEl) return;
   const state = await _pushState();
   const labels = { on: 'Notifications: on', off: 'Notifications: off', blocked: 'Notifications: blocked', unsupported: 'Notifications: unsupported' };
-  textEl.textContent = labels[state] + (state === 'blocked' ? ' — enable in browser settings' : '');
+  // S056: iOS exposes push only inside the Home-Screen-installed app.
+  const iosTab = /iP(hone|ad|od)/.test(navigator.userAgent) && !navigator.standalone;
+  if (state === 'unsupported' && iosTab) {
+    textEl.textContent = 'Notifications need the Home Screen app: Share → Add to Home Screen, then turn them on there.';
+  } else {
+    textEl.textContent = labels[state] + (state === 'blocked' ? ' — enable in browser settings' : '');
+  }
   btnEl.textContent = state === 'on' ? 'Turn off' : 'Turn on';
   const disabled = (state === 'unsupported' || state === 'blocked');
   btnEl.disabled = disabled;

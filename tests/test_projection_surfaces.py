@@ -387,9 +387,21 @@ def test_goal_compute_overwrites_with_explicit_override(app_ctx, clean_block3_fl
     _set_weights(app_, db, uid, [(START, ANCHOR)])
     _set_block3_flags(app_, db)
 
+    # S113: the USER endpoint no longer forwards override_projection_mode —
+    # the block-3 curve is preserved no matter what a client sends.
     r = client.post("/api/goal/compute", json={"override_projection_mode": True})
     assert r.status_code == 200, r.get_data(as_text=True)
+    assert _get_goal(app_, db, uid) == proj
 
+    # The override is an ADMIN action (server-side call with the flag).
+    import app as appmod
+    from models import User
+    with app_.app_context():
+        u = User.query.get(uid)
+        with app_.test_request_context():
+            from flask_login import login_user
+            login_user(u, force=True)
+            appmod._compute_goal_for_user(u, overrides={"override_projection_mode": True})
     new_proj = _get_goal(app_, db, uid)
     assert new_proj != proj
     # Legacy project_weight_curve rows carry a "tdee" key; curve rows don't.
