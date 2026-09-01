@@ -1213,10 +1213,12 @@ def _build_today_status():
         run_type = run_plan.run_type
         run_label = run_plan.label
         run_duration = run_plan.duration
+        run_detail = (run_plan.detail or "")[:160]  # prose wins over segments
     else:
         run_type = None
         run_label = None
         run_duration = None
+        run_detail = None
 
     # Which prescribed exercise is SHORT of its set count — so an in-progress
     # session with every exercise touched ("Dead Bug 2/3") isn't reported as
@@ -1265,6 +1267,7 @@ def _build_today_status():
         "run_prescribed": run_type,
         "run_label": run_label,
         "run_duration": run_duration,
+        "run_detail": run_detail,
         "run_logged": run_today_log is not None,
         "run_distance_today": run_today_log.distance_miles if run_today_log else None,
         "run_duration_today": run_today_log.duration_min if run_today_log else None,
@@ -1348,6 +1351,10 @@ def _format_today_status_block(ts):
         if hr:
             bits.append(f"avg_hr_full_session:{hr}")
         lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
+        if ts.get("run_detail"):
+            # S041: the debrief must see plan and actual side by side.
+            lines.append(f"  run_prescribed: {ts.get('run_label') or ''} {ts.get('run_duration') or ''}"
+                         f" — {ts['run_detail']}")
         acts = ts.get("run_activities_today") or []
         if len(acts) > 1:
             def _act(a):
@@ -1366,6 +1373,7 @@ def _format_today_status_block(ts):
         lines.append(
             f"  run: NOT LOGGED YET — {ts.get('run_label') or ts.get('run_prescribed')} "
             f"{ts.get('run_duration') or ''}".rstrip()
+            + (f" — {ts['run_detail']}" if ts.get("run_detail") else "")
             + ". Runs arrive ONLY via Garmin auto-sync (up to ~30 min after the watch "
               "uploads). If the athlete says they already ran, believe them: say it "
               "hasn't synced yet — never tell them to go run."
@@ -2340,25 +2348,29 @@ def _format_athlete_data(ctx, requires):
         block = _format_today_status_block(ts)
         if block:
             parts.append("\n".join(block))
-    # Ground phase explanations in the actual program structure so the coach
-    # doesn't hallucinate (e.g. "Phase 2 drops to 3-4 days" — false; all phases run 6 lift days).
-    if phase.get("lift_days_per_week") or phase.get("weekly_structure"):
-        parts.append(
-            f"This phase: {phase.get('lift_days_per_week', 6)} lift days/week, "
-            f"lifting style {phase.get('lifting', '?')}. "
-            f"Structure: {phase.get('weekly_structure', '?')} "
-            "Do not invent phase details beyond this — describe the phase only as written here."
-        )
+    # No static phase narrative (S042): the block-1 template text ("Tue Lower
+    # A + long run … Sun streak mile only") was injected as ground truth into
+    # every Block-3 prompt. The program is coach-designed weekly — the FULL
+    # WEEK PROGRAM block is the only structure the coach may describe.
+    parts.append(
+        f"Program week {ctx.get('week', '?')}/12 — the week's structure is coach-designed "
+        "(see FULL WEEK PROGRAM); do not describe a phase template."
+    )
 
     # Workout summary
     w = ctx.get("workout_today")
     if w:
         if w.get("isRest"):
-            parts.append("Today is a rest day (streak mile only).")
+            _ri = w.get('run') or {}
+            _rt = (f" Run: {_ri.get('label', '?')} {_ri.get('time', '')}."
+                   if _ri else " Run: not planned yet.")
+            parts.append("Today: no lifts prescribed." + _rt)
         else:
             run_info = w.get('run') or {}
             if run_info:
                 run_tail = f" Run: {run_info.get('label', '?')} {run_info.get('time', '')}."
+                if run_info.get('detail'):
+                    run_tail += f" ({str(run_info['detail'])[:160]})"
             else:
                 # Coach-or-nothing: no WeeklyRunPlan row -> the run is NOT
                 # planned. Never quote the template's run.
@@ -2646,6 +2658,8 @@ def _format_full_week_program(week):
                 f"    Run: {run_plan.label} ({run_plan.run_type}) "
                 f"{run_plan.duration or ''}".rstrip()
             )
+            if run_plan.detail:
+                out.append(f"      {run_plan.detail[:160]}")
         else:
             template_run = day.get("run")
             if template_run:

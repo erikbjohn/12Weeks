@@ -10101,10 +10101,13 @@ function renderTodayHero() {
   const dayLabel = isToday ? 'Today' : d.day;
 
   if (d.isRest) {
+    // No lifting today — but the run is whatever the coach prescribed (a
+    // 90-min long run on Sunday is not "streak mile only"). Never hardcode
+    // the run here; the pill reads the served run plan (S031).
     el.innerHTML = `<div class="th-card th-rest">
       <div class="th-label">${dayLabel}</div>
-      <div class="th-title">Rest Day</div>
-      <div class="th-sub">Streak mile only &middot; Recovery &middot; Hydrate</div>
+      <div class="th-title">No lifting</div>
+      <div class="th-run">${runPillHtml(d)}</div>
     </div>`;
     return;
   }

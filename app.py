@@ -10364,6 +10364,29 @@ _garmin_sync_attempt_last = {}
 GARMIN_AUTOSYNC_INTERVAL_S = 1800  # 30 min — data endpoints only, cheap
 
 
+def _garmin_dead_token_alert(uid):
+    """S037: the Garmin lifeline used to die silently — an expired OAuth2
+    (laptop asleep past the refresh window) showed only in the Settings
+    panel. Two hours past expiry = the refresher missed at least one window:
+    log ERROR and push once per local date. No Garmin HTTP is added."""
+    try:
+        from garmin_client import stored_oauth2_expires_at
+        from models import User as _U
+        from utils_time import user_local_today
+        exp = stored_oauth2_expires_at(uid)
+        if not exp or exp > time.time() - 2 * 3600:
+            return
+        _u = db.session.get(_U, uid)
+        _today = user_local_today(_u.timezone if _u and _u.timezone else "UTC")
+        hhmm = datetime.fromtimestamp(exp, tz=timezone.utc).strftime("%H:%M")
+        logging.error("[GARMIN] OAuth2 for user %s expired at %s UTC and was not refreshed", uid, hhmm)
+        _push_window_send(
+            uid, "garmin_auth", _today, "12 Weeks",
+            lambda: f"Garmin auth expired {hhmm} UTC — wake the laptop so the token refresher runs.")
+    except Exception:
+        logging.exception("[GARMIN] dead-token alert failed for user %s", uid)
+
+
 def _garmin_autosync_tick():
     """One background sync pass over every token-holding user. Returns the
     list of user_ids actually synced.
@@ -10403,6 +10426,7 @@ def _garmin_autosync_tick():
                 # path if Garmin ever unblocks this IP.
                 gc.try_restore_tokens(uid, allow_expired_exchange=True)
             if not gc.connected:
+                _garmin_dead_token_alert(uid)
                 continue
             from models import User as _U
             from utils_time import user_local_today

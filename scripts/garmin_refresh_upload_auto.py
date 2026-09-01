@@ -41,6 +41,17 @@ UPLOAD_ATTEMPTS = 3
 UPLOAD_RETRY_WAIT_S = 30
 
 
+def _notify(title, body):
+    """macOS notification (best-effort) so a broken lifeline is visible."""
+    try:
+        import subprocess
+        subprocess.run(["osascript", "-e",
+                        f'display notification "{body}" with title "{title}"'],
+                       timeout=5, check=False)
+    except Exception:
+        pass
+
+
 def _log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
@@ -96,7 +107,14 @@ def main():
         # One OAuth2 exchange from THIS machine's IP — the door Garmin keeps
         # open. If this raises with an auth error (OAuth1 dead, ~1yr), re-mint
         # with garmin_token_helper.py.
-        garth.client.refresh_oauth2()
+        try:
+            garth.client.refresh_oauth2()
+        except Exception as e:
+            # S037: a dead refresh used to be a traceback in a log nobody
+            # reads. Put it on screen — the OAuth1 is dead (~yearly) or
+            # Garmin is blocking; re-mint with garmin_token_helper.py.
+            _notify("12 Weeks — Garmin", f"OAuth2 refresh FAILED: {e}"[:200])
+            raise
         new_exp = getattr(garth.client.oauth2_token, "expires_at", 0) or 0
         if new_exp <= time.time() + 3600:
             sys.exit("refresh_oauth2 did not yield a fresh token — aborting")
