@@ -2220,10 +2220,25 @@ def _format_athlete_data(ctx, requires):
             cs_lines.append("  WATER_SPIKE_SUSPECTED: last weigh-in jumped 3-8 lb on a downtrend = gluten/water/inflammation, NOT fat. HOLD the deficit, do NOT deepen, do NOT call it a blown cut. Expect it to flush in 1-2 wks.")
         if cs.get("latest_note"):
             cs_lines.append(f"  latest_weigh_in_note: {cs['latest_note']}")
-        if cs.get("weeks_to_target") is not None:
-            cs_lines.append(f"  weeks_to_target_at_pace: {cs['weeks_to_target']}")
-        if cs.get("projected_week_12_weight") is not None:
-            cs_lines.append(f"  projected_week_12_weight: {cs['projected_week_12_weight']} lb")
+        if cs.get("on_curve") is not None:
+            # Block-3: the piecewise curve is THE verdict — the same call the
+            # dashboard badge and scoreboard make. The linear extrapolations
+            # below are suppressed so the coach can't judge pace from a line
+            # the athlete's own screens don't use (S035).
+            cs_lines.append(
+                f"  curve_target_today: {cs.get('curve_target_today')} lb (block-3 piecewise "
+                f"curve — the SAME curve the dashboard badge and scoreboard judge)")
+            cs_lines.append(
+                f"  on_curve: {cs['on_curve']}  ← THE pace word (on_pace/ahead/behind). "
+                f"Never judge pace from a straight-line projection while this is present.")
+        else:
+            if cs.get("weeks_to_target") is not None:
+                cs_lines.append(f"  weeks_to_target_at_pace: {cs['weeks_to_target']}")
+            if cs.get("projected_week_12_weight") is not None:
+                cs_lines.append(
+                    f"  projected_week_12_weight: {cs['projected_week_12_weight']} lb "
+                    f"(straight-line extrapolation of the block pace — cite only as "
+                    f"'if the recent slope held', never as the verdict)")
         if cs.get("weekly_deficit_estimate") is not None:
             cs_lines.append(
                 f"  est_weekly_deficit: {cs['weekly_deficit_estimate']} cal "

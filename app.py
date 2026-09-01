@@ -3952,8 +3952,13 @@ def api_workouts():
         }
     try:
         all_weeks["_exerciseNames"] = sorted(set(list(EXERCISES.keys()) + list(NAME_ALIASES.keys())))
+        # {alias: canonical} so the client resolves a displayed name to the
+        # key /api/sets stores under (resolve_name) instead of fuzzy-matching
+        # the first 6 letters — which hydrated Row's sets from Bench (S006).
+        all_weeks["_aliasMap"] = dict(NAME_ALIASES)
     except Exception:
         all_weeks["_exerciseNames"] = []
+        all_weeks["_aliasMap"] = {}
     response = jsonify(all_weeks)
     # Force fresh — iOS PWA + Cloudflare have layered caches that have
     # been serving stale workout data after server-side template/prescription

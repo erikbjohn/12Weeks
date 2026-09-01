@@ -1003,6 +1003,26 @@ async function showGroceryListPreStart() {
   }
 }
 
+function canonicalExName(name) {
+  var m = window._aliasMap || {};
+  return m[name] || name;
+}
+
+// Find the /api/sets key for a displayed exercise on a day by canonical name
+// equality only. Returns the matching key or null.
+function resolveSetKey(setData, week, day, exName, origName) {
+  var prefix = week + '_' + day + '_';
+  var wanted = {};
+  wanted[canonicalExName(exName)] = true;
+  if (origName) wanted[canonicalExName(origName)] = true;
+  for (var k in setData) {
+    if (!k.startsWith(prefix)) continue;
+    var stored = canonicalExName(k.substring(prefix.length));
+    if (wanted[stored]) return k;
+  }
+  return null;
+}
+
 function apiPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -4991,7 +5011,10 @@ async function recomputeGoal() {
         if (wRes.ok) {
           workoutData = await wRes.json();
           window._exerciseNames = workoutData._exerciseNames || [];
+    window._aliasMap = workoutData._aliasMap || window._aliasMap || {};
           delete workoutData._exerciseNames;
+          window._aliasMap = workoutData._aliasMap || window._aliasMap || {};
+          delete workoutData._aliasMap;
         }
       } catch(e) {}
       alert('Calories: ' + (data.calories || '?') + ' cal/day. Deficit: ' + (data.daily_deficit || '?') + ' cal/day (' + (data.weekly_loss_lbs || '?') + ' lb/week). Meals regenerated. Reloading...');
@@ -5343,6 +5366,8 @@ async function refreshWorkoutDataAfterSwap() {
             const fresh = await wRes.json();
             window._exerciseNames = fresh._exerciseNames || window._exerciseNames || [];
             delete fresh._exerciseNames;
+            window._aliasMap = fresh._aliasMap || window._aliasMap || {};
+            delete fresh._aliasMap;
             workoutData = fresh;
         }
         // Re-sync the swap map too: it is loaded once per session behind
@@ -11882,18 +11907,12 @@ async function renderDetail() {
           const origName = displayExercises[i].name;
           const dbKeyOrig = `${currentWeek}_${currentDay}_${origName}`;
           var _matchedKey = setData[dbKey] ? dbKey : (setData[dbKeyOrig] ? dbKeyOrig : null);
-          // Also search all keys for partial match (handles KB Swing vs Kettlebell Swing)
+          // Canonical-name fallback (KB Swing vs Kettlebell Swing): resolve
+          // through the served alias map, EXACT match only. The old 6-letter
+          // substring match hydrated Bent-Over Row's sets from Bench Press —
+          // six catalog lifts share the prefix "barbel" (S006).
           if (!_matchedKey) {
-            for (var _sk in setData) {
-              if (_sk.startsWith(currentWeek + '_' + currentDay + '_') && _sk !== dbKey && _sk !== dbKeyOrig) {
-                // Check if the exercise part matches any known alias
-                var _skEx = _sk.substring((currentWeek + '_' + currentDay + '_').length);
-                if (_skEx.toLowerCase().replace(/[^a-z]/g,'').includes(exName.toLowerCase().replace(/[^a-z]/g,'').substring(0,6))) {
-                  _matchedKey = _sk;
-                  break;
-                }
-              }
-            }
+            _matchedKey = resolveSetKey(setData, currentWeek, currentDay, exName, origName);
           }
           if (_matchedKey && setData[_matchedKey]) {
             for (const [setNum, setInfo] of Object.entries(setData[_matchedKey])) {

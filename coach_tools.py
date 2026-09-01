@@ -405,7 +405,27 @@ def _tool_get_body_state(user_id: int) -> str:
                     .order_by(BodyMeasurement.log_date.desc())
                     .limit(8).all())
     goal = TrainingGoal.query.filter_by(user_id=user_id).first()
+    # Block-3 curve verdict — the same call the badge/scoreboard make, so a
+    # rule-23 re-check returns the same word the athlete sees (S035).
+    curve = None
+    try:
+        import cut_guard
+        from goal_engine import curve_value, pace_status
+        from datetime import date as _date
+        if cut_guard._block3_mode(user_id):
+            anchor, start = cut_guard._block3_anchor_and_start(user_id)
+            if anchor is not None and start is not None:
+                from coach_assembler import _current_week
+                wt, spiked = cut_guard.despiked_weight_for_week(user_id, _current_week())
+                if wt is not None:
+                    today = _date.today()
+                    curve = {"curve_target_today": round(curve_value(anchor, start, today), 1),
+                             "on_curve": pace_status(wt, anchor, start, today),
+                             "despiked_weight": wt, "water_spike_suspected": spiked}
+    except Exception:
+        curve = None
     return json.dumps({
+        "block3_curve": curve,
         "recent_weights": [
             {"date": str(b.log_date), "lbs": b.weight_lbs}
             for b in bw
