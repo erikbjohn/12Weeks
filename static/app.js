@@ -833,6 +833,16 @@ function _computePhasePlan(goalType, startingWeight, targetWeight, startingBf) {
 // ─── ACCORDION STATE ───
 const _accordionState = JSON.parse(sessionStorage.getItem('accordion_state') || '{}');
 
+// S045: patch ONE accordion body instead of rebuilding all five via
+// innerHTML (which re-fetched sets/protocol/swaps on every dose, meal or
+// food toggle). Falls back to a full render when the section isn't mounted.
+function patchAccordion(id, contentHtml) {
+  var body = document.getElementById('acc-body-' + id);
+  if (!body) { renderDetail(); return false; }
+  body.innerHTML = contentHtml;
+  return true;
+}
+
 function renderAccordion(id, title, contentHtml, defaultOpen) {
     if (defaultOpen === undefined) defaultOpen = false;
     const isOpen = _accordionState[id] !== undefined ? _accordionState[id] : defaultOpen;
@@ -1425,8 +1435,13 @@ function toggleMealEaten(mealIdx, btnEl) {
     }
   }
 
-  // Full re-render to sync food checkboxes
-  renderDetail();
+  // Sync the food section only (S045) — a full renderDetail re-fetched
+  // sets, swaps and the protocol on every meal tap.
+  try {
+    var _wd = workoutData[String(currentWeek)];
+    var _dd = _wd && _wd.days && _wd.days[currentDay];
+    if (_dd) patchAccordion('food', buildFoodContent(_dd)); else renderDetail();
+  } catch (e) { renderDetail(); }
 
   if (marking) {
     const totalMeals = _getTotalMealCount();
@@ -11607,7 +11622,22 @@ async function toggleDose(id, currentlyTaken) {
     delete _doseSaving[id];
   }
   invalidateProtocolCache();
-  renderDetail();
+  _refreshProtocolSection();
+}
+
+// Refetch today's protocol payload and patch just that accordion (S045).
+async function _refreshProtocolSection() {
+  try {
+    var iso = todayStr();
+    var pr = await fetch('/api/protocol/today?date=' + iso);
+    if (!pr.ok) { renderDetail(); return; }
+    var p = await pr.json();
+    _protocolCache[iso] = p;
+    var total = p.doses.length, taken = p.doses.filter(function(x) { return x.taken; }).length;
+    var titleEl = document.querySelector('#acc-protocol h3');
+    if (titleEl) titleEl.innerHTML = 'Protocol' + ((total - taken) ? ' &middot; ' + taken + '/' + total + ' taken' : ' &middot; done');
+    if (!patchAccordion('protocol', buildProtocolContent(p))) return;
+  } catch (e) { renderDetail(); }
 }
 
 async function markDoseLate(id) {
@@ -11624,10 +11654,10 @@ async function markDoseLate(id) {
       showToast(msg, 'error');
     }
     invalidateProtocolCache();
+    _refreshProtocolSection();
   } finally {
     delete _doseSaving[id];
   }
-  renderDetail();
 }
 
 // ─── PROTOCOL FULL CALENDAR (design-from-artifact: browse the whole thing) ──
