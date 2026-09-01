@@ -58,17 +58,23 @@ class TestGateCreepGuard:
         with open(app_js_path, 'r') as f:
             lines = f.readlines()
 
-        # Search lines 5400-5590 which contain the init function
-        # (renderAll is at ~5572, finally block ends ~5588)
-        # Lines after 5590 are in saveState() and other functions, not the init path
-        init_lines = lines[5399:5590]  # 0-indexed, so line 5400 is index 5399
+        # Locate the init function by its signature rather than a fixed line
+        # range (unrelated edits above it used to shift the window and break
+        # this test): from the async DOMContentLoaded handler to its first
+        # renderAll() call plus the finally block that follows.
+        start = next(i for i, l in enumerate(lines)
+                     if "document.addEventListener('DOMContentLoaded', async" in l)
+        end = next(i for i, l in enumerate(lines) if i > start and "renderAll();" in l) + 20
+        init_lines = lines[start:end]
 
         # Count return statements in this range
         return_count = sum(1 for line in init_lines if 'return;' in line)
 
-        expected_count = 3  # Pre-start lockout + Onboarding + Bodyweight retest
+        # 401→/login redirect + Pre-start lockout + Onboarding + Bodyweight retest
+        # (the 401 redirect sat just above the old fixed line window)
+        expected_count = 4
         assert return_count == expected_count, (
-            f"Expected {expected_count} blocking gates before renderAll() in lines 5400-5590, "
+            f"Expected {expected_count} blocking gates before renderAll() in the init path, "
             f"found {return_count}. If you added a new gate that uses 'return;', bump this count. "
             f"If you removed a gate, decrement this count."
         )

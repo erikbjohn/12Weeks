@@ -220,6 +220,10 @@ class DayCompletion(db.Model):
     # week clamps at 12 (the phantom-done bug). Pre-existed in prod via runtime
     # migration (app.py ALTER TABLE) but was never mapped on the model.
     completed_at = db.Column(db.Text, nullable=True)
+    # 'auto' = written by api_set_log when every prescribed set was logged;
+    # 'manual' = Erik's explicit day toggle. Only auto rows are reopened when
+    # a set is un-checked (S018); a manual toggle is his call and stays.
+    source = db.Column(db.String(10), nullable=True)
     workout_started_at = db.Column(db.Text, nullable=True)
     workout_ended_at = db.Column(db.Text, nullable=True)
     workout_duration_min = db.Column(db.Integer, nullable=True)

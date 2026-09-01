@@ -294,6 +294,7 @@ with app.app_context():
     # Add missing columns to existing tables (db.create_all doesn't ALTER)
     _migrations = [
         ("psych_intake", "locked_until", "DATE"),
+        ("day_completion", "source", "VARCHAR(10)"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),
@@ -4394,7 +4395,7 @@ def api_set_log():
     # coach_assembler and coach_rules use). Prescription comes from the
     # resolver (coach/engine rows + swaps); an UNPLANNED day (no prescription,
     # coach-or-nothing) never auto-completes from set counts.
-    if done_provided and done:
+    if done_provided:
         try:
             from coach_assembler import _resolve_workout_for_day
             from workout_status import workout_state_from_rows
@@ -4419,16 +4420,24 @@ def api_set_log():
                 slot_rows_q = slot_rows_q.filter(SetLog.logged_date == _user_today())
             slot_rows = slot_rows_q.all()
             state = workout_state_from_rows(resolved.get("exercises") or [], slot_rows)
-            if state == "complete":
-                dc = DayCompletion.query.filter_by(
-                    user_id=current_user.id, week=week, day_idx=day_idx
-                ).first()
+            dc = DayCompletion.query.filter_by(
+                user_id=current_user.id, week=week, day_idx=day_idx
+            ).first()
+            if done and state == "complete":
                 if not dc:
                     db.session.add(DayCompletion(
                         user_id=current_user.id, week=week, day_idx=day_idx,
                         done=True, completed_at=_user_today().isoformat(),
+                        source="auto",
                     ))
                     db.session.commit()
+            elif not done and state != "complete" and dc and dc.done \
+                    and (dc.source or "auto") == "auto":
+                # S018: un-checking a set must reopen an AUTO-completed day,
+                # or a partial log reads DONE to the coach and the streak.
+                dc.done = False
+                dc.completed_at = None
+                db.session.commit()
         except Exception:
             logging.exception("auto-complete day failed (set save still ok)")
 
@@ -7158,6 +7167,7 @@ def api_toggle_day():
     else:
         dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
         db.session.add(dc)
+    dc.source = "manual"
     # Stamp WHEN it was completed so a stale done-flag from a prior cycle can't
     # read as "trained today" once the program clamps the week at 12 (the phantom
     # bug). Date-keyed; cleared when toggled back off.

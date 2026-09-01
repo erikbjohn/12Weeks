@@ -1010,7 +1010,22 @@ function apiPost(url, body) {
     body: JSON.stringify(body),
   }).then(res => {
     if (res.status === 401) { window.location.href = '/login'; return; }
-    if (!res.ok) { console.error('API error:', res.status, url); }
+    if (!res.ok) {
+      console.error('API error:', res.status, url);
+      // S014: a rejected save used to resolve like a success — the optimistic
+      // checkmark stayed green, nothing was queued, and the set was gone on
+      // the next render. 5xx = transient → queue for replay; 4xx = the server
+      // said no → tell the user (callers revert via res.rejected).
+      if (res.status >= 500) {
+        showToast('Save failed — queued. Will retry.', 'error');
+        queueForSync(url, body);
+      } else {
+        res.rejected = true;
+        res.clone().json().then(j => {
+          showToast('Not saved: ' + ((j && j.error) || ('error ' + res.status)), 'error');
+        }).catch(() => showToast('Not saved (error ' + res.status + ')', 'error'));
+      }
+    }
     return res;
   }).catch(e => {
     console.warn('POST failed (attempt 1), retrying:', url, e);
@@ -1804,6 +1819,18 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
   const reps = resolveLoggedReps(repsInput ? repsInput.value : '', repsInput ? repsInput.placeholder : '');
   const weightEntered = !!(wtInput && wtInput.value.trim() !== '');
 
+  const _prev = _setCache[key] ? Object.assign({}, _setCache[key]) : null;
+  const _revertIfRejected = (res) => {
+    if (!res || !res.rejected) return;
+    // The server refused the write: the optimistic UI is a lie — undo it.
+    if (_prev) _setCache[key] = _prev; else delete _setCache[key];
+    const wasDone = !!(_prev && _prev.done);
+    btn.classList.toggle('done', wasDone);
+    btn.innerHTML = wasDone ? '&#10003;' : '';
+    const row = btn.closest('.set-row');
+    if (row) row.classList.toggle('set-done', wasDone);
+  };
+
   if (_setCache[key] && _setCache[key].done) {
     // Un-check
     _setCache[key] = { done: false, weight, reps, weightEntered };
@@ -1814,7 +1841,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     _setSaving[key] = true;
     const _p1 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: false });
     if (_p1 && typeof _p1.finally === 'function') {
-      _p1.finally(() => { delete _setSaving[key]; });
+      _p1.then(_revertIfRejected).finally(() => { delete _setSaving[key]; });
     } else {
       setTimeout(() => { delete _setSaving[key]; }, 1500);
     }
@@ -1832,7 +1859,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     _setSaving[key] = true;
     const _p2 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true, exercise_swapped: isSwapped });
     if (_p2 && typeof _p2.finally === 'function') {
-      _p2.finally(() => { delete _setSaving[key]; });
+      _p2.then(_revertIfRejected).finally(() => { delete _setSaving[key]; });
     } else {
       setTimeout(() => { delete _setSaving[key]; }, 1500);
     }

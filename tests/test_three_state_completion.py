@@ -170,6 +170,39 @@ def test_api_sets_autocomplete_requires_every_exercise(app_ctx):
     assert dc.completed_at, "auto-complete must stamp completed_at (date-gate)"
 
 
+def test_uncheck_after_autocomplete_reopens_day(app_ctx):
+    """S018: un-checking a set after the day auto-completed must clear the
+    AUTO DayCompletion (a partial log read DONE to the coach and the streak).
+    A MANUAL toggle is Erik's call and must survive the same un-check."""
+    app_, db = app_ctx
+    from models import DayCompletion
+    u = _fresh_user(db, "threestate-reopen@test.com")
+    _seed_rx(db, u.id, 4, 3, ["Barbell Bench Press", "Barbell Row"], sets=2)
+    names = _resolved_names(app_, u, 4, 3)
+    client = _client_for(app_, u)
+    for n in names:
+        for sn in range(2):
+            client.post("/api/sets", json={"exercise": n, "week": 4, "day_idx": 3,
+                                            "set_number": sn, "weight": 100, "reps": 8, "done": True})
+    dc = DayCompletion.query.filter_by(user_id=u.id, week=4, day_idx=3).first()
+    assert dc and dc.done and dc.source == "auto"
+
+    r = client.post("/api/sets", json={"exercise": names[1], "week": 4, "day_idx": 3,
+                                        "set_number": 1, "weight": 100, "reps": 8, "done": False})
+    assert r.status_code == 200
+    db.session.expire_all()
+    dc = DayCompletion.query.filter_by(user_id=u.id, week=4, day_idx=3).first()
+    assert dc.done is False and dc.completed_at is None
+
+    # manual toggle survives an un-check
+    dc.done = True; dc.source = "manual"; dc.completed_at = "2026-09-01"; db.session.commit()
+    client.post("/api/sets", json={"exercise": names[0], "week": 4, "day_idx": 3,
+                                    "set_number": 0, "weight": 100, "reps": 8, "done": False})
+    db.session.expire_all()
+    dc = DayCompletion.query.filter_by(user_id=u.id, week=4, day_idx=3).first()
+    assert dc.done is True
+
+
 def test_coach_rules_partial_seven_done_sets_is_in_progress(app_ctx):
     """7 done sets across 2 of the prescribed exercises used to trip the
     6-sets/3-done heuristic and read complete. Must be in_progress."""
