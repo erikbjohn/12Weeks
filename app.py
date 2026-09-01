@@ -7694,51 +7694,6 @@ def api_measurements_record():
 
 # ─── WEEKLY CHECK-IN ────────────────────────────────────────────────────────
 
-@app.route("/api/checkins")
-@login_required
-def api_checkins():
-    entries = WeeklyCheckIn.query.filter_by(user_id=current_user.id).order_by(WeeklyCheckIn.week).all()
-    return jsonify([{
-        "week": e.week,
-        "energy": e.energy_level,
-        "sleep": e.sleep_quality,
-        "soreness": e.soreness_level,
-        "adherence": e.adherence_pct,
-        "notes": e.notes,
-        "date": e.check_in_date.isoformat() if e.check_in_date else None,
-    } for e in entries])
-
-
-@app.route("/api/checkins", methods=["POST"])
-@login_required
-def api_checkins_record():
-    data = request.get_json()
-    week = data["week"]
-    ci = WeeklyCheckIn.query.filter_by(user_id=current_user.id, week=week).first()
-    if ci:
-        ci.energy_level = data.get("energy", ci.energy_level)
-        ci.sleep_quality = data.get("sleep", ci.sleep_quality)
-        ci.soreness_level = data.get("soreness", ci.soreness_level)
-        ci.adherence_pct = data.get("adherence", ci.adherence_pct)
-        ci.notes = data.get("notes", ci.notes)
-    else:
-        ci = WeeklyCheckIn(
-            week=week,
-            energy_level=data.get("energy"),
-            sleep_quality=data.get("sleep"),
-            soreness_level=data.get("soreness"),
-            adherence_pct=data.get("adherence"),
-            notes=data.get("notes"),
-            check_in_date=_user_today(),
-            user_id=current_user.id,
-        )
-        db.session.add(ci)
-    db.session.commit()
-    return jsonify({"ok": True})
-
-
-# ─── SUPPLEMENTS ────────────────────────────────────────────────────────────
-
 @app.route("/api/supplements")
 @login_required
 def api_supplements():
@@ -8534,152 +8489,6 @@ def api_stats_body_comp():
         return jsonify({"error": str(e)[:200]}), 500
 
 
-@app.route("/api/stats/strength")
-@login_required
-def api_stats_strength():
-    """Return strength data — per-exercise weekly e1RM, percentiles, muscle profiles."""
-    try:
-        from body_stats import compute_1rm_percentile
-        uid = current_user.id
-
-        # Demographics
-        pa = PhysicalAssessment.query.filter_by(user_id=uid).first()
-        latest_bw = BodyWeight.query.filter_by(user_id=uid).order_by(BodyWeight.log_date.desc()).first()
-        current_weight = latest_bw.weight_lbs if latest_bw else (pa.bodyweight_lbs if pa else None)
-
-        sex = "male"
-        age = 30
-        intake = PsychIntake.query.filter_by(user_id=uid).first()
-        if intake and intake.conversation:
-            convo = intake.conversation if isinstance(intake.conversation, list) else []
-            sex, age = sex_and_age_from_intake(convo, sex, age)  # S099
-
-        # All completed sets
-        all_sets = SetLog.query.filter_by(user_id=uid, done=True).filter(
-            SetLog.weight > 0
-        ).order_by(SetLog.week, SetLog.set_number).all()
-
-        # Group by exercise, then by week — compute max e1RM per week
-        exercise_data = {}
-        for s in all_sets:
-            name = s.exercise_name
-            if name not in exercise_data:
-                exercise_data[name] = {}
-            reps = min(s.reps or 10, 15)
-            e1rm = round(_e1rm(s.weight, reps) or 0)
-            wk = s.week or 1
-            if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
-                exercise_data[name][wk] = e1rm
-
-        # Fallback: if an exercise has no SetLog, check ExerciseLog
-        if not exercise_data:
-            ex_logs = ExerciseLog.query.filter_by(user_id=uid).filter(
-                ExerciseLog.weight > 0
-            ).order_by(ExerciseLog.week).all()
-            for log in ex_logs:
-                name = log.exercise_name
-                if name not in exercise_data:
-                    exercise_data[name] = {}
-                reps = min(log.reps_completed or 10, 15)
-                e1rm = round(_e1rm(log.weight, reps) or 0)
-                wk = log.week or 1
-                if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
-                    exercise_data[name][wk] = e1rm
-
-        # Build per-exercise response with percentiles
-        bw = current_weight or 180
-        exercises = {}
-        for ex_name, weekly_map in exercise_data.items():
-            sorted_weeks = sorted(weekly_map.keys())
-            weekly_e1rm = [{"week": wk, "e1rm": weekly_map[wk]} for wk in sorted_weeks]
-            current_1rm = weekly_map[sorted_weeks[-1]] if sorted_weeks else None
-
-            percentile = None
-            rating = None
-            relative_strength = None
-            if current_1rm:
-                try:
-                    pct_data = compute_1rm_percentile(current_1rm, bw, ex_name, age, sex)
-                    if pct_data:
-                        percentile = pct_data.get("percentile")
-                        rating = pct_data.get("rating")
-                except Exception:
-                    pass
-                relative_strength = round(current_1rm / bw, 2) if bw else None
-
-            exercises[ex_name] = {
-                "weekly_e1rm": weekly_e1rm,
-                "current_1rm": current_1rm,
-                "percentile": percentile,
-                "relative_strength": relative_strength,
-                "rating": rating,
-            }
-
-        # Muscle group profiles
-        profiles = MuscleGroupProfile.query.filter_by(user_id=uid).all()
-        muscle_profiles = [{
-            "muscle_group": p.muscle_group,
-            "strength_score": p.strength_score,
-            "relative_strength": p.relative_strength,
-        } for p in profiles]
-
-        return jsonify({
-            "current_weight": current_weight,
-            "age": age,
-            "sex": sex,
-            "exercises": exercises,
-            "muscle_profiles": muscle_profiles,
-        })
-    except Exception as e:
-        logging.exception("stats/strength failed")
-        return jsonify({"error": str(e)[:200]}), 500
-
-
-@app.route("/api/stats/wellness")
-@login_required
-def api_stats_wellness():
-    """Return wellness data — morning check-ins, weekly reports, session compliance."""
-    try:
-        uid = current_user.id
-
-        # Morning check-ins
-        checkins = [{
-            "date": ci.log_date.isoformat(),
-            "sleep_quality": ci.sleep_quality,
-            "stress_level": ci.stress_level,
-            "soreness": ci.soreness,
-            "mood": ci.mood,
-            "motivation": ci.motivation,
-            "anxiety": ci.anxiety,
-        } for ci in MorningCheckIn.query.filter_by(user_id=uid).order_by(MorningCheckIn.log_date).all()]
-
-        # Weekly reports
-        weekly_reports = [{
-            "week": wr.week,
-            "adherence_pct": wr.adherence_pct,
-            "narrative": wr.narrative,
-        } for wr in WeeklyReport.query.filter_by(user_id=uid).order_by(WeeklyReport.week).all()]
-
-        # Session compliance from SessionAnalysis
-        compliance = [{
-            "week": sa.week,
-            "day_idx": sa.day_idx,
-            "overall_compliance": sa.overall_compliance,
-            "muscle_groups_trained": sa.muscle_groups_trained or [],
-        } for sa in SessionAnalysis.query.filter_by(user_id=uid).order_by(
-            SessionAnalysis.week, SessionAnalysis.day_idx
-        ).all()]
-
-        return jsonify({
-            "checkins": checkins,
-            "weekly_reports": weekly_reports,
-            "compliance": compliance,
-        })
-    except Exception as e:
-        logging.exception("stats/wellness failed")
-        return jsonify({"error": str(e)[:200]}), 500
-
-
 @app.route("/api/stats/aerobic-efficiency")
 @login_required
 def api_stats_aerobic_efficiency():
@@ -8842,27 +8651,6 @@ def api_morning_checkin_save():
         except Exception:
             logging.exception("morning-checkin: missed_checkin compliance event failed")
     return jsonify({"ok": True})
-
-
-@app.route("/api/morning-checkin/history")
-@login_required
-def api_morning_checkin_history():
-    days = request.args.get("days", 30, type=int)
-    since = _user_today() - timedelta(days=days)
-    entries = MorningCheckIn.query.filter(
-        MorningCheckIn.user_id == current_user.id,
-        MorningCheckIn.log_date >= since
-    ).order_by(MorningCheckIn.log_date).all()
-    return jsonify([{
-        "date": e.log_date.isoformat(),
-        "sleep_quality": e.sleep_quality,
-        "stress_level": e.stress_level,
-        "soreness": e.soreness,
-        "mood": e.mood,
-        "motivation": e.motivation,
-        "anxiety": e.anxiety,
-        "notes": e.notes,
-    } for e in entries])
 
 
 @app.route("/api/morning-checkin/extract", methods=["POST"])
@@ -9239,14 +9027,6 @@ def api_chat_history():
     } for m in messages])
 
 
-@app.route("/api/chat/clear", methods=["POST"])
-@login_required
-def api_chat_clear():
-    ChatMessage.query.filter_by(user_id=current_user.id).delete()
-    db.session.commit()
-    return jsonify({"ok": True})
-
-
 @app.route("/api/chat", methods=["POST"])
 @login_required
 def api_chat():
@@ -9409,14 +9189,6 @@ def _handle_rule_command(msg):
         db.session.commit()
         return jsonify({"response": f'Rule saved: "{rule_text}"'})
     return jsonify({"response": "Usage: /rule <text> | /rule list | /rule delete <id>"})
-@app.route("/api/rules")
-@login_required
-def api_rules():
-    """List all active coaching rules for the current user."""
-    rules = CoachRule.query.filter_by(user_id=current_user.id, active=True).order_by(CoachRule.created_at).all()
-    return jsonify([{"id": r.id, "rule": r.rule_text, "category": r.category, "source": r.source} for r in rules])
-
-
 @app.route("/api/chat/stream", methods=["POST"])
 @login_required
 def api_chat_stream():
@@ -9580,51 +9352,6 @@ def api_chat_stream():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-@app.route('/api/coach/daily-opener')
-@login_required
-def api_daily_opener():
-    """Returns today's morning opener. Generates if not yet created."""
-    today = _user_today()
-
-    # Check daily state
-    state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
-
-    # Check if opener already exists
-    existing = ChatMessage.query.filter_by(
-        user_id=current_user.id, log_date=today
-    ).filter(~ChatMessage.content.contains('[MORNING_CHECKIN]')).filter_by(
-        role='assistant'
-    ).order_by(ChatMessage.created_at.asc()).first()
-
-    # Check if already dismissed
-    already_seen = state and state.opener_dismissed_at is not None
-
-    if existing and state and state.opener_shown_at:
-        return jsonify({'message': existing.content, 'already_seen': already_seen})
-
-    # Not yet generated — trigger it
-    if not state:
-        state = DailyCoachState(user_id=current_user.id, state_date=today)
-        db.session.add(state)
-    state.opener_shown_at = datetime.now(timezone.utc)
-    db.session.commit()
-
-    return jsonify({'message': None, 'needs_generation': True, 'already_seen': False})
-
-
-@app.route('/api/coach/dismiss-opener', methods=['POST'])
-@login_required
-def api_dismiss_opener():
-    today = _user_today()
-    state = DailyCoachState.query.filter_by(user_id=current_user.id, state_date=today).first()
-    if not state:
-        state = DailyCoachState(user_id=current_user.id, state_date=today)
-        db.session.add(state)
-    state.opener_dismissed_at = datetime.now(timezone.utc)
-    db.session.commit()
-    return jsonify({'ok': True})
-
-
 @app.route('/api/coach/today-history')
 @login_required
 def api_coach_today_history():
@@ -10448,17 +10175,6 @@ def garmin_readiness():
         return jsonify(assess_readiness(None))
     summary = gc.get_today_summary(today=_user_today())
     return jsonify(assess_readiness(summary))
-
-
-@app.route("/api/garmin/hrv-trend")
-@login_required
-def garmin_hrv_trend():
-    gc = _get_garmin()
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    if not gc.connected:
-        return jsonify({"error": "Not connected"}), 401
-    return jsonify(gc.get_weekly_hrv() or [])
 
 
 def _post_token_save_sync(gc, user):
@@ -11829,21 +11545,6 @@ def api_food_selections_save():
         return jsonify({"error": f"Save failed: {str(e)[:100]}"}), 500
     return jsonify({"ok": True})
 
-@app.route("/api/food-selections/validate", methods=["POST"])
-@login_required
-def api_food_selections_validate():
-    from food_catalog import validate_selections
-    data = request.get_json()
-    selections = data.get("selected_foods", {})
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    daily_cal = goal.daily_calories if goal else 1800
-    daily_protein = goal.protein_grams if goal else 150
-    result = validate_selections(selections, daily_cal, daily_protein)
-    return jsonify(result)
-
-
-# ─── BASELINE ASSESSMENT ──────────────────────────────────────────────────
-
 @app.route("/api/baseline-assessment")
 @login_required
 def api_baseline_assessment():
@@ -12498,21 +12199,6 @@ def api_physical_assessment_save():
     return jsonify({"ok": True})
 
 
-@app.route("/api/physical-assessment/reset", methods=["POST"])
-@login_required
-def api_physical_assessment_reset():
-    PhysicalAssessment.query.filter_by(user_id=current_user.id).delete()
-    db.session.commit()
-    return jsonify({"ok": True})
-
-
-# ─── BODYWEIGHT RETEST (disabled) ──────────────────────────────────────────
-# Both retests disabled per Erik's request — they were intrusive blocking gates.
-# Week 6 (phase 1→2 boundary) was removed first; the week-12 retest was removed
-# 2026-06-29 because it hard-locked the entire app at week 12 (no dashboard,
-# coach, or settings until you completed a 4×60s test, no "later" escape).
-# Empty tuple => the status endpoint never reports due_and_pending, so the
-# frontend gate never fires; the POST endpoint rejects any retest week.
 RETEST_WEEKS = ()
 
 
@@ -13711,38 +13397,6 @@ def api_deficit_plan():
     curve-derived required_weekly instead."""
     return jsonify({"error": "retired — projection is curve-managed"}), 410
 
-
-@app.route("/api/bmr-recalculate", methods=["POST"])
-@login_required
-def api_bmr_recalculate():
-    """Recalculate BMR from actual weight loss data."""
-    data = request.get_json()
-    actual_loss = data.get("actual_weekly_loss", 0)
-    weekly_intake = data.get("weekly_intake", 0)
-    exercise_burn = data.get("exercise_burn", 0)
-    run_burn = data.get("run_burn", 0)
-
-    if actual_loss <= 0:
-        return jsonify({"error": "No weight loss to calculate from"}), 400
-
-    actual_deficit = actual_loss * 3500
-    actual_expenditure = weekly_intake + actual_deficit
-    actual_bmr = (actual_expenditure - exercise_burn - run_burn) / 7
-
-    # Sanity bounds — BMR outside 1000-3000 for most adults is likely data error
-    if actual_bmr < 1000 or actual_bmr > 3000:
-        return jsonify({"error": "Computed BMR outside reasonable range", "computed": round(actual_bmr)}), 400
-
-    # Save to DB
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    if pa:
-        pa.actual_bmr = round(actual_bmr)
-        db.session.commit()
-
-    return jsonify({"actual_bmr": round(actual_bmr)})
-
-
-# ─── OVERRIDE ENDPOINTS ──────────────────────────────────────────────────
 
 @app.route("/api/schedule-overrides")
 @login_required
