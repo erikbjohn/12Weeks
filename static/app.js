@@ -9083,7 +9083,12 @@ function _pdBodyComp(measurements) {
     cards += '</div>';
   }
 
-  return '<div class="pd-section"><div class="pd-section-label">Body Composition</div><div class="pd-comp-grid">' + cards + '</div></div>';
+  // S087: say WHICH baseline the deltas are against — the Scoreboard's Tape
+  // row is block-scoped (since start_date) while this grid compares to the
+  // first measurement in the fetched series; unlabeled they read as the
+  // same number and disagree.
+  var baseLabel = baseline && baseline.date ? ' <span style="font-size:11px;font-weight:400;color:var(--muted)">deltas vs ' + escapeHtml(String(baseline.date)) + '</span>' : '';
+  return '<div class="pd-section"><div class="pd-section-label">Body Composition' + baseLabel + '</div><div class="pd-comp-grid">' + cards + '</div></div>';
 }
 
 /* ── TRAINING STREAK (GitHub-style grid) ── */

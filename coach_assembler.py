@@ -1614,42 +1614,7 @@ def _build_fasting():
     }
 
 
-def _get_day_meal_type_local(user_id, week, day_idx):
-    """Get actual meal type for a day — DB first, template fallback."""
-    try:
-        from models import MealPlanOverride, WeeklyMealPlan
-        override = MealPlanOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
-        if override and override.meal_type:
-            return override.meal_type
-        wmp = WeeklyMealPlan.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
-        if wmp and wmp.day_type:
-            return wmp.day_type
-    except Exception:
-        pass
-    # Derive from the day's ACTUAL run+lift (mirrors app._get_day_meal_type) so
-    # the coach narrates the SAME day type the meal card shows — the stale
-    # DAY_MEAL_TYPES weekday map made them disagree.
-    from workout_data import (DAY_MEAL_TYPES, derive_meal_type,
-                              get_workouts, get_workouts_for_user)
-    weekday = DAY_NAMES[day_idx] if day_idx < 7 else "Mon"
-    try:
-        from models import PhysicalAssessment, TrainingGoal
-        pa = PhysicalAssessment.query.filter_by(user_id=user_id).first()
-        has_gym = pa.has_gym if pa else True
-        tdays = (get_workouts(week) if has_gym
-                 else get_workouts_for_user(week, has_gym=False))
-        day_dict = tdays[day_idx] if day_idx < len(tdays) else None
-        mt = derive_meal_type(day_dict, weekday)
-        if mt == "fast_day":
-            goal = (TrainingGoal.query.filter_by(user_id=user_id)
-                    .order_by(TrainingGoal.id.desc()).first())
-            if goal and goal.goal_type in ("bulk", "recomp"):
-                return "rest"
-        return mt
-    except Exception:
-        return DAY_MEAL_TYPES.get(weekday, "moderate")
-
-
+from meal_types import get_day_meal_type as _get_day_meal_type_local  # S111: same derivation as the card
 @section_builder("food_safety")
 def _build_food_safety():
     from models import UserConstraints, UserFoodSelections
