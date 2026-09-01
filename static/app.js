@@ -6473,7 +6473,7 @@ async function logMorningWeight() {
       + (_mcScaleEvent ? ' &middot; ' + _mcScaleEvent + ' event recorded (judged as water)' : '') + '</div>';
     if (evRow) evRow.style.display = 'none';
   } catch(e) {
-    if (row) row.innerHTML = '<div style="color:var(--muted);font-size:14px">Save failed &mdash; tell the coach your weight in chat and it will log it.</div>';
+    if (row) row.innerHTML = '<div style="color:var(--muted);font-size:14px">Save failed &mdash; use the weigh-in box on today\'s card, or tell the coach.</div>';
   }
 }
 
@@ -10205,6 +10205,7 @@ function renderTodayHero() {
       <div class="th-label">${dayLabel}</div>
       <div class="th-title">No lifting</div>
       <div class="th-run">${runPillHtml(d)}</div>
+      ${isToday ? weighInChipHtml() : ''}
     </div>`;
     return;
   }
@@ -10224,7 +10225,43 @@ function renderTodayHero() {
     <div class="th-run">
       ${runPillHtml(d)}
     </div>
+    ${isToday ? weighInChipHtml() : ''}
   </div>`;
+}
+
+// S019: the ONLY weekday weigh-in input used to live inside the morning
+// check-in overlay; dismiss it and there was nowhere on the day card to log
+// a weight (the failure copy pointed at a Stats input that doesn't exist).
+function weighInChipHtml() {
+  var today = todayStr();
+  var entry = Array.isArray(_bodyweightCache)
+    ? _bodyweightCache.slice().reverse().find(function(e) { return e.date === today; }) : null;
+  if (entry && entry.weight) {
+    return '<div class="th-weigh" style="margin-top:8px;font-size:14px;color:var(--muted)">&#9878; ' + entry.weight + ' lb logged today</div>';
+  }
+  return '<div class="th-weigh" id="th-weigh-row" style="margin-top:8px;display:flex;align-items:center;gap:8px">'
+    + '<input type="number" inputmode="decimal" id="th-weight" class="weight-input" style="width:90px;font-size:16px" placeholder="lbs" step="0.1">'
+    + '<button class="btn btn-primary" style="min-height:44px;padding:10px 16px" onclick="logHeroWeight()">Log weigh-in</button>'
+    + '</div>';
+}
+
+async function logHeroWeight() {
+  var inp = document.getElementById('th-weight');
+  var v = parseFloat(inp && inp.value);
+  if (!v || v < 60 || v > 500) { if (inp) inp.focus(); return; }
+  var row = document.getElementById('th-weigh-row');
+  try {
+    var res = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ date: todayStr(), weight: v }) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
+    _bodyweightCache = _bodyweightCache.filter(function(e) { return e.date !== todayStr(); });
+    _bodyweightCache.push({ date: todayStr(), weight: v });
+    if (row) row.innerHTML = '<span style="color:var(--accent);font-size:15px">&#10003; ' + v + ' lb logged</span>';
+    try { renderDetail(); } catch (e) {}  // Stats row reads _bodyweightCache
+  } catch(e) {
+    showToast('Weigh-in not saved — try again', 'error');
+  }
 }
 
 function renderPhaseNav() {
