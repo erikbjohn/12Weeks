@@ -610,10 +610,21 @@ def _build_week_schedule():
         user_id=current_user.id, week=week
     ).order_by(WeeklyDaySchedule.day_idx).all()
     if rows:
-        schedule = [{"day_idx": ds.day_idx,
-                     "day": DAY_NAMES[ds.day_idx] if ds.day_idx < 7 else "?",
-                     "liftName": ds.lift_name or "Rest",
-                     "isRest": ds.is_rest or False} for ds in rows]
+        # S079: a schedule row exists for every day at generation, seeded from
+        # the template — a day the coach failed to plan still carried a
+        # template title with no unplanned flag. Resolve each day through the
+        # SAME resolver as workout_today: no prescriptions → unplanned, no name.
+        schedule = []
+        for ds in rows:
+            day = _resolve_workout_for_day(week, ds.day_idx) or {}
+            unplanned = bool(day.get("lift_unplanned")) and not (ds.is_rest or False)
+            schedule.append({
+                "day_idx": ds.day_idx,
+                "day": DAY_NAMES[ds.day_idx] if ds.day_idx < 7 else "?",
+                "liftName": None if unplanned else (day.get("liftName") or ds.lift_name or ("Rest" if ds.is_rest else None)),
+                "isRest": ds.is_rest or False,
+                "unplanned": unplanned,
+            })
     else:
         # COACH-OR-NOTHING: no per-user schedule rows (rows are only written by
         # the planning apply path). The old fallback listed raw PHASE-template

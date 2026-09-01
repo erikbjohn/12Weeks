@@ -6958,9 +6958,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                 lift_name = _schedule_day_title(
                     lift_name, _cn, _deload_decision.get("deload")) or lift_name
 
-            # Extract muscle groups from the day's exercises
+            # Muscle groups from the COACH's exercises (S079) — the template's
+            # list described a program the athlete isn't doing.
             muscle_groups = set()
-            for ex in day_data.get("exercises", []):
+            _mg_src = [{"name": it.get("exercise")} for it in (_coach_program.get(day_idx) or [])] \
+                or day_data.get("exercises", [])
+            for ex in _mg_src:
                 ex_name = ex.get("name", ex.get("exercise", ""))
                 ex_info = _EXERCISES.get(ex_name, {})
                 mg = ex_info.get("muscle_group", "")
