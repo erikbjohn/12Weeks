@@ -922,6 +922,11 @@ def _marker_outcome(user_id, week, marker_type, raw, status, detail=None):
 
 
 def _parse_coach_markers(text, user_id, week):
+    try:
+        from coach_assembler import _invalidate_day_cache
+        _invalidate_day_cache()  # S103: markers below may rewrite today's plan
+    except Exception:
+        pass
     """Parse structured markers from coach response and apply them."""
     import re
     import logging
@@ -3823,7 +3828,7 @@ def _filter_meals_by_food_selections(days, user_food_ids):
     return filtered_days
 
 
-def _apply_exercise_swap_overlay(days, user_id, week):
+def _apply_exercise_swap_overlay(days, user_id, week, swap_rows=None):
     """Apply user-explicit ExerciseSwap rows to a week's day dicts, AFTER
     auto_swap_workout, so a manual/coach swap overrides the equipment-driven
     substitution. Recomputes target_weight, note, and catalog metadata against
@@ -3833,9 +3838,8 @@ def _apply_exercise_swap_overlay(days, user_id, week):
     try:
         from equipment_swaps import EXERCISE_SWAPS
         from workout_data import EXERCISES, resolve_name
-        _swap_rows = ExerciseSwap.query.filter_by(
-            user_id=user_id, week=week
-        ).all()
+        _swap_rows = (list(swap_rows) if swap_rows is not None
+                      else ExerciseSwap.query.filter_by(user_id=user_id, week=week).all())
         # Resolve the stored target to its canonical catalog name at READ time so
         # rows written before the swap-menu aliases existed stop rendering a ghost
         # exercise (no metadata, no alternatives, orphan history). This heals old
@@ -3910,6 +3914,27 @@ def api_workouts():
 
     all_weeks = {}
     _overlay_errors = []  # S119: failed overlay queries are reported, never silently 'unplanned'
+    # S072: one query per table for ALL weeks, grouped by week — the loop
+    # below used to issue ~7 queries × 12 weeks on every load and after
+    # every micro-interaction.
+    from collections import defaultdict as _dd
+    _uid = current_user.id
+    _pre = {"rx": _dd(list), "meal": _dd(list), "run": _dd(list), "runlog": _dd(list), "warmup": _dd(list), "sched": _dd(list)}
+    for r in WeeklyPrescription.query.filter_by(user_id=_uid).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all():
+        _pre["rx"][r.week].append(r)
+    for r in WeeklyMealPlan.query.filter_by(user_id=_uid).all():
+        _pre["meal"][r.week].append(r)
+    for r in WeeklyRunPlan.query.filter_by(user_id=_uid).all():
+        _pre["run"][r.week].append(r)
+    from models import RunLog as _RunLogM
+    for r in _RunLogM.query.filter_by(user_id=_uid).all():
+        _pre["runlog"][r.week].append(r)
+    for r in WeeklyWarmup.query.filter_by(user_id=_uid).all():
+        _pre["warmup"][r.week].append(r)
+    for r in WeeklyDaySchedule.query.filter_by(user_id=_uid).all():
+        _pre["sched"][r.week].append(r)
+    for r in ExerciseSwap.query.filter_by(user_id=_uid).all():
+        _pre.setdefault("swap", _dd(list))[r.week].append(r)
     for week in range(1, 13):
         phase = get_phase(week)
         if has_gym:
@@ -3919,9 +3944,7 @@ def api_workouts():
             days = get_workouts_for_user(week, has_gym=False)
 
         # Check for user-specific prescriptions
-        prescriptions = WeeklyPrescription.query.filter_by(
-            user_id=current_user.id, week=week
-        ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
+        prescriptions = _pre["rx"].get(week, [])
 
         # Per-day "does a real plan exist?" sets — drive the fail-loud strip
         # below so the static template never reaches the UI as the user's plan.
@@ -3983,13 +4006,11 @@ def api_workouts():
         # manual swap overrides the equipment-driven substitution (which
         # produced 175-lb DB RDL from a Conv DL slot). Shared helper — the
         # per-week endpoint applies the identical overlay.
-        _apply_exercise_swap_overlay(days, current_user.id, week)
+        _apply_exercise_swap_overlay(days, current_user.id, week, swap_rows=_pre.get("swap", {}).get(week, []))
 
         # Check for user-specific meal plans
         try:
-            meal_plans = WeeklyMealPlan.query.filter_by(
-                user_id=current_user.id, week=week
-            ).all()
+            meal_plans = _pre["meal"].get(week, [])
             if meal_plans:
                 mp_by_day = {mp.day_idx: mp.meal_data for mp in meal_plans}
                 for day_idx, meal_data in mp_by_day.items():
@@ -4003,7 +4024,7 @@ def api_workouts():
 
         # Run plan overlay
         try:
-            run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
+            run_plans = _pre["run"].get(week, [])
             if run_plans:
                 runplan_day_set = {rp.day_idx for rp in run_plans}
                 for rp in run_plans:
@@ -4025,7 +4046,7 @@ def api_workouts():
         # should show their logged run — not a red "not planned" flag.
         try:
             from models import RunLog
-            for rl in RunLog.query.filter_by(user_id=current_user.id, week=week).all():
+            for rl in _pre["runlog"].get(week, []):
                 di = rl.day_idx
                 if di is None or di >= len(days) or di in runplan_day_set:
                     continue
@@ -4061,7 +4082,7 @@ def api_workouts():
 
         # Warmup overlay
         try:
-            warmups = WeeklyWarmup.query.filter_by(user_id=current_user.id, week=week).all()
+            warmups = _pre["warmup"].get(week, [])
             if warmups:
                 for wu in warmups:
                     if wu.day_idx < len(days) and wu.warmup_data:
@@ -4074,7 +4095,7 @@ def api_workouts():
 
         # Day schedule overlay
         try:
-            day_schedules = WeeklyDaySchedule.query.filter_by(user_id=current_user.id, week=week).all()
+            day_schedules = _pre["sched"].get(week, [])
             if day_schedules:
                 for ds in day_schedules:
                     if ds.day_idx < len(days):

@@ -426,6 +426,40 @@ def _build_garmin():
 
 
 def _resolve_workout_for_day(week, day_idx):
+    """Request-memoized wrapper (S103): one coach prompt resolved the same
+    day 17+ times (today_status, week_schedule, claims, tools, dashboard,
+    set-save) at 5 queries each. The cache lives on flask.g, so it is
+    per-request and per-user and never survives a write from another turn.
+    Writers that change a day's plan within a request call
+    _invalidate_day_cache()."""
+    import copy
+    try:
+        from flask import request, has_request_context
+        if has_request_context():
+            # request.environ is per-request even when an app context is
+            # shared (tests push one app context for a whole module).
+            cache = request.environ.setdefault("_day_cache", {})
+            key = (getattr(current_user, "id", None), int(week), int(day_idx))
+            if key in cache:
+                return copy.deepcopy(cache[key])
+            val = _resolve_workout_for_day_uncached(week, day_idx)
+            cache[key] = copy.deepcopy(val)
+            return val
+    except Exception:
+        pass
+    return _resolve_workout_for_day_uncached(week, day_idx)
+
+
+def _invalidate_day_cache():
+    try:
+        from flask import request, has_request_context
+        if has_request_context():
+            request.environ["_day_cache"] = {}
+    except Exception:
+        pass
+
+
+def _resolve_workout_for_day_uncached(week, day_idx):
     """Single source of truth for "what does day N look like for this user".
 
     Mirrors api_workouts (app.py:1854) so the coach sees what the UI shows:
