@@ -44,4 +44,18 @@ S041 (run detail in coach context), S042 (no static phase narrative), S044 (no b
 | S023 | `program_calendar.py` / `programWeekFor` — the only week formula (11 copies removed) |
 | S027 | audible timer cues, wall-clock HIIT with catch-up, screen wake lock |
 
-**All 39 highs closed.** Suite 1003 passed / 35 JS. Medium (89) and low (32) untouched.
+**All 39 highs closed.**
+
+## MEDIUM — 49 of 89 shipped (commits 4d0ab8f..d453bd9)
+
+Security/cost: S133 (read-only SQL route), S091 (key-scraping scripts + dumps removed), S112 (test account
+neutralized), S090 (admin allowlist), S089/S127 (paid audit opt-in). UX: S084, S051, S050/S055, S061/S085/S126,
+S057/S105, S086/S109, S019-adjacent. Coach: S096/S123 (temperature sent), S062 (INFO logs), S047/S067 (max HR),
+S059 (dose taken state), S058/S077 (planners see recovery + commitments), S097/S124 (context once), S125, S116,
+S106, S098/S083, S121, S128, S082, S054. Data: S093, S094, S092, S108, S120, S110, S119, S053 (falsy-zero lint),
+S107, S088. Already closed by highs: S060, S102, S101, S122.
+
+**Open mediums (40):** S045 render perf, S046 chase push, S048 BW provenance, S049 exception markers, S052,
+S056, S063/S065 HIIT parse, S064, S066/S069 escalation inputs, S068 memory dedupe, S070 import cycle, S071 client
+consolidation, S072/S073/S103 perf, S074 curve re-anchor, S075 split admin keys, S076, S078, S079, S080, S081,
+S087, S095, S099, S100, S104, S111, S113, S114, S115, S117, S118, S129, S130, S131, S132. Lows (32) untouched.
