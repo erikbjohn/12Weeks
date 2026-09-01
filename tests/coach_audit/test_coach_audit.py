@@ -32,10 +32,7 @@ def test_phase_2_fixture_seeds_setlog_history(phase_2_mid_program):
     assert weeks >= {3, 4, 5}, f"expected weeks 3-5 in history, got {weeks}"
 
 
-@pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY for live coach + judge",
-)
+@pytest.mark.live_llm  # gated by --live-coach (S089), never by the key alone
 @pytest.mark.parametrize(
     "case",
     [p for p in ALL_PROMPTS
@@ -103,10 +100,7 @@ def test_no_gym_bw_lacks_barbell(no_gym_bw):
     assert "kettlebells" in (eq.available_equipment or [])
 
 
-@pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY",
-)
+@pytest.mark.live_llm  # gated by --live-coach (S089)
 @pytest.mark.parametrize(
     "case",
     [p for p in ALL_PROMPTS
@@ -138,10 +132,7 @@ def test_specialist_targeted(case, fixture_by_name, app_ctx, run_id):
     )
 
 
-@pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY",
-)
+@pytest.mark.live_llm  # gated by --live-coach (S089)
 @pytest.mark.parametrize(
     "case",
     [p for p in ALL_PROMPTS if p.target_specialist == "doctor"],

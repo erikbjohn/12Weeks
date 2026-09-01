@@ -5,7 +5,7 @@
 cd "$(git rev-parse --show-toplevel)" || exit 1
 PY=venv/bin/python; [ -x "$PY" ] || PY=python3
 echo "pre-push: running pytest…"
-OUT=$("$PY" -m pytest tests/ -q -x --ignore=tests/coach_audit -p no:cacheprovider 2>&1); RC=$?
+OUT=$("$PY" -m pytest -q -x -p no:cacheprovider 2>&1); RC=$?
 echo "$OUT" | tail -3
 [ $RC -eq 0 ] || { echo "pre-push: pytest RED — push refused (git push --no-verify to override)"; exit 1; }
 if [ -x node_modules/.bin/vitest ]; then

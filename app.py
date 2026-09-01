@@ -157,8 +157,14 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated
 
+ADMIN_EMAILS = {e.strip().lower() for e in
+                os.environ.get("ADMIN_EMAILS", "erik@placemetry.com").split(",") if e.strip()}
+
+
 def _determine_role(email):
-    if email and email.lower().endswith("@placemetry.com"):
+    """Explicit allowlist (S090): any @placemetry.com mailbox used to
+    self-register as a full admin with no invite."""
+    if email and email.lower() in ADMIN_EMAILS:
         return "admin"
     return "user"
 
@@ -3151,9 +3157,10 @@ def signup():
 
     role = _determine_role(email)
 
-    # Require invite for non-admins
+    # Require an invite for EVERYONE (S090) — an existing admin row keeps
+    # its role; a new address never bypasses the invite because of its domain.
     invite = None
-    if role != "admin":
+    if True:
         if not invite_code:
             flash("Invite code required.", "error")
             return redirect(url_for("login", mode="signup"))
@@ -3431,7 +3438,7 @@ def google_callback():
         invite_code = session.pop("invite_code", None)
         invite = None
 
-        if role != "admin":
+        if True:  # invite required regardless of domain (S090)
             if not invite_code:
                 flash("You need an invite to sign up.", "error")
                 return redirect(url_for("login"))
@@ -12837,10 +12844,20 @@ def api_admin_debug_sql():
     sql = (data.get("sql") or "").strip()
     if not sql:
         return jsonify({"error": "No SQL provided"}), 400
-    # Safety: only allow SELECT
+    # Safety (S133): the old guard was a prefix check — psycopg2 sends the
+    # whole string as one simple query, so `SELECT 1; DELETE …; COMMIT`
+    # executed. One statement only, inside a READ ONLY transaction Postgres
+    # itself enforces, always rolled back.
     if not sql.upper().startswith("SELECT"):
         return jsonify({"error": "Only SELECT queries allowed"}), 403
+    if ";" in sql.rstrip(";"):
+        return jsonify({"error": "One statement only"}), 403
     try:
+        db.session.rollback()
+        try:
+            db.session.execute(text("SET TRANSACTION READ ONLY"))
+        except Exception:
+            db.session.rollback()  # sqlite (tests) has no READ ONLY; the guards above still hold
         result = db.session.execute(text(sql))
         columns = list(result.keys())
         rows = [dict(zip(columns, row)) for row in result.fetchall()]
@@ -12848,6 +12865,8 @@ def api_admin_debug_sql():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)[:300]}), 500
+    finally:
+        db.session.rollback()
 
 
 @app.route("/api/admin/debug/patch-set", methods=["POST"])
@@ -13509,6 +13528,8 @@ def api_test_create_user():
     Admin-only (X-Admin-Key header or admin session): unauthenticated access
     would let anyone mint a valid login (hardcoded password) + 3 invites,
     or wipe the test account's data at will."""
+    if os.environ.get("RENDER") and not os.environ.get("ALLOW_TEST_USER"):
+        return jsonify({"error": "not found"}), 404  # S112: never on prod by default
     data = request.get_json(silent=True) or {}
     email = data.get("email", "test@12weeks.com")
     if email != "test@12weeks.com":
@@ -13538,13 +13559,14 @@ def api_test_create_user():
         User.query.filter_by(id=uid).delete()
         db.session.commit()
 
+    test_pw = secrets.token_urlsafe(12)  # S112: never the committed literal
     user = User(
         email=email,
         name="Test User",
-        password_hash=generate_password_hash("testtest1"),
+        password_hash=generate_password_hash(test_pw),
         role="user",
         email_verified=True,
-        invites_remaining=3,
+        invites_remaining=0,
     )
     db.session.add(user)
     db.session.commit()
@@ -13566,7 +13588,7 @@ def api_test_create_user():
     db.session.add(intake)
     db.session.commit()
 
-    return jsonify({"ok": True, "user_id": user.id})
+    return jsonify({"ok": True, "user_id": user.id, "password": test_pw})
 
 
 @app.route("/api/warmup-completions")

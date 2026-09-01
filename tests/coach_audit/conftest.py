@@ -1,10 +1,18 @@
 """Audit-specific pytest fixtures."""
 from __future__ import annotations
+import os
 import pytest
 from datetime import datetime, timezone
 
 
 def pytest_addoption(parser):
+    # S089: the key alone must never trigger a paid run. A plain `pytest`
+    # with ANTHROPIC_API_KEY exported used to fire ~67 Opus coach+judge
+    # calls and write a report file every invocation.
+    parser.addoption(
+        "--live-coach", action="store_true", default=False,
+        help="Run the paid live-LLM coach audit (needs ANTHROPIC_API_KEY).",
+    )
     parser.addoption(
         "--audit-mode",
         action="store",
@@ -98,6 +106,17 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(scope="session", autouse=True)
 def _stash_run_id(run_id, request):
-    """Make run_id discoverable by pytest_sessionfinish."""
-    request.config._audit_run_id_resolved = run_id
+    """Make run_id discoverable by pytest_sessionfinish — only for a
+    deliberate --live-coach run (no report files for keyless runs)."""
+    if request.config.getoption("--live-coach"):
+        request.config._audit_run_id_resolved = run_id
     yield
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--live-coach") and os.environ.get("ANTHROPIC_API_KEY"):
+        return
+    skip = pytest.mark.skip(reason="live coach audit: pass --live-coach with ANTHROPIC_API_KEY set")
+    for item in items:
+        if "coach_audit" in str(item.fspath) and item.get_closest_marker("live_llm"):
+            item.add_marker(skip)

@@ -10,7 +10,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
       - run: pip install -r requirements.txt pytest
-      - run: python -m pytest tests/ -q -x --ignore=tests/coach_audit
+      - run: python -m pytest -q -x
         env:
           ANTHROPIC_API_KEY: test-not-used
   js:

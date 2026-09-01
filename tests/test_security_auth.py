@@ -291,3 +291,34 @@ def test_invite_cannot_reset_existing_password(app_ctx):
     r = client.post("/api/invite", json={"email": "victim-admin@placemetry.com"},
                     headers={"X-CSRF-Token": "tok"})
     assert r.status_code == 400
+
+
+def test_debug_sql_refuses_multi_statement(app_ctx, monkeypatch):
+    """S133: the SELECT guard was a prefix check; `SELECT 1; DELETE …` ran."""
+    app_, db = app_ctx
+    key = "sql-guard-key-long-enough-for-the-guard-01"
+    monkeypatch.setenv("ADMIN_API_KEY", key)
+    c = app_.test_client()
+    r = c.post("/api/admin/debug/sql", json={"sql": "SELECT 1; DELETE FROM set_log; COMMIT"},
+               headers={"X-Admin-Key": key})
+    assert r.status_code == 403
+    r = c.post("/api/admin/debug/sql", json={"sql": "SELECT 1 AS one;"}, headers={"X-Admin-Key": key})
+    assert r.status_code == 200 and r.get_json()["rows"] == [{"one": 1}]
+
+
+def test_placemetry_domain_is_not_an_admin_by_itself():
+    """S090: role comes from an explicit allowlist, not the email domain."""
+    from app import _determine_role
+    assert _determine_role("erik@placemetry.com") == "admin"
+    assert _determine_role("newhire@placemetry.com") == "user"
+
+
+def test_test_user_route_hidden_on_render(app_ctx, monkeypatch):
+    """S112: never mint the test account on prod unless explicitly allowed."""
+    app_, db = app_ctx
+    key = "test-user-key-long-enough-for-the-guard-01"
+    monkeypatch.setenv("ADMIN_API_KEY", key)
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.delenv("ALLOW_TEST_USER", raising=False)
+    r = app_.test_client().post("/api/test/create-user", json={}, headers={"X-Admin-Key": key})
+    assert r.status_code == 404
