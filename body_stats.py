@@ -67,11 +67,9 @@ def body_fat_category(bf_pct, sex):
 
 def estimate_1rm(weight, reps):
     """Epley formula: 1RM = weight × (1 + reps/30)."""
-    if not weight or not reps or reps <= 0:
-        return 0
-    if reps == 1:
-        return weight
-    return round(weight * (1 + reps / 30))
+    from lift_history import e1rm as _e1rm  # S100: single implementation
+    v = _e1rm(weight, reps)
+    return round(v) if v else 0
 
 
 # ─── STRENGTH PERCENTILES ─────────────────────────────────────────────────

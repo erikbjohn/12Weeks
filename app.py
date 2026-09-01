@@ -7,6 +7,7 @@ import re
 import secrets
 import hmac
 from program_calendar import program_week, day_date, week_day_for_date
+from lift_history import e1rm as _e1rm
 import deload as _deload
 import threading
 import time
@@ -1389,34 +1390,7 @@ def _garmin_push_week_best_effort(user_id, week):
 # fasting; "45 minutes" set age=45 and skewed TDEE. Accepted forms: a message
 # that IS a bare 1-2 digit number (the direct answer to "how old are you?"),
 # "45 years old" / "45yo", or "I'm 45" / "age: 45" not followed by a unit.
-_AGE_UNIT_LOOKAHEAD = (r'(?!\s*(?:min(?:ute)?s?|miles?|mi\b|k\b|km\b|lbs?|'
-                       r'pounds?|kgs?|%|percent|weeks?|days?|hours?|hrs?|'
-                       r'reps?|sets?|feet|foot|ft\b|inch(?:es)?|in\b|'
-                       r'cal(?:orie)?s?)\b)')
-_AGE_CONTEXT_RES = [
-    re.compile(r"\b(\d{1,2})\s*(?:years?[\s-]*old|y/?o\b|yrs?[\s-]*old|year[\s-]old)",
-               re.IGNORECASE),
-    re.compile(r"\b(?:i'?m|i\s+am|my\s+age\s+is|age\s*(?:is|:)|turning|turned)\s+(\d{1,2})\b"
-               + _AGE_UNIT_LOOKAHEAD, re.IGNORECASE),
-]
-
-
-def _age_from_message(content):
-    """Return an age (13-80) ONLY when the message states it in age context;
-    otherwise None. Never treat a stray number in free text as the age."""
-    if content is None:
-        return None
-    text = str(content).strip()
-    if re.fullmatch(r"\d{1,2}", text):
-        num = int(text)
-        return num if 13 <= num <= 80 else None
-    for rx in _AGE_CONTEXT_RES:
-        m = rx.search(text)
-        if m:
-            num = int(m.group(1))
-            if 13 <= num <= 80:
-                return num
-    return None
+from intake_profile import age_from_message as _age_from_message, sex_and_age_from_intake  # S099: one parser
 
 
 def _extract_age_from_intake(user_id):
@@ -1425,11 +1399,7 @@ def _extract_age_from_intake(user_id):
     try:
         intake = PsychIntake.query.filter_by(user_id=user_id).first()
         if intake and intake.conversation:
-            for msg in intake.conversation:
-                if msg.get("role") == "user":
-                    _a = _age_from_message(msg.get("content", ""))
-                    if _a is not None:
-                        age = _a
+            _, age = sex_and_age_from_intake(intake.conversation, "male", age)  # S099
     except Exception:
         pass
     return age
@@ -6590,13 +6560,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                 intake_rec = PsychIntake.query.filter_by(user_id=current_user.id).first()
                 convo_rec = intake_rec.conversation if intake_rec and intake_rec.conversation else []
                 age_rec, sex_rec = 30, "male"
-                for msg in (convo_rec if isinstance(convo_rec, list) else []):
-                    if not isinstance(msg, dict) or msg.get("role") != "user":
-                        continue
-                    c = msg.get("content", "").lower().split()
-                    if any(w in c for w in ["female", "f", "woman"]): sex_rec = "female"
-                    _am = _age_from_message(msg.get("content", ""))
-                    if _am is not None: age_rec = _am
+                sex_rec, age_rec = sex_and_age_from_intake(convo_rec, sex_rec, age_rec)  # S099
 
                 tdee_rec = compute_tdee(current_weight, height_rec, age_rec, sex_rec)
                 new_targets = compute_targets(tdee_rec["tdee"], goal.goal_type or "cut",
@@ -7193,8 +7157,7 @@ def api_weight_detail(exercise_name):
     weekly_e1rm = {}
     for s in sets:
         if s.weight and s.weight > 0:
-            reps = min(s.reps or 10, 15)  # Cap at 15
-            e1rm = round(s.weight * (1 + reps / 30))
+            e1rm = round(_e1rm(s.weight, s.reps or 10) or 0)  # S100
             # week 0 = baseline test rows — keep them distinct from week 1
             # (falsy-zero: `s.week or 1` folded baseline into week 1).
             wk = s.week if s.week is not None else 1
@@ -7210,7 +7173,7 @@ def api_weight_detail(exercise_name):
         for log in ex_logs:
             if log.weight and log.weight > 0:
                 reps = min(log.reps_completed or 10, 15)
-                e1rm = round(log.weight * (1 + reps / 30))
+                e1rm = round(_e1rm(log.weight, reps) or 0)
                 wk = log.week or 1
                 if wk not in weekly_e1rm or e1rm > weekly_e1rm[wk]:
                     weekly_e1rm[wk] = e1rm
@@ -7244,8 +7207,7 @@ def api_weight_detail(exercise_name):
                 reps_val = int(reps_str)
             except ValueError:
                 reps_val = 10
-        reps_capped = min(reps_val, 15)
-        e1rm = round(p.target_weight * (1 + reps_capped / 30))
+        e1rm = round(_e1rm(p.target_weight, reps_val) or 0)  # S100
         if p.week not in prescribed_e1rm or e1rm > prescribed_e1rm[p.week]:
             prescribed_e1rm[p.week] = e1rm
 
@@ -7291,7 +7253,7 @@ def api_weight_detail(exercise_name):
     elif baseline_entries:
         bl = baseline_entries[0]
         bl_reps = min(bl.test_reps or 10, 15)
-        baseline_1rm = round(bl.test_weight * (1 + bl_reps / 30))
+        baseline_1rm = round(_e1rm(bl.test_weight, bl_reps) or 0)
     elif 0 in weekly_e1rm:
         baseline_1rm = weekly_e1rm[0]
 
@@ -7306,17 +7268,7 @@ def api_weight_detail(exercise_name):
             sex = "male"
             age = 30
             if intake and intake.conversation:
-                for msg in intake.conversation:
-                    content = msg.get("content", "").lower().strip()
-                    if msg.get("role") == "user":
-                        if content in ("male", "female", "m", "f"):
-                            sex = "female" if content in ("female", "f") else "male"
-                        try:
-                            num = int(content)
-                            if 15 <= num <= 80:
-                                age = num
-                        except ValueError:
-                            pass
+                sex, age = sex_and_age_from_intake(intake.conversation, sex, age)  # S099
 
             pct_data = compute_1rm_percentile(current_1rm, bw, exercise_name, age, sex)
             if pct_data:
@@ -8564,19 +8516,7 @@ def api_stats_projection_inputs():
         intake = PsychIntake.query.filter_by(user_id=uid).first()
         if intake and intake.conversation:
             convo = intake.conversation if isinstance(intake.conversation, list) else []
-            for msg in convo:
-                content = msg.get("content", "").lower().strip()
-                if msg.get("role") == "user":
-                    # Sex detection
-                    content_words = content.split()
-                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
-                        sex = "male"
-                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
-                        sex = "female"
-                    # Age detection — only from explicit age context
-                    _a = _age_from_message(msg.get("content", ""))
-                    if _a is not None:
-                        age = _a
+            sex, age = sex_and_age_from_intake(convo, sex, age)  # S099
 
         return jsonify({
             "current_weight": current_weight,
@@ -8622,17 +8562,7 @@ def api_stats_body_comp():
         intake = PsychIntake.query.filter_by(user_id=uid).first()
         if intake and intake.conversation:
             convo = intake.conversation if isinstance(intake.conversation, list) else []
-            for msg in convo:
-                content = msg.get("content", "").lower().strip()
-                if msg.get("role") == "user":
-                    content_words = content.split()
-                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
-                        sex = "male"
-                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
-                        sex = "female"
-                    _a = _age_from_message(msg.get("content", ""))
-                    if _a is not None:
-                        age = _a
+            sex, age = sex_and_age_from_intake(convo, sex, age)  # S099
 
         # All body measurements
         measurements = [{
@@ -8677,17 +8607,7 @@ def api_stats_strength():
         intake = PsychIntake.query.filter_by(user_id=uid).first()
         if intake and intake.conversation:
             convo = intake.conversation if isinstance(intake.conversation, list) else []
-            for msg in convo:
-                content = msg.get("content", "").lower().strip()
-                if msg.get("role") == "user":
-                    content_words = content.split()
-                    if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
-                        sex = "male"
-                    elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
-                        sex = "female"
-                    _a = _age_from_message(msg.get("content", ""))
-                    if _a is not None:
-                        age = _a
+            sex, age = sex_and_age_from_intake(convo, sex, age)  # S099
 
         # All completed sets
         all_sets = SetLog.query.filter_by(user_id=uid, done=True).filter(
@@ -8701,7 +8621,7 @@ def api_stats_strength():
             if name not in exercise_data:
                 exercise_data[name] = {}
             reps = min(s.reps or 10, 15)
-            e1rm = round(s.weight * (1 + reps / 30))
+            e1rm = round(_e1rm(s.weight, reps) or 0)
             wk = s.week or 1
             if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
                 exercise_data[name][wk] = e1rm
@@ -8716,7 +8636,7 @@ def api_stats_strength():
                 if name not in exercise_data:
                     exercise_data[name] = {}
                 reps = min(log.reps_completed or 10, 15)
-                e1rm = round(log.weight * (1 + reps / 30))
+                e1rm = round(_e1rm(log.weight, reps) or 0)
                 wk = log.week or 1
                 if wk not in exercise_data[name] or e1rm > exercise_data[name][wk]:
                     exercise_data[name][wk] = e1rm
@@ -9997,12 +9917,12 @@ def _build_coach_context():
             d[skey] = {"weight": s.weight, "rpe": None, "reps_completed": s.reps,
                        "week": s.week,
                        "date": s.logged_date.isoformat() if s.logged_date else None,
-                       "estimated_1rm": round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)}
+                       "estimated_1rm": _e1rm(s.weight, s.reps)}
         else:
             e = d[skey]
             if s.weight is not None and s.weight > e["weight"]:
                 e["weight"], e["reps_completed"] = s.weight, s.reps
-                e["estimated_1rm"] = round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)
+                e["estimated_1rm"] = _e1rm(s.weight, s.reps)
     exercise_history = {c: [_sess[c][k] for k in keys] for c, keys in _ord.items()}
 
     # Per-set data for today — use date-based query, not week number
@@ -11510,22 +11430,7 @@ def _compute_goal_for_user(user, overrides=None):
     # Extract sex and age from conversation
     sex = "male"
     age = 30
-    for msg in convo:
-        content = msg.get("content", "").lower().strip()
-        if msg.get("role") == "user":
-            # Sex detection
-            content_words = content.split()
-            if any(w in content_words for w in ["male", "m", "man", "guy", "dude"]):
-                sex = "male"
-            elif any(w in content_words for w in ["female", "f", "woman", "girl", "lady"]):
-                sex = "female"
-            # Age detection — ONLY explicit age context ("I'm 32", "32 years
-            # old", or a bare-number answer). A stray number in free text
-            # ("I can run 15 miles") must never overwrite the age: age<18
-            # silently forced minor handling (no deficit, fasting stripped).
-            _a = _age_from_message(msg.get("content", ""))
-            if _a is not None:
-                age = _a
+    sex, age = sex_and_age_from_intake(convo, sex, age)  # S099
 
     # BodyWeight is primary, PhysicalAssessment is fallback — NEVER default to 180
     latest_bw = BodyWeight.query.filter_by(user_id=user.id).order_by(BodyWeight.log_date.desc()).first()
@@ -12000,17 +11905,7 @@ def api_baseline_assessment():
     sex = "male"
     age = 30
     if intake and intake.conversation:
-        for msg in intake.conversation:
-            content = msg.get("content", "").lower().strip()
-            if msg.get("role") == "user":
-                if content in ("male", "female", "m", "f"):
-                    sex = "female" if content in ("female", "f") else "male"
-                try:
-                    num = int(content)
-                    if 15 <= num <= 80:
-                        age = num
-                except ValueError:
-                    pass
+        sex, age = sex_and_age_from_intake(intake.conversation, sex, age)  # S099
 
     physical_data = {}
     if pa:

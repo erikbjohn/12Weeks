@@ -13,6 +13,26 @@ name matching previously hid real data behind the equipment qualifier).
 """
 from datetime import date
 
+REP_CAP = 15  # Epley is unreliable above ~12-15 reps; the two Stats endpoints already capped here
+
+
+def e1rm(weight, reps, *, cap=REP_CAP, digits=1):
+    """THE Epley e1RM (S100). Five copies disagreed on cap and default:
+    uncapped one-decimal here, capped-at-15 integer in Stats, `reps or 10`
+    in weight-detail. One rule: cap at REP_CAP, one decimal, reps<=0 or
+    missing weight -> None. Callers wanting an int round themselves."""
+    try:
+        w = float(weight or 0)
+        r = int(reps or 0)
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 or r <= 0:
+        return None
+    if r == 1:
+        return round(w, digits)
+    return round(w * (1 + min(r, cap) / 30.0), digits)
+
+
 
 def lift_session_history(user_id, exercise_name, limit_sessions=None,
                          by_movement=True):
@@ -75,7 +95,7 @@ def lift_session_history(user_id, exercise_name, limit_sessions=None,
                  key=lambda x: (x["date"] or date.min, x["week"] or 0, x["day_idx"] or 0))
     for e in out:
         tw, tr = e["top_weight"], e["top_reps"] or 0
-        e["e1rm"] = round(tw * (1 + tr / 30.0), 1) if tw else None
+        e["e1rm"] = e1rm(tw, tr)
     if limit_sessions:
         out = out[-int(limit_sessions):]
     return out

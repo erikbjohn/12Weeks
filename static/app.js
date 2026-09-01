@@ -4406,7 +4406,7 @@ function showRevealPlan() {
         const setsLabel = String(last.reps || '');
         let current1RM = 0;
         const m = setsLabel.match(/(\d+)\s*(?:lb)?\s*x\s*(\d+)/i);
-        if (m) current1RM = Math.round(parseInt(m[1]) * (1 + parseInt(m[2]) / 30));
+        if (m) current1RM = Math.round(parseInt(m[1]) * (1 + Math.min(parseInt(m[2]), 15) / 30));  // S100: same 15-rep cap as the server
         else current1RM = Math.round(data.current / 0.75);
         if (current1RM <= 0) continue;
         const wk12_1rm = Math.round(current1RM * 1.35);
