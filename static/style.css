@@ -4800,3 +4800,6 @@ footer {
 }
 .hiit-btn:hover { background: var(--border); }
 .hiit-btn-close { color: var(--muted); }
+
+/* S029: a coach change that failed to persist — never let it read as a normal reply */
+.chat-bubble.chat-flag { border: 1px solid #e0a020; background: #2a2210; color: #f2c94c; }

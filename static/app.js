@@ -6965,7 +6965,9 @@ function renderChatMessages(containerId) {
   let html = '';
   for (const m of _chatHistory) {
     const isUser = m.role === 'user';
-    const bubbleCls = isUser ? 'chat-bubble user' : 'chat-bubble coach';
+    const isFlag = m.type === 'flag';  // S029: a coach change that did NOT persist
+    const bubbleCls = isFlag ? 'chat-bubble coach chat-flag'
+                    : (isUser ? 'chat-bubble user' : 'chat-bubble coach');
     const tsCls = isUser ? 'chat-timestamp ts-user' : 'chat-timestamp ts-coach';
     const rawText = m.text || m.content || '';
     // Coach messages get markdown rendering (bold, headers, line breaks);
