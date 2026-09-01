@@ -9798,7 +9798,22 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
 }
 
 // ─── MILESTONE DETECTION ────────────────────────────────────────────────────
+var _milestoneFacts = null;   // {streak, lost} — server truth, block-scoped
+var _milestoneFactsFetched = false;
+function _loadMilestoneFacts() {
+  if (_milestoneFactsFetched) return;
+  _milestoneFactsFetched = true;
+  fetch('/api/progress/dashboard').then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+    if (!d) return;
+    var streak = d.training && d.training.current_streak;
+    var sb = d.scoreboard || {};
+    var lost = (sb.anchor_weight && sb.current_weight_despiked) ? (sb.anchor_weight - sb.current_weight_despiked) : null;
+    _milestoneFacts = { streak: streak || 0, lost: lost || 0 };
+  }).catch(function() {});
+}
+
 function checkMilestones() {
+  _loadMilestoneFacts();
   const milestones = [];
 
   // 1. Weight PR: latest weight > max of all previous
@@ -9814,33 +9829,15 @@ function checkMilestones() {
     }
   }
 
-  // 2. Body weight milestones: every 2 lbs lost from starting weight
-  if (Array.isArray(_bodyweightCache) && _bodyweightCache.length >= 2) {
-    const startWeight = _bodyweightCache[0].weight;
-    const currentWeight = _bodyweightCache[_bodyweightCache.length - 1].weight;
-    const lost = startWeight - currentWeight;
-    if (lost >= 2) {
-      const milestone = Math.floor(lost / 2) * 2;
-      milestones.push(milestone + ' lbs lost from starting weight!');
-    }
-  }
-
-  // 3. Streak: consecutive days with at least one exercise completion
-  if (_completionsCache && _completionsCache.days) {
-    const dayKeys = Object.keys(_completionsCache.days).filter(k => _completionsCache.days[k]);
-    if (dayKeys.length >= 7) {
-      milestones.push(dayKeys.length + '-day workout streak!');
-    }
-  }
-
-  // 4. Perfect week: all 6 workout days completed in current week
-  if (_completionsCache && _completionsCache.days) {
-    let completedDays = 0;
-    for (let di = 0; di < 6; di++) {
-      if (_completionsCache.days[currentWeek + '_' + di]) completedDays++;
-    }
-    if (completedDays === 6) {
-      milestones.push('Perfect week ' + currentWeek + '! All 6 workout days completed.');
+  // 2-4 (S086/S109): the client used to derive 'lbs lost' from the first
+  // ALL-TIME weigh-in (March), a 'streak' from the COUNT of toggles ever, and
+  // a 'Perfect week' from 6 hardcoded days — all contradicting the server's
+  // evidence-based, block-scoped numbers. Only server-stated facts now.
+  if (_milestoneFacts) {
+    if (_milestoneFacts.streak >= 7) milestones.push(_milestoneFacts.streak + '-day training streak!');
+    if (_milestoneFacts.lost >= 2) {
+      const m2 = Math.floor(_milestoneFacts.lost / 2) * 2;
+      milestones.push(m2 + ' lbs down this block!');
     }
   }
 
@@ -12474,7 +12471,7 @@ async function renderDetail() {
           for (const day of days) {
             const exList = (day && day.exercises) || [];
             const found = exList.find(ex => (ex.name || ex.exercise) === name);
-            if (found && found.target_weight && wkNum >= latestPrescribedWk) {
+            if (found && found.target_weight != null && wkNum >= latestPrescribedWk) {  // 0 = BW is a real target
               latestPrescribedWk = wkNum;
               latestTarget = found.target_weight;
               // reps could be in ex.reps OR parsed from "3x12" in ex.sets

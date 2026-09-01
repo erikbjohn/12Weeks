@@ -1206,6 +1206,12 @@ def _parse_coach_markers(text, user_id, week):
             p_week = int(m.group(1)) if m.group(1) else week
             p_day, p_exercise = int(m.group(2)), m.group(3).strip()
             p_sets, p_reps = int(m.group(4)), m.group(5).strip()
+            from coach_planning_program import MIN_SETS as _MIN_SETS
+            if p_sets < _MIN_SETS:
+                # S054: the MIN_SETS rail lived only in the planner; a chat
+                # [PRESCRIPTION] could write a 2-set slot straight to the card.
+                logging.warning("PRESCRIPTION marker: %s sets=%s < MIN_SETS — clamped", m.group(3), p_sets)
+                p_sets = _MIN_SETS
             p_rest = m.group(6).strip() if m.group(6) else '60s'
             p_reason = m.group(8).strip() if m.group(8) else None
             try:
@@ -3831,7 +3837,7 @@ def _apply_exercise_swap_overlay(days, user_id, week):
                         user_id, _swap_target, week, _day_idx,
                         exercise_order=_ex_idx,
                     )
-                    if _t and _t.get("target_weight"):
+                    if _t and _t.get("target_weight") is not None:  # 0 = bodyweight sentinel, keep it
                         _ex["target_weight"] = _t["target_weight"]
                     else:
                         _ex.pop("target_weight", None)
@@ -6825,7 +6831,11 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
 
         # ─── RUNNING COACH: USE PARALLEL RESULT ───
         # Already fired upstream in the ThreadPoolExecutor block. Reuse.
-        _coach_runs = _coach_runs_parallel or {}
+        _coach_runs = dict(_coach_runs_parallel or {})
+        _rc_fail = _coach_runs.pop("_coach_failed", None)
+        if _rc_fail:
+            coach_failures.append({"domain": "run", "day": None,
+                                   "reason": f"running coach failed: {_rc_fail}"})
 
         # Delete existing engine-sourced run plans for this week (future days
         # only when preserving today+earlier). ATOMIC SWAP for coach rows on
@@ -6857,6 +6867,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             if not coach_run:
                 coach_failures.append({"domain": "run", "day": day_idx})
                 continue
+            if coach_run.get("floor"):
+                # S082: the running coach did not design this day; a floor
+                # placeholder is written honestly as source='floor' and the
+                # gap is reported instead of masquerading as coach output.
+                coach_failures.append({"domain": "run", "day": day_idx,
+                                       "reason": "running coach returned nothing — 7-day floor placeholder written"})
             progressed = {
                 "type": coach_run["type"],
                 "label": coach_run["label"],
@@ -6873,7 +6889,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                 label=progressed.get('label', 'Run'),
                 duration=progressed.get('time', '30 min'),
                 detail=progressed.get('detail', ''),
-                source='coach',
+                source='floor' if coach_run.get("floor") else 'coach',
                 segments_json=json.dumps(progressed["segments"]) if progressed.get("segments") else None,
             ))
 
@@ -8432,6 +8448,7 @@ def api_progress_dashboard():
             "curve_target_today": _sb_curve_target,
             "on_curve": _sb_on_curve,
             "current_weight_despiked": _sb_despiked,
+            "anchor_weight": _sb_anchor,  # block-3 start; the client's milestone banner keys off this (S086)
             "lift": {
                 "suspected": _sb_lt["lift_decline_suspected"],
                 "tonnage_delta_pct": _sb_lt["tonnage_delta_pct"],
@@ -11176,13 +11193,25 @@ def _morning_brief_body(uid, local_date):
     day_idx = local_date.weekday()
 
     try:
-        sched = WeeklyDaySchedule.query.filter_by(
-            user_id=uid, week=_week_for(), day_idx=day_idx).first()
-        if sched:
-            if sched.is_rest:
-                parts.append("Rest")
-            elif sched.lift_name:
-                parts.append(sched.lift_name)
+        # S128: name the lift through the SAME coach-or-nothing resolver the
+        # card uses (title reconciled against the coach's movements, nulled
+        # when no prescriptions exist) — the raw WeeklyDaySchedule row carries
+        # the template's label and could say 'Rest' on a coached day.
+        from coach_assembler import _resolve_workout_for_day
+        from flask_login import login_user as _lu
+        _bu = db.session.get(User, uid)
+        with app.test_request_context():
+            if _bu:
+                _lu(_bu, force=True)
+            _wd = _resolve_workout_for_day(_week_for(), day_idx) or {}
+        if _wd.get("lift_unplanned") or not _wd.get("liftName"):
+            if _wd.get("isRest"):
+                parts.append("No lifting")
+            elif WeeklyDaySchedule.query.filter_by(user_id=uid, week=_week_for(), day_idx=day_idx).first():
+                parts.append("Lifts not planned")  # a scheduled day with no coach plan
+            # no schedule at all (no program yet): say nothing about lifts
+        else:
+            parts.append(_wd["liftName"])
     except Exception:
         pass
 
@@ -13776,9 +13805,9 @@ def api_session_summary(week, day_idx):
             "modified": getattr(s, 'user_modified', False),
             "direction": getattr(s, 'modification_direction', None),
         })
-        if getattr(s, 'target_weight', None):
+        if getattr(s, 'target_weight', None) is not None:
             exercises[s.exercise_name]["target_weight"] = s.target_weight
-        if getattr(s, 'target_reps', None):
+        if getattr(s, 'target_reps', None) is not None:
             exercises[s.exercise_name]["target_reps"] = s.target_reps
 
     profiles = MuscleGroupProfile.query.filter_by(user_id=current_user.id).all()

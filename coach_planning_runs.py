@@ -564,8 +564,10 @@ def generate_week_runs(
         log.warning("generate_week_runs failed: %s — applying 7-day floor", e)
         # Floor the fills against last week too — the failure path must not
         # ship a same-day, same-type regression either.
-        return _apply_run_regression_floor(
+        floored = _apply_run_regression_floor(
             _ensure_seven_day_runs({}, week, deload=deload), user_id, week, deload=deload)
+        floored["_coach_failed"] = str(e)[:200]  # S082: surfaced as a coach failure upstream
+        return floored
 
     out: dict[int, dict] = {}
     for k, v in parsed.items():
@@ -630,5 +632,6 @@ def _ensure_seven_day_runs(out: dict, week: int, deload: bool = False) -> dict:
                 "duration": f"{mins} min",
                 "detail": "Easy aerobic recovery — every day gets a run.",
                 "segments": [{"kind": "steady", "minutes": mins, "hr": "≤132"}],
+                "floor": True,  # S082: NOT a coach decision — written as source='floor'
             }
     return out

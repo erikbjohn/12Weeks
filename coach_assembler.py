@@ -2734,7 +2734,8 @@ def _format_full_week_program(week):
         if day.get("isRest"):
             out.append("    (rest day from lifting)")
         for ex in (day.get("exercises") or []):
-            tw = f" @ {ex['target_weight']}lb" if ex.get("target_weight") else ""
+            _twv = ex.get("target_weight")
+            tw = " @ BW" if _twv == 0 else (f" @ {_twv}lb" if _twv is not None else "")
             note = f"  // {ex['note']}" if ex.get("note") else ""
             out.append(f"    - {ex.get('name')}: {ex.get('sets')}{tw}{note}")
 

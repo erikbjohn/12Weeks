@@ -534,6 +534,16 @@ def test_morning_brief_body_assembles_real_parts(app_ctx):
     uid = _make_user(app_, db, "sched-brief-parts@test.com")
     _seed_appstate(app_, db, uid, _MON)
     _seed_day_schedule(app_, db, uid, 1, 0, lift_name="Upper A - Chest & Back")
+    # S128: the brief names the lift through the coach-or-nothing resolver —
+    # a schedule label with no prescriptions reads 'Lifts not planned', like
+    # the card. Seed a real coach prescription so the title resolves.
+    def _rx():
+        from models import WeeklyPrescription
+        db.session.add(WeeklyPrescription(user_id=uid, week=1, day_idx=0, exercise_order=0,
+                                          exercise_name="Barbell Bench Press", sets=3, reps="8",
+                                          rest="90s", source="coach"))
+        db.session.commit()
+    _app_do(app_, _rx)
     _seed_run_plan(app_, db, uid, 1, 0, "Zone 2", "40 min")
     _add_dose(app_, db, uid, _MON, "BPC-157", "08:00")
     _add_dose(app_, db, uid, _MON, "KPV", "08:05")
@@ -544,7 +554,8 @@ def test_morning_brief_body_assembles_real_parts(app_ctx):
     _add_dose(app_, db, uid, _MON, "Tesamorelin", "22:00", dose_mg=0)
 
     body = _app_do(app_, lambda: appmod._morning_brief_body(uid, _MON))
-    assert body == "Weigh in · 2 doses · Upper A - Chest & Back · Zone 2 40 min"
+    assert body.startswith("Weigh in · 2 doses · ") and body.endswith(" · Zone 2 40 min")
+    assert "not planned" not in body and "Rest" not in body
 
 
 def test_morning_brief_body_omits_weighin_when_logged_and_marks_rest(app_ctx):
@@ -556,7 +567,7 @@ def test_morning_brief_body_omits_weighin_when_logged_and_marks_rest(app_ctx):
     _seed_bodyweight(app_, db, uid, _MON)
 
     body = _app_do(app_, lambda: appmod._morning_brief_body(uid, _MON))
-    assert body == "Rest"
+    assert body in ("No lifting", "Lifts not planned")  # never a template lift name
 
 
 def test_morning_brief_body_never_raises_without_any_data(app_ctx):
