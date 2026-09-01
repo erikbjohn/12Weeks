@@ -1800,7 +1800,10 @@ def build_filtered_context(agent_name):
                 fragment = builder()
                 ctx.update(fragment)
             except Exception as e:
+                # S008: a failed builder must read as UNKNOWN, never as
+                # "no data" — the prompt says so explicitly below.
                 log.warning("Section builder '%s' failed: %s", section_name, e)
+                ctx.setdefault("_section_errors", []).append(section_name)
         else:
             log.warning("No section builder registered for '%s'", section_name)
     return ctx
@@ -2286,6 +2289,15 @@ def _format_athlete_data(ctx, requires):
     # Absent entirely (no <protocol_status> block) when the athlete has no
     # PeptideDose rows imported — silence reads as "no protocol", never a
     # fabricated empty block.
+    se = ctx.get("_section_errors")
+    if se:
+        parts.append(
+            "<section_errors>\n  UNAVAILABLE this turn (builder error, NOT absent data): "
+            + ", ".join(se)
+            + "\n</section_errors>\nDo not conclude anything from the absence of these sections; "
+              "say the data could not be loaded if it matters."
+        )
+
     mo = ctx.get("marker_outcomes")
     if mo:
         mo_lines = ["<marker_outcomes>"]
