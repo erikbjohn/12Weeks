@@ -1031,6 +1031,7 @@ def _build_protocol_status():
     # row on the most recent scheduled date doesn't read as "current dose
     # is 0mg" (that reported 0.0 for a real athlete before this fix).
     current_retatrutide_mg = current_dose_mg(all_rows, today, "Retatrutide")
+    current_cagrilintide_mg = current_dose_mg(all_rows, today, "Cagrilintide")
 
     window_start = today - timedelta(days=6)
     next_esc = _next_escalation(all_rows, window_start)
@@ -1056,6 +1057,7 @@ def _build_protocol_status():
     return {"protocol_status": {
         "summary": summary,
         "current_retatrutide_mg": current_retatrutide_mg,
+        "current_cagrilintide_mg": current_cagrilintide_mg,
         "next_escalation": next_esc,
         "escalation_window": esc_window_active,
         "adherence_7d": adherence_7d(all_rows, today),
@@ -2266,13 +2268,16 @@ def _format_athlete_data(ctx, requires):
             ps_lines.append(f"  dose: {s['compound']} {s['dose_mg']}mg @ {s['time']}")
         if ps.get("current_retatrutide_mg") is not None:
             ps_lines.append(f"  current_retatrutide_mg: {ps['current_retatrutide_mg']}")
+        if ps.get("current_cagrilintide_mg") is not None:
+            ps_lines.append(f"  current_cagrilintide_mg: {ps['current_cagrilintide_mg']}")
         ne = ps.get("next_escalation")
+        _nec = (ne or {}).get("compound") or "Retatrutide"
         if ps.get("escalation_window") and ne:
             ps_lines.append(
-                f"  ESCALATION WINDOW ACTIVE (until +7d after {ne['date']}): {ne['detail']}"
+                f"  ESCALATION WINDOW ACTIVE (until +7d after {ne['date']}): {_nec} {ne['detail']}"
             )
         if ne:
-            ps_lines.append(f"  next_escalation: {ne['date']} — {ne['detail']}")
+            ps_lines.append(f"  next_escalation: {ne['date']} — {_nec} {ne['detail']}")
         adh = ps.get("adherence_7d") or {}
         if adh.get("pct") is not None:
             ps_lines.append(f"  adherence_7d: {adh['pct']}% ({adh.get('late', 0)} late)")

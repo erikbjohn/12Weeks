@@ -5610,7 +5610,8 @@ def _humanize_escalation(event):
     on Render's Linux runtime (and macOS dev), but not portable to Windows.
     Don't copy this pattern into code that needs to run there."""
     detail = re.sub(r"(\d)mg\b", r"\1 mg", event["detail"]).replace(" per dose", "")
-    return f"{event['date'].strftime('%b %-d')}: retatrutide {detail}"
+    compound = (event.get("compound") or "retatrutide").lower()
+    return f"{event['date'].strftime('%b %-d')}: {compound} {detail}"
 
 
 @app.route("/api/protocol/calendar", methods=["GET"])

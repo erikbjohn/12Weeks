@@ -11324,6 +11324,7 @@ var _PROTOCOL_ABBR = {
   'TB-500': 'TB',
   'GHK-Cu': 'GHK',
   'Tesamorelin': 'Tesa',
+  'Cagrilintide': 'Cagri',
 };
 
 function _protoAbbr(compound) {

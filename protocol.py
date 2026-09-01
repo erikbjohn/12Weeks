@@ -240,10 +240,17 @@ def _fmt_mg(mg: float) -> str:
 
 # ── Escalation derivation ────────────────────────────────────────────────
 
-def _retatrutide_escalations(dose_rows: list) -> list[dict]:
-    """Internal: full escalation event records, sorted by date —
-    [{"date", "kind": "dose"|"frequency", "detail"}] — per the two-event
-    decomposition documented in the module docstring.
+# Compounds whose schedule titrates (dose steps / frequency steps). The
+# detector used to be hardwired to Retatrutide, so Cagrilintide's four
+# steps (Aug 29 2×/wk, Sep 2, Sep 16, Oct 14 2026) were invisible to the
+# calendar, 'next change', escalation_window and rule 22 (S011).
+ESCALATING_COMPOUNDS = ("Retatrutide", "Cagrilintide")
+
+
+def _escalations_for(dose_rows: list, compound: str) -> list[dict]:
+    """Internal: full escalation event records for ONE compound, sorted by
+    date — [{"date", "kind": "dose"|"frequency", "detail", "compound"}] —
+    per the two-event decomposition documented in the module docstring.
 
     Held doses (dose_mg <= 0) are excluded entirely before any max/count
     tracking happens, whether represented by omitting the row or by a
@@ -251,7 +258,7 @@ def _retatrutide_escalations(dose_rows: list) -> list[dict]:
     """
     totals: dict = defaultdict(float)
     for r in dose_rows:
-        if r.compound == "Retatrutide" and r.dose_mg > 0:
+        if r.compound == compound and r.dose_mg > 0:
             totals[r.date] += r.dose_mg
     dates = sorted(totals)
     if not dates:
@@ -272,6 +279,7 @@ def _retatrutide_escalations(dose_rows: list) -> list[dict]:
                 "date": d,
                 "kind": "dose",
                 "detail": f"{_fmt_mg(running_max_dose)}mg → {_fmt_mg(mg)}mg per dose",
+                "compound": compound,
             })
 
         if running_max_count is not None and count > running_max_count:
@@ -281,6 +289,7 @@ def _retatrutide_escalations(dose_rows: list) -> list[dict]:
                     "date": d,
                     "kind": "frequency",
                     "detail": f"{running_max_count}×/wk → {count}×/wk",
+                    "compound": compound,
                 })
 
         running_max_dose = mg if running_max_dose is None else max(running_max_dose, mg)
@@ -290,10 +299,21 @@ def _retatrutide_escalations(dose_rows: list) -> list[dict]:
     return events
 
 
+def _retatrutide_escalations(dose_rows: list) -> list[dict]:
+    """All escalation events across ESCALATING_COMPOUNDS, sorted by date
+    (dose-steps before frequency-steps within a date). Name kept for the
+    existing callers/tests; it is no longer Retatrutide-only."""
+    events = []
+    for c in ESCALATING_COMPOUNDS:
+        events.extend(_escalations_for(dose_rows, c))
+    events.sort(key=lambda e: (e["date"], 0 if e["kind"] == "dose" else 1))
+    return events
+
+
 def escalation_dates(dose_rows: list) -> list:
     """Sorted, deduped union of dose-step and frequency-step dates
-    (derived from rows, never hardcoded). Defensively filters to
-    compound == "Retatrutide" — safe to call with a full, mixed-compound
+    (derived from rows, never hardcoded) across every titrating compound
+    (ESCALATING_COMPOUNDS) — safe to call with a full, mixed-compound
     dose list."""
     return sorted({e["date"] for e in _retatrutide_escalations(dose_rows)})
 

@@ -56,12 +56,19 @@ def test_escalation_dates_derived_from_csv():
     assert dates == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
 
 
-def test_escalation_dates_defensively_filters_to_retatrutide():
-    """Passing the FULL mixed-compound CSV must yield the same 3 dates —
-    the function must not assume the caller pre-filtered."""
-    from protocol import escalation_dates
+def test_escalation_dates_union_over_titrating_compounds():
+    """The FULL mixed-compound CSV yields Retatrutide's 3 steps PLUS
+    Cagrilintide's 4 (Aug 29 1×→2×/wk, Sep 2, Sep 16, Oct 14) — S011: the
+    detector used to be Retatrutide-only and these were invisible. Compounds
+    that never titrate (BPC, KPV, TB-500, Enclomiphene) contribute nothing."""
+    from protocol import escalation_dates, escalation_events
     dates = escalation_dates(_csv_rows())
-    assert dates == [date(2026, 8, 24), date(2026, 9, 10), date(2026, 9, 21)]
+    assert dates == [date(2026, 8, 24), date(2026, 8, 29), date(2026, 9, 2),
+                     date(2026, 9, 10), date(2026, 9, 16), date(2026, 9, 21), date(2026, 10, 14)]
+    by_date = {e["date"]: e for e in escalation_events(_csv_rows())}
+    assert by_date[date(2026, 8, 29)]["compound"] == "Cagrilintide"
+    assert by_date[date(2026, 8, 29)]["kind"] == "frequency"
+    assert by_date[date(2026, 9, 2)]["detail"] == "0.3mg → 0.6mg per dose"
 
 
 def test_escalation_dates_order_independent():
@@ -77,21 +84,23 @@ def test_next_escalation_before_first_boundary_is_dose_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 8, 1))
-    assert n == {"date": date(2026, 8, 24), "kind": "dose", "detail": "2mg → 3mg per dose"}
+    assert n == {"date": date(2026, 8, 24), "kind": "dose", "detail": "2mg → 3mg per dose", "compound": "Retatrutide"}
 
 
 def test_next_escalation_between_boundaries_is_frequency_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 8, 25))
-    assert n == {"date": date(2026, 9, 10), "kind": "frequency", "detail": "1×/wk → 2×/wk"}
+    assert n == {"date": date(2026, 9, 10), "kind": "frequency", "detail": "1×/wk → 2×/wk",
+                 "compound": "Retatrutide"}
 
 
 def test_next_escalation_on_boundary_date_is_inclusive_dose_step():
     from protocol import next_escalation
     rows = [r for r in _csv_rows() if r.compound == "Retatrutide"]
     n = next_escalation(rows, today=date(2026, 9, 21))
-    assert n == {"date": date(2026, 9, 21), "kind": "dose", "detail": "3mg → 4mg per dose"}
+    assert n == {"date": date(2026, 9, 21), "kind": "dose", "detail": "3mg → 4mg per dose",
+                 "compound": "Retatrutide"}
 
 
 def test_next_escalation_after_last_boundary_is_none():
