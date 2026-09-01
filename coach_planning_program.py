@@ -158,7 +158,7 @@ LAYOFF_CAP_FRAC = {LAYOFF_MODERATE: 0.75, LAYOFF_LONG: 0.60}
 def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
                    history_max_weight, history_top=None, new_move_frac=0.6,
                    max_jump_frac=0.20, prev_by_day=None, min_per_day=4,
-                   deload=False, floor=0, layoff_days=None):
+                   deload=False, floor=0, layoff_days=None, fixed_days=None):
     """Deterministic safety rails the LLM can't be trusted to honor. Mutates a
     copy. Returns (program, actions[]).
 
@@ -187,6 +187,17 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
     if rest_day_idx in out:
         out.pop(rest_day_idx)
         actions.append(f"Dropped lifting on rest day (day {rest_day_idx}) — long-run day.")
+    # S080: a committed trail long run / race day is FIXED — no heavy lower
+    # session stacked on it. Lower-body compounds on such a day are removed.
+    for fd in (fixed_days or []):
+        if fd in out:
+            from workout_data import EXERCISES as _EX, resolve_name as _rn
+            lower = {"quads", "posterior_chain", "hamstrings", "glutes"}
+            keep = [it for it in out[fd]
+                    if (_EX.get(_rn(it.get("exercise", "")), {}).get("muscle_group") not in lower)]
+            if len(keep) != len(out[fd]):
+                actions.append(f"Removed lower-body lifts on day {fd} — committed run/race day.")
+                out[fd] = keep
 
     # 2. new-movement load cap — match by canonical movement key so equipment/
     #    grip variants of a logged lift are NOT treated as new.
@@ -757,6 +768,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
                                    deload=deload)
     clean, actions = enforce_safety(
         clean, rest_day_idx=rest_day, ceiling=ceiling,
+        fixed_days=user_context.get("fixed_days"),
         history_exercises=hist_ex, history_max_weight=hist_max,
         history_top=hist_top,
         prev_by_day=_prev_program_by_day(user_id, week),

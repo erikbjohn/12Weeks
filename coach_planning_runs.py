@@ -268,6 +268,32 @@ def _segments_to_detail(segments) -> str:
     return "; ".join(parts)
 
 
+def _apply_fixed_commitments(out: dict, user_context: dict) -> dict:
+    """S080: a committed run (El Cajon Saturday…) IS that day's run. The
+    coach may not prescribe a second session or a different run over it."""
+    fixed = user_context.get("fixed_commitments") or {}
+    for di, a in fixed.items():
+        try:
+            di = int(di)
+        except (TypeError, ValueError):
+            continue
+        mins = int(a.get("duration_min") or 60)
+        kind = a.get("kind") or "other"
+        rtype = "z2_long" if kind in ("trail_long_run",) else ("race" if kind == "race" else "z2")
+        out[di] = {
+            "type": rtype,
+            "label": a.get("activity") or "Committed run",
+            "duration": f"{mins} min",
+            "detail": f"{a.get('activity')} — committed {kind.replace('_', ' ')}; this IS the day's run. "
+                      + (f"~{a['elevation_ft']} ft of gain. " if a.get('elevation_ft') else "")
+                      + "Effort by feel on the terrain; no added intervals.",
+            "segments": [{"kind": "steady", "minutes": mins}],
+            "fixed": True,
+        }
+        log.info("run planner: day %s fixed to committed activity %r", di, a.get("activity"))
+    return out
+
+
 def _apply_run_regression_floor(out: dict, user_id: int, week: int, deload: bool = False) -> dict:
     """Code-enforced anti-regression rail (mirrors the lift 'floor at top set').
 
@@ -609,6 +635,7 @@ def generate_week_runs(
     out = _ensure_seven_day_runs(out, week, deload=deload)
     # Hard backstop: even with the prompt + prior-prescription context, the LLM
     # can still slip a regression through. This guarantees it never ships.
+    out = _apply_fixed_commitments(out, user_context)
     out = _apply_run_regression_floor(out, user_id, week, deload=deload)
     # Aerobic-base rail: no quality sessions off a thin base — deterministic,
     # runs AFTER the regression floor so a floored hard day still converts.

@@ -6214,9 +6214,19 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
     except Exception:
         _common_ctx["checkins_7d"] = None
     try:
-        _common_ctx["scheduled_activities"] = _get_scheduled_activities() or None
+        # S080: the commitments that actually land in the week being planned,
+        # with dates (cadence-aware), so both planners treat them as FIXED.
+        from commitments import describe as _describe_commitments, fixed_days_for_week
+        _uc = UserConstraints.query.filter_by(user_id=current_user.id).first()
+        _acts = (_uc.scheduled_activities if _uc else None) or []
+        _wk_monday = day_date(AppState.query.filter_by(user_id=current_user.id).first().start_date, target_week, 0)
+        _common_ctx["scheduled_activities"] = _describe_commitments(_acts, _wk_monday) or None
+        _fx = fixed_days_for_week(_acts, _wk_monday)
+        _common_ctx["fixed_days"] = sorted(_fx.keys())
+        _common_ctx["fixed_commitments"] = _fx
     except Exception:
         _common_ctx["scheduled_activities"] = None
+        _common_ctx["fixed_days"] = []
 
     # Build template_runs for the running coach NOW so we can fire all three
     # in parallel before entering the per-day loop.
@@ -10054,10 +10064,8 @@ def _get_scheduled_activities():
     activities = constraints.scheduled_activities
     if not activities:
         return ""
-    lines = ["Scheduled activities this athlete has committed to:"]
-    for a in activities:
-        lines.append(f"  - {a.get('day', '?')}: {a.get('activity', '?')} ({a.get('duration_min', '?')} min)")
-    return "\n".join(lines)
+    from commitments import describe
+    return describe(activities)
 
 
 # ─── PROGRESS PHOTOS ────────────────────────────────────────────────────────
@@ -11245,7 +11253,21 @@ def api_constraints_save():
     if "custom_allergies" in data:
         c.custom_allergies = data["custom_allergies"]
     if "scheduled_activities" in data:
-        c.scheduled_activities = data["scheduled_activities"]
+        from commitments import KINDS, CADENCES
+        cleaned = []
+        for a in data["scheduled_activities"] or []:
+            if not isinstance(a, dict) or not a.get("activity"):
+                continue
+            cleaned.append({
+                "day": a.get("day"), "activity": str(a.get("activity"))[:80],
+                "duration_min": int(a.get("duration_min") or 60),
+                "kind": a.get("kind") if a.get("kind") in KINDS else "other",
+                "cadence": a.get("cadence") if a.get("cadence") in CADENCES else "weekly",
+                "anchor_date": a.get("anchor_date") or None,
+                "elevation_ft": int(a["elevation_ft"]) if a.get("elevation_ft") else None,
+                "type": "activity",
+            })
+        c.scheduled_activities = cleaned
     if "schedule_notes" in data:
         c.schedule_notes = data["schedule_notes"]
     if "completed" in data:

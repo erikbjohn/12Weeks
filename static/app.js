@@ -3185,7 +3185,7 @@ function renderConstraints() {
     // Scheduled activities
     const actList = _constraintData.scheduled_activities.map((a, i) =>
       `<div class="scheduled-activity-row">
-        <span>${a.day} — ${a.activity} (${a.duration_min}min)</span>
+        <span>${escapeHtml(a.day)} — ${escapeHtml(a.activity)} (${a.duration_min}min${a.kind && a.kind !== 'other' ? ', ' + escapeHtml(a.kind.replace(/_/g, ' ')) : ''}, ${escapeHtml(a.cadence || 'weekly')}${a.anchor_date ? ' from ' + escapeHtml(a.anchor_date) : ''})</span>
         <button onclick="removeScheduledActivity(${i})" class="remove-btn">&times;</button>
       </div>`
     ).join('') || '<div style="color:var(--muted);font-size:14px">No activities added yet</div>';
@@ -3212,6 +3212,22 @@ function renderConstraints() {
             <label>Duration (minutes)</label>
             <input type="number" inputmode="numeric" id="activity-duration" placeholder="e.g. 90" min="10" max="300">
           </div>
+          <div class="pa-measure-row">
+            <label>Kind</label>
+            <select id="activity-kind" class="pa-select">
+              <option value="trail_long_run">Trail long run</option><option value="race">Race</option><option value="group_run">Group run</option><option value="other" selected>Other</option>
+            </select>
+          </div>
+          <div class="pa-measure-row">
+            <label>How often</label>
+            <select id="activity-cadence" class="pa-select">
+              <option value="weekly" selected>Every week</option><option value="biweekly">Every other week</option><option value="once">Once</option>
+            </select>
+          </div>
+          <div class="pa-measure-row">
+            <label>Anchor date (first / only occurrence)</label>
+            <input type="date" id="activity-anchor">
+          </div>
           <button class="btn btn-secondary" style="width:100%;margin-top:8px" onclick="addScheduledActivity()">+ Add Activity</button>
         </div>
 
@@ -3220,11 +3236,28 @@ function renderConstraints() {
           <textarea id="constraint-schedule-notes" rows="2" placeholder="e.g. I travel every other Thursday" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;font-size:14px">${_constraintData.schedule_notes}</textarea>
         </div>
 
-        <button class="btn btn-primary" style="width:100%;margin-top:1.5rem" onclick="constraintScheduleNext()">Next: Physical Assessment</button>
+        <button class="btn btn-primary" style="width:100%;margin-top:1.5rem" onclick="${_constraintSettingsMode ? 'saveCommitmentsSettings()' : 'constraintScheduleNext()'}">${_constraintSettingsMode ? 'Save commitments' : 'Next: Physical Assessment'}</button>
       </div>
     </div>`;
     return;
   }
+}
+
+async function saveCommitmentsSettings() {
+  const notes = (document.getElementById('constraint-schedule-notes')?.value || '').trim();
+  _constraintData.schedule_notes = notes;
+  try {
+    const r = await fetch('/api/constraints', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ scheduled_activities: _constraintData.scheduled_activities, schedule_notes: notes }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('Commitments saved — next planning will build around them', 'success');
+  } catch (e) {
+    showToast('Could not save commitments', 'error');
+  }
+  _constraintSettingsMode = false;
+  const el = document.getElementById('baseline-overlay');
+  if (el) el.innerHTML = '';
+  var _hdr = document.querySelector('header'); if (_hdr) _hdr.style.display = '';
 }
 
 function toggleConstraint(id) {
@@ -3245,9 +3278,30 @@ function addScheduledActivity() {
   const name = (document.getElementById('activity-name')?.value || '').trim();
   const duration = parseInt(document.getElementById('activity-duration')?.value) || 60;
   if (!name) return;
-  _constraintData.scheduled_activities.push({ day, activity: name, duration_min: duration, type: 'activity' });
+  const kind = (document.getElementById('activity-kind') || {}).value || 'other';
+  const cadence = (document.getElementById('activity-cadence') || {}).value || 'weekly';
+  const anchor = (document.getElementById('activity-anchor') || {}).value || null;
+  _constraintData.scheduled_activities.push({ day, activity: name, duration_min: duration, type: 'activity',
+                                              kind, cadence, anchor_date: anchor });
   renderConstraints();
 }
+
+// S080: Settings → Commitments (post-onboarding editor for standing commitments).
+async function showCommitmentsSettings() {
+  closeSettingsMenu();
+  try {
+    const r = await fetch('/api/constraints');
+    if (r.ok) {
+      const c = await r.json();
+      _constraintData = Object.assign({ food_restrictions: [], custom_allergies: '', scheduled_activities: [], schedule_notes: '' }, c || {});
+      if (!Array.isArray(_constraintData.scheduled_activities)) _constraintData.scheduled_activities = [];
+    }
+  } catch (e) {}
+  _constraintStep = 1;
+  _constraintSettingsMode = true;
+  renderConstraints();
+}
+var _constraintSettingsMode = false;
 
 function removeScheduledActivity(idx) {
   _constraintData.scheduled_activities.splice(idx, 1);
@@ -5089,6 +5143,7 @@ function showSettingsMenu() {
     <button onclick="${_c}recomputeGoal()">Recompute Calories</button>
     <button onclick="${_c}launchWeeklyPlanning(currentWeek)">Re-plan This Week</button>
     <button onclick="${_c}launchWeeklyPlanning()">Plan Next Week</button>
+    <button onclick="${_c}showCommitmentsSettings()">Commitments</button>
     <button onclick="${_c}regenerateProfile()">Regenerate Profile</button>
     <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
     <button onclick="${_c}showGroceryList()">Grocery List</button>
