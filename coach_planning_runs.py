@@ -8,6 +8,7 @@ Engine remains as fallback when LLM fails.
 """
 from __future__ import annotations
 import os
+import re
 import json
 import logging
 from collections import defaultdict
@@ -292,8 +293,19 @@ def _apply_run_regression_floor(out: dict, user_id: int, week: int, deload: bool
             continue
         if cur_v < prev_v:
             plan["duration"] = prev_run.duration
-            plan["detail"] = (plan.get("detail") or "").rstrip(". ") + \
-                f". [held at last week's {prev_run.duration} — no regression outside deload]"
+            # Rewrite the WHOLE detail, never append to the coach's prose: the
+            # prose describes the shorter prescription the floor just rejected
+            # ("45 min steady ... trimmed ...") and leaving it produces a card
+            # that contradicts its own label (2026-09-01 incident). Same law as
+            # the Garmin fix: a rail that rewrites the outcome rewrites the
+            # entire athlete-facing text.
+            hr_m = re.search(r"@ HR\s*[≤<]?\s*\d+", plan.get("detail") or "")
+            hr_txt = f" ({hr_m.group(0)})" if hr_m else ""
+            # No "deload" wording on the card — athlete directive 2026-09-01.
+            plan["detail"] = (
+                f"{prev_run.duration} steady{hr_txt} — held at last week's "
+                f"{prev_run.duration}; easy-run volume does not regress."
+            )
             # Void any coach-supplied segments: they were built for the shorter
             # duration and now disagree with the stored duration.  garmin_sync
             # validates segments_total vs duration and would push the wrong

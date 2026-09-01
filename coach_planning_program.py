@@ -514,8 +514,19 @@ def _injury_block(user_id: int) -> str:
         rows = (CoachMemory.query
                 .filter(CoachMemory.user_id == user_id)
                 .filter(CoachMemory.memory_type == "injury").all())
-        notes = [r.content for r in rows if getattr(r, "content", None)]
-        return "; ".join(notes) if notes else "(none recorded)"
+        # Date-stamp every memory: an undated "celiac flare active" note from
+        # May was read as CURRENT in September and drove a bogus run trim
+        # (2026-09-01). A memory is a dated observation, never live state.
+        notes = []
+        for r in rows:
+            if not getattr(r, "content", None):
+                continue
+            d = getattr(r, "created_at", None)
+            notes.append(f"[{d.date().isoformat()}] {r.content}" if d else r.content)
+        if not notes:
+            return "(none recorded)"
+        return ("(dated observations — treat anything not recent as history, "
+                "not current state) " + "; ".join(notes))
     except Exception:
         return "(none recorded)"
 
