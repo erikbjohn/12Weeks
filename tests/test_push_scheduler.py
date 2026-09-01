@@ -577,3 +577,37 @@ def test_morning_brief_body_never_raises_without_any_data(app_ctx):
     # No AppState, no WeeklyDaySchedule/WeeklyRunPlan, no BodyWeight, no doses.
     body = _app_do(app_, lambda: appmod._morning_brief_body(uid, _MON))
     assert body == "Weigh in"
+
+
+def test_nightly_compliance_eval_emits_evidence_events(app_ctx):
+    """S066/S069: skipped lifts, a missing weigh-in and an unchecked dose
+    escalate; a clean day de-escalates."""
+    import app as appmod
+    from models import PeptideDose, WeeklyPrescription, ComplianceState
+    app_, db = app_ctx
+    uid = _make_user(app_, db, "sched-compliance@test.com")
+    _seed_appstate(app_, db, uid, _MON)
+    def _seed():
+        db.session.add(WeeklyPrescription(user_id=uid, week=1, day_idx=0, exercise_order=0,
+                                          exercise_name="Barbell Bench Press", sets=3, reps="8", rest="90s", source="coach"))
+        db.session.add(PeptideDose(user_id=uid, date=_MON, time="07:00", event_type="Injection",
+                                   compound="BPC-157", dose_mg=0.5))
+        db.session.commit()
+    _app_do(app_, _seed)
+    events = _app_do(app_, lambda: appmod._evaluate_day_compliance(uid, _MON))
+    assert set(events) == {"missed_workout", "missed_weighin", "missed_dose"}
+    st = _app_do(app_, lambda: ComplianceState.query.filter_by(user_id=uid).first())
+    assert st.consecutive_misses == 3 and st.anger_level >= 1
+
+    # a clean day: weigh-in, dose taken, day toggled
+    def _clean():
+        from models import DayCompletion
+        from datetime import datetime
+        _seed_bodyweight(app_, db, uid, _MON)
+        for d in PeptideDose.query.filter_by(user_id=uid).all():
+            d.taken_at = datetime(2026, 8, 10, 14, 0)
+        db.session.add(DayCompletion(user_id=uid, week=1, day_idx=0, done=True))
+        db.session.commit()
+    _app_do(app_, _clean)
+    events = _app_do(app_, lambda: appmod._evaluate_day_compliance(uid, _MON))
+    assert events == ["full_compliance_day"]

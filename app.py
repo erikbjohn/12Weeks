@@ -11000,6 +11000,49 @@ def _in_window(t, start, end):
     return start <= t < end
 
 
+def _evaluate_day_compliance(uid, local_date):
+    """Emit escalation/de-escalation events for `local_date` from EVIDENCE
+    (S066/S069): a lifting day with no complete session → missed_workout; no
+    weigh-in → missed_weighin; an untaken scheduled dose → missed_dose; all
+    clear → full_compliance_day. Returns the event names emitted."""
+    from coach_state import update_anger_level
+    from workout_status import workout_state_from_rows
+    from coach_assembler import _resolve_workout_for_day
+    from flask_login import login_user as _lu
+    events = []
+    state = AppState.query.filter_by(user_id=uid).first()
+    if not state or not state.start_date or local_date < state.start_date:
+        return events
+    week, day_idx = week_day_for_date(state.start_date, local_date)
+    if week is None:
+        return events
+    u = db.session.get(User, uid)
+    with app.test_request_context():
+        if u:
+            _lu(u, force=True)
+        day = _resolve_workout_for_day(week, day_idx) or {}
+    rx = day.get("exercises") or []
+    if rx and not day.get("isRest") and not day.get("lift_unplanned"):
+        toggled = DayCompletion.query.filter_by(user_id=uid, week=week, day_idx=day_idx, done=True).first()
+        rows = SetLog.query.filter_by(user_id=uid, week=week, day_idx=day_idx).all()
+        if not toggled and workout_state_from_rows(rx, rows) != "complete":
+            update_anger_level(uid, "missed_workout", today=local_date)
+            events.append("missed_workout")
+    if not BodyWeight.query.filter_by(user_id=uid, log_date=local_date).first():
+        update_anger_level(uid, "missed_weighin", today=local_date)
+        events.append("missed_weighin")
+    untaken = PeptideDose.query.filter(PeptideDose.user_id == uid, PeptideDose.date == local_date,
+                                       PeptideDose.dose_mg > 0, PeptideDose.taken_at.is_(None)).count()
+    if untaken:
+        update_anger_level(uid, "missed_dose", today=local_date)
+        events.append("missed_dose")
+    if not events:
+        update_anger_level(uid, "full_compliance_day", today=local_date)
+        events.append("full_compliance_day")
+    db.session.commit()
+    return events
+
+
 def _push_scheduler_tick():
     """One background pass over every user with at least one push
     subscription (distinct PushSubscription.user_id — a user with none is
@@ -11040,6 +11083,22 @@ def _push_scheduler_tick():
                 if _push_window_send(uid, "recap", local_date, "12 Weeks",
                                       lambda uid=uid, d=local_date: _sunday_recap_push(uid, d)):
                     fired.append((uid, "recap"))
+
+            # S066/S069: nightly compliance evaluation — the escalation ladder
+            # had exactly one input (a missed check-in). Skipped lifts, a
+            # missing weigh-in and unchecked doses now feed it, once per
+            # local date (ledgered in PushSent under kind 'compliance').
+            if _in_window(t, _dtime(23, 0), _dtime(23, 45)):
+                if not PushSent.query.filter_by(user_id=uid, kind="compliance", local_date=local_date).first():
+                    try:
+                        _events = _evaluate_day_compliance(uid, local_date)
+                        db.session.add(PushSent(user_id=uid, kind="compliance", local_date=local_date))
+                        db.session.commit()
+                        if _events:
+                            fired.append((uid, "compliance:" + ",".join(_events)))
+                    except Exception:
+                        db.session.rollback()
+                        logging.exception("compliance eval failed user=%s", uid)
         except Exception as e:
             logging.warning("push scheduler: user %s failed: %s", uid, e)
 

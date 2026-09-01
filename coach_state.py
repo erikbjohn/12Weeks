@@ -69,7 +69,8 @@ def update_anger_level(user_id, event, today=None):
     state = get_compliance_state(user_id)
 
     # Escalation events
-    if event in ("missed_checkin", "missed_workout", "missed_meals", "nutrition_cheat"):
+    if event in ("missed_checkin", "missed_workout", "missed_meals", "nutrition_cheat",
+                 "missed_weighin", "missed_dose"):  # S066: nightly compliance eval producers
         state.consecutive_misses += 1
         state.last_miss_date = today
         state.last_escalation_date = today
