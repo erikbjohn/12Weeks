@@ -27,23 +27,21 @@ S033 (idempotent toggles), S036 (fixed earlier today — Garmin autofill blocked
 row), S037 (Garmin dead-token push + macOS notify), S038 (shipped Aug 30), S039 (start_date rail),
 S041 (run detail in coach context), S042 (no static phase narrative), S044 (no boot-time DROP TABLE).
 
-## HIGH — still open (14)
+## HIGH — remaining 14, shipped later the same day (commits 587ab9a..7b3d6d2)
 
-| id | what | why not yet |
-|---|---|---|
-| S043 | Unique constraints on plan/bodyweight tables + dedupe | needs a one-shot prod dedupe first; check for existing duplicates before adding constraints |
-| S029 | Marker write failures invisible | needs a CoachMarkerLog model + chat surface (design) |
-| S013 | Boot gate → onboarding on any non-401 fetch failure | client init refactor |
-| S024 | force_regen deletes days the coach omitted; DB errors discard coach output | generation write path |
-| S028 | Worker death mid-generation → half-written week | related to S024 |
-| S020 | 14 hand-copied SSE readers, no carry buffer/timeout | client refactor |
-| S026 | [NUTRITION] marker updates TrainingGoal only, not served meal cards | marker handler + overlay |
-| S023 | Program-week formula copied 7× py / 4× js | refactor |
-| S027 | Timers vs iOS (vibrate-only, freezes on screen lock) | client |
-| S019 | No weigh-in input on day card after overlay dismissed | UX |
-| S025 | Glutening cannot be codified (no marker/note) | product |
-| S008 | ALL_SECTIONS pinned at config only | test/architecture |
-| S012 | Protocol import dry-run / request-body CSV | admin tooling |
-| S007 | Pin marker parsing on EVERY reply-persisting path | partially covered by test_chat_endpoint_codifies |
+| id | what shipped |
+|---|---|
+| S043 | prod deduped (4 prescription, 34 schedule rows); UNIQUE keys on plan tables + weigh-ins; startup index bootstrap; race-tolerant writers; admin replan guard |
+| S029 | `CoachMarkerLog`; every handler's failure recorded; one-time ⚠ flag bubble in chat; `<marker_outcomes>` core section |
+| S026 | `[NUTRITION: daily_calories]` persists `goal.calorie_override`, regenerates the rest of the week's meal cards, survives recalibration |
+| S024/S028 | day-granular plan swap; loud write-block failures; generate-status `partial` + client re-POST fills runs; Sunday button keys on lifts AND runs |
+| S020 | `sseReader(res)`: carry buffer in all 14 readers, non-OK → `[ERROR]` frame, 45 s idle guard |
+| S013 | tri-state onboarding check; "Couldn't reach the server — Retry" instead of Welcome |
+| S007/S008 | served-prompt contract test for every agent; failed builders announced in `<section_errors>` |
+| S012 | import-protocol takes `csv_text`, `dry_run`, returns per-row `changes` (new fast path — see memory) |
+| S025 | `BodyWeight.event/note`; tool + endpoint + `[SCALE_EVENT]` marker; cut_guard honours a recorded gluten event; one-tap chips on the strip |
+| S019 | weigh-in box on today's card |
+| S023 | `program_calendar.py` / `programWeekFor` — the only week formula (11 copies removed) |
+| S027 | audible timer cues, wall-clock HIIT with catch-up, screen wake lock |
 
-Medium (89) and low (32) untouched.
+**All 39 highs closed.** Suite 1003 passed / 35 JS. Medium (89) and low (32) untouched.
