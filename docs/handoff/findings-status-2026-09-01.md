@@ -55,7 +55,13 @@ S059 (dose taken state), S058/S077 (planners see recovery + commitments), S097/S
 S106, S098/S083, S121, S128, S082, S054. Data: S093, S094, S092, S108, S120, S110, S119, S053 (falsy-zero lint),
 S107, S088. Already closed by highs: S060, S102, S101, S122.
 
-**Open mediums (40):** S045 render perf, S046 chase push, S048 BW provenance, S049 exception markers, S052,
-S056, S063/S065 HIIT parse, S064, S066/S069 escalation inputs, S068 memory dedupe, S070 import cycle, S071 client
-consolidation, S072/S073/S103 perf, S074 curve re-anchor, S075 split admin keys, S076, S078, S079, S080, S081,
-S087, S095, S099, S100, S104, S111, S113, S114, S115, S117, S118, S129, S130, S131, S132. Lows (32) untouched.
+**All 89 mediums closed (commits eff0dde..3fa9f12).** Later batches: S052/S056/S113, S099/S100 (one intake
+parser, one e1RM), S114/S118/S104 (dose steps, inline chat history, [LLM] usage logs), S087/S111 (one meal
+day-type derivation), S063/S065 (timer runs the coach's segments), S076/S081, S064/S129, S130 (13 dead routes),
+S131/S132/S079, S068 (memories deduped/dated/pivotal kept), S066/S069 (nightly compliance eval), S117/S048,
+S115, S046/S049 (chase push; [EXCEPTION]/[COMMITMENT] markers), S075 (ADMIN_READ_KEY), S074 (one-shot curve
+re-anchor), S078 (every catalog exercise has a swap menu), S080 (cadence-aware commitments), S103/S072
+(resolver memo; workouts prefetch), S071 (llm_client — three modules used STALE model ids the API rejects),
+S070 (import cycle), S045/S073 (client render/bootstrap).
+
+Suite: 1018 Python / 39 JS, green. Lows (32) untouched.
