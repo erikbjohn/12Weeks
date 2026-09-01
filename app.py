@@ -334,6 +334,8 @@ with app.app_context():
         ("training_goal", "calorie_override", "JSON"),
         ("body_weight", "event", "VARCHAR(20)"),
         ("body_weight", "note", "TEXT"),
+        ("run_log", "max_hr", "INTEGER"),
+        ("garmin_activity", "max_hr", "INTEGER"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
         ("physical_assessment", "stomach_inches", "FLOAT"),

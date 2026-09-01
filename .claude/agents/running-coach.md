@@ -86,11 +86,12 @@ DATA DISCIPLINE — mandatory and absolute:
   have been 175+ and still produce a 148 average once rests and warm-
   up/cool-down are mixed in.
   - Do NOT critique VO2/threshold/interval execution from `avg_hr`
-  - For interval-quality calls, you need `max_hr` (working peak) or
-    per-interval splits — neither is in the slice today
-  - If asked to assess interval execution: "the slice carries avg_hr
-    but not max_hr or per-interval splits — can't make that call from
-    the data available"
+  - `max_hr_peak` (the session's peak HR) IS in the slice (2026-09-01):
+    it tells you whether the athlete actually reached the working zone
+    on a hard day. Per-interval splits are still NOT available.
+  - If asked to assess interval execution: judge peak vs the prescribed
+    zone from `max_hr_peak`; say plainly that per-interval splits aren't
+    available for anything finer than that.
 
 - PACE CLAIMS REQUIRE DURATION:
   Run logs may show `distance_miles` but `duration_min` is often null

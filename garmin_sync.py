@@ -274,10 +274,12 @@ def aggregate_day(rows):
     if hr_rows:
         hr = int(round(sum(_get(r, "avg_hr") * _get(r, "duration_min") for r in hr_rows)
                        / sum(_get(r, "duration_min") for r in hr_rows)))
+    mx = [_get(r, "max_hr") for r in rows if _get(r, "max_hr")]
     return {
         "distance_miles": dist or None,
         "duration_min": dur or None,
         "avg_hr": hr,
+        "max_hr": max(mx) if mx else None,
         "elevation_ft": elev or None,
     }
 
@@ -332,6 +334,7 @@ def sync_activities(gc, user_id, days_back=3, today=None):
             distance_miles=round((a.get("distance") or 0) / 1609.344, 2),
             duration_min=int(round((a.get("duration") or 0) / 60.0)),
             avg_hr=int(a["averageHR"]) if a.get("averageHR") else None,
+            max_hr=int(a["maxHR"]) if a.get("maxHR") else None,
             elevation_ft=int(round((a.get("elevationGain") or 0) * 3.28084)),
             raw_summary=json.dumps({k: a.get(k) for k in _RAW_KEYS}),
         )
@@ -375,6 +378,7 @@ def sync_activities(gc, user_id, days_back=3, today=None):
         existing.distance_miles = agg["distance_miles"]
         existing.duration_min = agg["duration_min"]
         existing.avg_hr = agg["avg_hr"]
+        existing.max_hr = agg.get("max_hr")
         existing.elevation_ft = agg["elevation_ft"]
         existing.source = "garmin"
         result["days_filled"].append(key)

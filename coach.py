@@ -128,6 +128,8 @@ def _format_runs(runs):
             parts.append(f"{dur}min")
             if r.get('avg_hr'):
                 parts.append(f"avg_hr_full_session:{r['avg_hr']}")
+            if r.get('max_hr'):
+                parts.append(f"max_hr_peak:{r['max_hr']}")
             if r.get('elevation_ft'):
                 parts.append(f"elev:{r['elevation_ft']}ft")
             lines.append(f"  {r.get('date','?')}: {' '.join(parts)}")

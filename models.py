@@ -219,6 +219,7 @@ class RunLog(db.Model):
     day_idx = db.Column(db.Integer)
     distance_miles = db.Column(db.Float)
     avg_hr = db.Column(db.Integer)
+    max_hr = db.Column(db.Integer)  # S047: peak HR — the only interval-execution signal Garmin gives us
     elevation_ft = db.Column(db.Integer)
     duration_min = db.Column(db.Integer)
     notes = db.Column(db.Text)
@@ -406,6 +407,7 @@ class GarminActivity(db.Model):
     distance_miles = db.Column(db.Float)
     duration_min = db.Column(db.Integer)
     avg_hr = db.Column(db.Integer)
+    max_hr = db.Column(db.Integer)
     elevation_ft = db.Column(db.Integer)
     raw_summary = db.Column(db.Text)  # JSON of selected raw Garmin fields
     pulled_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

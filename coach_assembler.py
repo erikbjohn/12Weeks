@@ -799,7 +799,7 @@ def _build_runs():
     ).limit(14).all()
     return {"run_history": [{
         "date": r.log_date.isoformat() if r.log_date else None,
-        "distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
+        "distance_miles": r.distance_miles, "avg_hr": r.avg_hr, "max_hr": getattr(r, "max_hr", None),
         "duration_min": r.duration_min,
         "elevation_ft": r.elevation_ft, "week": r.week,
     } for r in rows]}
@@ -1047,9 +1047,18 @@ def _build_protocol_status():
 
     today_rows = sorted((r for r in all_rows if r.date == today), key=lambda r: r.time)
     summary = [
-        {"compound": r.compound, "dose_mg": r.dose_mg, "time": r.time}
+        {"compound": r.compound, "dose_mg": r.dose_mg, "time": r.time,
+         "taken": r.taken_at is not None}
         for r in today_rows
     ]
+    # S059: the coach could not see whether the 07:00 stack was checked off.
+    _now_hhmm = datetime.now(timezone.utc).astimezone().strftime("%H:%M")
+    try:
+        from utils_time import user_local_now
+        _now_hhmm = user_local_now(current_user.timezone or "UTC").strftime("%H:%M")
+    except Exception:
+        pass
+    today_unchecked = [r for r in today_rows if r.taken_at is None and (r.time or "") <= _now_hhmm]
 
     # Held doses (dose_mg <= 0) are excluded — a hold means "no dose today",
     # not a new dose LEVEL. Delegated to protocol.current_dose_mg so a held
@@ -1081,6 +1090,7 @@ def _build_protocol_status():
 
     return {"protocol_status": {
         "summary": summary,
+        "today_unchecked": [{"compound": r.compound, "time": r.time} for r in today_unchecked],
         "current_retatrutide_mg": current_retatrutide_mg,
         "current_cagrilintide_mg": current_cagrilintide_mg,
         "next_escalation": next_esc,
@@ -1273,6 +1283,7 @@ def _build_today_status():
                 "start": _st[11:16] if len(_st) >= 16 else None,
                 "distance_miles": _a.distance_miles, "duration_min": _a.duration_min,
                 "avg_hr": _a.avg_hr,
+                "max_hr": getattr(_a, "max_hr", None),
             })
     except Exception:
         log.warning("GarminActivity today read failed", exc_info=True)
@@ -1297,6 +1308,7 @@ def _build_today_status():
         "run_distance_today": run_today_log.distance_miles if run_today_log else None,
         "run_duration_today": run_today_log.duration_min if run_today_log else None,
         "run_avg_hr_today": run_today_log.avg_hr if run_today_log else None,
+        "run_max_hr_today": getattr(run_today_log, "max_hr", None) if run_today_log else None,
         "workout_short_exercises": short_exercises,
         "run_activities_today": run_activities,
     }}
@@ -1375,6 +1387,8 @@ def _format_today_status_block(ts):
             bits.append("[NO DURATION LOGGED — pace not computable]")
         if hr:
             bits.append(f"avg_hr_full_session:{hr}")
+        if ts.get("run_max_hr_today"):
+            bits.append(f"max_hr_peak:{ts['run_max_hr_today']}")
         lines.append(f"  run: DONE ({', '.join(bits) if bits else 'logged'})")
         if ts.get("run_detail"):
             # S041: the debrief must see plan and actual side by side.
@@ -1388,6 +1402,7 @@ def _format_today_status_block(ts):
                 if a.get("distance_miles"): b.append(f"{a['distance_miles']}mi")
                 if a.get("duration_min"): b.append(f"{a['duration_min']}min")
                 if a.get("avg_hr"): b.append(f"HR {a['avg_hr']}")
+                if a.get("max_hr"): b.append(f"peak {a['max_hr']}")
                 return " ".join(b)
             lines.append(
                 f"  run_detail: the totals above are {len(acts)} separate runs summed — "
@@ -2328,7 +2343,14 @@ def _format_athlete_data(ctx, requires):
     if ps:
         ps_lines = ["<protocol_status>"]
         for s in ps.get("summary") or []:
-            ps_lines.append(f"  dose: {s['compound']} {s['dose_mg']}mg @ {s['time']}")
+            _tk = " — TAKEN" if s.get("taken") else " — UNCHECKED"
+            ps_lines.append(f"  dose: {s['compound']} {s['dose_mg']}mg @ {s['time']}{_tk}")
+        _tu = ps.get("today_unchecked") or []
+        if _tu:
+            ps_lines.append(
+                f"  today_unchecked_past_due: {len(_tu)} — "
+                + ", ".join(f"{x['compound']} @ {x['time']}" for x in _tu)
+                + ". Name these ONCE and direct the athlete to take/check them; never assume they were taken.")
         if ps.get("current_retatrutide_mg") is not None:
             ps_lines.append(f"  current_retatrutide_mg: {ps['current_retatrutide_mg']}")
         if ps.get("current_cagrilintide_mg") is not None:
