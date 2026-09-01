@@ -830,6 +830,19 @@ def run_label_for(run_type, explicit=None):
 SCALE_EVENTS = {"gluten", "sodium", "travel", "illness"}
 
 
+def _admin_audit(action, user_id, params):
+    """S132: admin one-shot repairs used to rewrite SetLog/RunLog/prescriptions
+    with no trace. One CoachMarkerLog row per applied repair (status
+    'admin') — visible in the same audit table as marker outcomes."""
+    try:
+        from models import CoachMarkerLog
+        db.session.add(CoachMarkerLog(user_id=user_id, marker_type="ADMIN", raw_marker=action,
+                                      status="admin", detail=json.dumps(params)[:300]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def _marker_outcome(user_id, week, marker_type, raw, status, detail=None):
     """Record a marker's outcome in its own short transaction (after any
     rollback the failing handler did). Never raises."""
@@ -2099,7 +2112,7 @@ def debug_goal_error():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()[-1000:]}), 500
 
 
-@app.route("/api/debug/override-day-with-actual")
+@app.route("/api/debug/override-day-with-actual", methods=["GET", "POST"])
 @admin_required
 def debug_override_day_with_actual():
     """Take the user's logged SetLog rows for (logged_date, day_idx) and write
@@ -2116,6 +2129,9 @@ def debug_override_day_with_actual():
     day_idx = int(request.args.get("day_idx", -1))
     if not email or not date_str or not week or day_idx < 0:
         return jsonify({"error": "email + date + week + day_idx required"}), 400
+    _dry = request.args.get("dry_run") in ("1", "true")  # S132
+    if week > 12 and request.args.get("allow_parked") not in ("1", "true"):
+        return jsonify({"error": "week > 12 is parked history; pass allow_parked=1"}), 400
     try:
         from datetime import datetime as _dt
         from models import User, SetLog, WeeklyPrescription
@@ -2164,8 +2180,14 @@ def debug_override_day_with_actual():
             r.week = week
             r.day_idx = day_idx
 
-        db.session.commit()
+        if _dry:
+            db.session.rollback()
+        else:
+            db.session.commit()
+            _admin_audit("override-day-with-actual", user.id,
+                         {"date": date_str, "week": week, "day_idx": day_idx})
         return jsonify({
+            "dry_run": _dry,
             "email": email, "date": date_str, "week": week, "day_idx": day_idx,
             "prescription_rows_created": created,
             "set_rows_aligned": len(rows),
@@ -2180,7 +2202,7 @@ def debug_override_day_with_actual():
         }), 500
 
 
-@app.route("/api/debug/realign-session-week")
+@app.route("/api/debug/realign-session-week", methods=["GET", "POST"])
 @admin_required
 def debug_realign_session_week():
     """Move a logged session from one week to another. Moves SetLog,
@@ -2199,6 +2221,9 @@ def debug_realign_session_week():
     date_str = request.args.get("date", "")
     if not email or not from_week or not to_week or day_idx < 0 or not date_str:
         return jsonify({"error": "email + from_week + to_week + day_idx + date required"}), 400
+    _dry = request.args.get("dry_run") in ("1", "true")  # S132
+    if max(from_week, to_week) > 12 and request.args.get("allow_parked") not in ("1", "true"):
+        return jsonify({"error": "week > 12 is parked history; pass allow_parked=1"}), 400
     try:
         from datetime import datetime as _dt
         from models import (User, SetLog, RunLog, WeeklyPrescription,
@@ -2275,8 +2300,14 @@ def debug_realign_session_week():
                 cw_changed = (state.current_week, to_week)
                 state.current_week = to_week
 
-        db.session.commit()
+        if _dry:
+            db.session.rollback()
+        else:
+            db.session.commit()
+            _admin_audit("realign-session-week", user.id,
+                         {"from_week": from_week, "to_week": to_week, "day_idx": day_idx, "date": date_str})
         return jsonify({
+            "dry_run": _dry,
             "email": email, "from_week": from_week, "to_week": to_week,
             "day_idx": day_idx, "date": date_str,
             "setlogs_moved": sl_count, "runlogs_moved": rl_count,
