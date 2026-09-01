@@ -1963,6 +1963,51 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
 
 let _activeTimerEl = null;
 
+// ─── TIMER CUES (S027) ────────────────────────────────────────────────────
+// iOS Safari has no Vibration API, so vibrate-only cues are silent on the
+// phone this app is built for. One AudioContext, created/resumed on the
+// first user gesture, serves the rest timer, inline timers and the HIIT
+// overlay. A screen Wake Lock keeps timers from freezing on auto-lock.
+var _cueCtx = null;
+var _wakeLock = null;
+function timerCuesUnlock() {
+  try {
+    if (!_cueCtx) _cueCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_cueCtx.state === 'suspended') _cueCtx.resume();
+  } catch (e) {}
+}
+function timerBeep(freq, secs) {
+  try {
+    if (!_cueCtx) timerCuesUnlock();
+    if (!_cueCtx) return;
+    var osc = _cueCtx.createOscillator(), gain = _cueCtx.createGain();
+    osc.type = 'sine'; osc.frequency.value = freq || 880;
+    gain.gain.setValueAtTime(0.3, _cueCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, _cueCtx.currentTime + (secs || 0.15));
+    osc.connect(gain); gain.connect(_cueCtx.destination);
+    osc.start(); osc.stop(_cueCtx.currentTime + (secs || 0.15));
+  } catch (e) {}
+  if (navigator.vibrate) { try { navigator.vibrate(Math.round((secs || 0.15) * 1000)); } catch (e) {} }
+}
+async function wakeLockAcquire() {
+  try {
+    if ('wakeLock' in navigator && !_wakeLock) {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', function() { _wakeLock = null; });
+    }
+  } catch (e) {}
+}
+function wakeLockRelease() {
+  try { if (_wakeLock) { _wakeLock.release(); _wakeLock = null; } } catch (e) {}
+}
+document.addEventListener('click', function(ev) {
+  var t = ev.target && ev.target.closest && ev.target.closest('.set-check, .hiit-start, [onclick*="startRestTimer"], [onclick*="startExerciseHiit"], [onclick*="startInlineTimer"]');
+  if (t) timerCuesUnlock();
+}, true);
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible' && (_hiitState || _restTimerInterval)) wakeLockAcquire();
+});
+
 function startRestTimer(exIdx, seconds) {
   const el = document.getElementById('rest-timer-' + exIdx);
   if (!el) return;
@@ -1979,14 +2024,20 @@ function startRestTimer(exIdx, seconds) {
   el.innerHTML = `<div class="rest-countdown">${formatTimer(seconds)}</div>`;
   el.style.display = 'block';
 
+  wakeLockAcquire();
+  let _lastWhole = null;
   _restTimerInterval = setInterval(() => {
     const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+    if (remaining !== _lastWhole) {
+      _lastWhole = remaining;
+      if (remaining > 0 && remaining <= 3) timerBeep(880, 0.1);
+    }
     if (remaining <= 0) {
       clearInterval(_restTimerInterval);
       _restTimerInterval = null;
       el.innerHTML = `<div class="rest-countdown rest-done">GO</div>`;
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      setTimeout(() => { el.style.display = 'none'; _activeTimerEl = null; }, 3000);
+      timerBeep(1200, 0.3);
+      setTimeout(() => { el.style.display = 'none'; _activeTimerEl = null; wakeLockRelease(); }, 3000);
     } else {
       el.innerHTML = `<div class="rest-countdown">${formatTimer(remaining)}</div>`;
     }
@@ -2003,26 +2054,11 @@ function formatTimer(sec) {
 var _hiitState = null;
 var _hiitLastWholeSec = null;
 
-function _hiitBeep(freq, duration) {
-  try {
-    var ctx = _hiitState && _hiitState.audioCtx;
-    if (!ctx) return;
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq || 880;
-    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + (duration || 0.15));
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + (duration || 0.15));
-  } catch (e) {}
-}
+function _hiitBeep(freq, duration) { timerBeep(freq, duration); }
 
 function startExerciseHiit(exName, week, dayIdx, exIdx, workSec, restSec, totalSets, startSet) {
   if (_hiitState && _hiitState.iv) clearInterval(_hiitState.iv);
-  if (_hiitState && _hiitState.audioCtx) { try { _hiitState.audioCtx.close(); } catch (e) {} }
+  wakeLockRelease();
 
   var overlay = document.getElementById('hiit-overlay');
   if (!overlay) {
@@ -2033,8 +2069,8 @@ function startExerciseHiit(exName, week, dayIdx, exIdx, workSec, restSec, totalS
   }
   overlay.classList.add('visible');
 
-  var audioCtx = null;
-  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  timerCuesUnlock();
+  wakeLockAcquire();
 
   _hiitState = {
     exName: exName, week: week, dayIdx: dayIdx, exIdx: exIdx,
@@ -2042,9 +2078,14 @@ function startExerciseHiit(exName, week, dayIdx, exIdx, workSec, restSec, totalS
     setIdx: startSet || 0,
     phase: 'work',
     remaining: workSec,
+    // Wall-clock (S027): iOS suspends JS timers on screen lock / background;
+    // a tick-counting timer froze a 45-60 s plank mid-hold. The phase end is
+    // an absolute time; _hiitTick derives remaining from it and catches up
+    // every phase that elapsed while hidden.
+    phaseEnd: Date.now() + workSec * 1000,
     paused: false,
+    pausedRemainingMs: null,
     iv: null,
-    audioCtx: audioCtx,
   };
   _hiitLastWholeSec = null;
 
@@ -2096,7 +2137,7 @@ function _hiitRenderCount() {
 function _hiitTick() {
   var s = _hiitState;
   if (!s || s.paused) return;
-  s.remaining -= 0.25;
+  s.remaining = (s.phaseEnd - Date.now()) / 1000;
   var wholeSec = Math.ceil(s.remaining);
   if (wholeSec !== _hiitLastWholeSec) {
     _hiitLastWholeSec = wholeSec;
@@ -2106,7 +2147,16 @@ function _hiitTick() {
     }
   }
   if (s.remaining <= 0) {
-    _hiitAdvance();
+    // Catch up: every phase that fully elapsed while the tab was hidden.
+    var guard = 0;
+    while (_hiitState && !_hiitState.paused && _hiitState.remaining <= 0 && guard++ < 64) {
+      var overshootMs = -_hiitState.remaining * 1000;
+      _hiitAdvance();
+      if (!_hiitState) break;
+      _hiitState.phaseEnd -= overshootMs;  // the next phase started when the last one ended
+      _hiitState.remaining = (_hiitState.phaseEnd - Date.now()) / 1000;
+    }
+    if (_hiitState) _hiitRenderCount();
   } else {
     _hiitRenderCount();
   }
@@ -2125,11 +2175,13 @@ function _hiitAdvance() {
     }
     s.phase = 'rest';
     s.remaining = s.restSec || 0;
+    s.phaseEnd = Date.now() + s.remaining * 1000;
     if (s.remaining <= 0) { return _hiitAdvance(); }
   } else {
     s.phase = 'work';
     s.setIdx++;
     s.remaining = s.workSec;
+    s.phaseEnd = Date.now() + s.remaining * 1000;
     _hiitBeep(1400, 0.2);
     if (navigator.vibrate) navigator.vibrate(200);
   }
@@ -2163,6 +2215,12 @@ function _hiitPause() {
   var s = _hiitState;
   if (!s) return;
   s.paused = !s.paused;
+  if (s.paused) {
+    s.pausedRemainingMs = Math.max(0, s.phaseEnd - Date.now());
+  } else {
+    s.phaseEnd = Date.now() + (s.pausedRemainingMs || 0);  // resume from where it stopped
+    s.pausedRemainingMs = null;
+  }
   var btn = document.getElementById('hiit-pause-btn');
   if (btn) btn.textContent = s.paused ? 'Resume' : 'Pause';
 }
@@ -2170,6 +2228,7 @@ function _hiitPause() {
 function _hiitSkip() {
   if (!_hiitState) return;
   _hiitState.remaining = 0;
+  _hiitState.phaseEnd = Date.now();
   _hiitAdvance();
 }
 
@@ -2187,7 +2246,7 @@ function _hiitFinish() {
 
 function _hiitClose() {
   if (_hiitState && _hiitState.iv) clearInterval(_hiitState.iv);
-  if (_hiitState && _hiitState.audioCtx) { try { _hiitState.audioCtx.close(); } catch (e) {} }
+  wakeLockRelease();
   _hiitState = null;
   _hiitLastWholeSec = null;
   var overlay = document.getElementById('hiit-overlay');
