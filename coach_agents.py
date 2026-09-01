@@ -68,7 +68,7 @@ AGENTS = {
     },
     "weekly_review": {
         "max_tokens": 1000,
-        "temperature": 1.0,
+        "temperature": 0.6,  # was 1.0 and never sent (S096); a review must not be the loosest agent
         "requires": _WITH_CHAT,
 
     },

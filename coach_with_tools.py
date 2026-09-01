@@ -71,7 +71,7 @@ If you don't know what week the athlete is in, call get_today_status first to fi
 NEVER fabricate a weight, set count, or workout for a day you haven't looked up. If the answer needs data not in your prompt, the tool exists for a reason."""
 
 
-def _forced_final_text(client, *, model, max_tokens, system, messages, tools) -> str:
+def _forced_final_text(client, *, model, max_tokens, system, messages, tools, temperature=None) -> str:
     """One text-only turn (tool_choice=none) after the tool loop exhausted
     MAX_TOOL_TURNS. The last response was a tool_use — streaming/returning it
     would ship the model's tool-call preamble ('Let me pull Friday next.') as
@@ -85,6 +85,7 @@ def _forced_final_text(client, *, model, max_tokens, system, messages, tools) ->
             messages=messages,
             tools=tools,  # history contains tool blocks — tools must stay defined
             tool_choice={"type": "none"},
+            **({"temperature": temperature} if temperature is not None else {}),
         )
         return "\n".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
@@ -101,6 +102,7 @@ def _run_loop(
     messages: list[dict],
     model: str,
     max_tokens: int,
+    temperature: float | None = None,
 ) -> str:
     """Run the tool-use loop. Returns the final assistant text."""
     from coach_tools import TOOLS, execute_tool
@@ -116,6 +118,7 @@ def _run_loop(
             system=full_system,
             messages=convo,
             tools=TOOLS,
+            **({"temperature": temperature} if temperature is not None else {}),
         )
 
         stop_reason = response.stop_reason
@@ -161,6 +164,7 @@ def _run_loop(
     text = _forced_final_text(
         client, model=model, max_tokens=max_tokens,
         system=full_system, messages=convo, tools=TOOLS,
+        temperature=temperature,
     )
     return text or "I didn't get a complete answer put together on that one. Ask me again."
 
@@ -172,6 +176,7 @@ def coach_chat(
     model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     agent_name: str = "conversation",
+    temperature: float | None = None,
 ) -> str:
     """Non-streaming entry. Returns final assistant text.
 
@@ -197,6 +202,7 @@ def coach_chat(
         messages=messages,
         model=model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"),
         max_tokens=max_tokens,
+        temperature=temperature,
     )
 
 
@@ -206,6 +212,7 @@ def coach_chat_stream(
     messages: list[dict],
     model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    temperature: float | None = None,
 ):
     """Streaming entry. Runs the tool loop server-side (no streaming during
     tool calls), then streams the FINAL assistant text token by token.
@@ -227,6 +234,7 @@ def coach_chat_stream(
             system=full_system,
             messages=convo,
             tools=TOOLS,
+            **({"temperature": temperature} if temperature is not None else {}),
         )
         stop_reason = response.stop_reason
         blocks = response.content
@@ -265,6 +273,7 @@ def coach_chat_stream(
         forced = _forced_final_text(
             client, model=chosen_model, max_tokens=max_tokens,
             system=full_system, messages=convo, tools=TOOLS,
+            temperature=temperature,
         )
         yield forced or ("I didn't get a complete answer put together on "
                          "that one. Ask me again.")

@@ -51,6 +51,15 @@ from protocol import (
     CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
 )
 
+# S062: gunicorn configures only its own loggers; Python's root logger sat at
+# WARNING on Render, so every logging.info (daemon started, Garmin restore,
+# marker application, week generation progress) was dropped.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
+    force=True,
+)
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 # Cookie hardening (S015). Secure only on Render so local http dev still works.
@@ -9330,6 +9339,7 @@ def api_chat():
         messages=messages,
         max_tokens=agent_config["max_tokens"],
         agent_name=_route_info["agent_name"],
+        temperature=agent_config.get("temperature"),
     )
     # No output gate: Opus 4.8 obeys the done-lift / fast-day rules on its own
     # (verified via /api/admin/debug/coach-dryrun). An earlier keyword gate
@@ -9520,6 +9530,7 @@ def api_chat_stream():
                     system_prompt=system_prompt,
                     messages=messages,
                     max_tokens=_agent_config["max_tokens"],
+                    temperature=_agent_config.get("temperature"),
                 ):
                     full_text += chunk + " "
                     safe_text = (chunk + " ").replace('\n', '\\n')
@@ -13299,6 +13310,7 @@ def api_admin_debug_fire_coach():
             user_id=user_obj.id, system_prompt=system_prompt,
             messages=messages, max_tokens=agent_config["max_tokens"],
             agent_name=route_info["agent_name"],
+            temperature=agent_config.get("temperature"),
         )
         # Save assistant response
         asst = ChatMessage(
