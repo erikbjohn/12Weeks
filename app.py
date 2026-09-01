@@ -8583,12 +8583,11 @@ def api_morning_checkin_save():
         # the athlete may have completed the real check-in on another device.
         return jsonify({"ok": True, "ignored": "checkin already exists"})
     if ci:
-        ci.sleep_quality = data.get("sleep_quality", ci.sleep_quality)
-        ci.stress_level = data.get("stress_level", ci.stress_level)
-        ci.soreness = data.get("soreness", ci.soreness)
-        ci.mood = data.get("mood", ci.mood)
-        ci.motivation = data.get("motivation", ci.motivation)
-        ci.anxiety = data.get("anxiety", ci.anxiety)
+        # Only a real value overwrites; a null (the chat/Sunday overlays send
+        # nulls — they carry no self-report, S022) never erases one.
+        for _k in ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety"):
+            if data.get(_k) is not None:
+                setattr(ci, _k, data[_k])
         ci.notes = data.get("notes", ci.notes)
     else:
         ci = MorningCheckIn(
@@ -8668,7 +8667,7 @@ def api_extract_checkin_values():
 - motivation (drive to train)
 - anxiety (anxiety level)
 
-If a value wasn't discussed, use 5 as default. Infer from context.
+Return null for any value the athlete did not EXPLICITLY state or clearly describe. Never infer, never default — a null is correct data, a guessed number is fabricated data.
 
 Conversation:
 {conversation}"""}],
@@ -8682,13 +8681,13 @@ Conversation:
             d = _user_today()
             ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
             if ci:
-                ci.sleep_quality = values.get('sleep_quality', ci.sleep_quality)
-                ci.stress_level = values.get('stress_level', ci.stress_level)
-                ci.soreness = values.get('soreness', ci.soreness)
-                ci.mood = values.get('mood', ci.mood)
-                ci.motivation = values.get('motivation', ci.motivation)
-                ci.anxiety = values.get('anxiety', ci.anxiety)
-                ci.notes = (ci.notes or '') + ' [AI-extracted values]'
+                assigned = False
+                for _k in ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety"):
+                    v = values.get(_k)
+                    if isinstance(v, (int, float)) and 1 <= v <= 10:
+                        setattr(ci, _k, int(v)); assigned = True
+                if assigned:
+                    ci.notes = (ci.notes or '') + ' [AI-extracted values]'
                 db.session.commit()
             return jsonify(values)
         # Model replied with no JSON object (refusal / plain text). Return a

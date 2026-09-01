@@ -5827,7 +5827,7 @@ async function checkMorningCheckin() {
           localStorage.setItem(dismissKey, '1');
           // Backfill MorningCheckIn so future checks find it immediately
           fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ date: today, sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements auto-backfill]' })
+            body: JSON.stringify({ date: today, sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements auto-backfill]' })
           }).catch(function(){});
           return;
         }
@@ -5926,7 +5926,7 @@ async function showMorningCheckinOverlay() {
         localStorage.setItem(_dk, '1');
         // Backfill MorningCheckIn if missing
         fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ date: todayStr(), sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements auto-backfill]' })
+          body: JSON.stringify({ date: todayStr(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements auto-backfill]' })
         }).catch(function(){});
         el.innerHTML = '';
         renderAll();
@@ -6097,7 +6097,7 @@ async function submitSundayMeasurements() {
   // This way even if the user closes the app mid-conversation, the gate is cleared
   // on all devices.
   await fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ date: todayStr(), sleep_quality: 5, stress_level: 5, soreness: 5, mood: 5, motivation: 5, anxiety: 3, notes: '[Sunday measurements submitted]' })
+    body: JSON.stringify({ date: todayStr(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements submitted]' })
   }).catch(function(){});
   var _sunDk = 'sunday_measurements_' + todayStr();
   localStorage.setItem(_sunDk, '1');
@@ -6460,8 +6460,8 @@ async function finishMorningCheckin() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         date: todayStr(),
-        sleep_quality: 5, stress_level: 5, soreness: 5,
-        mood: 5, motivation: 5, anxiety: 3,
+        sleep_quality: null, stress_level: null, soreness: null,
+        mood: null, motivation: null, anxiety: null,
         notes: '[Coach conversation check-in]',
       }),
     });
@@ -6474,8 +6474,8 @@ async function finishMorningCheckin() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           date: todayStr(),
-          sleep_quality: 5, stress_level: 5, soreness: 5,
-          mood: 5, motivation: 5, anxiety: 3,
+          sleep_quality: null, stress_level: null, soreness: null,
+          mood: null, motivation: null, anxiety: null,
           notes: '[Coach conversation check-in]',
         }),
       });

@@ -509,6 +509,10 @@ def _summarize_checkins(checkins):
         if ci.get("anxiety") is not None:
             parts.append(f"anxiety:{ci['anxiety']}")
         note = f" \"{ci['notes']}\"" if ci.get("notes") else ""
+        if not parts:
+            # Chat / Sunday overlays record the check-in without numbers —
+            # say so; never let an absence read as a score (S022).
+            parts.append("check-in done — no numeric self-report")
         lines.append(f"  {ci.get('date', '?')}: {', '.join(parts)}{note}")
 
     # Trend analysis
