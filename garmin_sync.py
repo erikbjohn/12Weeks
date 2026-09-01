@@ -366,9 +366,15 @@ def sync_activities(gc, user_id, days_back=3, today=None):
     for week, day_idx in sorted(touched):
         key = f"w{week}d{day_idx}"
         existing = RunLog.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
-        if existing and (existing.source or "manual") != "garmin":
+        has_manual_data = existing is not None and any(
+            getattr(existing, c) is not None
+            for c in ("distance_miles", "duration_min", "avg_hr", "elevation_ft"))
+        if existing and (existing.source or "manual") != "garmin" and has_manual_data:
             result["days_skipped_manual"].append(key)
             continue
+        # An all-empty 'manual' row is a placeholder, not a manual entry —
+        # it must never block the Garmin fill (2026-09-01: today's run synced
+        # into garmin_activity but the card stayed blank behind one).
         rows = GarminActivity.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).all()
         agg = aggregate_day(rows)
         if not agg:

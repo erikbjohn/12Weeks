@@ -13276,6 +13276,13 @@ def api_warmup_toggle():
 @login_required
 def api_run_log():
     data = request.get_json()
+    # An empty Log Run tap must not write (or overwrite!) anything: a NULL
+    # 'manual' row blocks the Garmin autofill for that day, and an empty
+    # submit over a synced run would wipe it (2026-09-01: today's run sat in
+    # garmin_activity while the card stayed blank behind one of these).
+    if all(data.get(k) in (None, "") for k in
+           ("distance_miles", "duration_min", "avg_hr", "elevation_ft", "notes")):
+        return jsonify({"error": "Nothing to log — enter at least one value"}), 400
     existing = RunLog.query.filter_by(
         user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx")
     ).first()
