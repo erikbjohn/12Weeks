@@ -12538,6 +12538,46 @@ def api_admin_debug_user(email):
     })
 
 
+@app.route("/api/admin/export-full")
+@admin_required
+def api_admin_export_full():
+    """Lossless per-user export: EVERY model with a user_id column, every
+    column, as {table: [rows]}. /api/export is a lossy client-shaped view
+    (one top set per session, waist-only measurements, no runs/doses/chat);
+    this is the backup feed scripts/db_backup.py pulls daily (S001).
+    Garmin OAuth tokens are deliberately excluded."""
+    import models as _models
+    from sqlalchemy import inspect as _sa_inspect
+    email = (request.args.get("email") or "").strip().lower()
+    user = User.query.filter_by(email=email).first() if email else None
+    if not user:
+        return jsonify({"error": "unknown email"}), 404
+
+    def _cell(v):
+        if isinstance(v, (datetime, date)):
+            return v.isoformat()
+        return v
+
+    out = {}
+    for name in dir(_models):
+        model = getattr(_models, name)
+        if not (isinstance(model, type) and issubclass(model, db.Model)) or model is db.Model:
+            continue
+        if model.__name__ == "GarminTokens":
+            continue
+        cols = [c.key for c in _sa_inspect(model).columns]
+        if "user_id" not in cols:
+            continue
+        rows = model.query.filter_by(user_id=user.id).order_by(model.id).all()
+        out[model.__tablename__] = [{c: _cell(getattr(r, c)) for c in cols} for r in rows]
+    user_cols = [c.key for c in _sa_inspect(User).columns if c.key != "password_hash"]
+    return jsonify({
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user": {c: _cell(getattr(user, c)) for c in user_cols},
+        "tables": out,
+    })
+
+
 @app.route("/api/admin/debug/sql", methods=["POST"])
 @admin_required
 def api_admin_debug_sql():

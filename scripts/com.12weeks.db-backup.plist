@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Laptop-side daily Postgres backup (see scripts/db_backup.py).
+     Install:
+       cp scripts/com.12weeks.db-backup.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.12weeks.db-backup.plist
+     Remove:
+       launchctl bootout gui/$(id -u)/com.12weeks.db-backup
+       rm ~/Library/LaunchAgents/com.12weeks.db-backup.plist
+     Runs daily while the Mac is awake, and once at login/load (catch-up on wake). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.12weeks.db-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/erikbjohn/Documents/Github/12Weeks/venv/bin/python</string>
+    <string>/Users/erikbjohn/Documents/Github/12Weeks/scripts/db_backup.py</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>86400</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/erikbjohn/Library/Logs/12weeks-backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/erikbjohn/Library/Logs/12weeks-backup.log</string>
+</dict>
+</plist>
