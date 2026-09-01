@@ -4177,6 +4177,23 @@ def api_state():
     })
 
 
+def _start_date_locked(user_id, current_start):
+    """True once this block has logged work on/after its start_date (S039):
+    every block-scoped read — despike window, auto-complete gate, streak,
+    _current_week, Garmin week mapping, the block-3 curve — is keyed off
+    start_date, and nothing re-keys rows when it moves."""
+    if current_start is None:
+        return False
+    if SetLog.query.filter(SetLog.user_id == user_id, SetLog.logged_date >= current_start).first():
+        return True
+    if RunLog.query.filter(RunLog.user_id == user_id, RunLog.log_date >= current_start).first():
+        return True
+    if BodyWeight.query.filter(BodyWeight.user_id == user_id, BodyWeight.log_date >= current_start).first():
+        return True
+    return False
+
+
+
 @app.route("/api/state", methods=["POST"])
 @login_required
 def api_state_update():
@@ -4187,7 +4204,14 @@ def api_state_update():
     if "baseline_done" in data:
         s.baseline_done = data["baseline_done"]
     if "start_date" in data:
-        s.start_date = date.fromisoformat(data["start_date"]) if data["start_date"] else None
+        new_start = date.fromisoformat(data["start_date"]) if data["start_date"] else None
+        if new_start != s.start_date:
+            if _start_date_locked(current_user.id, s.start_date):
+                return jsonify({"error": "start_date is locked once the block has logged work; "
+                                         "use the admin block-transition path"}), 409
+            if new_start is not None and new_start.weekday() != 0:
+                return jsonify({"error": "start_date must be a Monday"}), 400
+        s.start_date = new_start
     if "traveling" in data:
         s.traveling = data["traveling"]
     try:
@@ -7052,11 +7076,16 @@ def api_completions():
 def api_toggle_exercise():
     data = request.get_json()
     w, d, e = data["week"], data["day_idx"], data["exercise_idx"]
+    # S033: an explicit `done` makes the call idempotent (apiPost's retry and
+    # the offline outbox can replay it); a legacy body without it still toggles.
+    desired = data.get("done")
     ec = ExerciseCompletion.query.filter_by(user_id=current_user.id, week=w, day_idx=d, exercise_idx=e).first()
     if ec:
-        ec.done = not ec.done
+        ec.done = bool(desired) if desired is not None else (not ec.done)
     else:
-        ec = ExerciseCompletion(week=w, day_idx=d, exercise_idx=e, done=True, user_id=current_user.id)
+        ec = ExerciseCompletion(week=w, day_idx=d, exercise_idx=e,
+                                done=bool(desired) if desired is not None else True,
+                                user_id=current_user.id)
         db.session.add(ec)
     try:
         db.session.commit()
@@ -7176,11 +7205,13 @@ def api_exercise_swap():
 def api_toggle_day():
     data = request.get_json()
     w, d = data["week"], data["day_idx"]
+    desired = data.get("done")  # S033: explicit state is idempotent under retry/replay
     dc = DayCompletion.query.filter_by(user_id=current_user.id, week=w, day_idx=d).first()
     if dc:
-        dc.done = not dc.done
+        dc.done = bool(desired) if desired is not None else (not dc.done)
     else:
-        dc = DayCompletion(week=w, day_idx=d, done=True, user_id=current_user.id)
+        dc = DayCompletion(week=w, day_idx=d, done=bool(desired) if desired is not None else True,
+                           user_id=current_user.id)
         db.session.add(dc)
     dc.source = "manual"
     # Stamp WHEN it was completed so a stale done-flag from a prior cycle can't
@@ -7675,11 +7706,19 @@ def api_import():
         s = _get_state()
         s.current_week = data["state"].get("current_week", s.current_week)
         s.baseline_done = data["state"].get("baseline_done", s.baseline_done)
+        warnings = []
         if data["state"].get("start_date"):
-            s.start_date = date.fromisoformat(data["state"]["start_date"])
+            imported = date.fromisoformat(data["state"]["start_date"])
+            if imported != s.start_date and _start_date_locked(current_user.id, s.start_date):
+                warnings.append("start_date not imported: this block has logged work (S039)")
+            else:
+                s.start_date = imported
 
     db.session.commit()
-    return jsonify({"ok": True})
+    out = {"ok": True}
+    if "state" in data and warnings:
+        out["warnings"] = warnings
+    return jsonify(out)
 
 
 # ─── PROGRESS CHARTS DATA ──────────────────────────────────────────────────

@@ -1909,7 +1909,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
       if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
       if (!_completionsCache.exercises) _completionsCache.exercises = {};
       _completionsCache.exercises[`${week}_${dayIdx}_${exIdx}`] = true;
-      apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx });
+      apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx, done: true });
       renderDetail();
     }
   }
@@ -2134,7 +2134,7 @@ function _hiitFinish() {
   if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
   _completionsCache.exercises = _completionsCache.exercises || {};
   _completionsCache.exercises[s.week + '_' + s.dayIdx + '_' + s.exIdx] = true;
-  apiPost('/api/completions/exercise', { week: s.week, day_idx: s.dayIdx, exercise_idx: s.exIdx });
+  apiPost('/api/completions/exercise', { week: s.week, day_idx: s.dayIdx, exercise_idx: s.exIdx, done: true });
   _hiitClose();
   if (typeof renderDetail === 'function') try { renderDetail(); } catch (e) {}
 }
@@ -5219,9 +5219,18 @@ function showStartDateSetting() {
   const current = _stateCache.start_date || '';
   const date = prompt('Enter program start date (YYYY-MM-DD):', current);
   if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    _stateCache.start_date = date;
-    apiPost('/api/state', { start_date: date });
-    // Recalculate current week
+    apiPost('/api/state', { start_date: date }).then(function(res) {
+      if (!res || !res.ok) {
+        // 409: locked once the block has logged work; 400: not a Monday
+        try { res.clone().json().then(function(j){ showToast(j.error || 'Start date not changed', 'error'); }); }
+        catch (e) { showToast('Start date not changed', 'error'); }
+        return;
+      }
+      _stateCache.start_date = date;
+      renderAll();
+    });
+    return;
+    // (unreachable legacy recompute kept for reference)
     const start = new Date(date);
     const now = new Date();
     const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
@@ -7674,12 +7683,14 @@ function toggleEx(week, dayIdx, exIdx) {
   if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
   if (!_completionsCache.exercises) _completionsCache.exercises = {};
   const key = week + '_' + dayIdx + '_' + exIdx;
+  var _exDone;
   if (_completionsCache.exercises[key]) {
-    delete _completionsCache.exercises[key];
+    delete _completionsCache.exercises[key]; _exDone = false;
   } else {
-    _completionsCache.exercises[key] = true;
+    _completionsCache.exercises[key] = true; _exDone = true;
   }
-  apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx });
+  // S033: send the intended state so a retried/replayed POST can't invert it
+  apiPost('/api/completions/exercise', { week, day_idx: dayIdx, exercise_idx: exIdx, done: _exDone });
   renderDetail();
 }
 
@@ -7693,12 +7704,13 @@ function toggleDay(week, dayIdx, e) {
   if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
   if (!_completionsCache.days) _completionsCache.days = {};
   const key = week + '_' + dayIdx;
+  var _dayDone;
   if (_completionsCache.days[key]) {
-    delete _completionsCache.days[key];
+    delete _completionsCache.days[key]; _dayDone = false;
   } else {
-    _completionsCache.days[key] = true;
+    _completionsCache.days[key] = true; _dayDone = true;
   }
-  apiPost('/api/completions/day', { week, day_idx: dayIdx });
+  apiPost('/api/completions/day', { week, day_idx: dayIdx, done: _dayDone });
   renderDayGrid();
 
   // If day just marked complete (not uncompleting), trigger coach feedback — once per session
@@ -12838,7 +12850,7 @@ async function completeWorkoutSession() {
 
   // Save duration to backend — await to ensure it lands before navigation
   await apiPost('/api/completions/day', {
-    week: currentWeek, day_idx: currentDay,
+    week: currentWeek, day_idx: currentDay, done: true,
     workout_started_at: _workoutStartTime,
     workout_ended_at: endTime,
     workout_duration_min: durationMin,
@@ -13260,7 +13272,7 @@ function logFocusSet() {
     if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
     if (!_completionsCache.exercises) _completionsCache.exercises = {};
     _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusRealExIdx}`] = true;
-    apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx });
+    apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx, done: true });
 
     // Skip RPE for warm-up exercises
     const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
@@ -13366,7 +13378,7 @@ function startTimedSet(seconds) {
         if (!_completionsCache) _completionsCache = { exercises: {}, days: {} };
         if (!_completionsCache.exercises) _completionsCache.exercises = {};
         _completionsCache.exercises[`${currentWeek}_${currentDay}_${_focusRealExIdx}`] = true;
-        apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx });
+        apiPost('/api/completions/exercise', { week: currentWeek, day_idx: currentDay, exercise_idx: _focusRealExIdx, done: true });
 
         // Skip RPE for warm-up exercises
         const currentEx = _workoutActive ? _workoutExercises[_workoutExIdx] : null;
