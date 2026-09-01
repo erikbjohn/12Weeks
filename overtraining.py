@@ -124,24 +124,20 @@ def assess_readiness(garmin_data):
     composite = round(composite)
 
     # Determine risk level
+    # S117: no canned prescriptions here ('Drop 1-2 sets or 10% weight',
+    # 'Stand down'). The program never silently cuts lifting; what to DO with
+    # a red morning is the coach's decision, made in the athlete's own data
+    # (CORE_PROMPT rule 24). This module reports numbers and flags only.
     if composite >= 65:
         risk_level = "low"
-        suggestion = "Green light. Hit it hard today."
-        ok = True
     elif composite >= 40:
         risk_level = "moderate"
-        suggestion = "Your body's talking — listen. Drop 1-2 sets or 10% weight. Form over ego today."
-        ok = True
     else:
         risk_level = "high"
-        suggestion = "Stand down. Walk, stretch, recover. Pushing through this is how you lose a week, not gain a day."
-        ok = False
 
     return {
         "risk_level": risk_level,
         "score": composite,
         "flags": flags,
-        "suggestion": suggestion,
-        "ok_to_train": ok,
         "metrics": {k: round(v) for k, v in scores.items()},
     }

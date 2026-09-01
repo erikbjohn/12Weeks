@@ -164,6 +164,9 @@ TOOLS: list[dict[str, Any]] = [
                                    "not fat. Saying 'hold the deficit' in prose does nothing.",
                 },
                 "note": {"type": "string", "description": "Short context for the event."},
+                "overwrite": {"type": "boolean",
+                              "description": "Only after the athlete confirms a different number than the "
+                                             "scale reading already logged for that date."},
             },
             "required": ["weight_lbs"],
         },
@@ -591,7 +594,8 @@ def _tool_get_protocol_status(user_id: int, days: int = 7) -> str:
 
 
 def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = None,
-                         event: str | None = None, note: str | None = None) -> str:
+                         event: str | None = None, note: str | None = None,
+                         overwrite: bool = False) -> str:
     from models import BodyWeight, db
     try:
         w = float(weight_lbs)
@@ -611,10 +615,18 @@ def _tool_log_bodyweight(user_id: int, weight_lbs: float, date: str | None = Non
     if event and event not in ("gluten", "sodium", "travel", "illness"):
         return json.dumps({"error": f"unknown event {event!r}"})
     row = BodyWeight.query.filter_by(user_id=user_id, log_date=d).first()
+    if row and (row.source or "strip") != "coach" and abs((row.weight_lbs or 0) - w) > 0.05 and not overwrite:
+        # S048: a scale reading already exists for that date — a chat number
+        # must not silently replace it. Ask, then call again with overwrite.
+        return json.dumps({"ok": False, "existing": {"date": d.isoformat(), "weight_lbs": row.weight_lbs,
+                                                      "source": row.source or "strip"},
+                           "hint": "a weigh-in is already logged for that date; confirm with the athlete "
+                                   "which number is right, then call again with overwrite=true"})
     if row:
         row.weight_lbs = w
+        row.source = "coach"
     else:
-        row = BodyWeight(log_date=d, weight_lbs=w, user_id=user_id)
+        row = BodyWeight(log_date=d, weight_lbs=w, user_id=user_id, source="coach")
         db.session.add(row)
     if event:
         row.event = event

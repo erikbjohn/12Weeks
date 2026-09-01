@@ -293,6 +293,10 @@ class BodyWeight(db.Model):
     # cut_guard treats a gluten event as an authoritative spike.
     event = db.Column(db.String(20), nullable=True)
     note = db.Column(db.Text, nullable=True)
+    # S048: who wrote it — 'strip' | 'coach' | 'assessment' | 'import' |
+    # 'admin' | 'transition' | 'goal' | 'carry'. The coach tool refuses to
+    # overwrite a scale reading without explicit confirmation.
+    source = db.Column(db.String(16), nullable=True)
     __table_args__ = (db.UniqueConstraint('user_id', 'log_date', name="uq_bodyweight_key"),)
 
 

@@ -10181,9 +10181,11 @@ function renderReadiness() {
     flagsHtml = `<div class="readiness-flags">${readinessData.flags.join(' &middot; ')}</div>`;
   }
 
+  // Data-only chips (S117): the score and the flags. The decision is the
+  // coach's, spoken in chat — never a static line in the coach's voice here.
   el.innerHTML = `<div class="readiness-inner">
     <span class="readiness-score">${readinessData.score}/100</span>
-    ${readinessData.suggestion}
+    Readiness ${escapeHtml(String(readinessData.risk_level || ''))}
     ${flagsHtml}
   </div>`;
 }

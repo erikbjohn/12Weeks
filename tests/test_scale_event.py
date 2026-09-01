@@ -59,3 +59,23 @@ def test_tool_and_marker_write_the_event(app_ctx):
     db.session.expire_all()
     r2 = BodyWeight.query.filter_by(user_id=u.id, log_date=date.fromisoformat(tomorrow)).first()
     assert r2 and r2.event == "sodium" and r2.weight_lbs == 204.2  # carried forward
+
+
+def test_coach_tool_does_not_overwrite_a_scale_reading_silently(app_ctx):
+    """S048: a chat number must not replace the strip's reading without
+    explicit confirmation (overwrite=True)."""
+    import json
+    from models import User, BodyWeight
+    from coach_tools import _tool_log_bodyweight
+    app_, db = app_ctx
+    u = User(email="bw-prov@test.com", password_hash="x"); db.session.add(u); db.session.commit()
+    db.session.add(BodyWeight(user_id=u.id, log_date=date(2026, 9, 1), weight_lbs=200.2, source="strip"))
+    db.session.commit()
+    with app_.test_request_context():
+        out = json.loads(_tool_log_bodyweight(u.id, 198.0, date="2026-09-01"))
+    assert out["ok"] is False and out["existing"]["weight_lbs"] == 200.2
+    with app_.test_request_context():
+        out = json.loads(_tool_log_bodyweight(u.id, 198.0, date="2026-09-01", overwrite=True))
+    assert out["ok"] is True
+    row = BodyWeight.query.filter_by(user_id=u.id, log_date=date(2026, 9, 1)).first()
+    assert row.weight_lbs == 198.0 and row.source == "coach"

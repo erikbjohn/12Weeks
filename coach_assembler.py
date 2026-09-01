@@ -2567,6 +2567,12 @@ def _format_athlete_data(ctx, requires):
         readiness_line = f"Readiness score: {r['score']}/100 ({r['risk_level']} risk)."
         if r.get("flags"):
             readiness_line += f" Flags: {', '.join(r['flags'])}."
+        if r.get("risk_level") == "high":
+            # S117: a red morning must become a DECISION, in the athlete's data,
+            # not a silent cut and not a canned 'stand down'.
+            readiness_line += (" HIGH RISK: lead with it. State the numbers, then decide out loud — "
+                               "trim RUNNING first (lifting is protected in the cut), name the exact change, "
+                               "and codify it with a marker. Never silently reduce lifting; never ignore it.")
         parts.append(readiness_line)
 
     # Wellness trend (RHR/HRV/sleep) — DB-derived, always present whenever

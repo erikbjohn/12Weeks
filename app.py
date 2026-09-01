@@ -335,6 +335,7 @@ with app.app_context():
         ("training_goal", "calorie_override", "JSON"),
         ("body_weight", "event", "VARCHAR(20)"),
         ("body_weight", "note", "TEXT"),
+        ("body_weight", "source", "VARCHAR(16)"),
         ("run_log", "max_hr", "INTEGER"),
         ("run_log", "activity_type", "VARCHAR(40)"),
         ("run_log", "activity_name", "TEXT"),
@@ -1110,7 +1111,7 @@ def _parse_coach_markers(text, user_id, week):
                         .order_by(BodyWeight.log_date.desc()).first())
                 if not prev:
                     raise ValueError("no prior weigh-in to attach the event to")
-                row = BodyWeight(user_id=user_id, log_date=d, weight_lbs=prev.weight_lbs)
+                row = BodyWeight(user_id=user_id, log_date=d, weight_lbs=prev.weight_lbs, source="carry")
                 db.session.add(row)
             row.event = kind
             if m.group(3):
@@ -7606,8 +7607,9 @@ def api_bodyweight_record():
     bw = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
     if bw:
         bw.weight_lbs = weight
+        bw.source = "strip"
     else:
-        bw = BodyWeight(log_date=d, weight_lbs=weight, user_id=current_user.id)
+        bw = BodyWeight(log_date=d, weight_lbs=weight, user_id=current_user.id, source="strip")
         db.session.add(bw)
     if "event" in data:
         bw.event = event
@@ -7932,7 +7934,7 @@ def api_import():
             d = date.fromisoformat(entry["date"])
             existing = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
             if not existing:
-                db.session.add(BodyWeight(log_date=d, weight_lbs=entry["weight"], user_id=current_user.id))
+                db.session.add(BodyWeight(log_date=d, weight_lbs=entry["weight"], user_id=current_user.id, source="import"))
 
     # Import state
     if "state" in data:
@@ -11220,7 +11222,7 @@ def _compute_goal_for_user(user, overrides=None):
     elif pa and pa.bodyweight_lbs:
         weight = pa.bodyweight_lbs
         # Sync to BodyWeight table so it's there for next time
-        db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=user.id))
+        db.session.add(BodyWeight(log_date=_user_today(), weight_lbs=weight, user_id=user.id, source="goal"))
         db.session.commit()
     elif existing_goal and existing_goal.target_weight:
         # Use a reasonable estimate from existing goal
@@ -12245,7 +12247,7 @@ def api_physical_assessment_save():
                 db.session.flush()  # flush PA changes first
                 bw_check = BodyWeight.query.filter_by(user_id=current_user.id, log_date=d).first()
                 if not bw_check:
-                    db.session.add(BodyWeight(log_date=d, weight_lbs=float(data["bodyweight"]), user_id=current_user.id))
+                    db.session.add(BodyWeight(log_date=d, weight_lbs=float(data["bodyweight"]), user_id=current_user.id, source="assessment"))
             except Exception:
                 db.session.rollback()
                 # Re-query PA after rollback
@@ -12447,7 +12449,7 @@ def api_admin_set_weight():
     if bw:
         bw.weight_lbs = float(weight)
     else:
-        db.session.add(BodyWeight(log_date=d, weight_lbs=float(weight), user_id=user.id))
+        db.session.add(BodyWeight(log_date=d, weight_lbs=float(weight), user_id=user.id, source="admin"))
 
     # 2. Save to PhysicalAssessment (weight + optional height)
     pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()

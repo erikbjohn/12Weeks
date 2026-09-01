@@ -445,7 +445,7 @@ def run_transition(user, anchor_weight, dry_run=False):
     # (i) Day-0 BodyWeight, only if none exists yet for today.
     existing_bw = BodyWeight.query.filter_by(user_id=user.id, log_date=TRANSITION_DATE).first()
     if not existing_bw:
-        db.session.add(BodyWeight(user_id=user.id, log_date=TRANSITION_DATE, weight_lbs=anchor_weight))
+        db.session.add(BodyWeight(user_id=user.id, log_date=TRANSITION_DATE, weight_lbs=anchor_weight, source="transition"))
 
     # (j) LabReminders.
     db.session.add(LabReminder(user_id=user.id, label=LAB_BASELINE_LABEL, due_date=TRANSITION_DATE))
