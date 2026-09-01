@@ -23,7 +23,10 @@ def _anthropic_client():
     import anthropic
     return anthropic.Anthropic(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        max_retries=3,
+        # S017: the executor waits ≤60-90 s; a hung call must die inside that,
+        # not retry 3× at the SDK's 600 s default and wedge the job.
+        max_retries=1,
+        timeout=75.0,
     )
 
 

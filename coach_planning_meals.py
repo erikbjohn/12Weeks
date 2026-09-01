@@ -24,7 +24,10 @@ def _anthropic_client():
     import anthropic
     return anthropic.Anthropic(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        max_retries=3,
+        # S017: the executor waits ≤60-90 s; a hung call must die inside that,
+        # not retry 3× at the SDK's 600 s default and wedge the job.
+        max_retries=1,
+        timeout=75.0,
     )
 
 
@@ -44,13 +47,16 @@ def _build_weight_trend_block(user_id: int, lookback_weeks: int = 6) -> str:
     return "\n".join(f"  {r.log_date}: {r.weight_lbs} lb" for r in rows[:14])
 
 
-def _build_recent_macros_block(user_id: int) -> str:
+def _build_recent_macros_block(user_id: int, week: int | None = None) -> str:
     """Last week's day_type pattern + targets — coach uses this to see
-    what's been working."""
+    what's been working. Bounded to this block's weeks: parked block-1/2
+    plans sit at weeks 13-36 in the same table and ordered DESC they were
+    the 'recent' plans (S010)."""
     from models import WeeklyMealPlan
-    rows = (WeeklyMealPlan.query
-            .filter(WeeklyMealPlan.user_id == user_id)
-            .order_by(WeeklyMealPlan.week.desc(), WeeklyMealPlan.day_idx)
+    q = WeeklyMealPlan.query.filter(WeeklyMealPlan.user_id == user_id)
+    if week:
+        q = q.filter(WeeklyMealPlan.week.between(max(1, week - 2), week))
+    rows = (q.order_by(WeeklyMealPlan.week.desc(), WeeklyMealPlan.day_idx)
             .limit(14).all())
     if not rows:
         return "(no recent meal plans)"
@@ -84,7 +90,7 @@ def generate_week_meals(
                         rationale}}
     """
     weight_block = _build_weight_trend_block(user_id)
-    macros_block = _build_recent_macros_block(user_id)
+    macros_block = _build_recent_macros_block(user_id, week)
 
     workout_lines = "\n".join(
         f"  {_DAY_NAMES[d]}: {pattern}"

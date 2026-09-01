@@ -1640,7 +1640,7 @@ def _reconcile_prescription_to_logged(user_id, exercise, logged_weight, from_wee
     rows = WeeklyPrescription.query.filter(
         WeeklyPrescription.user_id == user_id,
         WeeklyPrescription.exercise_name == exercise,
-        WeeklyPrescription.week >= from_week,
+        WeeklyPrescription.week.between(from_week, 12),  # never the parked blocks at 13-36
     ).all()
     for rx in rows:
         if _deload.is_deload_week(user_id, rx.week):  # coach-called deload weeks stay light
@@ -4733,6 +4733,9 @@ def _fill_missing_week_runs(user_id, target_week):
 # timeout before anything was written. We run it in a background thread, keyed
 # by (user_id, week), and the client polls /generate-status.
 _GEN_JOBS = {}
+# A 'running' job older than this is dead (S017: a hung coach call used to
+# wedge the (user, week) key in 'running' until the next deploy).
+GEN_JOB_STALE_S = 480
 _GEN_JOBS_LOCK = threading.Lock()
 # (user_id, week) -> latest human-readable progress line shown on the loading page
 _GEN_PROGRESS = {}
@@ -4756,6 +4759,9 @@ def api_weekly_program_generate_status():
         return jsonify({"status": "none"}), 400
     with _GEN_JOBS_LOCK:
         job = _GEN_JOBS.get((current_user.id, week))
+    if job and job.get("status") == "running" and \
+            time.time() - (job.get("started_at") or 0) > GEN_JOB_STALE_S:
+        job = None  # dead job: fall through to the persisted-program check
     if not job:
         # The in-process job store does NOT survive a worker restart (a deploy
         # mid-generation) or a multi-worker poll mismatch — but the generated
@@ -4885,8 +4891,11 @@ def api_generate_weekly_program():
     with _GEN_JOBS_LOCK:
         _job = _GEN_JOBS.get(_key)
         if _job and _job.get("status") == "running":
-            return jsonify({"status": "started", "week": target_week})
-        _GEN_JOBS[_key] = {"status": "running"}
+            _age = time.time() - (_job.get("started_at") or 0)
+            if _age < GEN_JOB_STALE_S:
+                return jsonify({"status": "started", "week": target_week})
+            logging.error("generate: stale running job for %s (%.0fs) — restarting", _key, _age)
+        _GEN_JOBS[_key] = {"status": "running", "started_at": time.time()}
 
     def _bg_generate():
         from flask_login import login_user
@@ -4929,7 +4938,7 @@ def admin_replan_week():
     uid = user.id
     key = (uid, week)
     with _GEN_JOBS_LOCK:
-        _GEN_JOBS[key] = {"status": "running"}
+        _GEN_JOBS[key] = {"status": "running", "started_at": time.time()}
 
     def _bg():
         from flask_login import login_user
@@ -6167,7 +6176,7 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
                     SetLog.user_id == current_user.id,
                     SetLog.exercise_name == exercise_name,
                     SetLog.weight > 0,
-                    SetLog.week >= max(1, target_week - 6),
+                    SetLog.week.between(max(1, target_week - 6), target_week),
                 ).scalar()
             except Exception:
                 _recent_top = None
@@ -13044,7 +13053,7 @@ def api_admin_heal_prescriptions():
         if w0 and w0 > 0:
             recent_top = db.session.query(db.func.max(SetLog.weight)).filter(
                 SetLog.user_id == u.id, SetLog.exercise_name == rx.exercise_name,
-                SetLog.weight > 0, SetLog.week >= max(1, rx.week - 6)).scalar()
+                SetLog.weight > 0, SetLog.week.between(max(1, rx.week - 6), rx.week)).scalar()
         proposed = w0
         neww = w0
         is_bb = _is_barbell_movement(rx.exercise_name)

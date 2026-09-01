@@ -58,7 +58,7 @@ _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday",
 
 def _anthropic_client():
     import anthropic
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=3)
+    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=1, timeout=75.0)
 
 
 def validate_program(parsed, catalog, available_equipment):
@@ -384,12 +384,26 @@ def enforce_safety(program, *, rest_day_idx, ceiling, history_exercises,
     return out, actions
 
 
+def _block_set_rows(user_id: int, week: int, lookback: int):
+    """Logged sets that are RECENT for `week`: weeks (week-lookback)..week AND
+    logged on/after this block's start_date. transition_block3 parked block-1
+    history at weeks 25-36 and block-2 at 13-18 in the SAME table; an
+    unbounded `week >= current-N` read those June rows as this block's recent
+    tops (S010): no movement was ever 'new', the jump cap anchored on June,
+    the nutritionist saw last block's meal plans."""
+    from models import SetLog, AppState
+    q = (SetLog.query
+         .filter(SetLog.user_id == user_id, SetLog.weight > 0)
+         .filter(SetLog.week.between(max(1, week - lookback), week)))
+    state = AppState.query.filter_by(user_id=user_id).first()
+    if state and state.start_date:
+        q = q.filter(SetLog.logged_date >= state.start_date)
+    return q
+
+
 def _history_block(user_id: int, current_week: int, lookback_weeks: int = 4) -> str:
     from models import SetLog
-    rows = (SetLog.query
-            .filter(SetLog.user_id == user_id)
-            .filter(SetLog.weight > 0)
-            .filter(SetLog.week >= max(1, current_week - lookback_weeks))
+    rows = (_block_set_rows(user_id, current_week, lookback_weeks)
             .order_by(SetLog.exercise_name, SetLog.logged_date.desc())
             .all())
     if not rows:
@@ -726,9 +740,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
     # Code-enforced safety rails — the prompt alone does not reliably hold them.
     from models import SetLog
     from workout_data import resolve_name
-    hist_rows = (SetLog.query
-                 .filter(SetLog.user_id == user_id, SetLog.weight > 0,
-                         SetLog.week >= max(1, week - 4)).all())
+    hist_rows = _block_set_rows(user_id, week, 4).all()
     hist_ex = {resolve_name(r.exercise_name) for r in hist_rows}
     hist_max = max([r.weight for r in hist_rows], default=0)
     hist_top = {}  # per-movement recent top set, for the jump cap
