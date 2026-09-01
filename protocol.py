@@ -533,7 +533,10 @@ def missed_line(dose_rows: list, today, rules: Optional[dict] = None) -> list[di
             if late_window_hours is not None and 0 <= hours_elapsed <= late_window_hours:
                 action = "taken_late"
             else:
-                action = "none"
+                # S061: nothing can be done about it any more — an unbounded
+                # list of 'confirm with your doctor' rows reached the card and
+                # every coach prompt forever. Only actionable misses are listed.
+                continue
 
         out.append({"date": r.date, "compound": r.compound, "rule": rule_text, "action": action})
 

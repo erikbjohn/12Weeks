@@ -304,3 +304,13 @@ class TestNutritionBmrLockoutMarkers:
             cm = CoachMemory.query.filter_by(user_id=u.id, memory_type="lockout_warning").first()
         assert cm is not None
         assert "skipped Monday workout" in cm.content
+
+
+def test_fast_day_marker_does_not_skip_the_workout(app_ctx, user_factory):
+    """S057: a NUTRITION fast-day call is a meal decision, never a schedule skip."""
+    app, db = app_ctx
+    from models import MealPlanOverride, WeeklyScheduleOverride
+    u = user_factory()
+    _parse(app, "[NUTRITION: day=2, meal_type=fast_day, reason=protocol]", u.id, week=3)
+    assert MealPlanOverride.query.filter_by(user_id=u.id, week=3, day_idx=2, meal_type="fast_day").first()
+    assert not WeeklyScheduleOverride.query.filter_by(user_id=u.id, week=3, day_idx=2, skip_day=True).first()

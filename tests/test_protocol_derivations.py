@@ -442,12 +442,14 @@ def test_missed_line_yesterday_is_retro_mark_regardless_of_window():
                      "rule": "confirm with your doctor", "action": "retro_mark"}]
 
 
-def test_missed_line_older_with_default_null_window_is_none():
+def test_missed_line_older_with_default_null_window_is_omitted():
+    """S061: a miss nothing can be done about is not listed (it used to
+    accumulate as an unbounded 'confirm with your doctor' nag)."""
     from protocol import missed_line
     today = date(2026, 9, 10)
     rows = [Row(date=date(2026, 9, 7), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
     out = missed_line(rows, today)
-    assert out[0]["action"] == "none"
+    assert out == []
 
 
 def test_missed_line_older_within_override_window_is_taken_late():
@@ -459,13 +461,13 @@ def test_missed_line_older_within_override_window_is_taken_late():
     assert out[0]["action"] == "taken_late"
 
 
-def test_missed_line_older_outside_override_window_is_none():
+def test_missed_line_older_outside_override_window_is_omitted():
     from protocol import missed_line
     today = date(2026, 9, 1)
     rows = [Row(date=date(2026, 8, 20), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
     custom_rules = {"BPC-157": {"missed_dose_rule": "confirm with your doctor", "late_window_hours": 96}}
     out = missed_line(rows, today, rules=custom_rules)
-    assert out[0]["action"] == "none"
+    assert out == []
 
 
 def test_missed_line_excludes_taken_and_not_yet_due_rows():

@@ -113,8 +113,10 @@ def _is_deload(week):
 
 
 def _is_peak_week(week):
-    """Week 12 = peak finish (mini-taper, scale+look). HOLD everything."""
-    return week == 12
+    """2026-08-30: no week-12 hold. Phase 3 is progressive to the end
+    (feedback_sawtooth_volume); a taper, if any, is the coach's call via
+    the deload flag. This engine-era helper never claims one by number."""
+    return False
 
 
 def _get_progression_increment(exercise_name, is_weak):

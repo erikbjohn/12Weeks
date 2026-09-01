@@ -923,14 +923,10 @@ def _parse_coach_markers(text, user_id, week):
                 existing.reason = reason
             else:
                 db.session.add(MealPlanOverride(user_id=user_id, week=week, day_idx=day_idx, meal_type=meal_type, reason=reason))
-            # If it's a fast day, also skip the workout for that day
-            if meal_type == 'fast_day':
-                sched = WeeklyScheduleOverride.query.filter_by(user_id=user_id, week=week, day_idx=day_idx).first()
-                if sched:
-                    sched.skip_day = True
-                    sched.notes = 'Fast day \u2014 no workout'
-                else:
-                    db.session.add(WeeklyScheduleOverride(user_id=user_id, week=week, day_idx=day_idx, skip_day=True, notes='Fast day \u2014 no workout'))
+            # S057: a fast day is a NUTRITION decision. It no longer skips the
+            # workout as a side effect (the client's skip branch blanked the
+            # whole day — run, protocol and all). A real skip is an explicit
+            # [SCHEDULE]/[DAY_SCHEDULE] decision.
             db.session.commit()
         except Exception as _me:
             logging.exception("Coach NUTRITION (meal_type) marker failed")

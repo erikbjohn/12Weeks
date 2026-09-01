@@ -10203,17 +10203,24 @@ function renderTodayNav() {
     </button>`;
   }).join('');
 
-  const info = weekData.phaseInfo || {};
   const isDeload = !!weekData.deload;
+  // S084: no static block-1 phase text ("Hypertrophy base … 400-500 kcal
+  // below TDEE") under the nav. Show served facts for the SELECTED day:
+  // today's meal target and the day's run. Block 3 has no phase semantics.
+  const selDay = (weekData.days || [])[currentDay] || {};
+  const bits = [];
+  if (selDay.mealPlan && selDay.mealPlan.targetCal) bits.push(selDay.mealPlan.targetCal + ' kcal');
+  if (selDay.run && selDay.runStatus !== 'unplanned' && selDay.run.label) bits.push(selDay.run.label + ' ' + (selDay.run.time || ''));
+  const focusLine = bits.length ? bits.join(' &middot; ') : 'Week ' + currentWeek + ' of 12';
 
   el.innerHTML = `
     <div class="tn-week-row">
       <button class="tn-week-arrow" onclick="setWeek(Math.max(1, currentWeek-1))">&lsaquo;</button>
-      <span class="tn-week-label">Week ${currentWeek}${isDeload ? ' &middot; Deload' : ''} &middot; Phase ${weekData.phase}</span>
+      <span class="tn-week-label">Week ${currentWeek} of 12${isDeload ? ' &middot; Deload' : ''}</span>
       <button class="tn-week-arrow" onclick="setWeek(Math.min(12, currentWeek+1))">&rsaquo;</button>
     </div>
     <div class="tn-days">${dayBtns}</div>
-    <div class="tn-focus">${info.focus || ''} &middot; ${info.deficit || ''}</div>
+    <div class="tn-focus" style="font-size:14px;color:var(--muted)">${focusLine}</div>
   `;
 }
 
@@ -10311,12 +10318,10 @@ function renderPhaseNav() {
 }
 
 function renderPhaseBanner() {
-  const weekData = workoutData[String(currentWeek)];
-  if (!weekData) return;
-  const info = weekData.phaseInfo;
-  if (!info) return;
+  // S084: the static PHASES narrative is never rendered (block 3 is
+  // coach-designed weekly; the banner element stays hidden).
   const el = document.getElementById('phase-banner');
-  el.innerHTML = `Focus: <span>${info.focus}</span> Lifting: <span>${info.lifting}</span> Deficit: <span>${info.deficit}</span> Protein: <span>${info.protein}</span>`;
+  if (el) el.style.display = 'none';
 }
 
 function renderWeekTabs() {
@@ -11480,6 +11485,9 @@ function buildProtocolContent(p) {
   return html;
 }
 
+var _protocolCache = {};
+function invalidateProtocolCache() { _protocolCache = {}; }
+
 async function toggleDose(id, currentlyTaken) {
   if (_doseSaving[id]) return;
   _doseSaving[id] = true;
@@ -11488,6 +11496,7 @@ async function toggleDose(id, currentlyTaken) {
   } finally {
     delete _doseSaving[id];
   }
+  invalidateProtocolCache();
   renderDetail();
 }
 
@@ -11504,6 +11513,7 @@ async function markDoseLate(id) {
       } catch(e) {}
       showToast(msg, 'error');
     }
+    invalidateProtocolCache();
   } finally {
     delete _doseSaving[id];
   }
@@ -12065,16 +12075,9 @@ async function renderDetail() {
 
   // Check for schedule override — skip day shows rest message
   var schedOverride = _scheduleOverrides.find(function(o) { return o.day_idx === currentDay; });
-  if (schedOverride && schedOverride.skip_day) {
-    panel.innerHTML = '<div class="detail-inner" style="padding:2rem;text-align:center">' +
-        '<div style="font-size:48px;margin-bottom:1rem">&#128524;</div>' +
-        '<h3 style="color:var(--text);margin-bottom:0.5rem">Rest Day</h3>' +
-        '<div style="color:var(--muted);font-size:14px;margin-bottom:8px">Coach adjusted — take it easy today.</div>' +
-        (schedOverride.notes ? '<div style="color:var(--coach);font-size:13px">' + schedOverride.notes + '</div>' : '') +
-    '</div>';
-    panel.classList.add('visible');
-    return;
-  }
+  // S057: a coach-skipped day keeps its run, food and protocol sections —
+  // only the lifts are suppressed (banner below). No early return.
+  var _skipDay = !!(schedOverride && schedOverride.skip_day);
 
   // Load exercise swaps BEFORE sets — set lookup needs the swapped names
   if (!_exerciseSwapsLoaded) {
@@ -12150,8 +12153,14 @@ async function renderDetail() {
     const _vd = new Date();
     _vd.setDate(_vd.getDate() + _wkDelta * 7 + _dayDelta);
     const _iso = _vd.getFullYear() + '-' + String(_vd.getMonth() + 1).padStart(2, '0') + '-' + String(_vd.getDate()).padStart(2, '0');
-    const pr = await fetch('/api/protocol/today?date=' + _iso);
-    if (pr.ok) _protocolToday = await pr.json();
+    // S051: cached per date — renderDetail used to await this on EVERY
+    // render (each set check, meal toggle, swipe). Dose writes invalidate.
+    if (_protocolCache[_iso]) {
+      _protocolToday = _protocolCache[_iso];
+    } else {
+      const pr = await fetch('/api/protocol/today?date=' + _iso);
+      if (pr.ok) { _protocolToday = await pr.json(); _protocolCache[_iso] = _protocolToday; }
+    }
   } catch(e) {}
 
   // If traveling, try to load travel workout
@@ -12521,10 +12530,19 @@ async function renderDetail() {
         ${(d.run && d.runStatus !== 'unplanned') ? `<span class="meta-chip ${runClass}">${d.run.label} &middot; ${d.run.time}</span>` : `<span class="meta-chip run-unplanned">&#9888; Run not planned</span>`}
       </div>
     </div>
+    ${_skipDay ? '<div class="skip-banner" style="margin:8px 0 12px;padding:12px;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:14px">&#128524; <b style="color:var(--text)">No lifting today — coach adjusted.</b>' + (schedOverride.notes ? '<div style="color:var(--coach);font-size:13px;margin-top:4px">' + escapeHtml(schedOverride.notes) + '</div>' : '') + '</div>' : ''}
     ${renderAccordion('coach', 'Coach', buildCoachContent(d), true)}
-    ${renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
+    ${_skipDay ? renderAccordion('exercise', 'Run', buildExerciseContent(Object.assign({}, d, {isRest: true, exercises: []}), [], '', '', runClass, isTraveling), true)
+               : renderAccordion('exercise', exerciseLabel, buildExerciseContent(d, displayExercises, exRows, bwToggleHtml, runClass, isTraveling), true)}
     ${renderAccordion('food', 'Food', buildFoodContent(d), false)}
-    ${_protocolToday && _protocolToday.doses.length ? renderAccordion('protocol', 'Protocol', buildProtocolContent(_protocolToday), false) : ''}
+    ${_protocolToday && _protocolToday.doses.length ? (function() {
+        var total = _protocolToday.doses.length;
+        var taken = _protocolToday.doses.filter(function(x) { return x.taken; }).length;
+        var untaken = total - taken;
+        var title = 'Protocol' + (untaken ? ' &middot; ' + taken + '/' + total + ' taken' : ' &middot; done');
+        // S051: open by default while today's doses are still owed
+        return renderAccordion('protocol', title, buildProtocolContent(_protocolToday), _protocolToday.is_today !== false && untaken > 0);
+      })() : ''}
     ${renderAccordion('stats', 'Stats', buildStatsContent(d, weightSummaryHtml, garminStatsHtml, timingRows, currentDay), false)}
   </div>`;
 
