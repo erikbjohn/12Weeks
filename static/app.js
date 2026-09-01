@@ -10254,11 +10254,18 @@ function buildCoachContent(d) {
     // browsed — browsing week 11 on Sunday must not offer "Plan Week 12".
     var _nextWk = (getActualProgramWeek() || currentWeek) + 1;
     var _nextWkData = workoutData && workoutData[String(_nextWk)];
+    // "Planned" = lifts AND runs both present (S028): meals commit before
+    // runs, so keying on mealPlan hid the button on a half-written week.
     var _nextWkPlanned = false;
     if (_nextWkData && _nextWkData.days) {
-      for (var _ndi = 0; _ndi < _nextWkData.days.length && !_nextWkPlanned; _ndi++) {
-        if (_nextWkData.days[_ndi] && _nextWkData.days[_ndi].mealPlan) _nextWkPlanned = true;
+      var _hasLift = false, _hasRun = false;
+      for (var _ndi = 0; _ndi < _nextWkData.days.length; _ndi++) {
+        var _nd = _nextWkData.days[_ndi];
+        if (!_nd) continue;
+        if ((_nd.exercises || []).length && _nd.liftStatus !== 'unplanned') _hasLift = true;
+        if (_nd.run && _nd.runStatus !== 'unplanned') _hasRun = true;
       }
+      _nextWkPlanned = _hasLift && _hasRun;
     }
     html += '<button class="btn btn-primary" style="width:100%;font-size:15px;padding:12px" onclick="openInlineCoachChat()">Talk to Erik</button>';
     if (_isSunOrMon && !_nextWkPlanned && _nextWk <= 12) {
@@ -10302,6 +10309,7 @@ async function launchWeeklyPlanning(weekOverride) {
             if (progRes.ok) {
                 var _pd = await progRes.json();
                 if (_pd && _pd.status === 'started') {
+                    var _finishPosted = false;
                     // Heavy coach generation runs server-side in the background
                     // (so the request can't 502 on the ~25s edge timeout). Poll
                     // for the result — it normally lands in 30-60s.
@@ -10313,6 +10321,15 @@ async function launchWeeklyPlanning(weekOverride) {
                             var _stj = await _st.json();
                             if (_stj.status === 'done') { programData = _stj; break; }
                             if (_stj.status === 'error') { programData = null; break; }
+                            if (_stj.status === 'partial' && !_finishPosted) {
+                                // S028: lifts landed but runs/schedule didn't (worker died
+                                // between commits). A non-force re-POST fills the gaps in
+                                // the background — keep polling.
+                                _finishPosted = true;
+                                container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)">Finishing Week ' + nextWeek + ' — planning the runs…</div>';
+                                try { await fetch('/api/weekly-program/generate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ week: nextWeek }) }); } catch(e) {}
+                                continue;
+                            }
                             // Show what the coaches are actually doing on the load page.
                             if (_stj.status === 'running' && _stj.progress) {
                                 container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--muted)">'
@@ -10340,7 +10357,7 @@ async function launchWeeklyPlanning(weekOverride) {
             var _rec = await fetch('/api/weekly-program/generate-status?week=' + nextWeek);
             if (_rec.ok) {
                 var _recj = await _rec.json();
-                if (_recj && _recj.status === 'done' && _recj.program) programData = _recj;
+                if (_recj && (_recj.status === 'done' || _recj.status === 'partial') && _recj.program) programData = _recj;
             }
         } catch(e) {}
     }

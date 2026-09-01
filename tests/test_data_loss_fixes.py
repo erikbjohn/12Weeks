@@ -226,7 +226,8 @@ def test_generate_status_poll_is_a_pure_read(gen_ctx, monkeypatch):
 
     j = client.get(
         f"/api/weekly-program/generate-status?week={week}").get_json()
-    assert j["status"] == "done", j
+    # lifts with no runs = a partial week (S028); the program still comes back
+    assert j["status"] in ("done", "partial"), j
     assert j.get("program"), j
 
     with app.app_context():

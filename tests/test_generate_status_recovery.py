@@ -65,5 +65,8 @@ def test_status_falls_back_to_persisted_program_when_job_lost(app_ctx):
         db.session.commit()
 
     j = client.get("/api/weekly-program/generate-status?week=11").get_json()
-    assert j["status"] == "done", j
+    # lifts persisted, no runs: reported as PARTIAL naming the gap (S028) —
+    # never a dead "done · recovered" that hides the finish button.
+    assert j["status"] == "partial", j
+    assert "run" in j.get("missing_domains", []), j
     assert j.get("program"), j

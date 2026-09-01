@@ -4877,6 +4877,18 @@ def api_weekly_program_generate_status():
                     week, False, None, {}, inline_llm=False) or {})
                 out["status"] = "done"
                 out["recovered"] = True
+                # S028: a worker death between per-domain commits leaves coach
+                # lifts with no runs/schedule. Say so, and name what's missing,
+                # so the client can offer "Finish planning" instead of a dead
+                # 'done · recovered'.
+                _missing = []
+                if not WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).first():
+                    _missing.append("run")
+                if not WeeklyDaySchedule.query.filter_by(user_id=current_user.id, week=week).first():
+                    _missing.append("schedule")
+                if _missing:
+                    out["status"] = "partial"
+                    out["missing_domains"] = _missing
                 return jsonify(out)
         except Exception:
             pass
@@ -6190,10 +6202,15 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
     # coach produced nothing (LLM outage, timeout), the existing plan is KEPT
     # and the failure is surfaced instead of leaving the week empty.
     if force_regen:
-        if any(_coach_program.get(_d) for _d in range(7)):
+        _coach_days = [_d for _d in range(7) if _coach_program.get(_d)]
+        if _coach_days:
+            # Day-granular swap (S024): only days the coach actually returned
+            # are replaced; a day it omitted keeps its previous plan and is
+            # reported as such instead of being wiped.
             _future_only(WeeklyPrescription.query.filter_by(
                 user_id=current_user.id, week=target_week,
-            ).filter(WeeklyPrescription.source.in_(('coach', 'engine'))),
+            ).filter(WeeklyPrescription.source.in_(('coach', 'engine')))
+             .filter(WeeklyPrescription.day_idx.in_(_coach_days)),
                 WeeklyPrescription).delete(synchronize_session=False)
         elif WeeklyPrescription.query.filter_by(
                 user_id=current_user.id, week=target_week, source='coach').first():
@@ -6207,8 +6224,12 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         items = _coach_program.get(day_idx) or []
         if not items:
             # FAIL LOUD: the program coach designed nothing for this day (and
-            # there is NO template fallback). Surface it; UI shows "not planned".
-            coach_failures.append({"domain": "lift", "day": day_idx})
+            # there is NO template fallback). Surface it; UI shows "not planned"
+            # — unless a previous plan for the day survived the swap.
+            _kept = force_regen and WeeklyPrescription.query.filter_by(
+                user_id=current_user.id, week=target_week, day_idx=day_idx, source='coach').first()
+            coach_failures.append({"domain": "lift", "day": day_idx,
+                                   **({"reason": "coach omitted the day — previous plan kept"} if _kept else {})})
             continue
         for order, _it in enumerate(items):
             exercise_name = _it["exercise"]
@@ -6651,8 +6672,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             })
 
         db.session.commit()
-    except Exception:
+    except Exception as _we:
         db.session.rollback()
+        # S024: a DB error here used to throw away the coach's whole
+        # meal week in silence — surface it like any other coach failure.
+        logging.exception("week %s meal block failed", target_week)
+        coach_failures.append({"domain": "meal", "day": None,
+                               "reason": f"db write failed: {str(_we)[:160]}"})
 
     # --- RUN PLAN GENERATION ---
     run_summary = []
@@ -6675,6 +6701,9 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             user_id=current_user.id, week=target_week)
         if not (force_regen and _coach_runs):
             _run_del_q = _run_del_q.filter(WeeklyRunPlan.source != 'coach')
+        else:
+            # Day-granular (S024): a day the running coach omitted keeps its run.
+            _run_del_q = _run_del_q.filter(WeeklyRunPlan.day_idx.in_(list(_coach_runs.keys())))
         _future_only(_run_del_q, WeeklyRunPlan).delete(synchronize_session=False)
 
         for day_idx in range(7):
@@ -6721,8 +6750,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             })
 
         db.session.commit()
-    except Exception:
+    except Exception as _we:
         db.session.rollback()
+        # S024: a DB error here used to throw away the coach's whole
+        # run week in silence — surface it like any other coach failure.
+        logging.exception("week %s run block failed", target_week)
+        coach_failures.append({"domain": "run", "day": None,
+                               "reason": f"db write failed: {str(_we)[:160]}"})
 
     # --- WARMUP GENERATION ---
     try:
@@ -6786,8 +6820,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             ))
 
         db.session.commit()
-    except Exception:
+    except Exception as _we:
         db.session.rollback()
+        # S024: a DB error here used to throw away the coach's whole
+        # warmup week in silence — surface it like any other coach failure.
+        logging.exception("week %s warmup block failed", target_week)
+        coach_failures.append({"domain": "warmup", "day": None,
+                               "reason": f"db write failed: {str(_we)[:160]}"})
 
     # --- DAY SCHEDULE SEEDING ---
     schedule_summary = []
@@ -6847,8 +6886,13 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
             _deload.persist_deload_decision(current_user.id, target_week, _deload_decision)
         except Exception:
             logging.exception("persisting the deload decision failed")
-    except Exception:
+    except Exception as _we:
         db.session.rollback()
+        # S024: a DB error here used to throw away the coach's whole
+        # schedule week in silence — surface it like any other coach failure.
+        logging.exception("week %s schedule block failed", target_week)
+        coach_failures.append({"domain": "schedule", "day": None,
+                               "reason": f"db write failed: {str(_we)[:160]}"})
 
     # Calorie recalibration info for the coach
     calorie_change = None
