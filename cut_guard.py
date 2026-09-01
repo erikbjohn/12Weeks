@@ -21,36 +21,62 @@ Passing 0.0 (the default) reproduces the original, unadjusted rule exactly.
 """
 
 
+SPIKE_WINDOW_DAYS = 14   # a glutening parks water for a week-plus; beyond this it's real
+SPIKE_CLEAR_TOLERANCE_LB = 1.0  # back within this of the baseline trend = flushed
+SPIKE_MAX_GAP_DAYS = 10
+
+
 def detect_water_spike(rows, expected_weekly_loss=0.0):
     """rows: newest-first, objects with `.log_date` (date) and `.weight_lbs`
-    (float). Only the first three rows matter (latest / prior / before) — the
-    minimum needed to confirm "a jump on top of a downtrend".
+    (float). Pass up to ~20 rows: the spike is a DURABLE state derived from
+    the trailing SPIKE_WINDOW_DAYS, not a property of the last three rows.
+
+    Before 2026-09-01 only latest/prior/before were examined, so at Block 3's
+    daily weigh-in cadence a parked +6 lb read as spiked for exactly ONE
+    morning; days 2..8 of the flush showed 'behind' on every surface (S002 —
+    the block-1 failure verbatim). With three rows this function behaves
+    exactly as it always did, so weekly-cadence callers are unchanged.
 
     expected_weekly_loss: the slope (lb/week) the cut is expected to be
-    losing at, e.g. `goal_engine.BLOCK3_WEEKLY_RATES[week]`. Used to adjust
-    the observed step so an active cut's own loss doesn't mask a real spike.
-    0.0 reproduces today's unadjusted behavior exactly.
+    losing at. Adjusts each observed step so an active cut's own loss doesn't
+    mask a real spike, and carries the baseline forward along the curve while
+    the spike persists (so a 10-day flush doesn't freeze the anchor).
 
     Returns (weight_to_anchor_on, spiked: bool):
-      - spiked False: weight_to_anchor_on is the latest logged weight (or
-        None if there are no rows at all — nothing to anchor on).
-      - spiked True: weight_to_anchor_on is the PRIOR (pre-spike) weight —
-        the de-spiked anchor for cut math.
+      - spiked False: latest logged weight (None with no rows).
+      - spiked True: the pre-spike BASELINE carried forward along the
+        expected-loss slope to the latest date — the de-spiked anchor.
     """
     if len(rows) < 3:
         return (rows[0].weight_lbs if rows else None), False
-
-    latest, prior, before = rows[0], rows[1], rows[2]
-    if prior.weight_lbs is None or before.weight_lbs is None:
+    latest = rows[0]
+    rows = [r for r in rows if r.weight_lbs is not None]
+    if len(rows) < 3:
         return latest.weight_lbs, False
 
-    step = latest.weight_lbs - prior.weight_lbs
-    step_days = (latest.log_date - prior.log_date).days
-    prior_down = prior.weight_lbs < before.weight_lbs
-    adjusted_step = step + expected_weekly_loss * (step_days / 7)
-
-    if 3 <= adjusted_step <= 8 and prior_down and 0 < step_days <= 10:
-        return prior.weight_lbs, True
+    # Most recent jump inside the window: rows[i] is the first spiked reading,
+    # rows[i+1] the baseline it jumped from.
+    for i in range(len(rows) - 2):
+        newer, base = rows[i], rows[i + 1]
+        if (latest.log_date - base.log_date).days > SPIKE_WINDOW_DAYS:
+            break
+        step_days = (newer.log_date - base.log_date).days
+        if not (0 < step_days <= SPIKE_MAX_GAP_DAYS):
+            continue
+        adjusted = (newer.weight_lbs - base.weight_lbs) + expected_weekly_loss * (step_days / 7)
+        if not (3 <= adjusted <= 8):
+            continue
+        # The baseline must sit on a downtrend: lower than the readings just
+        # before it (one row at weekly cadence == the original prior_down;
+        # up to three at daily cadence, so one flat morning doesn't veto it).
+        before = [r.weight_lbs for r in rows[i + 2:i + 5]]
+        if not before or not base.weight_lbs < max(before):
+            continue
+        days_since_base = (latest.log_date - base.log_date).days
+        baseline_trend = base.weight_lbs - expected_weekly_loss * (days_since_base / 7)
+        if latest.weight_lbs > baseline_trend + SPIKE_CLEAR_TOLERANCE_LB:
+            return baseline_trend, True
+        return latest.weight_lbs, False  # jumped, then flushed back to trend
     return latest.weight_lbs, False
 
 
@@ -127,7 +153,7 @@ def expected_weekly_loss_for(user_id, week):
 
 def despiked_weight_for_week(user_id, week):
     """(weight_to_anchor_on, spiked: bool) for `user_id` — the SAME
-    block-scoped (>= AppState.start_date), newest-first-limit-3 query
+    block-scoped (>= AppState.start_date), newest-first-limit-20 query
     app._despiked_current_weight and coach_assembler._build_cut_status
     already run, reused here so weekly_report's block-3 judgment (I-3)
     can't drift from either badge's despike verdict. `week` feeds
@@ -141,6 +167,6 @@ def despiked_weight_for_week(user_id, week):
          .filter(BodyWeight.weight_lbs.isnot(None)))
     if block_start is not None:
         q = q.filter(BodyWeight.log_date >= block_start)
-    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(3).all()
+    rows = q.order_by(BodyWeight.log_date.desc(), BodyWeight.id.desc()).limit(20).all()
     expected_loss = expected_weekly_loss_for(user_id, week)
     return detect_water_spike(rows, expected_loss)

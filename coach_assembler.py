@@ -882,7 +882,7 @@ def _build_cut_status():
         import cut_guard
         expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
         _, water_spike_suspected = cut_guard.detect_water_spike(
-            list(reversed(bws[-3:])), expected_loss)
+            list(reversed(bws[-20:])), expected_loss)
 
     # Latest weigh-in note (e.g. "glutened at dinner") — surfaces context the coach
     # would otherwise never see.
@@ -958,7 +958,7 @@ def _build_cut_status():
             from goal_engine import curve_value, pace_status
             _expected_loss = cut_guard.expected_weekly_loss_for(current_user.id, _current_week())
             _curve_weight, _ = cut_guard.detect_water_spike(
-                list(reversed(bws))[:3], _expected_loss)
+                list(reversed(bws))[:20], _expected_loss)
             if _curve_weight is not None:
                 curve_target_today = curve_value(_anchor, _block3_start, today)
                 on_curve = pace_status(_curve_weight, _anchor, _block3_start, today)

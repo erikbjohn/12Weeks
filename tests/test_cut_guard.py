@@ -88,7 +88,9 @@ def test_attenuation_case_fires_with_block3_slope_but_not_at_slope0():
     # Slope-adjusted: adjusted = 1.6 + 2.5*(10/7) = 5.1714... -> FIRES.
     wt, spiked = detect_water_spike(rows, expected_weekly_loss=2.5)
     assert spiked is True
-    assert wt == 206.0
+    # Anchor = baseline carried 10 days down the 2.5 lb/wk curve, not the raw
+    # 206: the cut kept going underneath the water.
+    assert wt == pytest.approx(206.0 - 2.5 * 10 / 7)
 
 
 # ---- (c) 0/1/2-row degradation ---------------------------------------------------
@@ -227,3 +229,55 @@ def test_both_call_sites_agree_on_clean_loss(app_ctx, clean_projection_flag, mon
 
     assert app_spiked is False
     assert cs["water_spike_suspected"] == app_spiked
+
+
+# ---- (d) S002: daily cadence — the spike must HOLD through the flush ----------------
+
+def _daily_series(spike_days, flush=False):
+    """Newest-first daily rows: 10 on-curve days at 2.5 lb/wk, then +6 lb parked
+    for `spike_days`, optionally one flushed morning back on the curve."""
+    rate = 2.5 / 7
+    seq = []  # oldest-first (days_ago, weight)
+    day = 0
+    w = 212.0
+    for _ in range(10):
+        seq.append((day, round(w, 2))); day += 1; w -= rate
+    for _ in range(spike_days):
+        seq.append((day, round(w + 6.0, 2))); day += 1; w -= rate
+    if flush:
+        seq.append((day, round(w, 2))); day += 1
+    total = day - 1
+    return _rows(*[(total - d, wt) for d, wt in reversed(seq)])
+
+
+@pytest.mark.parametrize("spike_days", [1, 2, 4, 7])
+def test_daily_cadence_spike_holds_every_day_of_the_flush(spike_days):
+    from cut_guard import detect_water_spike
+    rows = _daily_series(spike_days)
+    wt, spiked = detect_water_spike(rows, expected_weekly_loss=2.5)
+    assert spiked is True, f"day {spike_days} of the spike read as real weight"
+    # anchor tracks the curve underneath the water, never the spiked reading
+    assert wt < rows[0].weight_lbs - 4.5
+
+
+def test_daily_cadence_spike_clears_when_weight_returns_to_trend():
+    from cut_guard import detect_water_spike
+    rows = _daily_series(5, flush=True)
+    wt, spiked = detect_water_spike(rows, expected_weekly_loss=2.5)
+    assert spiked is False
+    assert wt == rows[0].weight_lbs
+
+
+def test_daily_cadence_spike_expires_after_window():
+    """A 'spike' still parked after 14+ days is real weight, not water."""
+    from cut_guard import detect_water_spike
+    rows = _daily_series(16)
+    _, spiked = detect_water_spike(rows, expected_weekly_loss=2.5)
+    assert spiked is False
+
+
+def test_three_row_callers_keep_legacy_behavior():
+    """Anything still passing only 3 rows gets the original rule."""
+    from cut_guard import detect_water_spike
+    assert detect_water_spike(_rows((0, 212.0), (7, 206.0), (14, 208.0)))[1] is True
+    assert detect_water_spike(_rows((0, 212.0), (7, 206.0), (14, 204.0)))[1] is False
