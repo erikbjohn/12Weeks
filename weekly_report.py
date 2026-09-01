@@ -59,10 +59,25 @@ def compute_weekly_metrics(week_num, user_id=None):
     )
 
     today = date.today()
-    # Approximate week boundaries (week_num weeks ago from program start)
-    # For simplicity, use the last 7 days ending today (for current week)
-    week_end = today
-    week_start = today - timedelta(days=6)
+    # S064: the window is the PROGRAM week (start_date + 7*(week_num-1) .. +6),
+    # clamped at today for the current week — never "the last 7 calendar
+    # days ending on the server's UTC today", which made a report for week
+    # 3 run in week 9 describe week 9, and made hand-seeded tests expire.
+    week_start = None
+    if user_id is not None:
+        try:
+            from models import AppState
+            from program_calendar import day_date
+            _st = AppState.query.filter_by(user_id=user_id).first()
+            if _st and _st.start_date:
+                week_start = day_date(_st.start_date, week_num, 0)
+        except Exception:
+            week_start = None
+    if week_start is None:
+        week_end = today
+        week_start = today - timedelta(days=6)
+    else:
+        week_end = min(week_start + timedelta(days=6), today)
 
     # Workouts completed — EVIDENCE-based and block-scoped (S076), the same
     # definition as the dashboard streak (toggle OR all sets OR a run on a

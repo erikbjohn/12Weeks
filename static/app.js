@@ -11015,13 +11015,21 @@ async function sendInlineCoachMsg() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
     try {
+        var fullText = '';
+        // S129: a bare confirmation ("yes", "next", "looks good") during the
+        // walkthrough is deterministic — the app advances the day itself and
+        // the follow-up trigger asks about the new day. Paying a full Opus
+        // tool-loop turn for the reply it then discarded was pure cost.
+        var _preConfirm = _planning && !_isChange && (_isReady || _isDone)
+            && window._planDayBlocks && !window._planChangesPending
+            && ((window._planDayIdx || 0) < ((window._planDayOrder || []).length));
+        if (!_preConfirm) {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: text }),
         });
         typingBubble.innerHTML = '';
-        var fullText = '';
         var reader = sseReader(res);
         var decoder = new TextDecoder(); var _sseBuf = '';
         while (true) {
@@ -11050,7 +11058,8 @@ async function sendInlineCoachMsg() {
         if (!fullText.trim()) {
             typingBubble.innerHTML = '<em>(Coach returned an empty response — check server logs)</em>';
         }
-        if (_chatHistory) {
+        }  // end !_preConfirm
+        if (_chatHistory && !_preConfirm) {
             _chatHistory.push({ role: 'user', content: text, date: todayStr() });
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
         }
