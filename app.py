@@ -144,6 +144,30 @@ def _admin_key_is_strong(key: str) -> bool:
     return bool(key) and len(key) >= 24 and key not in _LEAKED_ADMIN_KEYS
 
 
+def _header_key_ok(api_key, expected_key):
+    return bool(api_key and _admin_key_is_strong(expected_key)
+                and hmac.compare_digest(api_key, expected_key))
+
+
+def admin_read_required(f):
+    """S075: read-only diagnostics accept EITHER the write key or a separate
+    ADMIN_READ_KEY, so the key that gets pasted into Claude sessions all day
+    (debug/sql, serve-as-user, today-status…) is not the one that can run
+    raw SQL writes, reset passwords or roll back the block."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-Admin-Key')
+        if _header_key_ok(api_key, os.environ.get('ADMIN_API_KEY') or '') or \
+                _header_key_ok(api_key, os.environ.get('ADMIN_READ_KEY') or ''):
+            return f(*args, **kwargs)
+        if not current_user or not current_user.is_authenticated:
+            return jsonify({"error": "Login required"}), 401
+        if not current_user.is_admin:
+            return jsonify({"error": "Admin required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -2389,7 +2413,7 @@ def debug_realign_session_week():
 
 
 @app.route("/api/debug/api-workouts-as-user")
-@admin_required
+@admin_read_required
 def debug_api_workouts_as_user():
     """Run api_workouts as if the given user were logged in, return the JSON
     payload the UI would actually receive. Admin-only diagnostic.
@@ -2436,7 +2460,7 @@ def debug_api_workouts_as_user():
 
 
 @app.route("/api/debug/today-status")
-@admin_required
+@admin_read_required
 def debug_today_status():
     """Dump the coach's today_status GROUNDING for a user — the exact 3-state
     workout signal (not_started/in_progress/complete) plus the rendered directive
@@ -2465,7 +2489,7 @@ def debug_today_status():
 
 
 @app.route("/api/debug/serve-as-user", methods=["GET"])
-@admin_required
+@admin_read_required
 def debug_serve_as_user():
     """Impersonate a user and call an allowlisted API path, returning the exact
     JSON payload that user would receive. Admin-only diagnostic.
@@ -2537,7 +2561,7 @@ def debug_serve_as_user():
 
 
 @app.route("/api/debug/coach-context", methods=["GET"])
-@admin_required
+@admin_read_required
 def debug_coach_context():
     """Assemble and return the coach's context blocks (cut_status, protocol_status,
     lift_trend, readiness, wellness, garmin, today_status) by calling section builders
@@ -2671,7 +2695,7 @@ def debug_copy_runplan():
 
 
 @app.route("/api/debug/full-day-state")
-@admin_required
+@admin_read_required
 def debug_full_day_state():
     """Dump everything stored for a user on a date: SetLog, RunLog,
     WeeklyPrescription, WeeklyRunPlan. Read-only diagnostic.
@@ -2743,7 +2767,7 @@ def debug_full_day_state():
 
 
 @app.route("/api/debug/version")
-@admin_required
+@admin_read_required
 def debug_version():
     """Which commit is this process actually running? Render sets
     RENDER_GIT_COMMIT at build time. Exists because two replan jobs raced a
@@ -2755,7 +2779,7 @@ def debug_version():
 
 
 @app.route("/api/debug/show-sets")
-@admin_required
+@admin_read_required
 def debug_show_sets():
     """Dump SetLog rows for a user across recent days. Admin-only diagnostic.
     Query: ?email=...&days=7 (default 7)
@@ -2854,7 +2878,7 @@ def debug_move_sets_day():
 
 
 @app.route("/api/debug/run-plan")
-@admin_required
+@admin_read_required
 def debug_run_plan():
     """Show user's stored WeeklyRunPlan rows + what coach_rules will resolve.
     Admin-only diagnostic.
@@ -2934,7 +2958,7 @@ def debug_clear_stale_prescriptions():
 
 
 @app.route("/api/debug/program-friday")
-@admin_required
+@admin_read_required
 def debug_program_friday():
     """Inspect what the program says for a user's Friday — template, prescription
     override, ExerciseSwap, run dict. Admin-only diagnostic."""
@@ -3031,7 +3055,7 @@ def api_coach_flag():
 
 
 @app.route("/api/debug/coach-feedback")
-@admin_required
+@admin_read_required
 def debug_coach_feedback():
     """Dump recent CoachFeedback rows. Admin-only diagnostic.
     Query: ?email=...&days=14 (defaults to all users, last 14 days)
@@ -12557,7 +12581,7 @@ def api_admin_set_weight():
 
 
 @app.route("/api/admin/debug/user/<path:email>")
-@admin_required
+@admin_read_required
 def api_admin_debug_user(email):
     """Full diagnostic dump of a user's state. Admin-only."""
     email = email.strip().lower()
@@ -12669,7 +12693,7 @@ def api_admin_export_full():
 
 
 @app.route("/api/admin/debug/sql", methods=["POST"])
-@admin_required
+@admin_read_required
 def api_admin_debug_sql():
     """Run a read-only SQL query. Admin-only. SELECT only."""
     data = request.get_json()
@@ -13010,7 +13034,7 @@ def api_admin_save_measurements():
 
 
 @app.route("/api/admin/dashboard")
-@admin_required
+@admin_read_required
 def api_admin_dashboard_data():
     """All-users overview for admin monitoring. Returns onboarding status,
     activity, and key metrics for every user."""

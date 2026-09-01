@@ -322,3 +322,16 @@ def test_test_user_route_hidden_on_render(app_ctx, monkeypatch):
     monkeypatch.delenv("ALLOW_TEST_USER", raising=False)
     r = app_.test_client().post("/api/test/create-user", json={}, headers={"X-Admin-Key": key})
     assert r.status_code == 404
+
+
+def test_read_key_cannot_write(app_ctx, monkeypatch):
+    """S075: ADMIN_READ_KEY opens diagnostics only; writes need ADMIN_API_KEY."""
+    app_, db = app_ctx
+    monkeypatch.setenv("ADMIN_API_KEY", "write-key-long-enough-for-the-guard-0001")
+    monkeypatch.setenv("ADMIN_READ_KEY", "read-key-long-enough-for-the-guard-00001")
+    c = app_.test_client()
+    r = c.get("/api/debug/version", headers={"X-Admin-Key": "read-key-long-enough-for-the-guard-00001"})
+    assert r.status_code == 200
+    r = c.post("/api/admin/debug/exec", json={"sql": "UPDATE set_log SET weight=0"},
+               headers={"X-Admin-Key": "read-key-long-enough-for-the-guard-00001"})
+    assert r.status_code in (401, 403)
