@@ -2512,6 +2512,13 @@ async function checkOnboardingComplete() {
       fetch('/api/food-selections'),
       fetch('/api/equipment'),
     ]);
+    // S013: an unreachable server is NOT "onboarding incomplete". Any
+    // non-OK status (502 HTML from the edge, a dropped worker) returns
+    // null = unknown, and the boot shows a retry banner instead of the
+    // Welcome dead end with the header hidden.
+    const all = [intakeRes, conRes, paRes, goalRes, foodRes, eqRes];
+    if (all.some(r => r.status === 401)) return false;
+    if (all.some(r => !r.ok)) return null;
     const intake = await intakeRes.json();
     const con = await conRes.json();
     const pa = await paRes.json();
@@ -2521,11 +2528,25 @@ async function checkOnboardingComplete() {
 
     // plan_accepted is the FINAL gate — user must have reviewed and accepted the training plan
     const planAccepted = goal.plan_accepted || false;
-    return intake.completed && con.completed && pa.completed && eq.completed && goal.computed && food.completed && planAccepted;
+    return !!(intake.completed && con.completed && pa.completed && eq.completed && goal.computed && food.completed && planAccepted);
   } catch(e) {
-    // If we can't check, fall back to baseline_done
-    return _stateCache.baseline_done;
+    return null;  // unknown — never guess from a fallback state
   }
+}
+
+function showServerUnreachable() {
+  // Keep the header; give the athlete a way back. Reused by the boot gate
+  // and resumeOnboarding's failure path (S013).
+  var _hdr = document.querySelector('header');
+  if (_hdr) _hdr.style.display = '';
+  var _appLoading = document.getElementById('app-loading');
+  if (_appLoading) _appLoading.style.display = 'none';
+  var el = document.getElementById('detail-panel') || document.getElementById('baseline-overlay') || document.body;
+  el.innerHTML = '<div style="text-align:center;padding:2rem 1rem;color:var(--muted)">'
+    + '<div style="font-size:16px;color:#e8ede9;margin-bottom:8px">Couldn\'t reach the server.</div>'
+    + '<div style="font-size:13px;margin-bottom:16px">Your data is safe — nothing was reset.</div>'
+    + '<button class="btn btn-primary" style="padding:12px 24px;font-size:15px" onclick="window.location.reload()">Retry</button>'
+    + '</div>';
 }
 
 async function resumeOnboarding() {
@@ -2591,7 +2612,7 @@ async function resumeOnboarding() {
     showFinalReveal();
   } catch(e) {
     console.error('Resume onboarding error:', e);
-    showWelcome();
+    showServerUnreachable();  // S013: never Welcome on a fetch failure
   }
 }
 
@@ -5680,6 +5701,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       showFinalReveal();
     } else {
       const onboardingDone = await checkOnboardingComplete();
+      if (onboardingDone === null || stateW._status === 0 || stateW._status >= 500) {
+        showServerUnreachable();
+        return;
+      }
       if (!onboardingDone) {
         await resumeOnboarding();
         return; // STOP — don't load chat, check-ins, or render the main app

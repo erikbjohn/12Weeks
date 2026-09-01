@@ -70,9 +70,9 @@ class TestGateCreepGuard:
         # Count return statements in this range
         return_count = sum(1 for line in init_lines if 'return;' in line)
 
-        # 401→/login redirect + Pre-start lockout + Onboarding + Bodyweight retest
-        # (the 401 redirect sat just above the old fixed line window)
-        expected_count = 4
+        # 401→/login redirect + server-unreachable retry banner (S013) +
+        # Pre-start lockout + Onboarding + Bodyweight retest
+        expected_count = 5
         assert return_count == expected_count, (
             f"Expected {expected_count} blocking gates before renderAll() in the init path, "
             f"found {return_count}. If you added a new gate that uses 'return;', bump this count. "
