@@ -144,7 +144,7 @@ def test_days_grouped_correctly_count_and_time_order(app_ctx, monkeypatch):
     assert [d["time"] for d in day1] == ["06:00", "07:00", "19:00"]
     assert [d["compound"] for d in day1] == ["Enclomiphene", "Retatrutide", "BPC-157"]
     for d in day1:
-        assert set(d.keys()) == {"compound", "dose_mg", "time", "taken"}
+        assert set(d.keys()) == {"compound", "dose_mg", "time", "taken", "event_type", "syringe_units", "site", "notes"}
 
     day3 = days["2026-08-24"]
     assert len(day3) == 2

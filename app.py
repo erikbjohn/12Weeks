@@ -5850,6 +5850,9 @@ def protocol_calendar():
         days.setdefault(r.date.isoformat(), []).append({
             "compound": r.compound, "dose_mg": r.dose_mg, "time": r.time,
             "taken": r.taken_at is not None,
+            # S115: the day drawer shows the doctor's units/site/conditional notes
+            "event_type": r.event_type, "syringe_units": r.syringe_units,
+            "site": r.site, "notes": r.notes,
         })
     for iso in days:
         days[iso].sort(key=lambda d: d["time"])

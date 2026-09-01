@@ -11676,8 +11676,10 @@ function _protoCalCellHtml(dt, days, escByIso, todayIso, varies) {
   var bg = esc ? 'var(--run-hiit-bg)' : 'var(--surface2)';
   var doseLines = doses.map(function(dd) { return _protoDoseLine(dd, varies); }).join('');
 
-  return '<div style="border:' + border + ';background:' + bg + ';border-radius:6px;padding:4px;min-height:60px"' +
-    (esc ? ' title="' + escapeHtml(esc.detail) + '"' : '') + '>' +
+  // S115: cells are tappable — time, units, site and the doctor's notes were
+  // only in hover tooltips, which never render on iOS.
+  window._protoCalDays = days; window._protoCalEsc = escByIso;
+  return '<div onclick="toggleProtoDayDrawer(\'' + iso + '\')" style="cursor:pointer;border:' + border + ';background:' + bg + ';border-radius:6px;padding:4px;min-height:60px">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
       '<span style="font-size:16px;font-weight:700;color:var(--text)">' + dt.getDate() + '</span>' +
       '<span style="display:flex;gap:3px;align-items:center">' +
@@ -11687,6 +11689,28 @@ function _protoCalCellHtml(dt, days, escByIso, todayIso, varies) {
     '</div>' +
     doseLines +
   '</div>';
+}
+
+function toggleProtoDayDrawer(iso) {
+  var id = 'proto-drawer-' + iso;
+  var existing = document.getElementById(id);
+  document.querySelectorAll('.proto-day-drawer').forEach(function(el) { el.remove(); });
+  if (existing) return;  // second tap closes
+  var days = window._protoCalDays || {}, escByIso = window._protoCalEsc || {};
+  var doses = days[iso] || [];
+  var esc = escByIso[iso];
+  var html = '<div id="' + id + '" class="proto-day-drawer" style="grid-column:1 / -1;border:1px solid var(--border2);border-radius:8px;padding:10px;margin-top:4px;background:var(--surface)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+      '<span style="font-weight:700;color:var(--text);font-size:15px">' + escapeHtml(_fmtShortDate(iso)) + '</span>' +
+      '<button onclick="toggleProtoDayDrawer(\'' + iso + '\')" style="background:none;border:none;color:var(--muted);font-size:18px;min-width:44px;min-height:44px">&times;</button>' +
+    '</div>' +
+    (esc ? '<div style="color:var(--run-hiit);font-size:14px;margin-bottom:8px">&#9650; ' + escapeHtml(esc.detail || '') + '</div>' : '') +
+    (doses.length ? doses.map(function(d) { return _doseRowHtml(d, false); }).join('') : '<div style="color:var(--muted);font-size:14px">No doses scheduled.</div>') +
+  '</div>';
+  // Insert under the week row that holds this date.
+  var cell = document.querySelector('[onclick="toggleProtoDayDrawer(\'' + iso + '\')"]');
+  var grid = cell && cell.parentElement;
+  if (grid) grid.insertAdjacentHTML('beforeend', html);
 }
 
 function _protoCalRowHtml(week, days, escByIso, todayIso, varies, weekIdx) {
