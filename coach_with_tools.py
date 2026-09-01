@@ -71,6 +71,23 @@ If you don't know what week the athlete is in, call get_today_status first to fi
 NEVER fabricate a weight, set count, or workout for a day you haven't looked up. If the answer needs data not in your prompt, the tool exists for a reason."""
 
 
+def _log_usage(response, *, agent: str, model: str, turn: int = 0):
+    """S104: LLM usage telemetry. response.usage was never read anywhere, so
+    cost per action and cache hit rate were unmeasurable. One INFO line per
+    call — grep '[LLM]' in Render logs."""
+    try:
+        u = getattr(response, "usage", None)
+        if not u:
+            return
+        log.info("[LLM] agent=%s model=%s turn=%s in=%s out=%s cache_read=%s cache_write=%s",
+                 agent, model, turn,
+                 getattr(u, "input_tokens", None), getattr(u, "output_tokens", None),
+                 getattr(u, "cache_read_input_tokens", None),
+                 getattr(u, "cache_creation_input_tokens", None))
+    except Exception:
+        pass
+
+
 def _forced_final_text(client, *, model, max_tokens, system, messages, tools, temperature=None) -> str:
     """One text-only turn (tool_choice=none) after the tool loop exhausted
     MAX_TOOL_TURNS. The last response was a tool_use — streaming/returning it
@@ -87,6 +104,7 @@ def _forced_final_text(client, *, model, max_tokens, system, messages, tools, te
             tool_choice={"type": "none"},
             **({"temperature": temperature} if temperature is not None else {}),
         )
+        _log_usage(resp, agent="forced_final", model=model)
         return "\n".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
@@ -120,6 +138,7 @@ def _run_loop(
             tools=TOOLS,
             **({"temperature": temperature} if temperature is not None else {}),
         )
+        _log_usage(response, agent="tool_loop", model=model, turn=turn)
 
         stop_reason = response.stop_reason
         blocks = response.content
@@ -236,6 +255,7 @@ def coach_chat_stream(
             tools=TOOLS,
             **({"temperature": temperature} if temperature is not None else {}),
         )
+        _log_usage(response, agent="stream_tool_loop", model=chosen_model, turn=turn)
         stop_reason = response.stop_reason
         blocks = response.content
 

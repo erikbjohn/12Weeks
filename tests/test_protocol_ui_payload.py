@@ -97,7 +97,7 @@ def _add_dose(app_, db, user_id, d, time_s, event_type, compound, dose_mg,
 
 DOSE_UI_FIELDS = {
     "id", "time", "event_type", "compound", "dose_mg",
-    "syringe_units", "site", "notes", "taken",
+    "syringe_units", "site", "notes", "taken", "change",
 }
 
 

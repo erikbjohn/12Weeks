@@ -561,6 +561,23 @@ def missed_line(dose_rows: list, today, rules: Optional[dict] = None) -> list[di
 
 # ── Fasted dose lookup ────────────────────────────────────────────────
 
+def dose_change_for(dose_rows: list, row) -> Optional[dict]:
+    """S114: is `row` a dose STEP for its compound? Returns
+    {"from": prev_mg} when the most recent earlier positive dose differs,
+    {"first": True} when there is no earlier positive dose, else None."""
+    if row.dose_mg is None or row.dose_mg <= 0:
+        return None
+    earlier = [r for r in dose_rows
+               if r.compound == row.compound and r.dose_mg and r.dose_mg > 0
+               and (r.date, r.time) < (row.date, row.time)]
+    if not earlier:
+        return {"first": True}
+    prev = max(earlier, key=lambda r: (r.date, r.time))
+    if prev.dose_mg != row.dose_mg:
+        return {"from": prev.dose_mg}
+    return None
+
+
 def fasted_meal_cutoff(dose_time_hhmm: str, lead_h: float = 2.0) -> str:
     """The last-meal cutoff for a fasted dose: dose time minus `lead_h`,
     rounded DOWN to the half hour — one number for the banner, the meal

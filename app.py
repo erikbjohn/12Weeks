@@ -48,7 +48,7 @@ from models import (
     PushSubscription, PushSent,
 )
 from protocol import (
-    missed_line, vial_status, fasted_dose_time, fasted_meal_cutoff, PROTOCOL_COMPOUNDS,
+    missed_line, vial_status, fasted_dose_time, fasted_meal_cutoff, dose_change_for, PROTOCOL_COMPOUNDS,
     CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
 )
 
@@ -5718,6 +5718,7 @@ def protocol_today():
                 "compound": r.compound, "dose_mg": r.dose_mg,
                 "syringe_units": r.syringe_units, "site": r.site,
                 "notes": r.notes, "taken": r.taken_at is not None,
+                "change": dose_change_for(all_rows, r),  # S114: {"from": mg} | {"first": true} | null
             }
             for r in today_rows
         ],
@@ -11118,11 +11119,20 @@ def _morning_brief_body(uid, local_date):
         # match every sibling surface (dose-night gate, recap adherence,
         # calendar checkmark logic), so a mid-block hold can't make the morning
         # brief claim "N doses" for a day where some of those N were held.
-        n = PeptideDose.query.filter_by(user_id=uid, date=local_date).filter(
+        _today_rows = PeptideDose.query.filter_by(user_id=uid, date=local_date).filter(
             PeptideDose.dose_mg > 0
-        ).count()
+        ).all()
+        n = len(_today_rows)
         if n:
             parts.append(f"{n} dose{'s' if n != 1 else ''}")
+            # S114: a dose step is named in the brief, not discovered on the card
+            _all = PeptideDose.query.filter_by(user_id=uid).all()
+            for _r in _today_rows:
+                _ch = dose_change_for(_all, _r)
+                if _ch and _ch.get("from") is not None:
+                    parts.append(f"{_r.compound} steps {_ch['from']:g}→{_r.dose_mg:g} mg")
+                elif _ch and _ch.get("first"):
+                    parts.append(f"first {_r.compound} {_r.dose_mg:g} mg")
     except Exception:
         pass
 

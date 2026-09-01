@@ -10838,7 +10838,39 @@ function openInlineCoachChat() {
           'style="flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:15px;outline:none">' +
         '<button onclick="sendInlineCoachMsg()" style="background:var(--coach);color:#000;border:none;border-radius:8px;padding:10px 16px;font-weight:600;cursor:pointer;font-size:14px">Send</button>' +
       '</div>';
-    _fetchInlineCoachOpener();
+    _renderTodayHistoryInline().then(_fetchInlineCoachOpener);
+}
+
+// S118: today's conversation (morning check-in replies with codified
+// changes, earlier "Talk to Erik" turns) was invisible once its overlay
+// closed — every open was a fresh opener. Render it above the opener.
+async function _renderTodayHistoryInline() {
+    var messagesEl = document.getElementById('coach-inline-messages');
+    if (!messagesEl) return;
+    try {
+        var r = await fetch('/api/coach/today-history');
+        if (!r.ok) return;
+        var hist = await r.json();
+        if (!Array.isArray(hist) || !hist.length) return;
+        var html = '';
+        for (var i = 0; i < hist.length; i++) {
+            var m = hist[i];
+            if (!m || !m.content) continue;
+            if (m.role === 'user') {
+                html += '<div class="chat-bubble user" style="margin-bottom:8px">' + escapeHtml(m.content) + '</div>';
+            } else {
+                var cls = m.type === 'flag' ? 'chat-bubble coach chat-flag' : 'chat-bubble coach';
+                html += '<div class="' + cls + '" style="margin-bottom:8px">' + renderCoachMarkdown(m.content) + '</div>';
+            }
+        }
+        if (!html) return;
+        var typing = messagesEl.querySelector('.chat-bubble.coach');
+        var wrap = document.createElement('div');
+        wrap.innerHTML = '<div style="font-size:11px;color:var(--dim);margin:0 0 6px">Earlier today</div>' + html
+            + '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+        if (typing) messagesEl.insertBefore(wrap, typing); else messagesEl.appendChild(wrap);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    } catch (e) {}
 }
 
 async function _fetchInlineCoachOpener() {
@@ -11392,7 +11424,10 @@ function _doseRowHtml(dose, interactive) {
     : '';
   return '<div class="protocol-dose-row" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)' + (taken ? ';opacity:0.6' : '') + '">' +
     '<div style="flex:1;min-width:0">' +
-      '<div style="font-size:16px;font-weight:700;color:var(--text)">' + escapeHtml(dose.compound) + ' <span style="font-weight:400;color:var(--muted)">' + dose.dose_mg + 'mg</span></div>' +
+      '<div style="font-size:16px;font-weight:700;color:var(--text)">' + escapeHtml(dose.compound) + ' <span style="font-weight:400;color:var(--muted)">' + dose.dose_mg + 'mg</span>'
+        + (dose.change && dose.change.from != null ? ' <span style="font-size:12px;color:var(--accent)">&#9650; step from ' + dose.change.from + 'mg</span>' : '')
+        + (dose.change && dose.change.first ? ' <span style="font-size:12px;color:var(--accent)">&#9679; first dose</span>' : '')
+        + '</div>' +
       metaHtml + noteHtml +
     '</div>' +
     (interactive

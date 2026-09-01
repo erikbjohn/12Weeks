@@ -190,7 +190,7 @@ def test_today_payload_lists_all_seeded_doses_sorted_by_time(app_ctx, monkeypatc
     assert oral["dose_mg"] == 6.25
     for dd in body["doses"]:
         assert set(dd.keys()) == {"id", "time", "event_type", "compound", "dose_mg",
-                                   "syringe_units", "site", "notes", "taken"}
+                                   "syringe_units", "site", "notes", "taken", "change"}
     times = [dd["time"] for dd in body["doses"]]
     assert times == sorted(times)
 
