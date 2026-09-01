@@ -3125,8 +3125,10 @@ def accept_invite(code):
 
     existing = User.query.filter_by(email=recipient_email).first()
 
-    # Already has a password → just send to login
-    if request.method == "GET" and existing and existing.password_hash:
+    # Already has a password → just send to login. Applies to POST as well:
+    # an invite must never become a password reset for an existing account
+    # (any invite-holder could otherwise take over the admin account).
+    if existing and existing.password_hash:
         flash("You already have an account — log in with your password.", "success")
         return redirect(url_for("login"))
 
@@ -3194,6 +3196,12 @@ def accept_invite(code):
 def api_create_invite():
     data = request.get_json()
     email = data.get("email", "").strip().lower() if data else ""
+
+    if email and User.query.filter_by(email=email).first():
+        # Inviting an existing address is never legitimate: the accept flow
+        # refuses it anyway, and it must not hand a non-admin a link tied to
+        # someone else's account.
+        return jsonify({"error": "That address already has an account"}), 400
 
     if not current_user.is_admin:
         if current_user.invites_remaining <= 0:

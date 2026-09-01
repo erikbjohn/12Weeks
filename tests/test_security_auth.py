@@ -251,3 +251,43 @@ def test_push_to_user_only_targets_that_users_subscriptions(app_ctx, monkeypatch
         sent = app_module.push_to_user(b, "Title", "Body")
     assert sent == 0
     assert calls == []
+
+
+def test_invite_cannot_reset_existing_password(app_ctx):
+    """S004: an invite for an address that already has a password must not
+    overwrite that password or log the caller in as that user."""
+    from models import Invite, User
+    from werkzeug.security import generate_password_hash
+    app_, db = app_ctx
+    with app_.app_context():
+        victim = User(email="victim-admin@placemetry.com", name="V", role="admin",
+                      password_hash=generate_password_hash("victim-pass-123"),
+                      email_verified=True)
+        attacker = User(email="attacker@test.com", name="A", role="user",
+                        password_hash=generate_password_hash("attacker-pass-1"),
+                        email_verified=True, invites_remaining=3)
+        db.session.add_all([victim, attacker]); db.session.commit()
+        original_hash = victim.password_hash
+        attacker_id = attacker.id
+        inv = Invite(code="takeover-code", created_by=attacker.id,
+                     email_sent_to="victim-admin@placemetry.com")
+        db.session.add(inv); db.session.commit()
+
+    client = app_.test_client()
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "tok"
+    r = client.post("/invite/takeover-code", data={
+        "csrf_token": "tok", "password": "pwned-pass-99", "password_confirm": "pwned-pass-99"})
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+    with app_.app_context():
+        v = User.query.filter_by(email="victim-admin@placemetry.com").first()
+        assert v.password_hash == original_hash
+        assert Invite.query.filter_by(code="takeover-code").first().used_by is None
+
+    # And creating an invite for an existing address is refused outright.
+    _login(client, attacker_id)
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "tok"
+    r = client.post("/api/invite", json={"email": "victim-admin@placemetry.com"},
+                    headers={"X-CSRF-Token": "tok"})
+    assert r.status_code == 400
