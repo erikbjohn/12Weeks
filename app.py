@@ -5287,14 +5287,24 @@ def admin_import_protocol():
     data = request.get_json(silent=True) or {}
     csv_path = data.get("csv_path") or "peptide_protocol.csv"
     force_past = bool(data.get("force_past", False))
+    # S012: `csv_text` lets the locally edited CSV be POSTed straight to
+    # prod — DB and repo updated from the same bytes, no deploy, no
+    # debug/exec. `dry_run` runs the identical logic and rolls back,
+    # returning the same payload plus a per-row `changes` diff, so
+    # "does the CSV match prod?" is one call.
+    csv_text = data.get("csv_text")
+    dry_run = bool(data.get("dry_run", False))
 
-    if not os.path.isabs(csv_path):
-        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), csv_path)
-    if not os.path.exists(csv_path):
-        return jsonify({"error": f"CSV not found: {csv_path}"}), 400
+    if csv_text is None:
+        if not os.path.isabs(csv_path):
+            csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), csv_path)
+        if not os.path.exists(csv_path):
+            return jsonify({"error": f"CSV not found: {csv_path}"}), 400
 
     import csv as _csv
+    import io as _io
     from collections import Counter
+    changes = []  # every insert/update/delete, future rows included
 
     def _none_if_dash(v):
         v = (v or "").strip()
@@ -5304,7 +5314,7 @@ def admin_import_protocol():
     seen_keys = set()
     dup_keys = set()
     try:
-        with open(csv_path, newline="") as f:
+        with (_io.StringIO(csv_text) if csv_text is not None else open(csv_path, newline="")) as f:
             reader = _csv.DictReader(f)
             for raw in reader:
                 row_date = datetime.strptime(raw["Date"].strip(), "%Y-%m-%d").date()
@@ -5381,6 +5391,8 @@ def admin_import_protocol():
                 db.session.add(new_row)
                 expected_keys.add(key)
                 imported += 1
+                changes.append({"op": "insert", "date": r["date"].isoformat(), "compound": r["compound"],
+                                "field": None, "db_value": None, "csv_value": r["dose_mg"]})
                 if is_past and force_past:
                     skipped.append({
                         "date": r["date"].isoformat(), "compound": r["compound"],
@@ -5425,6 +5437,8 @@ def admin_import_protocol():
                             "csv_value": r["dose_mg"],
                             "reason": "updated via force_past (row was past-dated)",
                         })
+                    changes.append({"op": "update", "date": r["date"].isoformat(), "compound": r["compound"],
+                                    "field": "dose_mg", "db_value": existing_row.dose_mg, "csv_value": r["dose_mg"]})
                     existing_row.dose_mg = r["dose_mg"]
                     row_touched = True
 
@@ -5438,6 +5452,8 @@ def admin_import_protocol():
                             "field": field, "db_value": db_val, "csv_value": csv_val,
                             "reason": "updated via force_past (row was past-dated)",
                         })
+                    changes.append({"op": "update", "date": r["date"].isoformat(), "compound": r["compound"],
+                                    "field": field, "db_value": db_val, "csv_value": csv_val})
                     setattr(existing_row, field, csv_val)
                     row_touched = True
 
@@ -5468,6 +5484,8 @@ def admin_import_protocol():
                 continue
 
             if d >= today:
+                changes.append({"op": "delete", "date": d.isoformat(), "compound": row.compound,
+                                "field": None, "db_value": row.dose_mg, "csv_value": None})
                 db.session.delete(row)
                 expected_keys.discard(key)
                 deleted += 1
@@ -5528,7 +5546,10 @@ def admin_import_protocol():
 
         meal_days_regenerated = _reconcile_meal_rail(user, changed_dates)
 
-        db.session.commit()
+        if dry_run:
+            db.session.rollback()
+        else:
+            db.session.commit()
     except _ProtocolImportIntegrityError as e:
         db.session.rollback()
         import logging
@@ -5541,10 +5562,12 @@ def admin_import_protocol():
         return jsonify({"error": f"protocol import failed: {e}"}), 500
 
     return jsonify({
+        "dry_run": dry_run,
         "imported": imported,
         "updated": updated,
         "deleted": deleted,
         "skipped": skipped,
+        "changes": changes,
         "meal_days_regenerated": meal_days_regenerated,
         "row_count": len(parsed_rows),
         "per_compound": dict(Counter(r["compound"] for r in parsed_rows)),

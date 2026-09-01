@@ -579,3 +579,36 @@ def test_import_requires_admin_key(app_ctx, monkeypatch):
     client = app_.test_client()
     r = client.post(f"/api/admin/import-protocol?email={u.email}", json={"csv_path": REAL_CSV_PATH})
     assert r.status_code in (401, 403)
+
+
+# ── (S012) csv_text body + dry_run diff ─────────────────────────────────────
+
+def test_csv_text_body_and_dry_run_diff(app_ctx, monkeypatch):
+    """The locally edited CSV can be POSTed as text (no deploy); dry_run
+    returns the identical per-row change list and writes nothing."""
+    from models import PeptideDose
+    app_, db = app_ctx
+    u = _fresh_user(app_, db, "import-csvtext@test.com")
+    _set_today(monkeypatch, date(2026, 8, 10))
+    client = _client(app_, monkeypatch)
+    with open(REAL_CSV_PATH) as f:
+        text = f.read()
+    r = _post_import(client, u.email, csv_text=text)
+    assert r.status_code == 200 and r.get_json()["imported"] == 381
+
+    # edit one future row in the text: Tesamorelin 2026-09-01 1 mg → 1.5 mg
+    edited = text.replace("2026-09-01,22:00,Injection,Tesamorelin,1,10u", "2026-09-01,22:00,Injection,Tesamorelin,1.5,15u", 1)
+    assert edited != text
+    r = _post_import(client, u.email, csv_text=edited, dry_run=True)
+    body = r.get_json()
+    assert body["dry_run"] is True and body["updated"] == 1
+    ops = [(c["op"], c["date"], c["compound"], c["field"]) for c in body["changes"]]
+    assert ("update", "2026-09-01", "Tesamorelin", "dose_mg") in ops
+    db.session.expire_all()
+    row = PeptideDose.query.filter_by(user_id=u.id, date=date(2026, 9, 1), compound="Tesamorelin").first()
+    assert row.dose_mg == 1.0  # dry run wrote nothing
+
+    r = _post_import(client, u.email, csv_text=edited)
+    assert r.get_json()["updated"] == 1
+    db.session.expire_all()
+    assert PeptideDose.query.filter_by(user_id=u.id, date=date(2026, 9, 1), compound="Tesamorelin").first().dose_mg == 1.5
