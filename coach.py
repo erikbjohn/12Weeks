@@ -326,19 +326,21 @@ def _format_meals_today(meals, meal_plan=None, user_timezone=None):
 def _format_memories(memories):
     if not memories:
         return ""
-    lines = ["COACH MEMORY (persistent observations — survive across conversations):"]
+    lines = ["COACH MEMORY (dated observations — a memory is what was true ON ITS DATE, never live state; "
+             "anything not recent is history):"]
+    def _prefix(m):
+        d = m.get('date')
+        w = f"wk{m.get('week', '?')}" if m.get('week') else ""
+        return f"[{d}{' ' + w if w else ''}]" if d else (f"[{w}]" if w else "")
     # Show exceptions and victories first (most important for consistency)
     priority = [m for m in memories if m.get('type') in ('exception', 'victory', 'commitment')]
     others = [m for m in memories if m.get('type') not in ('exception', 'victory', 'commitment')]
     if priority:
         lines.append("  CRITICAL — CHECK THESE BEFORE ANY COMPLIANCE JUDGMENT:")
         for m in priority:
-            prefix = f"[wk{m.get('week', '?')}]" if m.get('week') else ""
-            lines.append(f"  {prefix} [{m.get('type', 'note').upper()}] {m['content']}")
+            lines.append(f"  {_prefix(m)} [{m.get('type', 'note').upper()}] {m['content']}")
     for m in others:
-        prefix = f"[wk{m.get('week', '?')}]" if m.get('week') else ""
-        mtype = m.get('type', 'note')
-        lines.append(f"  {prefix} [{mtype}] {m['content']}")
+        lines.append(f"  {_prefix(m)} [{m.get('type', 'note')}] {m['content']}")
     return '\n'.join(lines)
 
 

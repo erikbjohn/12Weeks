@@ -1670,10 +1670,21 @@ def _build_goal():
 @section_builder("coach_memories")
 def _build_coach_memories():
     from models import CoachMemory
-    rows = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
-        CoachMemory.created_at.desc()
-    ).limit(50).all()
-    return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week} for m in rows]}
+    # S068: pivotal memories (exceptions the coach granted, victories,
+    # commitments) are ALWAYS carried — the 50-newest window evicted them
+    # under daily observation noise, which is how the coach contradicted
+    # itself on a granted exception. Then the newest of the rest.
+    pivotal = (CoachMemory.query
+               .filter(CoachMemory.user_id == current_user.id,
+                       CoachMemory.memory_type.in_(("exception", "victory", "commitment", "injury")))
+               .order_by(CoachMemory.created_at.desc()).limit(40).all())
+    seen = {m.id for m in pivotal}
+    recent = [m for m in CoachMemory.query.filter_by(user_id=current_user.id)
+              .order_by(CoachMemory.created_at.desc()).limit(80).all() if m.id not in seen][:30]
+    rows = sorted(pivotal + recent, key=lambda m: m.created_at or datetime.min, reverse=True)
+    return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week,
+                                "date": m.created_at.date().isoformat() if m.created_at else None}
+                               for m in rows]}
 
 
 @section_builder("user_rules")

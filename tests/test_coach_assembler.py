@@ -132,9 +132,31 @@ class TestCoachMemoriesBounded:
             login_user(u, force=True)
             out = _build_coach_memories()
         mems = out["coach_memories"]
-        assert len(mems) <= 50, "coach memories must be bounded to protect context size"
-        # shape contract used downstream
-        assert set(mems[0].keys()) == {"type", "content", "week"}
+        assert len(mems) <= 70, "coach memories must be bounded to protect context size"
+        # shape contract used downstream (S068: each memory is dated)
+        assert set(mems[0].keys()) == {"type", "content", "week", "date"}
+
+
+    def test_pivotal_memories_survive_observation_noise(self, app_ctx):
+        """S068: an exception granted 3 months ago must not be evicted by 80
+        newer observations — that is how the coach contradicted itself."""
+        from coach_assembler import _build_coach_memories
+        from models import CoachMemory
+        from app import db
+        from flask_login import login_user
+        from datetime import datetime, timedelta, timezone
+        app, _ = app_ctx
+        u = _make_user(app_ctx)
+        old = datetime.now(timezone.utc) - timedelta(days=90)
+        db.session.add(CoachMemory(user_id=u.id, content="Exception granted: Saturday trail race replaces the long run",
+                                   memory_type="exception", week=2, created_at=old))
+        for i in range(80):
+            db.session.add(CoachMemory(user_id=u.id, content=f"noise {i}", memory_type="observation", week=4))
+        db.session.commit()
+        with app.test_request_context():
+            login_user(u, force=True)
+            mems = _build_coach_memories()["coach_memories"]
+        assert any(m["type"] == "exception" and "trail race" in m["content"] for m in mems)
 
 
 class TestCorePromptGuards:

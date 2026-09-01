@@ -843,6 +843,45 @@ def _admin_audit(action, user_id, params):
         db.session.rollback()
 
 
+def _persist_memories(uid, week, memories):
+    """S068: dedupe before insert (same type + content in the last 14 days
+    is a repeat, not a new fact) and never extract from a bare opener/popup
+    reply — the caller decides that. Returns the number inserted."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    since = _dt.now(_tz.utc) - _td(days=14)
+    n = 0
+    for mem in memories or []:
+        content = (mem.get("content") or "").strip()
+        if not content:
+            continue
+        if mem.get("type") == "rule":
+            existing = CoachRule.query.filter_by(user_id=uid, rule_text=content, active=True).first()
+            if not existing:
+                db.session.add(CoachRule(user_id=uid, rule_text=content, category="correction", source="auto"))
+                n += 1
+            continue
+        dup = (CoachMemory.query
+               .filter(CoachMemory.user_id == uid, CoachMemory.memory_type == mem.get("type"),
+                       CoachMemory.created_at >= since)
+               .filter(db.func.lower(CoachMemory.content) == content.lower()).first())
+        if dup:
+            continue
+        db.session.add(CoachMemory(user_id=uid, content=content, memory_type=mem.get("type"), week=week))
+        n += 1
+    if n:
+        db.session.commit()
+    return n
+
+
+def _skip_memory_extraction(user_msg, reply_text):
+    """Openers/popups ([CHAT_OPENED], [MORNING_CHECKIN]…) with a short reply
+    carry no new facts about the athlete — extracting from them filled
+    coach_memory with noise (365 'observation' rows) that evicted pivotal
+    exceptions from the 50-newest window."""
+    m = (user_msg or "").lstrip()
+    return m.startswith("[") and len((reply_text or "").strip()) < 200
+
+
 def _marker_outcome(user_id, week, marker_type, raw, status, detail=None):
     """Record a marker's outcome in its own short transaction (after any
     rollback the failing handler did). Never raises."""
@@ -9164,22 +9203,11 @@ def api_chat():
     _app = app
 
     def _save_memories():
+        if _skip_memory_extraction(user_msg, response_text):
+            return
         with _app.app_context():
             try:
-                memories = extract_memories(user_msg, response_text, context)
-                for mem in memories:
-                    if mem.get('type') == 'rule':
-                        existing = CoachRule.query.filter_by(user_id=uid, rule_text=mem['content'], active=True).first()
-                        if not existing:
-                            db.session.add(CoachRule(user_id=uid, rule_text=mem['content'], category='correction', source='auto'))
-                    else:
-                        cm = CoachMemory(
-                            user_id=uid, content=mem["content"],
-                            memory_type=mem["type"], week=week,
-                        )
-                        db.session.add(cm)
-                if memories:
-                    db.session.commit()
+                _persist_memories(uid, week, extract_memories(user_msg, response_text, context))
             except Exception:
                 pass  # Memory extraction is best-effort
 
@@ -9337,22 +9365,12 @@ def api_chat_stream():
                 # Extract memories from conversation (same as non-streaming endpoint)
                 try:
                     def _save_memories_stream():
+                        if _skip_memory_extraction(user_msg, full_text):
+                            return
                         with _app.app_context():
                             try:
-                                memories = extract_memories(user_msg, full_text, context)
-                                for mem in memories:
-                                    if mem.get('type') == 'rule':
-                                        existing = CoachRule.query.filter_by(user_id=_current_user_id, rule_text=mem['content'], active=True).first()
-                                        if not existing:
-                                            db.session.add(CoachRule(user_id=_current_user_id, rule_text=mem['content'], category='correction', source='auto'))
-                                    else:
-                                        cm = CoachMemory(
-                                            user_id=_current_user_id, content=mem["content"],
-                                            memory_type=mem["type"], week=context.get("week", 1),
-                                        )
-                                        db.session.add(cm)
-                                if memories:
-                                    db.session.commit()
+                                _persist_memories(_current_user_id, context.get("week", 1),
+                                                  extract_memories(user_msg, full_text, context))
                             except Exception:
                                 pass  # Memory extraction is best-effort
 
