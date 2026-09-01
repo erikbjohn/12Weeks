@@ -2242,6 +2242,7 @@ def _format_athlete_data(ctx, requires):
         claims_text = format_claims_block(build_claims(
             user_id=current_user.id,
             scope=("body_weight", "goal", "today_status", "week_program"),
+            today_status=ctx.get("today_status"),
         ))
         if claims_text:
             parts.append(claims_text)

@@ -91,3 +91,24 @@ def test_both_chat_endpoints_codify_markers():
         return src[i:j]
     assert "_parse_coach_markers(" in body("api_chat")
     assert "_parse_coach_markers(" in body("api_chat_stream")
+
+
+def test_assemble_prompt_builds_context_once(app_ctx, monkeypatch):
+    """S097: coach_claims must reuse the caller's today_status, not re-run
+    every section builder a second time per turn."""
+    app_, db = app_ctx
+    import coach_assembler as ca, coach_claims
+    from flask_login import login_user
+    from models import User
+    u = User.query.filter_by(email="contract@test.com").first()
+    calls = {"n": 0}
+    real = ca.build_filtered_context
+    def counting(name):
+        calls["n"] += 1
+        return real(name)
+    monkeypatch.setattr(ca, "build_filtered_context", counting)
+    with app_.test_request_context():
+        login_user(u, force=True)
+        ctx = ca.build_filtered_context("conversation")
+        ca.assemble_prompt("conversation", ctx)
+    assert calls["n"] == 1

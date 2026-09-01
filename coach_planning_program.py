@@ -695,7 +695,10 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         f"{_deload_block}\n\n"
         f"ALLOWED EXERCISES (equipment-filtered — use these exact names):\n{catalog_str}\n\n"
         f"RECENT TOP SETS (last 4 weeks):\n{history}\n\n"
-        f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
+        + (f"STANDING COMMITMENTS (plan around them, never over them):\n"
+           f"{user_context.get('scheduled_activities')}\n\n"
+           if user_context.get("scheduled_activities") else "")
+        + f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
         f"nudge up incrementally, NEVER leap a load):\n{prev_program}\n\n"
         "Design the week. JSON only."
     )

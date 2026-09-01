@@ -508,11 +508,27 @@ def generate_week_runs(
         if user_context.get('recovery_note') else "")
 
 
+    _rc_bits = []
+    if user_context.get("wellness_line"):
+        _rc_bits.append(f"- {user_context['wellness_line']}")
+    if user_context.get("readiness_7d") is not None:
+        _rc_bits.append(f"- training readiness (7d mean): {user_context['readiness_7d']}/100")
+    if user_context.get("checkins_7d"):
+        _rc_bits.append(f"- check-ins (7d): {user_context['checkins_7d']}")
+    if user_context.get("scheduled_activities"):
+        _rc_bits.append("- " + user_context["scheduled_activities"].replace("\n", "\n  "))
+    _recovery_ctx = (
+        "RECOVERY CONTEXT (Garmin + check-ins, real data — use it for LOAD "
+        "decisions; it says nothing about any single run's execution):\n"
+        + "\n".join(_rc_bits) + "\n"
+        if _rc_bits else "")
+
     user_prompt = (
         f"ATHLETE CONTEXT:\n"
         f"- Goal: {goal_type}, currently {current_wt} lb → target {target_wt} lb\n"
         f"- Phase: {phase}{' (DELOAD)' if deload else ''}\n"
         f"{_recovery_line}"
+        f"{_recovery_ctx}"
         f"- Week being prescribed: {week}\n"
         f"- Target weekly miles: {target_miles or 'unspecified'}\n\n"
         f"TEMPLATE RUN STRUCTURE (you pick load):\n{template_block}\n\n"

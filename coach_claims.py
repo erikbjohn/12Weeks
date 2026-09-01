@@ -87,7 +87,7 @@ def _fetch_week_program(user_id: int) -> tuple[int, list[dict]] | None:
     return week, days
 
 
-def build_claims(user_id: int, scope: tuple[str, ...] = ()) -> list[Claim]:
+def build_claims(user_id: int, scope: tuple[str, ...] = (), today_status: dict | None = None) -> list[Claim]:
     """Build the claims table for this user. `scope` filters which
     sections to include; empty = all.
 
@@ -140,7 +140,10 @@ def build_claims(user_id: int, scope: tuple[str, ...] = ()) -> list[Claim]:
         ))
 
     if want("today_status"):
-        ts = _fetch_today_status(user_id)
+        # S097: the caller (assemble_prompt) already built today_status —
+        # re-fetching re-ran every core section builder (Garmin fallback,
+        # lift-trend scans, session analysis) a second time per turn.
+        ts = today_status if today_status is not None else _fetch_today_status(user_id)
         if ts:
             out.append(Claim(
                 claim_id="today.weekday",

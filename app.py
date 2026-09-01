@@ -6096,6 +6096,38 @@ def _weekly_generation_impl(target_week, force_regen, preserve_through, data,
         "weeks_remaining": max(0, 12 - target_week + 1),
         "water_spike_suspected": _water_spike,
     }
+    # S058/S077: the planners never saw recovery data or standing
+    # commitments — 28 days of GarminWellness and the check-ins existed and
+    # no planner prompt received them. Computed once, handed to all three.
+    try:
+        from coach_assembler import wellness_trends, format_wellness_line
+        _wl_rows = GarminWellness.query.filter(
+            GarminWellness.user_id == current_user.id,
+            GarminWellness.date >= _user_today() - timedelta(days=28)).all()
+        _wt = wellness_trends(_wl_rows, _user_today())
+        _common_ctx["wellness_line"] = format_wellness_line(_wt) if _wt else None
+        _rd = [r.training_readiness for r in _wl_rows
+               if r.training_readiness is not None and r.date >= _user_today() - timedelta(days=7)]
+        _common_ctx["readiness_7d"] = round(sum(_rd) / len(_rd)) if _rd else None
+    except Exception:
+        _common_ctx["wellness_line"] = None
+        _common_ctx["readiness_7d"] = None
+    try:
+        _ci = MorningCheckIn.query.filter(
+            MorningCheckIn.user_id == current_user.id,
+            MorningCheckIn.log_date >= _user_today() - timedelta(days=7)).all()
+        _sore = [c.soreness for c in _ci if c.soreness is not None]
+        _slp = [c.sleep_quality for c in _ci if c.sleep_quality is not None]
+        _common_ctx["checkins_7d"] = (
+            f"soreness avg {sum(_sore)/len(_sore):.1f}/10 (n={len(_sore)}), "
+            f"sleep avg {sum(_slp)/len(_slp):.1f}/10 (n={len(_slp)})"
+            if (_sore or _slp) else None)
+    except Exception:
+        _common_ctx["checkins_7d"] = None
+    try:
+        _common_ctx["scheduled_activities"] = _get_scheduled_activities() or None
+    except Exception:
+        _common_ctx["scheduled_activities"] = None
 
     # Build template_runs for the running coach NOW so we can fire all three
     # in parallel before entering the per-day loop.
