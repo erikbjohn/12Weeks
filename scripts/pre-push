@@ -1,0 +1,14 @@
+#!/bin/sh
+# S032 pre-push gate: refuse to push a red suite. Install with
+#   ln -sf ../../scripts/pre-push .git/hooks/pre-push
+# Bypass deliberately with: git push --no-verify
+cd "$(git rev-parse --show-toplevel)" || exit 1
+PY=venv/bin/python; [ -x "$PY" ] || PY=python3
+echo "pre-push: running pytest…"
+OUT=$("$PY" -m pytest tests/ -q -x --ignore=tests/coach_audit -p no:cacheprovider 2>&1); RC=$?
+echo "$OUT" | tail -3
+[ $RC -eq 0 ] || { echo "pre-push: pytest RED — push refused (git push --no-verify to override)"; exit 1; }
+if [ -x node_modules/.bin/vitest ]; then
+  npx vitest run tests/js >/dev/null 2>&1 || { echo "pre-push: vitest RED — push refused"; exit 1; }
+fi
+echo "pre-push: green"

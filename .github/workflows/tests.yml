@@ -1,0 +1,23 @@
+# S032: the suite was red for 11 days and nothing noticed. Every push and PR
+# runs the Python and JS suites; a red main is visible in the GitHub UI.
+name: tests
+on: [push, pull_request]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest tests/ -q -x --ignore=tests/coach_audit
+        env:
+          ANTHROPIC_API_KEY: test-not-used
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm }
+      - run: npm ci
+      - run: npx vitest run tests/js

@@ -227,7 +227,10 @@ def test_legacy_user_no_flags_old_ratio_logic_intact(app_ctx, clean_flags):
     uid, email, client = _login(app_, db, "i3-legacy@test.com")
     proj = [{"week": w, "projected": 220.0 - w} for w in range(1, 13)]
     _seed_goal_and_state(app_, db, uid, proj, target_weight=185.0, start_date=START)
-    _set_weights(app_, db, uid, [(START, 221.0)])
+    # compute_weekly_metrics reads the last 7 days ending TODAY, so the
+    # weigh-in must be dated today — a fixed START date silently expired
+    # a week after this test was written (the 11-day red suite, S032).
+    _set_weights(app_, db, uid, [(date.today(), 221.0)])
 
     def _do_it():
         return weekly_report.compute_weekly_metrics(1, user_id=uid)

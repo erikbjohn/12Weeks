@@ -127,10 +127,11 @@ def clean_projection_flag(app_ctx):
     """Ensure the projection_mode flag doesn't leak into other test modules."""
     _, db = app_ctx
     from models import SystemFlag
-    SystemFlag.query.filter_by(key="projection_mode").delete()
+    keys = ["projection_mode", "projection_mode:1", "block3_anchor:1"]  # tests use user_id=1
+    SystemFlag.query.filter(SystemFlag.key.in_(keys)).delete(synchronize_session=False)
     db.session.commit()
     yield
-    SystemFlag.query.filter_by(key="projection_mode").delete()
+    SystemFlag.query.filter(SystemFlag.key.in_(keys)).delete(synchronize_session=False)
     db.session.commit()
 
 
