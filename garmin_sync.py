@@ -252,18 +252,7 @@ def structure_hash(workout_json, date_iso):
 # Program calendar mapping + daily aggregation
 # ---------------------------------------------------------------------------
 
-def week_day_for_date(start_date, d):
-    """Inverse of app.py's `start_date + (week-1)*7 + day_idx`. (None, None)
-    when outside the 12-week program window."""
-    if not start_date or not d:
-        return (None, None)
-    diff = (d - start_date).days
-    if diff < 0:
-        return (None, None)
-    week = diff // 7 + 1
-    if week > 12:
-        return (None, None)
-    return (week, diff % 7)
+from program_calendar import week_day_for_date  # noqa: F401 — single source (S023)
 
 
 def aggregate_day(rows):

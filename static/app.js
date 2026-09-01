@@ -5297,33 +5297,6 @@ function showStartDateSetting() {
       renderAll();
     });
     return;
-    // (unreachable legacy recompute kept for reference)
-    const start = new Date(date);
-    const now = new Date();
-    const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-    const week = Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
-    currentWeek = week;
-    currentPhase = WEEK_TO_PHASE[week];
-    renderAll();
-  }
-}
-
-async function exportData() {
-  closeSettingsMenu();
-  try {
-    const res = await fetch('/api/export');
-    const data = await res.json();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '12week_backup_' + todayStr() + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    alert('Export failed: ' + e.message);
   }
 }
 
@@ -5648,8 +5621,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         showPreStartLockout(_stateCache.start_date);
         return; // Don't render the app
       }
-      const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-      const week = Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+      // server's user-tz date when the state carries it (device clock drift)
+      const week = programWeekFor(_stateCache.start_date, _stateCache.user_date || _stateCache.server_date);
       currentWeek = week;
       currentPhase = WEEK_TO_PHASE[week];
     }
@@ -7629,17 +7602,22 @@ function setDay(d) {
 
 // User's actual program week — computed from start_date, NOT the week the user is viewing.
 // Returns the week number (1-12) or null if state not loaded.
+// S023: THE client-side week formula — mirrors program_calendar.program_week.
+// Takes the server's user-tz date, never the device clock, when available.
+function programWeekFor(startDateStr, todayStr_) {
+  const startDt = new Date(startDateStr + 'T00:00:00');
+  const nowDt = todayStr_ ? new Date(todayStr_ + 'T00:00:00') : new Date();
+  const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
+  return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+}
+
 function getActualProgramWeek() {
   // With a start_date, derive the week from it using the SERVER's user-tz
   // date (user_date) — no device-local midnight drift, and immune to a
   // polluted AppState.current_week (navigation used to save the VIEWED week
   // there, which made this function follow whatever week was being browsed).
   if (_stateCache && _stateCache.start_date) {
-    const originDate = (_stateCache.user_date || _stateCache.server_date);
-    const nowDt = originDate ? new Date(originDate + 'T00:00:00') : new Date();
-    const startDt = new Date(_stateCache.start_date + 'T00:00:00');
-    const diffDays = Math.floor((nowDt - startDt) / (1000 * 60 * 60 * 24));
-    return Math.min(12, Math.max(1, Math.floor(diffDays / 7) + 1));
+    return programWeekFor(_stateCache.start_date, _stateCache.user_date || _stateCache.server_date);
   }
   // Legacy no-start_date users: the persisted current_week IS the program week.
   if (_stateCache && _stateCache.current_week) return _stateCache.current_week;
@@ -12006,10 +11984,7 @@ async function renderDetail() {
 
   // Future week gate — show locked placeholder if browsing ahead AND no plan generated yet
   if (_stateCache && _stateCache.start_date) {
-    const _startDt = new Date(_stateCache.start_date + 'T00:00:00');
-    const _nowDt = new Date();
-    const _diffDays = Math.floor((_nowDt - _startDt) / (1000 * 60 * 60 * 24));
-    const _actualWeek = Math.min(12, Math.max(1, Math.floor(_diffDays / 7) + 1));
+    const _actualWeek = getActualProgramWeek();
     const _futureWeekData = workoutData[String(currentWeek)];
     if (currentWeek > _actualWeek && (!_futureWeekData || !_futureWeekData.days || !_futureWeekData.days.length)) {
       panel.innerHTML = '<div class="detail-inner" style="padding:2rem;text-align:center">' +

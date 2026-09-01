@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import hmac
+from program_calendar import program_week, day_date, week_day_for_date
 import deload as _deload
 import threading
 import time
@@ -1526,8 +1527,7 @@ def _current_week():
     try:
         s = _get_state()
         if s.start_date:
-            diff_days = (_user_today() - s.start_date).days
-            week = min(12, max(1, diff_days // 7 + 1))
+            week = program_week(s.start_date, _user_today())
             if s.current_week != week:
                 s.current_week = week
                 try:
@@ -5185,8 +5185,7 @@ def _reconcile_meal_rail(user, changed_dates):
     state = AppState.query.filter_by(user_id=user.id).first()
     if not state or not state.start_date:
         return []  # no program anchor — nothing to regenerate against
-    diff_days = (today - state.start_date).days
-    current_week = min(12, max(1, diff_days // 7 + 1))
+    current_week = program_week(state.start_date, today)
 
     goal = TrainingGoal.query.filter_by(user_id=user.id).first()
     fs = UserFoodSelections.query.filter_by(user_id=user.id).first()
@@ -11092,7 +11091,7 @@ def _morning_brief_body(uid, local_date):
     def _week_for():
         state = AppState.query.filter_by(user_id=uid).first()
         if state and state.start_date:
-            return min(12, max(1, (local_date - state.start_date).days // 7 + 1))
+            return program_week(state.start_date, local_date)
         return (state.current_week if state else None) or 1
 
     day_idx = local_date.weekday()
@@ -11702,8 +11701,8 @@ def api_admin_set_goal_target():
     # assume a full 12 weeks even when the user is already mid-program.
     user_state = AppState.query.filter_by(user_id=user.id).first()
     if user_state and user_state.start_date:
-        from datetime import date as _date
-        user_cw = min(12, max(1, (_date.today() - user_state.start_date).days // 7 + 1))
+        # user-LOCAL today (this copy used server-UTC date.today(), S023)
+        user_cw = program_week(user_state.start_date, _user_today_for(user))
     else:
         user_cw = user_state.current_week if user_state and user_state.current_week else 1
     weeks_remaining = max(1, 12 - user_cw + 1)
@@ -12171,8 +12170,7 @@ def api_weekly_report_generate():
     # Compute week from start_date (not stale current_week DB value)
     if s.start_date:
         local_today = _user_today()
-        diff_days = (local_today - s.start_date).days
-        week = min(12, max(1, diff_days // 7 + 1))
+        week = program_week(s.start_date, local_today)
     else:
         week = s.current_week or 1
 

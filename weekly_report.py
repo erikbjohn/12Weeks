@@ -3,6 +3,7 @@
 import os
 import logging
 from datetime import date, timedelta
+from program_calendar import program_week
 
 log = logging.getLogger(__name__)
 
@@ -295,8 +296,7 @@ def _build_sunday_recap_inner(uid, local_date):
     # Same start_date-based week resolution as app._week_for()/_current_week
     # (clamped 1..12) — never date.today(), so this stays correct however
     # far `local_date` is from the server's own clock.
-    diff_days = (local_date - state.start_date).days
-    week_num = min(12, max(1, diff_days // 7 + 1))
+    week_num = program_week(state.start_date, local_date)
     week_monday = state.start_date + timedelta(days=(week_num - 1) * 7)
     week_sunday = week_monday + timedelta(days=6)
 
