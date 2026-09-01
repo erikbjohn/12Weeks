@@ -43,3 +43,9 @@ def test_cross_site_post_to_api_is_refused(app_ctx):
     assert r.status_code != 403
     r = c.post("/api/run-log", json={"week": 1})
     assert r.status_code != 403
+
+
+def test_coach_assembler_never_imports_app():
+    """S070: the app ↔ coach_assembler cycle is broken; keep it that way."""
+    src = pathlib.Path("coach_assembler.py").read_text()
+    assert "from app import" not in src and "import app\n" not in src

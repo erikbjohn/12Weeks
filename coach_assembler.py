@@ -398,7 +398,7 @@ def _build_garmin():
         log.warning("garmin_wellness today-row read failed", exc_info=True)
         garmin_data = None
     if garmin_data is None:
-        from app import _get_garmin
+        from garmin_registry import get_garmin as _get_garmin  # S070: no app import
         gc = _get_garmin(current_user.id)
         if not gc.connected:
             gc.try_restore_tokens(current_user.id)

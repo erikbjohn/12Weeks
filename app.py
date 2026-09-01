@@ -1411,23 +1411,10 @@ def _parse_coach_markers(text, user_id, week):
             db.session.rollback()
 
 
-# Per-user Garmin clients (keyed by user_id)
-_garmin_clients = {}
-# Per-user push locks: serializes concurrent push_week calls (marker thread vs
-# generation hook) so a single user never has two simultaneous pushes racing.
-_garmin_push_locks: dict = {}
-_garmin_push_locks_guard = threading.Lock()
-
-
-def _get_garmin(user_id=None):
-    """Get or create a Garmin client for the current user."""
-    uid = user_id or (current_user.id if current_user and current_user.is_authenticated else None)
-    if not uid:
-        return GarminClient()
-    if uid not in _garmin_clients:
-        client = GarminClient(user_id=uid)
-        _garmin_clients[uid] = client
-    return _garmin_clients[uid]
+# Per-user Garmin clients + push locks live in garmin_registry (S070) so
+# coach_assembler no longer imports app.py. These names stay as aliases.
+from garmin_registry import (get_garmin as _get_garmin, _garmin_clients,
+                             _garmin_push_locks, _garmin_push_locks_guard)
 
 
 def _garmin_linked(uid):
