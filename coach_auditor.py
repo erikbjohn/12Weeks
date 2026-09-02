@@ -61,6 +61,7 @@ def audit_claim(claim_text: str, source_rows: list[str]) -> AuditResult:
         system="You are a precise fact-check auditor.",
         messages=[{"role": "user", "content": user_msg}],
     )
+    __import__('llm_client').record_usage(resp, 'auditor')   # S104
     out = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip().lower()
     if out.startswith("supported"):
         return AuditResult(supported=True)
@@ -113,6 +114,7 @@ def audit_posture(user_message: str, response_text: str) -> PostureResult:
         system="You audit conversational posture, not facts.",
         messages=[{"role": "user", "content": msg}],
     )
+    __import__('llm_client').record_usage(resp, 'auditor')   # S104
     out = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip().lower()
     if out.startswith("ok"):
         return PostureResult(ok=True)

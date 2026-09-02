@@ -404,6 +404,7 @@ milestone: Achievement or PR""",
                 "content": f"Athlete said: {user_message}\n\nCoach responded: {coach_response}\n\nExtract memories (or NONE):",
             }],
         )
+        __import__('llm_client').record_usage(response, 'coach_legacy')   # S104
         text = response.content[0].text.strip()
         if text == "NONE" or not text:
             return []

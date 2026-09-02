@@ -97,8 +97,8 @@ def _call_judge_with_retry(client, user_block: str):
     raise last_exc
 
 
-def judge_response(case: PromptCase, response: str, archetype_desc: str) -> JudgeResult:
-    user_block = f"""ARCHETYPE:
+def _user_block(case: PromptCase, response: str, archetype_desc: str) -> str:
+    return f"""ARCHETYPE:
 {archetype_desc}
 
 USER MESSAGE:
@@ -116,18 +116,9 @@ MUST_NOT (the response must avoid these):
 FOCUS DIMENSIONS (weight these more heavily):
 {json.dumps(case.focus_dimensions)}
 """
-    client = _client()
-    try:
-        resp = _call_judge_with_retry(client, user_block)
-    except Exception as e:
-        return JudgeResult(
-            passed=False,
-            scores=dict(ZERO_SCORES),
-            violations=[f"judge API error: {type(e).__name__}: {e}"],
-            evidence="",
-        )
 
-    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+
+def _parse_judge_text(text: str) -> JudgeResult:
     try:
         data = _extract_json(text)
     except Exception as e:
@@ -153,3 +144,71 @@ FOCUS DIMENSIONS (weight these more heavily):
         violations=list(data.get("violations") or []),
         evidence=str(data.get("evidence") or ""),
     )
+
+
+def judge_response(case: PromptCase, response: str, archetype_desc: str) -> JudgeResult:
+    user_block = _user_block(case, response, archetype_desc)
+    client = _client()
+    try:
+        resp = _call_judge_with_retry(client, user_block)
+    except Exception as e:
+        return JudgeResult(
+            passed=False,
+            scores=dict(ZERO_SCORES),
+            violations=[f"judge API error: {type(e).__name__}: {e}"],
+            evidence="",
+        )
+    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    return _parse_judge_text(text)
+
+
+def judge_batch(items, *, chunk: int = 100, poll_s: int = 30, log=print) -> dict:
+    """S127: judge MANY (case, response, archetype_desc) triples through the
+    Message Batches API — 50% of standard pricing, all chunks submitted up
+    front, then polled together; results keyed by case id (never by list
+    position). The system prompt carries a cache_control breakpoint since it
+    is identical across the batch. Returns {case.id: JudgeResult}."""
+    import time as _t
+    client = _client()
+    reqs = []
+    for case, response, archetype_desc in items:
+        reqs.append({
+            "custom_id": str(case.id)[:64],
+            "params": {
+                "model": JUDGE_MODEL, "max_tokens": MAX_TOKENS,
+                "system": [{"type": "text", "text": JUDGE_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                "messages": [{"role": "user", "content": _user_block(case, response, archetype_desc)}],
+            },
+        })
+    batches = {}
+    for i in range(0, len(reqs), chunk):
+        part = reqs[i:i + chunk]
+        for attempt in range(4):
+            try:
+                b = client.messages.batches.create(requests=part)
+                batches[b.id] = [r["custom_id"] for r in part]
+                log(f"[judge_batch] submitted {b.id} ({len(part)} requests)")
+                break
+            except Exception as e:
+                if attempt == 3:
+                    raise
+                _t.sleep(5 * 2 ** attempt)
+    out = {}
+    pending = set(batches)
+    while pending:
+        for bid in list(pending):
+            b = client.messages.batches.retrieve(bid)
+            if b.processing_status != "ended":
+                continue
+            for r in client.messages.batches.results(bid):
+                if r.result.type == "succeeded":
+                    text = "".join(blk.text for blk in r.result.message.content if getattr(blk, "type", None) == "text")
+                    out[r.custom_id] = _parse_judge_text(text)
+                else:
+                    out[r.custom_id] = JudgeResult(passed=False, scores=dict(ZERO_SCORES),
+                                                   violations=[f"judge batch error: {r.result.type}"], evidence="")
+            pending.discard(bid)
+            log(f"[judge_batch] collected {bid}")
+        if pending:
+            _t.sleep(poll_s)
+    return out

@@ -282,6 +282,7 @@ def generate_intake_report(conversation_history, lifting_data=None):
                 "content": f"Here is the complete intake conversation. Generate the baseline psychological report.\n\n{convo_text}{lifting_context}",
             }],
         )
+        __import__('llm_client').record_usage(response, 'psych_intake')   # S104
         return response.content[0].text
     except Exception as e:
         log.error("Report generation error: %s", e)

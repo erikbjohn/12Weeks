@@ -674,3 +674,119 @@ def test_source_pins_for_shipped_but_untested_partials():
     assert "window._weightsCache[exName]" not in js
     assert "Fast day. Water, black coffee, electrolytes only." not in js, "S159: no hardcoded fast-day literal"
     assert "escapeHtml(String(activePlan.note))" in js
+
+
+# ═════════════════════════ mechanism batch ═════════════════════════
+
+def test_schedule_gap_heals_from_coach_prescriptions(app_ctx):
+    """S028: a week with coach lifts but no WeeklyDaySchedule rows gets them back."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s028@test.com")
+    from models import WeeklyPrescription, WeeklyDaySchedule
+    import app as appmod
+    WeeklyPrescription.query.filter_by(user_id=u.id).delete(); WeeklyDaySchedule.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    for i, ex in enumerate(["Barbell Back Squat", "Romanian Deadlift", "Leg Press"]):
+        db.session.add(WeeklyPrescription(user_id=u.id, week=7, day_idx=0, exercise_order=i, exercise_name=ex,
+                                          sets=3, reps="8", target_weight=100, source="coach"))
+    db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        added = appmod._fill_missing_week_schedule(u.id, 7)
+    assert added == list(range(7))
+    d0 = WeeklyDaySchedule.query.filter_by(user_id=u.id, week=7, day_idx=0).first()
+    assert d0 and not d0.is_rest and d0.lift_name and "quads" in (d0.muscle_groups or [])
+    d1 = WeeklyDaySchedule.query.filter_by(user_id=u.id, week=7, day_idx=1).first()
+    assert d1.is_rest
+    assert appmod._fill_missing_week_schedule(u.id, 7) == []   # idempotent
+
+
+def test_temperature_threaded_to_multiagent_and_specialists():
+    src = open("coach_multi_agent.py").read()
+    assert src.count('"temperature": persona["temperature"]') == 2
+    import glob
+    for f in ("coach_specialists/strength.py", "coach_specialists/running.py", "coach_specialists/nutritionist.py"):
+        assert '"temperature": _PERSONA["temperature"]' in open(f).read(), f
+    assert '"temperature": fm.get("temperature")' in open("coach_specialists/loader.py").read()
+
+
+def test_invite_request_throttle_is_db_backed(app_ctx):
+    app_, db = app_ctx
+    from models import SystemFlag
+    SystemFlag.query.filter(SystemFlag.key.like("invite_req:%")).delete(synchronize_session=False); db.session.commit()
+    import app as appmod
+    appmod._invite_request_attempts.clear()
+    client = app_.test_client()
+    codes = [client.post("/api/request-invite", json={"name": "x", "email": "a@b.co"}).status_code for _ in range(4)]
+    assert codes[-1] == 429, codes
+    assert SystemFlag.query.filter(SystemFlag.key.like("invite_req:%")).first() is not None
+
+
+def test_div_controls_are_keyboard_reachable():
+    import re
+    src = open("static/app.js").read()
+    bare = [m.group(0) for m in re.finditer(r"<div [^>]*onclick=", src) if "role=" not in m.group(0)]
+    assert not bare, bare[:3]
+    assert "t.getAttribute('role') === 'button'" in src
+    assert "renderSundaySection" not in src   # S134 dead chain
+
+
+def test_today_status_carries_executed_plan_flag():
+    from coach_assembler import _format_athlete_data
+    ts = {"workout_state": "not_started", "run_logged": True, "run_distance_today": 4.0, "run_duration_today": 40,
+          "run_followed_pushed_plan": True, "run_activities_today": [{"start": "06:10", "followed_plan": True, "name": "12W Wk3 Tue"}]}
+    txt = _format_athlete_data({"today_status": ts}, ["today_status"])
+    assert "run_executed_pushed_plan: yes" in txt
+
+
+def test_claims_block_is_gated_on_multiagent(monkeypatch):
+    from coach_assembler import _format_athlete_data
+    monkeypatch.delenv("MULTIAGENT_ENABLED", raising=False)
+    txt = _format_athlete_data({"today_status": {"workout_state": "not_started"}}, ["today_status"])
+    assert "claim_id" not in txt and "<claims>" not in txt
+
+
+def test_llm_usage_is_recorded_and_queryable(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    from llm_client import record_usage
+    from models import LlmUsage
+    class _U: input_tokens = 1200; output_tokens = 80; cache_read_input_tokens = 900; cache_creation_input_tokens = 0
+    class _R: usage = _U(); model = "claude-test"
+    LlmUsage.query.delete(); db.session.commit()
+    record_usage(_R(), "unit_test")
+    assert LlmUsage.query.filter_by(agent="unit_test").count() == 1
+    monkeypatch.setenv("ADMIN_READ_KEY", "r" * 32)
+    r = app_.test_client().get("/api/admin/debug/llm-usage?days=1", headers={"X-Admin-Key": "r" * 32})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    row = [x for x in r.get_json()["rows"] if x["agent"] == "unit_test"][0]
+    assert row["calls"] == 1 and row["cache_hit_ratio"] == round(900 / 2100, 3)
+
+
+def test_every_messages_create_site_records_usage():
+    import glob, re
+    for f in glob.glob("*.py") + glob.glob("coach_specialists/*.py"):
+        if f in ("llm_client.py",):
+            continue
+        src = open(f).read()
+        n_create = len(re.findall(r"\.messages\.create\(", src))
+        if not n_create:
+            continue
+        n_rec = src.count("record_usage(") + (src.count("_log_usage(") - 1 if "def _log_usage(" in src else 0)
+        assert n_rec >= n_create, (f, n_create, n_rec)
+
+
+def test_swap_refresh_fetches_one_week_and_onboarding_is_one_call(app_ctx):
+    src = open("static/app.js").read()
+    fn = src[src.index("async function refreshWorkoutDataAfterSwap"):src.index("async function refreshWorkoutDataAfterSwap") + 900]
+    assert "fetch('/api/workouts/' + currentWeek)" in fn and "fetch('/api/workouts')" not in fn
+    assert "fetch('/api/onboarding/status')" in src
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s073@test.com")
+    r = client.get("/api/onboarding/status")
+    assert r.status_code == 200 and r.get_json()["complete"] is False
+
+
+def test_judge_batch_uses_batches_api_with_cached_system():
+    src = open("tests/coach_audit/judge.py").read()
+    assert "client.messages.batches.create(requests=part)" in src
+    assert '"cache_control": {"type": "ephemeral"}' in src
+    assert "out[r.custom_id]" in src

@@ -726,6 +726,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
             model=_SONNET, max_tokens=4000,
             system=system, messages=[{"role": "user", "content": user_prompt}],
         )
+        __import__('llm_client').record_usage(resp, 'planning_program')   # S104
         text = "".join(b.text for b in resp.content
                         if getattr(b, "type", None) == "text").strip()
         from llm_client import parse_json_reply

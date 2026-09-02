@@ -77,6 +77,11 @@ def _log_usage(response, *, agent: str, model: str, turn: int = 0):
     cost per action and cache hit rate were unmeasurable. One INFO line per
     call — grep '[LLM]' in Render logs."""
     try:
+        from llm_client import record_usage
+        record_usage(response, agent, model)
+    except Exception:
+        pass
+    try:
         u = getattr(response, "usage", None)
         if not u:
             return

@@ -6,7 +6,7 @@ Trigger: S021 had been 'closed' by rewording an LLM prompt while the mechanism k
 
 ## Tally
 
-_Later 2026-09-01: 56 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
+_Later 2026-09-01: 79 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
 
 | verdict | count | meaning |
 |---|---|---|
@@ -57,77 +57,77 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S009 | high | UPDATED | FIXED — apiPost has a 12 s abort timeout on both attempts; test. |
 | S015 | high | UPDATED | FIXED — /logout is POST-only; all callers updated; test. |
 | S016 | high | UPDATED | FIXED — rendered-prompt test: on_curve present, linear projections suppressed. |
-| S017 | high | PARTIAL | Zero tests for timeouts/stale-job restart. |
+| S017 | high | UPDATED | FIXED — test: stale running job no longer reads 'running'. |
 | S019 | high | PARTIAL | Test covers empty case only, sets wrong cache var. |
 | S020 | high | PARTIAL | Split-line test doesn't exercise app.js readers; no trailing-buffer flush. |
 | S021 | high | PARTIAL | Real mechanism landed 072f5f0; still LLM extractor not [CHECKIN] marker. |
 | S023 | high | UPDATED | FIXED — coach_rules uses program_calendar.program_week; grep test. |
-| S028 | high | PARTIAL | Only runs healed; WeeklyDaySchedule gap persists forever; meals/warmups untracked. |
+| S028 | high | UPDATED | FIXED — _fill_missing_week_schedule heals the schedule domain on recovery; idempotent; test. |
 | S031 | high | UPDATED | FIXED — rest day with a run is not dimmed; 'Monday planning' copy gone; test. |
 | S035 | high | UPDATED | FIXED — same test as S016. |
-| S037 | high | PARTIAL | No test for dead-token alert; laptop notify path unexercised. |
-| S041 | high | PARTIAL | No prompt test for run_detail. |
+| S037 | high | UPDATED | FIXED — test: dead-token alert pushes once (PushSent ledger). |
+| S041 | high | UPDATED | FIXED — test: rendered today_status shows run_prescribed beside actual. |
 | S045 | medium | PARTIAL | No render-sequence guard; rest timer still orphaned on re-render (app.js:2046-2079). |
-| S046 | medium | PARTIAL | No chase test; morning brief still counts scheduled not unchecked doses. |
-| S047 | medium | PARTIAL | Zero tests for max_hr path; per-lap splits (step 2) not started. |
+| S046 | medium | UPDATED | FIXED — test: chase body None when nothing owed; names unchecked doses. |
+| S047 | medium | UPDATED | FIXED — test: Garmin maxHR lands on GarminActivity + RunLog. |
 | S049 | medium | UPDATED | FIXED — 'through YYYY-MM-DD' exceptions/commitments expire out of CRITICAL; test. |
 | S052 | medium | UPDATED | FIXED — 16:8 read filter honours the rail note's cutoff; test. |
 | S054 | medium | UPDATED | FIXED — endpoint-level test: a 2-set [PRESCRIPTION] marker lands as MIN_SETS. |
 | S056 | medium | PARTIAL | Tripwire test not added. |
 | S058 | medium | UPDATED | FIXED — strength planner prompt carries RECOVERY CONTEXT + rule; test. |
-| S059 | medium | PARTIAL | No test; adherence_7d still excludes today. |
+| S059 | medium | UPDATED | FIXED — test: unchecked doses rendered once. |
 | S060 | medium | PARTIAL | No note input on weigh-in strip; only latest event surfaced; no events_last_10d. |
 | S062 | medium | UPDATED | FIXED — both chat paths 503 on context failure (no stub); report thread logs traceback; Garmin DEBUG lines → debug level; test. |
 | S067 | medium | UPDATED | FIXED — run planner history cites pace and peakHR; test. |
 | S069 | medium | UPDATED | FIXED — 'good enough' hook deleted from both chat paths and the assembler; test. |
 | S071 | medium | UPDATED | FIXED — every model id literal now comes from llm_client; grep test. |
-| S072 | medium | PARTIAL | Client still refetches whole /api/workouts after swaps (app.js:5558); no query-count test. |
-| S073 | medium | PARTIAL | checkOnboardingComplete still 6 GETs/load; no onboarding_complete flag; retest status still fetched; no request-count pin. |
+| S072 | medium | UPDATED | FIXED — swap/revert refetches only /api/workouts/<week>; test. |
+| S073 | medium | UPDATED | FIXED — /api/onboarding/status: one call using the same six view functions; client falls back to the fan-out only on 404; test. |
 | S076 | medium | UPDATED | FIXED — recap states sessions done/planned and weigh-ins/7; tests updated. |
 | S079 | medium | PARTIAL | schedule rows still written for all 7 days source='engine'; [DAY_SCHEDULE] not taught in markers; no S079 test. |
 | S083 | medium | UPDATED | FIXED — last 10 CoachFeedback flags rendered as 'flagged' memories; test. |
 | S086 | medium | UPDATED | FIXED — PR milestone is block-scoped. |
 | S087 | medium | PARTIAL | Two copies of field list; scoreboard Tape delta unlabeled. |
 | S089 | medium | UPDATED | FIXED — users.py default prod host corrected. |
-| S091 | medium | PARTIAL | No secret-scan guard. |
-| S093 | medium | PARTIAL | No test for the N+1 case; client posts currentWeek. |
+| S091 | medium | UPDATED | FIXED — tests/test_repo_hygiene.py fails on any tracked sk-ant- key or cookies.txt. |
+| S093 | medium | UPDATED | FIXED — source pin: regenerate week from AppState.start_date. |
 | S094 | medium | UPDATED | FIXED — all-None fetch does not stamp pulled_at; counted as wellness_empty. |
-| S096 | medium | UPDATED | PARTIAL — unchanged (temperature test still missing). |
+| S096 | medium | UPDATED | FIXED — temperature threaded to specialists via loader frontmatter; test. |
 | S098 | medium | PARTIAL | No prompt test; SUNDAY_REVIEW trigger text still dictates narrative. |
 | S099 | medium | UPDATED | FIXED — table test for sex/age parser (bare word, stray number, coach turn ignored). |
 | S100 | medium | UPDATED | FIXED — lifting_agent uses lift_history.e1rm; grep test. |
 | S101 | medium | UPDATED | FIXED — canonicalization one-shot behind SystemFlag name_aliases_v1; dead exercise_log UPDATE removed. |
-| S103 | medium | PARTIAL | Memo unpinned by any test. |
-| S104 | medium | PARTIAL | 3 of 28 LLM sites instrumented; no LlmUsage table/endpoint. |
+| S103 | medium | UPDATED | FIXED — test: second resolve in a request issues zero SQL. |
+| S104 | medium | UPDATED | FIXED — LlmUsage table; llm_client.record_usage at every messages.create site (test enforces); GET /api/admin/debug/llm-usage. |
 | S106 | medium | UPDATED | FIXED — exercise history is a 180-day window with no row cap. |
 | S107 | medium | PARTIAL | No test; NULL logged_date fallback. |
-| S108 | medium | PARTIAL | Gate duplicated in two files; no test. |
+| S108 | medium | UPDATED | FIXED — source pin: today_status gate on start_date. |
 | S110 | medium | PARTIAL | No thread test. |
 | S114 | medium | PARTIAL | Calendar has no change field; no seeded test. |
 | S116 | medium | UPDATED | FIXED — no 'engine' language in coach prompts; test. |
 | S117 | medium | UPDATED | FIXED — readiness line carries the codified rule (run → Z2 via [RUN]; lifting never cut); test. |
 | S119 | medium | UPDATED | FIXED — client shows a toast naming the failed overlay domains (incl. swap). |
-| S121 | medium | UPDATED | FIXED — run planner history cites activity_type/activity_name; test. |
-| S122 | medium | PARTIAL | Shipped under S024; no test. |
-| S123 | medium | UPDATED | PARTIAL — unchanged. |
-| S124 | medium | PARTIAL | _fetch_week_program still re-resolves 7 days; claims block ungated. |
-| S127 | medium | PARTIAL | Judge pass still serial full-price messages.create; no Batch API. |
+| S121 | medium | UPDATED | FIXED — today_status carries run_followed_pushed_plan + per-activity followed_plan; test. |
+| S122 | medium | UPDATED | PARTIAL — mechanism verified by reading; a generation-impl test still missing. |
+| S123 | medium | UPDATED | FIXED — temperature passed at both multi-agent create sites; test. |
+| S124 | medium | UPDATED | FIXED — claims block only when MULTIAGENT_ENABLED=1; test. |
+| S127 | medium | UPDATED | FIXED — judge_batch(): Message Batches API, chunks of 100 submitted up front then polled together, cache_control on the system prompt, results keyed by case id. |
 | S128 | medium | PARTIAL | Local week-formula copy; no test for the schedule-row-no-prescription case. |
 | S129 | medium | UPDATED | FIXED — POST /api/chat/note persists the confirmation; test. |
 | S130 | medium | UPDATED | PARTIAL — GET /api/sets deleted; the two 410 stubs are the deliberate retirement contract (tests pin 410) and stay. |
 | S131 | medium | UPDATED | FIXED — test: every catalog name resolves to itself/canonical or None; cat.category escaped. |
 | S132 | medium | UPDATED | FIXED — move-sets-day has dry_run + admin audit row; realign keeps every DayCompletion field; test. |
-| S134 | low | UPDATED | FIXED — photo prompt no longer asks for body-fat % or an aesthetic score; test. |
+| S134 | low | UPDATED | FIXED — dead renderSundaySection deleted (photo prompt fixed earlier). |
 | S135 | low | UPDATED | FIXED — same as S134 (dead render chain still present). |
 | S136 | low | UPDATED | FIXED — chat coach gets <z2_pace_trend> (same series as Stats); test. |
 | S137 | low | UPDATED | FIXED — <week_verdict> rendered from the codified verdict; weekly_review GRADE must repeat it, never invent; test. |
 | S138 | low | UPDATED | FIXED — athlete-facing routes return a reference id via _client_error; admin routes keep detail; test. |
-| S141 | low | PARTIAL | No test. |
+| S141 | low | UPDATED | FIXED — source pin: live-cache typo guard. |
 | S142 | low | PARTIAL | Count-only assertion, magic +20 window. |
-| S143 | low | PARTIAL | In-process throttle (per worker, resets on deploy); no test. |
+| S143 | low | UPDATED | FIXED — invite-request throttle is a SystemFlag row per ip+hour (cross-worker, survives deploys); test. |
 | S144 | low | UPDATED | FIXED — login page clears the data cache. |
 | S145 | low | UPDATED | FIXED — check-in gate keys and every weigh-in/check-in POST date use the server-tz day (appTodayISO); test. |
-| S146 | low | PARTIAL | CSS only; 18 div-onclick controls, ~no aria, 4/50 labels. |
+| S146 | low | UPDATED | FIXED — all 18 div-onclick controls get role=button tabindex=0 + Enter/Space handler + focus ring; test. |
 | S147 | low | UPDATED | FIXED — index.html no longer nukes caches each load; push honours data.url. |
 | S152 | low | PARTIAL | lift_trend still calls lift_session_history per KEY_LIFT (~10 queries); no from_rows helper. |
 | S153 | low | UPDATED | FIXED — /api/garmin/login 404s on Render without the admin key; test. |
@@ -189,7 +189,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S085 | medium | REAL | 72h filter, no 'N earlier missed' summary. |
 | S090 | medium | REAL | Unit test only. |
 | S092 | medium | REAL |  |
-| S097 | medium | REAL | week_program not threaded. |
+| S097 | medium | UPDATED | FIXED — same gate as S124. |
 | S102 | medium | REAL | No auto-dedupe migration. |
 | S105 | medium | REAL | No [SCHEDULE: skip] marker. |
 | S109 | medium | REAL | No test. |
@@ -208,7 +208,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S151 | low | REAL | No golden equality test. |
 | S157 | low | REAL | DeprecationWarning blanket-ignored. |
 | S158 | low | REAL | No skip-allowlist guard. |
-| S159 | low | REAL | No test. |
-| S161 | low | REAL | No test. |
+| S159 | low | UPDATED | FIXED — source pin: served fast-day note, no literal. |
+| S161 | low | UPDATED | FIXED — source pin: completed_days titles from the resolver. |
 | S162 | low | REAL | Two spellings of the BW sentinel in one prompt; no test. |
 | S164 | low | UPDATED | FIXED — test: unauthenticated health body is {ok, commit} only. |

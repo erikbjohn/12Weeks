@@ -4812,3 +4812,6 @@ footer {
    user cannot see. Mouse/touch focus stays quiet via :focus-visible. */
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 button, [role="button"] { touch-action: manipulation; }
+
+/* S146: role=button divs are focusable; make focus visible like real buttons */
+[role="button"]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

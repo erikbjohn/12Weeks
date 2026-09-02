@@ -1395,11 +1395,14 @@ def _build_today_status():
         for _a in (_GA.query.filter_by(user_id=current_user.id, activity_date=today)
                    .order_by(_GA.start_time_local.asc()).all()):
             _st = (_a.start_time_local or "")
+            _nm = getattr(_a, "activity_name", None) or ""
             run_activities.append({
                 "start": _st[11:16] if len(_st) >= 16 else None,
                 "distance_miles": _a.distance_miles, "duration_min": _a.duration_min,
                 "avg_hr": _a.avg_hr,
                 "max_hr": getattr(_a, "max_hr", None),
+                "name": _nm or None,
+                "followed_plan": _nm.startswith("12W Wk"),   # S121: the pushed watch workout was executed
             })
     except Exception:
         log.warning("GarminActivity today read failed", exc_info=True)
@@ -1427,6 +1430,7 @@ def _build_today_status():
         "run_max_hr_today": getattr(run_today_log, "max_hr", None) if run_today_log else None,
         "workout_short_exercises": short_exercises,
         "run_activities_today": run_activities,
+        "run_followed_pushed_plan": any(a.get("followed_plan") for a in run_activities) or None,
     }}
 
 
@@ -1510,6 +1514,8 @@ def _format_today_status_block(ts):
             # S041: the debrief must see plan and actual side by side.
             lines.append(f"  run_prescribed: {ts.get('run_label') or ''} {ts.get('run_duration') or ''}"
                          f" — {ts['run_detail']}")
+        if ts.get("run_followed_pushed_plan"):
+            lines.append("  run_executed_pushed_plan: yes (the watch ran the 12W structured workout — segments were followed)")
         acts = ts.get("run_activities_today") or []
         if len(acts) > 1:
             def _act(a):
@@ -2340,6 +2346,10 @@ Rules:
 # _format_athlete_data — builds <athlete_data> XML from context sections
 # ---------------------------------------------------------------------------
 
+class _ClaimsSkipped(Exception):
+    pass
+
+
 def _format_athlete_data(ctx, requires):
     """Build the athlete_data block from available context sections.
 
@@ -2361,6 +2371,9 @@ def _format_athlete_data(ctx, requires):
     # still renders).
     try:
         from coach_claims import build_claims, format_claims_block
+        import os as _os
+        if _os.environ.get("MULTIAGENT_ENABLED") != "1":
+            raise _ClaimsSkipped()   # S124: only the Doctor persona is taught claim_ids
         claims_text = format_claims_block(build_claims(
             user_id=current_user.id,
             scope=("body_weight", "goal", "today_status", "week_program"),

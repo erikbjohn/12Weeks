@@ -421,10 +421,12 @@ def coach_chat_multiagent(
         resp = client.messages.create(
             model=persona["model"],
             max_tokens=max_tokens,
+            **({"temperature": persona["temperature"]} if persona.get("temperature") is not None else {}),   # S123
             system=system,
             messages=convo,
             tools=doctor_tools,
         )
+        __import__('llm_client').record_usage(resp, 'multi_agent')   # S104
         if resp.stop_reason == "tool_use":
             convo.append({
                 "role": "assistant",
@@ -563,11 +565,13 @@ def coach_chat_multiagent(
         resp = client.messages.create(
             model=persona["model"],
             max_tokens=max_tokens,
+            **({"temperature": persona["temperature"]} if persona.get("temperature") is not None else {}),   # S123
             system=system,
             messages=convo,
             tools=doctor_tools,  # history contains tool blocks — must stay defined
             tool_choice={"type": "none"},
         )
+        __import__('llm_client').record_usage(resp, 'multi_agent')   # S104
         text = "\n".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()

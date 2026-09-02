@@ -18,6 +18,28 @@ SONNET = "claude-sonnet-4-6"
 HAIKU = "claude-haiku-4-5-20251001"
 
 
+def record_usage(response, agent: str, model: str | None = None):
+    """S104: persist response.usage (best effort, never raises). Safe outside
+    an app context (returns silently)."""
+    try:
+        u = getattr(response, "usage", None)
+        if not u:
+            return
+        from models import db, LlmUsage
+        db.session.add(LlmUsage(agent=(agent or "?")[:40], model=(model or getattr(response, "model", None) or "?")[:60],
+                                input_tokens=getattr(u, "input_tokens", None),
+                                output_tokens=getattr(u, "output_tokens", None),
+                                cache_read_tokens=getattr(u, "cache_read_input_tokens", None),
+                                cache_write_tokens=getattr(u, "cache_creation_input_tokens", None)))
+        db.session.commit()
+    except Exception:
+        try:
+            from models import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def client(*, timeout: float = 60.0, max_retries: int = 1):
     """A configured Anthropic client. Timeout is REQUIRED thinking — the SDK
     default (600 s × 3 retries) wedged background jobs (S017)."""

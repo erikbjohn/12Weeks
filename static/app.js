@@ -2606,6 +2606,12 @@ async function toggleWeightDetail(exerciseName, rowEl) {
 async function checkOnboardingComplete() {
   // Onboarding is only truly complete when ALL steps are done
   try {
+    // S073: one call. The six-GET fan-out below stays only as the fallback
+    // for a server that predates /api/onboarding/status.
+    const one = await fetch('/api/onboarding/status');
+    if (one.status === 401) return false;
+    if (one.ok) { const j = await one.json(); return !!j.complete; }
+    if (one.status !== 404) return null;
     const [intakeRes, conRes, paRes, goalRes, foodRes, eqRes] = await Promise.all([
       fetch('/api/psych-intake/status'),
       fetch('/api/constraints'),
@@ -2958,7 +2964,7 @@ function renderBaselineMeasurements(el) {
         <button class="photo-retake" onclick="retakeBaselinePhoto('${pose}')">Retake</button>
       </div>${analysisHtml}`;
     } else {
-      slotContent = `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+      slotContent = `<div role="button" tabindex="0" class="photo-upload-btn" onclick="this.querySelector('input').click()">
         <div class="photo-icon">&#128247;</div>
         <div>Tap to capture</div>
         <input type="file" accept="image/*" capture="environment" onchange="handleBaselinePhotoCapture('${pose}', this)">
@@ -3013,7 +3019,7 @@ function retakeBaselinePhoto(pose) {
   delete _baselinePhotoResults[pose];
   const slotEl = document.getElementById(`bl-photo-slot-${pose}`);
   if (slotEl) {
-    slotEl.innerHTML = `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+    slotEl.innerHTML = `<div role="button" tabindex="0" class="photo-upload-btn" onclick="this.querySelector('input').click()">
       <div class="photo-icon">&#128247;</div>
       <div>Tap to capture</div>
       <input type="file" accept="image/*" capture="environment" onchange="handleBaselinePhotoCapture('${pose}', this)">
@@ -3396,16 +3402,16 @@ function renderPhysicalAssessment() {
         <div class="pa-question">
           <div class="pa-question-text">Do you have access to a gym with barbells and machines?</div>
           <div class="pa-choices">
-            <div class="pa-choice${_paData.has_gym === true ? ' selected' : ''}" onclick="_paData.has_gym=true;paUpdateChoices()">Yes</div>
-            <div class="pa-choice${_paData.has_gym === false ? ' selected' : ''}" onclick="_paData.has_gym=false;paUpdateChoices()">No</div>
+            <div role="button" tabindex="0" class="pa-choice${_paData.has_gym === true ? ' selected' : ''}" onclick="_paData.has_gym=true;paUpdateChoices()">Yes</div>
+            <div role="button" tabindex="0" class="pa-choice${_paData.has_gym === false ? ' selected' : ''}" onclick="_paData.has_gym=false;paUpdateChoices()">No</div>
           </div>
         </div>
 
         <div class="pa-question">
           <div class="pa-question-text">Do you have a measuring tape?</div>
           <div class="pa-choices">
-            <div class="pa-choice${_paData.has_tape === true ? ' selected' : ''}" onclick="_paData.has_tape=true;paUpdateChoices()">Yes</div>
-            <div class="pa-choice${_paData.has_tape === false ? ' selected' : ''}" onclick="_paData.has_tape=false;paUpdateChoices()">No</div>
+            <div role="button" tabindex="0" class="pa-choice${_paData.has_tape === true ? ' selected' : ''}" onclick="_paData.has_tape=true;paUpdateChoices()">Yes</div>
+            <div role="button" tabindex="0" class="pa-choice${_paData.has_tape === false ? ' selected' : ''}" onclick="_paData.has_tape=false;paUpdateChoices()">No</div>
           </div>
         </div>
 
@@ -3941,7 +3947,7 @@ function renderEquipmentSelection() {
 
     const items = cat.items.map(item => {
         const isSelected = _equipSelections.includes(item.id);
-        return '<div class="food-item' + (isSelected ? ' selected' : '') + '" onclick="toggleEquip(\'' + item.id + '\')">' +
+        return '<div role="button" tabindex="0" class="food-item' + (isSelected ? ' selected' : '') + '" onclick="toggleEquip(\'' + item.id + '\')">' +
             '<div class="food-item-name">' + item.name + '</div>' +
         '</div>';
     }).join('');
@@ -4084,7 +4090,7 @@ function renderFoodSelection() {
   const foodItems = foods.map(f => {
     const isSelected = selected.includes(f.id);
     const portionInfo = `${f.default_portion} ${f.unit} = ${Math.round(f.cal * f.default_portion)} cal, ${Math.round(f.protein * f.default_portion)}P`;
-    return `<div class="food-item${isSelected ? ' selected' : ''}" onclick="toggleFood('${category}','${f.id}')">
+    return `<div role="button" tabindex="0" class="food-item${isSelected ? ' selected' : ''}" onclick="toggleFood('${category}','${f.id}')">
       <div class="food-item-name">${f.name}</div>
       <div class="food-item-macros">${portionInfo}</div>
     </div>`;
@@ -5276,7 +5282,7 @@ async function showGroceryList() {
       html += `<div class="shop-category"><div class="shop-cat-label">${escapeHtml(cat.category)}</div>`;
       for (const item of cat.items) {
         const safeId = item.item.replace(/[^a-zA-Z0-9]/g, '_');
-        html += `<div class="shop-item" onclick="this.classList.toggle('shop-done')">
+        html += `<div role="button" tabindex="0" class="shop-item" onclick="this.classList.toggle('shop-done')">
           <button class="shop-check" aria-label="Check off ${escapeHtml(item.item)}"></button>
           <span class="shop-item-name">${escapeHtml(item.item)}</span>
           <span class="shop-item-qty">${escapeHtml(String(item.total))}</span>
@@ -5532,7 +5538,7 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
 
         // If currently swapped, offer "Revert to original" first
         if (isCurrentlySwapped) {
-            options.push(`<div class="swap-option" onclick="revertExerciseSwap(${currentWeek},${currentDay},${exIdx})" style="border-left:3px solid var(--accent)">
+            options.push(`<div role="button" tabindex="0" class="swap-option" onclick="revertExerciseSwap(${currentWeek},${currentDay},${exIdx})" style="border-left:3px solid var(--accent)">
                 <span class="swap-name">${escapeHtml(originalName)}</span>
                 <span class="swap-note">Original exercise</span>
             </div>`);
@@ -5542,7 +5548,7 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
         if (data.alternatives) {
             for (const alt of data.alternatives) {
                 if (alt.name === exerciseName) continue; // Skip current
-                options.push(`<div class="swap-option" onclick="swapExercise(${currentWeek},${currentDay},${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
+                options.push(`<div role="button" tabindex="0" class="swap-option" onclick="swapExercise(${currentWeek},${currentDay},${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
                     <span class="swap-name">${alt.name}</span>
                     <span class="swap-note">${alt.note}</span>
                 </div>`);
@@ -5574,17 +5580,14 @@ async function showExerciseSwap(exIdx, exerciseName, event) {
 // Refetching after the write is what makes the card match the database.
 async function refreshWorkoutDataAfterSwap() {
     try {
+        // S072: only the week that changed — /api/workouts/<week> — not the
+        // whole 12-week payload after every swap/revert.
         const [wRes, sRes] = await Promise.all([
-            fetch('/api/workouts'),
+            fetch('/api/workouts/' + currentWeek),
             fetch('/api/exercise-swaps'),
         ]);
         if (wRes.ok) {
-            const fresh = await wRes.json();
-            window._exerciseNames = fresh._exerciseNames || window._exerciseNames || [];
-            delete fresh._exerciseNames;
-            window._aliasMap = fresh._aliasMap || window._aliasMap || {};
-            delete fresh._aliasMap;
-            workoutData = fresh;
+            workoutData[String(currentWeek)] = await wRes.json();
         }
         // Re-sync the swap map too: it is loaded once per session behind
         // _exerciseSwapsLoaded, so without this it keeps serving the pre-write
@@ -7533,7 +7536,7 @@ async function showGarminPanel() {
   const wrap = document.createElement('div');
   wrap.id = 'garmin-panel';
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
-  wrap.innerHTML = '<div style="background:var(--card,#16181d);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;max-height:85vh;overflow-y:auto;padding:20px" onclick="event.stopPropagation()">' +
+  wrap.innerHTML = '<div role="button" tabindex="0" style="background:var(--card,#16181d);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;max-height:85vh;overflow-y:auto;padding:20px" onclick="event.stopPropagation()">' +
       '<h3 style="font-size:20px;margin-bottom:14px">&#8986; Garmin Sync</h3>' +
       '<div id="garmin-panel-body" style="font-size:16px">Loading&hellip;</div>' +
       '<button class="btn btn-secondary" style="width:100%;margin-top:14px;font-size:16px" onclick="closeGarminPanel()">Close</button>' +
@@ -10586,7 +10589,7 @@ function renderDayGrid() {
     const isRest = d.isRest;
     const done = isDayDone(currentWeek, i);
 
-    return `<div class="day-card${isRest?' rest':''}${done?' completed':''}${currentDay===i?' active':''}" onclick="setDay(${i})">
+    return `<div role="button" tabindex="0" class="day-card${isRest?' rest':''}${done?' completed':''}${currentDay===i?' active':''}" onclick="setDay(${i})">
       <div class="day-card-left">
         <div class="day-abbr">${d.day}</div>
       </div>
@@ -10596,7 +10599,7 @@ function renderDayGrid() {
           ${runPillHtml(d)}
         </div>
       </div>
-      <div class="day-card-right" onclick="toggleDay(${currentWeek},${i},event)">
+      <div role="button" tabindex="0" class="day-card-right" onclick="toggleDay(${currentWeek},${i},event)">
         ${done ? '&#10003;' : '&#9675;'}
       </div>
     </div>`;
@@ -11935,7 +11938,7 @@ function _protoCalCellHtml(dt, days, escByIso, todayIso, varies) {
   // S115: cells are tappable — time, units, site and the doctor's notes were
   // only in hover tooltips, which never render on iOS.
   window._protoCalDays = days; window._protoCalEsc = escByIso;
-  return '<div onclick="toggleProtoDayDrawer(\'' + iso + '\')" style="cursor:pointer;border:' + border + ';background:' + bg + ';border-radius:6px;padding:4px;min-height:60px">' +
+  return '<div role="button" tabindex="0" onclick="toggleProtoDayDrawer(\'' + iso + '\')" style="cursor:pointer;border:' + border + ';background:' + bg + ';border-radius:6px;padding:4px;min-height:60px">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
       '<span style="font-size:16px;font-weight:700;color:var(--text)">' + dt.getDate() + '</span>' +
       '<span style="display:flex;gap:3px;align-items:center">' +
@@ -12923,7 +12926,7 @@ async function renderDetail() {
       const displayVal = est1rm || wt;
       const _srcTag = loggedRM > 0 ? '' : ' <span style="font-size:10px;color:var(--muted)">(planned)</span>';
       wsRows += `<div class="ws-row-wrap">
-  <div class="ws-row" onclick="toggleWeightDetail('${name}', this)">
+  <div role="button" tabindex="0" class="ws-row" onclick="toggleWeightDetail('${name}', this)">
     <span class="ws-name">${shortName}</span>
     <span class="ws-val">${displayVal} lb${_srcTag} ${trendIcon}</span>
   </div>
@@ -13113,7 +13116,7 @@ function retakePhoto(pose) {
 }
 
 function renderPhotoUploadButton(pose) {
-  return `<div class="photo-upload-btn" onclick="this.querySelector('input').click()">
+  return `<div role="button" tabindex="0" class="photo-upload-btn" onclick="this.querySelector('input').click()">
     <div class="photo-icon">&#128247;</div>
     <div>Tap to capture</div>
     <input type="file" accept="image/*" capture="environment" onchange="handlePhotoCapture('${pose}', this)">
@@ -13173,10 +13176,6 @@ function togglePhotoCompare() {
   if (grid) grid.classList.toggle('visible', _sundayCompareOpen);
 }
 
-async function renderSundaySection(dayData) {
-  // Measurements handled by morning flow + Stats accordion; photos in morning flow
-  return '';
-}
 
 async function loadSundayPhotoPreviews() {
   const photos = await loadPhotos();
@@ -14256,7 +14255,7 @@ async function showTransitionSwap(exIdx, exerciseName) {
       return;
     }
     const altsHtml = data.alternatives.filter(a => a.name !== exerciseName).map(alt =>
-      `<div class="swap-option" onclick="transitionSwapTo(${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
+      `<div role="button" tabindex="0" class="swap-option" onclick="transitionSwapTo(${exIdx},'${alt.name.replace(/'/g, "\\'")}')">
         <span class="swap-name">${alt.name}</span>
         <span class="swap-note">${alt.note}</span>
       </div>`
@@ -14305,5 +14304,15 @@ window.addEventListener('popstate', (e) => {
   const el = document.getElementById('exercise-focus');
   if (el && el.classList.contains('visible')) {
     exitExerciseFocus();
+  }
+});
+
+
+// S146: keyboard access for the role="button" divs — Enter/Space acts like a tap.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  var t = e.target;
+  if (t && t.getAttribute && t.getAttribute('role') === 'button' && t.tagName !== 'BUTTON' && t.tagName !== 'A') {
+    e.preventDefault(); t.click();
   }
 });

@@ -849,6 +849,20 @@ class PushSubscription(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow())
 
 
+class LlmUsage(db.Model):
+    """S104: one row per model call — cost per route/agent/day and cache hit
+    rate become a query instead of a log grep."""
+    __tablename__ = "llm_usage"
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    agent = db.Column(db.String(40), index=True)
+    model = db.Column(db.String(60))
+    input_tokens = db.Column(db.Integer)
+    output_tokens = db.Column(db.Integer)
+    cache_read_tokens = db.Column(db.Integer)
+    cache_write_tokens = db.Column(db.Integer)
+
+
 class PushSent(db.Model):
     """Idempotency ledger for push sends. One row per (user, kind, local_date)
     guards against re-sending the same notification after a worker

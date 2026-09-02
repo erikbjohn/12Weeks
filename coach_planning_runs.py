@@ -584,6 +584,7 @@ def generate_week_runs(
             system=system,
             messages=[{"role": "user", "content": user_prompt}],
         )
+        __import__('llm_client').record_usage(resp, 'planning_runs')   # S104
         text = "".join(
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()

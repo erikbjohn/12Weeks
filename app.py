@@ -794,6 +794,7 @@ Output HTML with inline styles. Dark background (#0d0f0e), light text (#e8ede9),
 Keep it SHORT — 4-5 sentences max. Sign it "— Erik".""",
             messages=[{"role": "user", "content": f"Athlete name: {name}\n\nIntake report:\n{intake_report[:500]}"}],
         )
+        __import__('llm_client').record_usage(response, 'app_' + request.endpoint.split('.')[-1] if request else 'app')   # S104
         return response.content[0].text
     except Exception:
         return f"""<div style="background:#0d0f0e;color:#e8ede9;padding:2rem;font-family:sans-serif;max-width:500px;margin:0 auto">
@@ -3474,6 +3475,21 @@ def api_request_invite():
         return jsonify({"error": "valid email required"}), 400
     _ip = request.remote_addr or "?"
     _now = time.time()
+    # S143: DB-backed (SystemFlag row per ip+hour) so the limit is real across
+    # gunicorn workers and deploys; the in-process dict is only a fast path.
+    try:
+        _hk = f"invite_req:{_ip}:{int(_now // 3600)}"
+        _row = SystemFlag.query.filter_by(key=_hk).first()
+        if _row and int(_row.value or 0) >= 3:
+            return jsonify({"error": "Too many requests — try again in an hour"}), 429
+        if _row:
+            _row.value = str(int(_row.value or 0) + 1)
+        else:
+            db.session.add(SystemFlag(key=_hk, value="1"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logging.exception("invite-request throttle row failed")
     _a = _invite_request_attempts.get(_ip, (0, _now))
     if _now - _a[1] > 3600:
         _a = (0, _now)
@@ -4292,6 +4308,30 @@ def _get_state():
     return s
 
 
+@app.route("/api/onboarding/status")
+@login_required
+def api_onboarding_status():
+    """S073: the client used to issue six GETs on every load to decide whether
+    onboarding is complete. Same six answers, one call, same view functions
+    (no parallel logic to drift)."""
+    def _j(fn, *a):
+        r = fn(*a)
+        r = r[0] if isinstance(r, tuple) else r
+        return r.get_json() or {}
+    try:
+        intake = _j(api_psych_intake_status); con = _j(api_constraints); pa = _j(api_physical_assessment_status)
+        goal = _j(api_goal); food = _j(api_food_selections); eq = _j(api_equipment)
+    except Exception:
+        logging.exception("onboarding status")
+        return jsonify({"error": "unavailable"}), 503
+    complete = bool(intake.get("completed") and con.get("completed") and pa.get("completed")
+                    and eq.get("completed") and goal.get("computed") and food.get("completed")
+                    and goal.get("plan_accepted"))
+    return jsonify({"complete": complete, "intake": intake.get("completed"), "constraints": con.get("completed"),
+                    "physical": pa.get("completed"), "equipment": eq.get("completed"),
+                    "goal": goal.get("computed"), "food": food.get("completed"), "plan_accepted": goal.get("plan_accepted")})
+
+
 @app.route("/api/state")
 @login_required
 def api_state():
@@ -4815,6 +4855,46 @@ def _prev_run_durations(user_id, target_week):
     return out
 
 
+def _fill_missing_week_schedule(user_id, target_week):
+    """S028: a worker death between per-domain commits left coach lifts with
+    no WeeklyDaySchedule rows — and nothing ever wrote them again. Derive the
+    missing days' titles from the COACH's own exercises (same resolver the
+    generation path uses) and write them. Idempotent; pure DB."""
+    added = []
+    try:
+        from workout_data import EXERCISES as _EX
+        for day_idx in range(7):
+            if WeeklyDaySchedule.query.filter_by(user_id=user_id, week=target_week, day_idx=day_idx).first():
+                continue
+            rx = (WeeklyPrescription.query
+                  .filter_by(user_id=user_id, week=target_week, day_idx=day_idx, source='coach')
+                  .order_by(WeeklyPrescription.exercise_order).all())
+            names = [r.exercise_name for r in rx]
+            is_rest = not names
+            try:
+                lift_name = _schedule_day_title("", names) if names else "Rest"
+            except Exception:
+                lift_name = None
+            if not lift_name:
+                lift_name = "Rest" if is_rest else "Lift"
+            mgs = set()
+            for n in names:
+                for part in (_EX.get(n, {}).get("muscle_group", "") or "").split("_"):
+                    if part in ("chest", "back", "quads", "hamstrings", "shoulders", "glutes", "biceps", "triceps", "core"):
+                        mgs.add(part)
+            db.session.add(WeeklyDaySchedule(user_id=user_id, week=target_week, day_idx=day_idx,
+                                             lift_name=lift_name, muscle_groups=sorted(mgs),
+                                             is_rest=is_rest, source='coach'))
+            added.append(day_idx)
+        if added:
+            db.session.commit()
+            logging.warning("S028: healed WeeklyDaySchedule for user %s week %s days %s", user_id, target_week, added)
+    except Exception:
+        logging.exception("S028: schedule heal failed")
+        db.session.rollback()
+    return added
+
+
 def _fill_missing_week_runs(user_id, target_week):
     """COACH-OR-NOTHING run generation for a week that has no run-plan rows.
     Touches only the run domain — never existing lift prescriptions. Returns
@@ -4932,6 +5012,7 @@ def api_weekly_program_generate_status():
                 # lifts with no runs/schedule. Say so, and name what's missing,
                 # so the client can offer "Finish planning" instead of a dead
                 # 'done · recovered'.
+                _fill_missing_week_schedule(current_user.id, week)   # S028: heal, do not just report
                 _missing = []
                 if not WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).first():
                     _missing.append("run")
@@ -8834,6 +8915,7 @@ Return ONLY a JSON object of the form:
 
 {athlete_text}"""}],
         )
+        __import__('llm_client').record_usage(response, 'app_' + request.endpoint.split('.')[-1] if request else 'app')   # S104
         text_out = response.content[0].text.strip()
         if '{' not in text_out:
             # Model replied with no JSON object (refusal / plain text).
@@ -9703,6 +9785,7 @@ Be direct and honest. This person wants real feedback, not flattery. They're usi
             max_tokens=1000,
             messages=[{"role": "user", "content": content}],
         )
+        __import__('llm_client').record_usage(response, 'app_' + request.endpoint.split('.')[-1] if request else 'app')   # S104
         return response.content[0].text
     except Exception as e:
         return f"Photo saved. Analysis failed: {str(e)[:100]}"
@@ -12738,6 +12821,26 @@ def api_admin_debug_fire_coach():
         })
 
 
+@app.route("/api/admin/debug/llm-usage")
+@admin_read_required
+def api_admin_llm_usage():
+    """S104: tokens by agent per day (last N days) + cache-hit ratio."""
+    from models import LlmUsage
+    days = int(request.args.get("days", 7))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = LlmUsage.query.filter(LlmUsage.created_at >= since).all()
+    agg = {}
+    for r in rows:
+        k = (r.created_at.date().isoformat() if r.created_at else "?", r.agent or "?", r.model or "?")
+        a = agg.setdefault(k, {"calls": 0, "in": 0, "out": 0, "cache_read": 0, "cache_write": 0})
+        a["calls"] += 1; a["in"] += r.input_tokens or 0; a["out"] += r.output_tokens or 0
+        a["cache_read"] += r.cache_read_tokens or 0; a["cache_write"] += r.cache_write_tokens or 0
+    out = [{"date": k[0], "agent": k[1], "model": k[2], **v,
+            "cache_hit_ratio": round(v["cache_read"] / (v["in"] + v["cache_read"]), 3) if (v["in"] + v["cache_read"]) else None}
+           for k, v in sorted(agg.items())]
+    return jsonify({"days": days, "rows": out})
+
+
 @app.route("/api/admin/debug/exec", methods=["POST"])
 @admin_required
 def api_admin_debug_exec():
@@ -12854,6 +12957,7 @@ def api_admin_coach_dryrun():
             client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"), max_retries=2)
             resp = client.messages.create(model=CLAUDE_OPUS, max_tokens=600,
                                            system=sp, messages=messages)
+            __import__('llm_client').record_usage(resp, 'app_' + request.endpoint.split('.')[-1] if request else 'app')   # S104
             raw = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
             ts = ctx.get("today_status") or {}
             return jsonify({

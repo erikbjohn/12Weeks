@@ -34,6 +34,7 @@ def load_agent_md(name: str) -> dict:
     return {
         "name": fm.get("name", name),
         "model": fm.get("model", _SONNET),
+        "temperature": fm.get("temperature"),   # S096/S123: threaded like every other agent
         "tools": list(fm.get("tools") or []),
         "system_prompt": body,
     }

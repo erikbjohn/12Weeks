@@ -131,6 +131,7 @@ def prescribe_starting_weight(
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
         )
+        __import__('llm_client').record_usage(response, 'lifting_agent')   # S104
         text = response.content[0].text.strip()
     except Exception as e:
         log.warning("lifting_agent: API call failed: %s", e)

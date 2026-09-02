@@ -42,8 +42,10 @@ def consult(brief: str, user_id: int) -> str:
     client = _anthropic_client()
     resp = client.messages.create(
         model=_PERSONA["model"],
+        **({"temperature": _PERSONA["temperature"]} if _PERSONA.get("temperature") is not None else {}),
         max_tokens=600,
         system=system,
         messages=[{"role": "user", "content": user_msg}],
     )
+    __import__('llm_client').record_usage(resp, 'specialist_nutritionist')   # S104
     return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")

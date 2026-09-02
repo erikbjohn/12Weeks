@@ -39,6 +39,7 @@ def classify_physique_goal(actor_answer):
             system="Classify the physique goal into exactly one word: cut, bulk, or recomp.\n\ncut = lean, low body fat, defined muscles, visible abs (Brad Pitt Fight Club, Bruce Lee, Daniel Craig)\nbulk = big, massive, powerful, heavy muscle (The Rock, Thor, Arnold, Hulk)\nrecomp = athletic, balanced, functional muscle without extreme leanness or mass (Captain America, Iron Man, Spider-Man, Batman)\n\nRespond with ONLY one word: cut, bulk, or recomp",
             messages=[{"role": "user", "content": f"Physique goal: {actor_answer}"}],
         )
+        __import__('llm_client').record_usage(response, 'goal_classify')   # S104
         result = response.content[0].text.strip().lower()
         if result in ("cut", "bulk", "recomp"):
             return result
