@@ -16,8 +16,6 @@ SAFE = re.compile(r"is not None|is None|!= null|== null|=== 0|!== 0|> 0|<= 0|>= 
 ALLOWLIST = {
     ("coach_planning_program.py", 'w = f"{r.target_weight:g} lb" if r.target_weight else "BW"'):
         "0 renders as 'BW' by design",
-    ("app.py", "if targets.get('target_weight'):"): "goal body-weight target, never 0",
-    ("app.py", 'if targets.get("target_weight"):'): "goal body-weight target, never 0",
     ("app.py", "if goal and goal.target_weight and bw:"): "goal body-weight target, never 0",
     ("app.py", "elif existing_goal and existing_goal.target_weight:"): "goal body-weight target, never 0",
     ("app.py", "current_weight = bw.weight_lbs if bw else (goal.target_weight + 10)"): "not a conditional on the sentinel",

@@ -407,7 +407,7 @@ def _build_garmin():
         gc = _get_garmin(current_user.id)
         if not gc.connected:
             gc.try_restore_tokens(current_user.id)
-        garmin_data = gc.get_today_summary() if gc.connected else None
+        garmin_data = gc.get_today_summary() if gc.usable() else None  # S139
     readiness = assess_readiness(garmin_data) if garmin_data else None
 
     # Wellness trend: DB-only read, ZERO Garmin API calls — works even when
@@ -1200,7 +1200,18 @@ def _build_lift_trend():
     """
     from lift_trend import lift_decline
     week = _current_week()
-    return {"lift_trend": lift_decline(current_user.id, week)}
+    lt = lift_decline(current_user.id, week)
+    # S137: the ONE codified weekly verdict (weekly_report.week_verdict) rides
+    # along as a sibling key so the weekly_review agent grades from it instead
+    # of inventing one. (Sibling, not inside lt: lt must stay identical to the
+    # weekly report's dict.)
+    try:
+        from weekly_report import compute_weekly_metrics
+        verdict = (compute_weekly_metrics(week, user_id=current_user.id) or {}).get("verdict")
+    except Exception:
+        log.warning("lift_trend: week_verdict unavailable", exc_info=True)
+        verdict = None
+    return {"lift_trend": lt, "week_verdict": verdict}
 
 
 @section_builder("today_status")
@@ -2144,7 +2155,7 @@ Rules:
 - MISSES: List missed workouts, skipped meals, incomplete days. Name the day and what was missed.
 - BODY: Weight trend this week. Waist measurement if available. Compare to goal trajectory.
 - MOOD: Summarize check-in trends (mood, sleep, anxiety). Flag any concerning patterns.
-- GRADE: Give a single word assessment — COMPLIANT, PARTIAL, or OFF-TRACK.
+- GRADE: Repeat the codified <week_verdict> verbatim (ON_TRACK, SCALE_ONLY, LIFTS_ONLY or OFF) and one sentence on what drove it. If <week_verdict> is absent, write "GRADE: not computed" — never invent a grade.
 - Structured format with section headers (WINS, MISSES, BODY, MOOD, GRADE).
 - If you wrote anything about next week other than the single closing line, DELETE it before sending.
 </protocol>""",
@@ -2480,6 +2491,8 @@ def _format_athlete_data(ctx, requires):
     # per-lift deltas + tonnage + weeks compared, or a brief one-liner
     # confirming the detector ran and found nothing.
     lt = ctx.get("lift_trend")
+    if ctx.get("week_verdict"):
+        parts.append(f"<week_verdict>{ctx['week_verdict']}</week_verdict>  (codified: ON_TRACK / SCALE_ONLY = scale fine, lifts sliding / LIFTS_ONLY / OFF — THIS is the week's grade; never invent another)")
     if lt:
         if lt.get("lift_decline_suspected"):
             lt_lines = ["<lift_trend>"]
@@ -2959,15 +2972,12 @@ def assemble_prompt(agent_name, context):
     agent = AGENTS.get(agent_name, AGENTS.get("conversation"))
     requires = agent.get("requires", ["base"])
 
-    # Anger level — "good enough" in message forces Lombardi mode (demo)
+    # Anger level comes ONLY from the evidence-based compliance state (S069:
+    # the "good enough" demo keyword that forced Lombardi mode is deleted).
     try:
-        from coach_state import get_anger_label, get_anger_instruction, ANGER_LEVELS
-        if context.get("_force_angry"):
-            anger_label = ANGER_LEVELS[3]["label"]
-            anger_instruction = ANGER_LEVELS[3]["instruction"]
-        else:
-            anger_label = get_anger_label(current_user.id)
-            anger_instruction = get_anger_instruction(current_user.id)
+        from coach_state import get_anger_label, get_anger_instruction
+        anger_label = get_anger_label(current_user.id)
+        anger_instruction = get_anger_instruction(current_user.id)
     except Exception:
         anger_label = "Baseline — Saban process mode"
         anger_instruction = "Standard coaching intensity. Process-focused. Direct."

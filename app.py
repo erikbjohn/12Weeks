@@ -650,7 +650,7 @@ with app.app_context():
                     # allow_llm=False: never block boot on a network/LLM call.
                     targets = compute_next_targets(rx.user_id, rx.exercise_name, rx.week,
                                                    rx.day_idx, allow_llm=False)
-                    if targets.get('target_weight'):
+                    if targets.get('target_weight') is not None:   # S053: 0 = bodyweight
                         rx.target_weight = targets['target_weight']
                         filled += 1
                 except Exception:
@@ -2191,7 +2191,7 @@ def api_regenerate_meals():
 
 
 @app.route("/api/debug/workouts-error")
-@login_required
+@admin_required
 def debug_workouts_error():
     """Call api_workouts and return the error if it crashes."""
     try:
@@ -2202,7 +2202,7 @@ def debug_workouts_error():
 
 
 @app.route("/api/debug/goal-error", methods=["POST"])
-@login_required
+@admin_required
 def debug_goal_error():
     """Call api_goal_compute and return the error if it crashes."""
     try:
@@ -2387,6 +2387,10 @@ def debug_realign_session_week():
                 done=dc_from.done,
                 workout_started_at=dc_from.workout_started_at,
                 workout_ended_at=dc_from.workout_ended_at,
+                # S132: these were dropped on every realign (data loss).
+                completed_at=dc_from.completed_at,
+                workout_duration_min=dc_from.workout_duration_min,
+                source=dc_from.source,
             )
             db.session.add(new_dc)
             db.session.delete(dc_from)
@@ -4441,7 +4445,9 @@ def api_set_log():
 
         # Also compute progression targets for storage (used by next week's planning)
         targets = compute_next_targets(current_user.id, exercise, week, day_idx)
-        if targets.get("target_weight"):
+        # S053: `is not None` — target_weight=0 is the bodyweight sentinel and
+        # must be stored, not dropped by a truthy check.
+        if targets.get("target_weight") is not None:
             existing.target_weight = targets["target_weight"]
             existing.target_reps = targets.get("target_reps")
 
@@ -4536,25 +4542,6 @@ def api_set_log():
             pass  # never fail the set save on a reconcile error
 
     return jsonify({"ok": True, "id": existing.id})
-
-
-@app.route("/api/sets")
-@login_required
-def api_get_sets():
-    """Get all set logs for current user."""
-    sets = SetLog.query.filter_by(user_id=current_user.id).order_by(
-        SetLog.week, SetLog.day_idx, SetLog.set_number
-    ).all()
-    result = {}
-    for s in sets:
-        key = f"{s.week}_{s.day_idx}_{s.exercise_name}"
-        if key not in result:
-            result[key] = []
-        result[key].append({
-            "set": s.set_number, "weight": s.weight,
-            "reps": s.reps, "done": s.done,
-        })
-    return jsonify(result)
 
 
 @app.route("/api/prescription/seed", methods=["POST"])
@@ -9150,10 +9137,6 @@ def api_chat():
     # Build context for the AI coach
     from coach_assembler import build_filtered_context
     context = build_filtered_context(_route_info["agent_name"])
-    # "good enough" triggers Lombardi mode (demo keyword)
-    if "good enough" in user_msg.lower():
-        context["_force_angry"] = True
-
     # Get AI response
     from coach_assembler import assemble_prompt
     from coach import _build_messages
@@ -9303,9 +9286,6 @@ def api_chat_stream():
     try:
         from coach_assembler import build_filtered_context
         context = build_filtered_context(_route_info["agent_name"])
-        # "good enough" triggers Lombardi mode (demo keyword)
-        if "good enough" in user_msg.lower():
-            context["_force_angry"] = True
     except Exception as ctx_err:
         import logging
         logging.error("Coach context build failed: %s", ctx_err)
@@ -9512,7 +9492,7 @@ def _build_coach_context():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
-    if gc.connected:
+    if gc.usable():  # S139: never fire the OAuth2 exchange from a request
         garmin_data = gc.get_today_summary(today=local_today)
         readiness_data = assess_readiness(garmin_data)
 
@@ -10118,12 +10098,12 @@ def _analyze_progress_photo(photo_b64, pose, current_week):
 Pose: {pose} view. {bw_note} {comparison_note}{aspiration_note}
 
 Please provide:
-1. **Estimated body fat percentage** (give a range, e.g. 18-22%)
-2. **Visible muscle groups** - which muscles are showing definition? Rate development.
-3. **Areas of progress** - if a comparison photo is provided, what's changed?
-4. **Goal physique gap** - based on their aspirational reference, what specific areas need the most work? What exercises should be emphasized?
-5. **Aesthetic score** (1-10) - based on overall physique balance, symmetry, and conditioning
-5. **Honest feedback** - what should they focus on? What's looking good?
+1. **Visible muscle groups** - which muscles are showing definition?
+2. **Areas of progress** - if a comparison photo is provided, what's visibly changed? If nothing is clearly different, say so.
+3. **Goal physique gap** - based on their aspirational reference, what specific areas need the most work? What exercises should be emphasized?
+4. **Honest feedback** - what should they focus on? What's looking good?
+
+Do NOT estimate body fat percentage and do NOT assign any numeric score or rating. A number a photo cannot support is fabricated data; the athlete's real numbers come from the scale, the tape and the logged lifts.
 
 Be direct and honest. This person wants real feedback, not flattery. They're using exercise for both physical and mental health."""
     })
@@ -12137,7 +12117,7 @@ def api_morning_briefing():
     gc = _get_garmin()
     if not gc.connected:
         gc.try_restore_tokens(current_user.id)
-    garmin_data = gc.get_today_summary(today=_user_today()) if gc.connected else None
+    garmin_data = gc.get_today_summary(today=_user_today()) if gc.usable() else None  # S139
     readiness = assess_readiness(garmin_data)
     # Honest readiness: assess_readiness returns score=None when there is no
     # Garmin data. NEVER fabricate a number here — inventing "70 → GREEN" told
@@ -13497,12 +13477,27 @@ def api_run_log():
         user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx")
     ).first()
     if existing:
-        existing.distance_miles = data.get("distance_miles")
-        existing.avg_hr = data.get("avg_hr")
-        existing.elevation_ft = data.get("elevation_ft")
-        existing.duration_min = data.get("duration_min")
-        existing.notes = data.get("notes")
-        existing.source = "manual"
+        # S036: MERGE. A blank field in the form means "unchanged", never
+        # "erase" — an Update Run with one empty box on a Garmin-synced day used
+        # to NULL that field and flip source='manual', which garmin_sync then
+        # refused to touch again (the slot was locked out with wrong data).
+        # Only a value the athlete typed replaces the stored one; a Garmin row
+        # stays source='garmin' so sync keeps refreshing the fields the athlete
+        # did not touch, and the edit is recorded in notes for the audit trail.
+        changed = []
+        for k in ("distance_miles", "avg_hr", "elevation_ft", "duration_min", "notes"):
+            v = data.get(k)
+            if v is None or v == "":
+                continue
+            if getattr(existing, k) != v:
+                setattr(existing, k, v); changed.append(k)
+        if (existing.source or "manual") == "garmin":
+            if changed:
+                tag = "[manual edit: " + ",".join(changed) + "]"
+                if tag not in (existing.notes or ""):
+                    existing.notes = ((existing.notes or "") + " " + tag).strip()
+        else:
+            existing.source = "manual"
     else:
         existing = RunLog(
             user_id=current_user.id, week=data.get("week"), day_idx=data.get("day_idx"),

@@ -63,6 +63,15 @@ class GarminClient:
     def connected(self):
         return self._connected and self.api is not None
 
+    def usable(self):
+        """S139: True only when a data call will NOT re-run the OAuth2
+        exchange — connected AND the in-memory token is not expired. Every
+        request-path caller (coach context, briefings) must gate on this;
+        `connected` alone stays True on a lapsed session and the next fetch
+        fires the exchange Garmin rate-blocks for server IPs (429 → 900 s
+        daemon cooldown)."""
+        return bool(self.connected) and not self.oauth2_expired_in_memory()
+
     def oauth2_expired_in_memory(self):
         """True when the live session's OAuth2 has lapsed IN PLACE — the next
         data call would silently re-run the blocked exchange instead of

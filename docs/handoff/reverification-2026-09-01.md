@@ -20,6 +20,8 @@ The systemic failure is test coverage: most PARTIALs shipped real code but skipp
 
 ## Still-live defects that matter most (fix first)
 
+_Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fixed with behavior tests in tests/test_reverification_fixes.py; see the table for each._
+
 - **S036** [high, COSMETIC] — Closed against a different bug. Update Run with one blank field on a Garmin day still nulls it and sets source='manual', locking Garmin out (app.py:13500-13505). No merge branch, no test.
 - **S132** [medium, PARTIAL] — move-sets-day untouched (GET, no dry_run/audit); realign still DROPS completed_at/workout_duration_min/source (app.py:2385-2390) — active data loss.
 - **S053** [medium, COSMETIC] — app.py:4444 set-save falsy-zero site was ALLOWLISTED in the lint with a wrong justification instead of fixed; target_weight 0 still never reaches SetLog.
@@ -43,10 +45,10 @@ The systemic failure is test coverage: most PARTIALs shipped real code but skipp
 
 | id | sev | verdict | gap |
 |---|---|---|---|
-| S148 | low | NOT_DONE | No commit. missed_line still has no lower date bound; every untaken dose since Aug 10 listed on card and in every coach prompt (protocol.py:505-550). |
-| S036 | high | COSMETIC | Closed against a different bug. Update Run with one blank field on a Garmin day still nulls it and sets source='manual', locking Garmin out (app.py:13500-13505). No merge branch, no test. |
-| S053 | medium | COSMETIC | app.py:4444 set-save falsy-zero site was ALLOWLISTED in the lint with a wrong justification instead of fixed; target_weight 0 still never reaches SetLog. |
-| S139 | low | COSMETIC | No GarminClient.usable(); the 3 live-fallback sites (coach_assembler.py:410, app.py:12140, app.py:9516) still trigger server-IP OAuth → 429 → daemon cooldown. Only dead routes deleted. |
+| S148 | low | UPDATED | SUPERSEDED — bounded by the S061/S085 actionability filter (≤72 h); older misses are dropped, not listed. |
+| S036 | high | UPDATED | FIXED — run edit merges fields, Garmin row keeps source, edit tagged in notes; test. |
+| S053 | medium | UPDATED | FIXED — set-save and boot backfill use `is not None`; allowlist entries removed; test stores target 0. |
+| S139 | low | UPDATED | FIXED — GarminClient.usable(); all three request-path fetches gate on it; test. |
 | S004 | critical | PARTIAL | No invite expiry; core vector closed. |
 | S007 | high | PARTIAL | Endpoint test is a source grep; no SWAP/SORENESS persistence tests. |
 | S008 | high | PARTIAL | Legacy /api/morning-briefing path (app.py:12189, app.js:6836) still bypasses ALL_SECTIONS. |
@@ -75,7 +77,7 @@ The systemic failure is test coverage: most PARTIALs shipped real code but skipp
 | S060 | medium | PARTIAL | No note input on weigh-in strip; only latest event surfaced; no events_last_10d. |
 | S062 | medium | PARTIAL | Only basicConfig; app.py:9311 context-build failure still no traceback; weekly-report thread swallows silently; garmin DEBUG spam now prints at INFO. |
 | S067 | medium | PARTIAL | Run PLANNER history block still has no pace/peak HR (coach_planning_runs.py:44-58); no test for max_hr mapping. |
-| S069 | medium | PARTIAL | 'good enough' demo hook still forces angry mode in prod: app.py:9154, app.py:9307, coach_assembler.py:2962-2966. |
+| S069 | medium | UPDATED | FIXED — 'good enough' hook deleted from both chat paths and the assembler; test. |
 | S071 | medium | PARTIAL | 10 _anthropic_client copies + model literals in 8 files remain; test only greps 4 stale spellings (cannot fail on the real condition). |
 | S072 | medium | PARTIAL | Client still refetches whole /api/workouts after swaps (app.js:5558); no query-count test. |
 | S073 | medium | PARTIAL | checkOnboardingComplete still 6 GETs/load; no onboarding_complete flag; retest status still fetched; no request-count pin. |
@@ -84,7 +86,7 @@ The systemic failure is test coverage: most PARTIALs shipped real code but skipp
 | S083 | medium | PARTIAL | Headline untouched: thumbs-down CoachFeedback never reaches the coach (app.py:3040-3062); duration/navy BF/WeeklyReport still not in context. |
 | S086 | medium | PARTIAL | PR detection still all-time; no test. |
 | S087 | medium | PARTIAL | Two copies of field list; scoreboard Tape delta unlabeled. |
-| S089 | medium | PARTIAL | tests/coach_audit/test_specialist_audit.py still makes a REAL paid API call under plain pytest with a key set (observed POST); users.py wrong prod host. |
+| S089 | medium | UPDATED | FIXED — specialist smoke test carries live_llm marker (skipped without --live-coach). |
 | S091 | medium | PARTIAL | No secret-scan guard. |
 | S093 | medium | PARTIAL | No test for the N+1 case; client posts currentWeek. |
 | S094 | medium | PARTIAL | No test; all-None fetch still counts as successful sync. |
@@ -110,14 +112,14 @@ The systemic failure is test coverage: most PARTIALs shipped real code but skipp
 | S127 | medium | PARTIAL | Judge pass still serial full-price messages.create; no Batch API. |
 | S128 | medium | PARTIAL | Local week-formula copy; no test for the schedule-row-no-prescription case. |
 | S129 | medium | PARTIAL | Athlete's 'yes' confirmations now never persisted anywhere. |
-| S130 | medium | PARTIAL | GET /api/sets unbounded dump still live (app.py:4541); test cannot catch it. |
+| S130 | medium | UPDATED | FIXED — GET /api/sets deleted (no caller); test asserts 405. |
 | S131 | medium | PARTIAL | No test; _swapped_from key still unread. |
-| S132 | medium | PARTIAL | move-sets-day untouched (GET, no dry_run/audit); realign still DROPS completed_at/workout_duration_min/source (app.py:2385-2390) — active data loss. |
-| S134 | low | PARTIAL | Server still asks Claude for 'Estimated body fat %' and 'Aesthetic score 1-10' (app.py:10119-10125) — fabricated metrics; sync 45s call. |
-| S135 | low | PARTIAL | Same: Aesthetic score prompt intact; dead render chain remains. |
+| S132 | medium | UPDATED | FIXED — realign copies completed_at/workout_duration_min/source. |
+| S134 | low | UPDATED | FIXED — photo prompt no longer asks for body-fat % or an aesthetic score; test. |
+| S135 | low | UPDATED | FIXED — same as S134 (dead render chain still present). |
 | S136 | low | PARTIAL | Chat coach never sees the Z2 trend (coach_assembler has no aerobic hit). |
-| S137 | low | PARTIAL | weekly_review protocol (coach_assembler.py:2147) still tells the coach to INVENT a grade; codified verdict never shown to it; zero tests. |
-| S138 | low | PARTIAL | 20 str(e) sites remain; debug/workouts-error + goal-error still return tracebacks; coach bubble still yields raw errors. |
+| S137 | low | UPDATED | FIXED — <week_verdict> rendered from the codified verdict; weekly_review GRADE must repeat it, never invent; test. |
+| S138 | low | UPDATED | PARTIAL→ traceback endpoints now admin_required; ~20 str(e) sites remain. |
 | S141 | low | PARTIAL | No test. |
 | S142 | low | PARTIAL | Count-only assertion, magic +20 window. |
 | S143 | low | PARTIAL | In-process throttle (per worker, resets on deploy); no test. |

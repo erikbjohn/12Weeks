@@ -3,6 +3,7 @@ import pytest
 import os
 
 
+@pytest.mark.live_llm
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),
     reason="needs ANTHROPIC_API_KEY for live specialist call",
