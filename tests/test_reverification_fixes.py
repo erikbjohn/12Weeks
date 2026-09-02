@@ -790,3 +790,38 @@ def test_judge_batch_uses_batches_api_with_cached_system():
     assert "client.messages.batches.create(requests=part)" in src
     assert '"cache_control": {"type": "ephemeral"}' in src
     assert "out[r.custom_id]" in src
+
+
+# ═════════════════════════ swapped-slot targets (found in Erik's data 2026-09-01) ═════
+
+def test_next_targets_use_the_exercises_own_history_not_a_swap_sibling(app_ctx):
+    """KB Swing that replaced an RDL must progress from KB Swing rows (30 lb), never inherit RDL 135."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "kbswing@test.com")
+    from models import SetLog
+    from datetime import date
+    from training_engine import compute_next_targets
+    SetLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    for i in range(4):
+        db.session.add(SetLog(user_id=u.id, exercise_name="Romanian Deadlift", week=4, day_idx=1, set_number=i,
+                              weight=135, reps=10, done=True, logged_date=date(2026, 9, 1)))
+        db.session.add(SetLog(user_id=u.id, exercise_name="KB Swing", week=3, day_idx=5, set_number=i,
+                              weight=30, reps=10, done=True, logged_date=date(2026, 8, 29)))
+    db.session.commit()
+    t = compute_next_targets(u.id, "KB Swing", 5, 1, allow_llm=False)
+    assert t["target_weight"] is not None and t["target_weight"] <= 45, t
+
+
+def test_next_targets_fall_back_to_scaled_sibling_history_when_none_of_its_own(app_ctx):
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "rdlfallback@test.com")
+    from models import SetLog
+    from datetime import date
+    from training_engine import compute_next_targets
+    SetLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    for i in range(4):
+        db.session.add(SetLog(user_id=u.id, exercise_name="Single-Leg Romanian Deadlift", week=2, day_idx=1, set_number=i,
+                              weight=50, reps=10, done=True, logged_date=date(2026, 8, 18)))
+    db.session.commit()
+    t = compute_next_targets(u.id, "Romanian Deadlift", 4, 1, allow_llm=False)
+    assert t["target_weight"] is not None and t["target_weight"] >= 50, t

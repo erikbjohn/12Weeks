@@ -271,14 +271,48 @@ def compute_next_targets(user_id, exercise_name, week, day_idx, exercise_order=N
     # "Romanian Deadlift" with barbell). Walk EXERCISE_SWAPS in both
     # directions so the engine sees the full strength baseline regardless of
     # which name carries the rows.
-    name_candidates = _get_equivalent_names(exercise_name)
-    if raw_exercise_name and raw_exercise_name not in name_candidates:
-        name_candidates.append(raw_exercise_name)
+    # The exercise's OWN history first. The cross-equipment walk below is a
+    # FALLBACK for a lift with no rows of its own (Phase-1 dumbbell RDL → barbell
+    # RDL). It used to be the primary query: the newest session of ANY swap
+    # sibling won, so a KB Swing that replaced an RDL inherited the RDL's 135 lb
+    # (+10 = 145) as its target while the athlete swung 30 lb; Leg Press and
+    # Bulgarian split squat targets were poisoned by squat rows the same way
+    # (2026-09-01, prod). A swap menu is not a strength equivalence.
+    own_names = [exercise_name]
+    if raw_exercise_name and raw_exercise_name not in own_names:
+        own_names.append(raw_exercise_name)
     last_sets = SetLog.query.filter(
         SetLog.user_id == user_id,
-        SetLog.exercise_name.in_(name_candidates),
+        SetLog.exercise_name.in_(own_names),
         SetLog.done == True,  # noqa: E712 — SQLAlchemy truth
     ).order_by(SetLog.logged_date.desc(), SetLog.set_number.asc()).limit(20).all()
+    if not last_sets:
+        name_candidates = _get_equivalent_names(exercise_name)
+        if raw_exercise_name and raw_exercise_name not in name_candidates:
+            name_candidates.append(raw_exercise_name)
+        last_sets = SetLog.query.filter(
+            SetLog.user_id == user_id,
+            SetLog.exercise_name.in_(name_candidates),
+            SetLog.done == True,  # noqa: E712 — SQLAlchemy truth
+        ).order_by(SetLog.logged_date.desc(), SetLog.set_number.asc()).limit(20).all()
+        if last_sets:
+            # Borrowed history: scale each row's load by the equipment-class
+            # factor so a dumbbell/cable/machine sibling is not read as the
+            # same number on a barbell (or vice versa).
+            try:
+                from equipment_swaps import scale_for_swap
+                import copy as _copy
+                scaled = []
+                for r in last_sets:
+                    f = scale_for_swap(r.exercise_name, exercise_name)
+                    if f != 1.0 and r.weight:
+                        r2 = _copy.copy(r); r2.weight = r.weight * f
+                        scaled.append(r2)
+                    else:
+                        scaled.append(r)
+                last_sets = scaled
+            except Exception:
+                pass
 
     if not last_sets:
         # No history — ask the lifting agent (LLM) for a sensible starting
