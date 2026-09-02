@@ -608,3 +608,28 @@ def test_admin_add_vial_400s_on_missing_fields(app_ctx, monkeypatch):
         headers={"X-Admin-Key": admin_key},
     )
     assert r.status_code == 400
+
+
+def test_athlete_can_complete_own_lab_and_manage_vials(app_ctx):
+    """S149/S140: lab reminders and vials are reachable without a curl."""
+    from models import User, LabReminder, PeptideVial
+    from datetime import date
+    app_, db = app_ctx
+    def _seed():
+        u = User(email="labs-vials@test.com", password_hash="x"); db.session.add(u); db.session.commit()
+        lab = LabReminder(user_id=u.id, label="Week 8 draw", due_date=date.today()); db.session.add(lab); db.session.commit()
+        return u.id, lab.id
+    uid, lab_id = _app_do(app_, _seed)
+    c = _client_for(app_, uid)
+    r = c.post(f"/api/protocol/lab/{lab_id}/complete", json={})
+    assert r.status_code == 200
+    assert _app_do(app_, lambda: LabReminder.query.get(lab_id).completed_at) is not None
+    r = c.post("/api/protocol/vials", json={"compound": "BPC-157", "total_mg": 5})
+    assert r.status_code == 200
+    r = c.post("/api/protocol/vials", json={"compound": "NotAThing", "total_mg": 5})
+    assert r.status_code == 400
+    r = c.get("/api/protocol/vials")
+    assert r.status_code == 200 and len(r.get_json()) == 1
+    vid = r.get_json()[0]["id"]
+    assert c.delete(f"/api/protocol/vial/{vid}").status_code == 200
+    assert _app_do(app_, lambda: PeptideVial.query.filter_by(user_id=uid).count()) == 0

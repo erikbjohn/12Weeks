@@ -1109,28 +1109,3 @@ def test_morning_briefing_unknown_readiness_never_fabricated(app_ctx, monkeypatc
     assert "GREEN (70/100)" not in seen_msgs[0]
     assert "UNKNOWN" in seen_msgs[0]
 
-
-def test_status_connected_from_saved_token_without_live_session(app_ctx):
-    # Erik's bug 2026-06-15: a server restart drops the in-memory Garmin session.
-    # A SAVED TOKEN must still read as connected — a cold / rate-limited restore
-    # must NEVER present the login form. Disconnect must actually clear the token.
-    app_, db = app_ctx
-    from models import GarminTokens
-    from flask_login import login_user
-    import app as appmod
-    u = _mk_user(db, "linked@test.com")
-    appmod._garmin_clients.pop(u.id, None)  # ensure NO live session in this process
-    GarminTokens.query.filter_by(user_id=u.id).delete()
-    db.session.add(GarminTokens(user_id=u.id, token_data="dummy-token-blob"))
-    db.session.commit()
-    with app_.test_request_context():
-        login_user(u)
-        st = appmod.garmin_status().get_json()
-        assert st["connected"] is True and st["linked"] is True and st["live"] is False
-        sync = appmod.garmin_sync_status().get_json()
-        assert sync["connected"] is True and sync["live"] is False
-        # Disconnect genuinely unlinks: token deleted, status flips to not connected.
-        appmod.garmin_logout()
-        assert GarminTokens.query.filter_by(user_id=u.id).first() is None
-        appmod._garmin_clients.pop(u.id, None)
-        assert appmod.garmin_status().get_json()["connected"] is False

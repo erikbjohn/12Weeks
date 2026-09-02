@@ -5837,6 +5837,60 @@ def admin_add_vial():
     return jsonify({"id": vial.id})
 
 
+@app.route("/api/protocol/lab/<int:lab_id>/complete", methods=["POST"])
+@login_required
+def api_complete_own_lab_reminder(lab_id):
+    """S149: the athlete completes his own lab reminder from the card; the
+    admin endpoint stays for backfills."""
+    lab = LabReminder.query.filter_by(id=lab_id, user_id=current_user.id).first()
+    if not lab:
+        return jsonify({"error": "not found"}), 404
+    if lab.completed_at is None:
+        lab.completed_at = _utcnow()
+        db.session.commit()
+    return jsonify({"ok": True, "completed_at": lab.completed_at.isoformat()})
+
+
+@app.route("/api/protocol/vials", methods=["GET", "POST"])
+@login_required
+def api_protocol_vials():
+    """S140: vials were create-only by admin curl. GET lists the athlete's
+    vials; POST creates one (compound must be a protocol compound)."""
+    if request.method == "GET":
+        rows = PeptideVial.query.filter_by(user_id=current_user.id).order_by(PeptideVial.reconstituted_on.desc()).all()
+        return jsonify([{"id": v.id, "compound": v.compound, "total_mg": v.total_mg,
+                         "reconstituted_on": v.reconstituted_on.isoformat(), "expiry_days": v.expiry_days,
+                         "notes": v.notes} for v in rows])
+    data = request.get_json(silent=True) or {}
+    compound = (data.get("compound") or "").strip()
+    if compound not in PROTOCOL_COMPOUNDS:
+        return jsonify({"error": f"compound must be one of {sorted(PROTOCOL_COMPOUNDS)}"}), 400
+    try:
+        total_mg = float(data.get("total_mg"))
+        assert total_mg > 0
+    except Exception:
+        return jsonify({"error": "total_mg must be a positive number"}), 400
+    try:
+        recon = date.fromisoformat(data["reconstituted_on"]) if data.get("reconstituted_on") else _user_today()
+    except ValueError:
+        return jsonify({"error": "bad reconstituted_on"}), 400
+    v = PeptideVial(user_id=current_user.id, compound=compound, total_mg=total_mg,
+                    reconstituted_on=recon, expiry_days=int(data.get("expiry_days") or 28),
+                    notes=(data.get("notes") or "")[:200] or None)
+    db.session.add(v); db.session.commit()
+    return jsonify({"ok": True, "id": v.id})
+
+
+@app.route("/api/protocol/vial/<int:vial_id>", methods=["DELETE"])
+@login_required
+def api_protocol_vial_delete(vial_id):
+    v = PeptideVial.query.filter_by(id=vial_id, user_id=current_user.id).first()
+    if not v:
+        return jsonify({"error": "not found"}), 404
+    db.session.delete(v); db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/admin/complete-lab-reminder", methods=["POST"])
 @admin_required
 def admin_complete_lab_reminder():
@@ -10110,44 +10164,6 @@ def garmin_login():
     return jsonify({"connected": False, "error": error}), 401
 
 
-@app.route("/api/garmin/status")
-@login_required
-def garmin_status():
-    gc = _get_garmin()
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    linked = gc.connected or _garmin_linked(current_user.id)
-    return jsonify({"connected": linked, "live": gc.connected, "linked": linked, "restore_error": gc.last_restore_error})
-
-
-@app.route("/api/garmin/today")
-@login_required
-def garmin_today():
-    gc = _get_garmin()
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    if not gc.connected:
-        if _garmin_linked(current_user.id):
-            return _garmin_reconnect_response(gc)
-        return jsonify({"error": "Not connected to Garmin"}), 401
-    summary = gc.get_today_summary(today=_user_today())
-    if summary is None:
-        return jsonify({"error": "Failed to fetch Garmin data"}), 500
-    return jsonify(summary)
-
-
-@app.route("/api/garmin/readiness")
-@login_required
-def garmin_readiness():
-    gc = _get_garmin()
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    if not gc.connected:
-        return jsonify(assess_readiness(None))
-    summary = gc.get_today_summary(today=_user_today())
-    return jsonify(assess_readiness(summary))
-
-
 def _post_token_save_sync(gc, user):
     """Fresh valid tokens just landed: clear the cooldown and sync NOW.
     The whole point of a token upload is landing the data that stalled while
@@ -10524,7 +10540,7 @@ def garmin_wellness():
         GarminWellness.user_id == current_user.id,
         GarminWellness.date >= since,
     ).order_by(GarminWellness.date.desc()).all()
-    return jsonify([{
+    out = [{
         "date": r.date.isoformat(),
         "sleep_hours": round(r.sleep_seconds / 3600, 1) if r.sleep_seconds else None,
         "sleep_score": r.sleep_score,
@@ -10535,7 +10551,18 @@ def garmin_wellness():
         "resting_hr": r.resting_hr,
         "stress": r.stress_overall,
         "vo2max": r.vo2max,
-    } for r in rows])
+    } for r in rows]
+    # S139: the readiness assessment from the DB row — the client's live
+    # /api/garmin/today + /readiness routes (which knocked on Garmin from the
+    # server IP) are gone; the Stats block and the chip read this.
+    if out:
+        try:
+            from coach_assembler import garmin_today_from_wellness_row
+            from overtraining import assess_readiness
+            out[0]["assessment"] = assess_readiness(garmin_today_from_wellness_row(rows[0]))
+        except Exception:
+            out[0]["assessment"] = None
+    return jsonify(out)
 
 
 # ─── TIMEZONE ──────────────────────────────────────────────────────────────

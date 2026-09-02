@@ -5710,6 +5710,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const w = wRes && wRes.ok ? await wRes.json() : [];
       _wellnessToday = (w && w.length) ? w[0] : null;
+      garminData = _garminDataFromWellness(_wellnessToday);   // S139
+      readinessData = (_wellnessToday && _wellnessToday.assessment) || null;
+      garminConnected = !!garminData;
       renderGarminBar();
     } catch(e) { _wellnessToday = null; }
 
@@ -7477,13 +7480,18 @@ async function renderGarminPanelBody() {
     return;
   }
   if (!st || !st.connected) {
+    // S153: a credential login from the SERVER's IP is how Garmin 429s get
+    // armed (memory: only the laptop IP may exchange). The link is made by
+    // the laptop refresher; the form stays behind ?admin=1 for emergencies.
+    var adminForm = new URLSearchParams(window.location.search).get('admin') === '1';
     body.innerHTML =
-      '<div style="color:var(--muted);margin-bottom:10px;font-size:16px">Not connected.</div>' +
+      '<div style="color:var(--muted);margin-bottom:10px;font-size:16px;line-height:1.5">Not connected right now. Garmin is linked from your laptop (the token refresher runs every 6 h and re-links within 12 h). Nothing to do here — if it stays disconnected past a day, wake the laptop.</div>' +
+      (adminForm ? (
       '<input id="garmin-email" type="email" placeholder="Garmin email" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px">' +
       '<input id="garmin-password" type="password" placeholder="Password" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px">' +
       '<input id="garmin-mfa" type="text" placeholder="MFA code" class="weight-input" style="width:100%;margin-bottom:8px;font-size:16px;display:none">' +
       '<div id="garmin-error" style="display:none;color:#e66;margin-bottom:8px;font-size:15px"></div>' +
-      '<button id="garmin-submit" class="btn btn-primary" style="width:100%;font-size:16px" onclick="garminLogin()">Connect</button>';
+      '<button id="garmin-submit" class="btn btn-primary" style="width:100%;font-size:16px" onclick="garminLogin()">Connect (server-side login — last resort)</button>') : '');
     return;
   }
   const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -7541,7 +7549,7 @@ async function renderGarminPanelBody() {
     (rows
       ? '<div style="font-size:14px;color:var(--muted);margin-bottom:4px">Week ' + st.week + ' &mdash; workouts loaded on your watch (past days show what actually happened):</div>' + rows
       : '') +
-    '<button class="btn btn-secondary" style="width:100%;margin-top:12px;font-size:14px" onclick="garminLogout().then(renderGarminPanelBody)">Disconnect Garmin</button>';
+    '<button class="btn btn-secondary" style="width:100%;margin-top:12px;font-size:14px" onclick="if(confirm(\'Disconnect? The laptop refresher will re-link Garmin within 12 hours — this only pauses sync until then.\')) garminLogout().then(renderGarminPanelBody)">Disconnect Garmin</button>';
 }
 
 async function garminSyncNow(btn) {
@@ -7678,14 +7686,30 @@ async function garminLogout() {
   renderAll();
 }
 
+// S139: Garmin data for the Stats block and the readiness chip comes from
+// the stored wellness row (DB only) — the live /today + /readiness routes
+// were dead on the token-based connection and knocked on Garmin from the
+// server IP. garminData mirrors the old live shape so the renderers stand.
+function _garminDataFromWellness(w) {
+  if (!w) return null;
+  return {
+    hrv: { lastNight: w.hrv, weeklyAvg: w.hrv_weekly_avg },
+    sleep: { score: w.sleep_score, durationHours: w.sleep_hours },
+    bodyBattery: { current: w.body_battery },
+    trainingReadiness: { score: w.readiness, level: '' },
+    date: w.date,
+  };
+}
 async function refreshGarmin() {
   try {
-    const [todayRes, readyRes] = await Promise.all([
-      fetch('/api/garmin/today'),
-      fetch('/api/garmin/readiness'),
-    ]);
-    if (todayRes.ok) garminData = await todayRes.json();
-    if (readyRes.ok) readinessData = await readyRes.json();
+    const r = await fetch('/api/garmin/wellness?days=7');
+    if (!r.ok) return;
+    const w = await r.json();
+    _wellnessToday = (w && w.length) ? w[0] : null;
+    garminData = _garminDataFromWellness(_wellnessToday);
+    readinessData = (_wellnessToday && _wellnessToday.assessment) || null;
+    garminConnected = !!garminData;
+    renderGarminBar();
   } catch(e) {
     console.error('Garmin refresh failed', e);
   }
@@ -11593,21 +11617,39 @@ function buildProtocolContent(p) {
     '</div>';
   }
 
-  // Vial reorder warnings
-  var flagged = (p.vials || []).filter(function(v) { return v.reorder_flag; });
-  if (flagged.length) {
-    html += flagged.map(function(v) {
-      return '<div class="protocol-reorder-warning" style="margin-top:8px;padding:10px 12px;border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);border-radius:8px;color:var(--run-hiit);font-size:14px">' +
-        '&#9888; ' + escapeHtml(v.compound) + ': ' + v.doses_left + ' doses left &mdash; reorder by ' + _fmtShortDate(v.reorder_by) +
+  // Vials (S140): every vial as a compact line, reorder-flagged ones in the
+  // warning style; plus an add form so a new vial never needs a curl.
+  var vials = p.vials || [];
+  if (vials.length) {
+    html += vials.map(function(v) {
+      var warn = !!v.reorder_flag;
+      var style = warn
+        ? 'border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);color:var(--run-hiit)'
+        : 'border:1px solid var(--border);background:var(--surface2);color:var(--muted)';
+      return '<div class="protocol-vial" style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:14px;' + style + '">' +
+        (warn ? '&#9888; ' : '&#9679; ') + escapeHtml(v.compound) + ' &middot; ' + (v.mg_remaining != null ? v.mg_remaining + ' mg left' : '') +
+        (v.doses_left != null ? ' &middot; ' + v.doses_left + ' doses' : '') +
+        (v.runout_date ? ' &middot; runout ' + _fmtShortDate(v.runout_date) : '') +
+        (warn && v.reorder_by ? ' &mdash; reorder by ' + _fmtShortDate(v.reorder_by) : '') +
       '</div>';
     }).join('');
+  }
+  if (p.is_today !== false) {
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">+ Add a vial</summary>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+        '<input id="vial-compound" placeholder="Compound (e.g. BPC-157)" style="flex:1 1 140px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<input id="vial-mg" type="number" inputmode="decimal" placeholder="total mg" style="width:100px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<input id="vial-date" type="date" style="font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<button class="btn btn-secondary" style="min-height:44px" onclick="addVial()">Save</button>' +
+      '</div></details>';
   }
 
   // Labs due
   if (p.labs_due && p.labs_due.length) {
     html += p.labs_due.map(function(l) {
-      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px">' +
-        '🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) +
+      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px;display:flex;align-items:center;gap:10px">' +
+        '<span style="flex:1">🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) + '</span>' +
+        '<button class="btn btn-secondary" style="min-height:44px;padding:8px 14px" onclick="completeLab(' + l.id + ')">Done</button>' +  // S149
       '</div>';
     }).join('');
   }
@@ -11617,6 +11659,28 @@ function buildProtocolContent(p) {
 
 var _protocolCache = {};
 function invalidateProtocolCache() { _protocolCache = {}; }
+
+async function completeLab(id) {  // S149
+  try {
+    var r = await apiPost('/api/protocol/lab/' + id + '/complete', {});
+    if (!r || !r.ok) throw new Error('save');
+    showToast('Lab marked done', 'success');
+  } catch (e) { showToast('Could not mark the lab done', 'error'); }
+  invalidateProtocolCache(); _refreshProtocolSection();
+}
+
+async function addVial() {  // S140
+  var compound = (document.getElementById('vial-compound') || {}).value || '';
+  var mg = parseFloat((document.getElementById('vial-mg') || {}).value);
+  var date = (document.getElementById('vial-date') || {}).value || null;
+  if (!compound.trim() || !mg) { showToast('Compound and total mg required', 'error'); return; }
+  try {
+    var r = await apiPost('/api/protocol/vials', { compound: compound.trim(), total_mg: mg, reconstituted_on: date });
+    if (!r || !r.ok) throw new Error('save');
+    showToast('Vial saved', 'success');
+  } catch (e) { showToast('Could not save the vial (check the compound name)', 'error'); }
+  invalidateProtocolCache(); _refreshProtocolSection();
+}
 
 async function toggleDose(id, currentlyTaken) {
   if (_doseSaving[id]) return;
