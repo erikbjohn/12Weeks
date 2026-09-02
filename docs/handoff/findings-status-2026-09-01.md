@@ -1,3 +1,5 @@
+> **CORRECTION 2026-09-01 (later):** 'closed' below means a commit references the id, NOT that the audit's proposal was implemented. A per-finding re-verification found 73 REAL, 86 PARTIAL, 3 COSMETIC, 1 NOT_DONE, 2 SUPERSEDED. See `reverification-2026-09-01.md` for the per-id gaps.
+
 # Findings triage — status as of 2026-09-01
 
 Worked in the main loop from `findings-2026-08-29.md` (no workflows, no agents).
