@@ -64,4 +64,16 @@ re-anchor), S078 (every catalog exercise has a swap menu), S080 (cadence-aware c
 (resolver memo; workouts prefetch), S071 (llm_client — three modules used STALE model ids the API rejects),
 S070 (import cycle), S045/S073 (client render/bootstrap).
 
-Suite: 1018 Python / 39 JS, green. Lows (32) untouched.
+## LOW — all 32 closed (commits 500c3f8..2843a87)
+
+Security: S164 (health probe minimal), S143 (request-invite hardened), S144/S147 (service worker caches only
+/api/workouts), S154 (LLM text escaped), S165 (APP_URL required on Render), S160 (orphan fix one-shot),
+S138 (no exception text to clients). Correctness: S145 (one app-wide today), S151 (/api/workouts/<week> =
+same builder), S161, S159, S155 (chat history char budget), S157 (un-awaited posture coroutine; warnings
+3,300→0, RuntimeWarning fatal), S158 (permanent skips are real tests), S152, S136 (Z2 pace trend to the run
+planner), S137 (WeeklyReport.verdict), S156 (report result DB fallback), S139 (Garmin stats from DB; live
+routes gone), S149 (lab Done button), S140 (vials UI + API), S153 (Garmin panel copy), S146 (focus-visible +
+keyboard clickables), S163 (parallel tools), S134/S135 (Sunday photo capture), S141, S150, S142, S148, S162.
+
+**ALL 165 FINDINGS CLOSED.** Suite: 1017 Python / 39 JS, green, zero warnings.
+
