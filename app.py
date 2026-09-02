@@ -869,6 +869,14 @@ def run_label_for(run_type, explicit=None):
 SCALE_EVENTS = {"gluten", "sodium", "travel", "illness"}
 
 
+def _client_error(e, status=500, public="Server error"):
+    """S138: never ship internal exception text to a user-facing client.
+    Log the traceback under a short ref the athlete can quote."""
+    ref = secrets.token_hex(4)
+    logging.exception("[%s] %s", ref, e)
+    return jsonify({"error": public, "ref": ref}), status
+
+
 def _admin_audit(action, user_id, params):
     """S132: admin one-shot repairs used to rewrite SetLog/RunLog/prescriptions
     with no trace. One CoachMarkerLog row per applied repair (status
@@ -2189,7 +2197,7 @@ def api_regenerate_meals():
         return jsonify({"ok": True, "meals": meal_summary, "daily_calories": base_calories})
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        return _client_error(e)
 
 
 @app.route("/api/debug/workouts-error")
@@ -3920,6 +3928,24 @@ def _apply_exercise_swap_overlay(days, user_id, week, swap_rows=None):
 @app.route("/api/workouts")
 @login_required
 def api_workouts():
+    all_weeks = _build_all_weeks_payload()
+    response = jsonify(all_weeks)
+    # Force fresh — iOS PWA + Cloudflare have layered caches that have
+    # been serving stale workout data after server-side template/prescription
+    # changes. Hard refresh wasn't enough.
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+def _build_all_weeks_payload():
+    """THE served-week builder (S151): template → prescription overlay →
+    auto_swap → swap overlay → meal/run/logged-run/warmup/schedule overlays →
+    title reconciliation → finalize_day_plan → food filter, for all 12
+    weeks. /api/workouts/<week> used to be a 169-line unreachable fork of
+    this that had already drifted (dropped target_weight=0, no logged-run
+    overlay); it now returns one week of the same payload."""
     from equipment_swaps import auto_swap_workout
     from workout_data import EXERCISES, NAME_ALIASES
     eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
@@ -4176,14 +4202,7 @@ def api_workouts():
         all_weeks["_aliasMap"] = {}
     if _overlay_errors:
         all_weeks["_overlay_errors"] = _overlay_errors
-    response = jsonify(all_weeks)
-    # Force fresh — iOS PWA + Cloudflare have layered caches that have
-    # been serving stale workout data after server-side template/prescription
-    # changes. Hard refresh wasn't enough.
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
+    return all_weeks
 
 
 @app.route("/api/workouts/<int:week>")
@@ -4191,181 +4210,13 @@ def api_workouts():
 def api_week(week):
     if week < 1 or week > 12:
         return jsonify({"error": "Week must be 1-12"}), 400
-    from equipment_swaps import auto_swap_workout
-    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
-    user_equipment = eq.available_equipment if eq else []
-    user_food_ids = _get_user_food_ids()
-    phase = get_phase(week)
-
-    # Detect bodyweight-only users
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    has_gym = pa.has_gym if pa else True
-    if has_gym:
-        days = get_workouts(week)
-    else:
-        from workout_data import get_workouts_for_user
-        days = get_workouts_for_user(week, has_gym=False)
-
-    # Check for user-specific prescriptions
-    prescriptions = WeeklyPrescription.query.filter_by(
-        user_id=current_user.id, week=week
-    ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
-
-    presc_day_set = {rx.day_idx for rx in prescriptions}
-    runplan_day_set = set()
-    mealplan_day_set = set()
-
-    if prescriptions:
-        rx_by_day = {}
-        for rx in prescriptions:
-            if rx.day_idx not in rx_by_day:
-                rx_by_day[rx.day_idx] = []
-            ex_dict = {
-                "name": rx.exercise_name,
-                "sets": f"{rx.sets}x{rx.reps}",
-                # Coach-only rest — no hardcoded default, no template-row leak.
-                "rest": rx.rest if rx.source == "coach" else None,
-                "note": rx.note or "",
-            }
-            ex_info = EXERCISES.get(rx.exercise_name, {})
-            if ex_info.get("video"):
-                ex_dict["video"] = ex_info["video"]
-            # Inject tracked_metric so height-tracked plyos (Box Jump) render
-            # "in" not "lb" here too (the bulk endpoint already does this).
-            if ex_info.get("tracked_metric"):
-                ex_dict["tracked_metric"] = ex_info["tracked_metric"]
-            rx_by_day[rx.day_idx].append(ex_dict)
-
-        for day_idx, exercises in rx_by_day.items():
-            if day_idx < len(days):
-                days[day_idx]["exercises"] = exercises
-                # (Day-title reconciliation runs AFTER the schedule overlay below,
-                # which would otherwise overwrite a title set here.)
-
-    for day in days:
-        if "exercises" in day:
-            day["exercises"] = auto_swap_workout(day["exercises"], user_equipment)
-
-    # Apply user-explicit ExerciseSwap rows AFTER auto_swap_workout — the same
-    # overlay /api/workouts applies, so the two endpoints can't disagree on a
-    # day that has a manual or coach [SWAP].
-    _apply_exercise_swap_overlay(days, current_user.id, week)
-
-    # Check for user-specific meal plans
-    try:
-        meal_plans = WeeklyMealPlan.query.filter_by(
-            user_id=current_user.id, week=week
-        ).all()
-        if meal_plans:
-            mp_by_day = {mp.day_idx: mp.meal_data for mp in meal_plans}
-            for day_idx, meal_data in mp_by_day.items():
-                if day_idx < len(days) and meal_data:
-                    days[day_idx]["mealPlan"] = meal_data
-                    days[day_idx]["mealType"] = meal_data.get("label", "custom")
-                    mealplan_day_set.add(day_idx)
-    except Exception:
-        pass  # No coach meals resolved — finalize_day_plan strips the template ones
-
-    # Run plan overlay
-    try:
-        run_plans = WeeklyRunPlan.query.filter_by(user_id=current_user.id, week=week).all()
-        if run_plans:
-            runplan_day_set = {rp.day_idx for rp in run_plans}
-            for rp in run_plans:
-                if rp.day_idx < len(days):
-                    days[rp.day_idx]["run"] = {"type": rp.run_type, "label": rp.label, "time": rp.duration, "detail": rp.detail or ""}
-                    if rp.segments_json:  # S063
-                        try:
-                            days[rp.day_idx]["run"]["segments"] = json.loads(rp.segments_json)
-                        except Exception:
-                            pass
-    except Exception:
-        pass
-
-    # LOGGED-RUN overlay (see /api/workouts): show an already-run day's logged
-    # run instead of a red "not planned" flag.
-    try:
-        from models import RunLog
-        for rl in RunLog.query.filter_by(user_id=current_user.id, week=week).all():
-            di = rl.day_idx
-            if di is None or di >= len(days) or di in runplan_day_set:
-                continue
-            if not (rl.duration_min or rl.distance_miles):
-                continue
-            _t = (f"{rl.duration_min} min" if rl.duration_min
-                  else f"{rl.distance_miles} mi")
-            _tmpl = days[di].get("run") or {}
-            _bits = []
-            if rl.distance_miles: _bits.append(f"{rl.distance_miles} mi")
-            if rl.duration_min: _bits.append(f"{rl.duration_min} min")
-            if rl.avg_hr: _bits.append(f"avg HR {rl.avg_hr}")
-            if rl.elevation_ft: _bits.append(f"{rl.elevation_ft} ft")
-            days[di]["run"] = {
-                # type 'logged' (no HIIT-timer button on a finished run); show
-                # what was actually run, not the template interval structure.
-                "type": "logged",
-                "label": _tmpl.get("label", "Run"),
-                "time": _t,
-                "detail": ("Logged: " + " · ".join(_bits)) if _bits else "Logged.",
-                "logged": True,
-            }
-            runplan_day_set.add(di)
-    except Exception:
-        pass
-
-    # Warmup overlay
-    try:
-        warmups = WeeklyWarmup.query.filter_by(user_id=current_user.id, week=week).all()
-        if warmups:
-            for wu in warmups:
-                if wu.day_idx < len(days) and wu.warmup_data:
-                    days[wu.day_idx]["warmup"] = wu.warmup_data
-    except Exception:
-        pass
-
-    # Day schedule overlay
-    try:
-        day_schedules = WeeklyDaySchedule.query.filter_by(user_id=current_user.id, week=week).all()
-        if day_schedules:
-            for ds in day_schedules:
-                if ds.day_idx < len(days):
-                    days[ds.day_idx]["liftName"] = ds.lift_name
-                    if ds.is_rest:
-                        days[ds.day_idx]["isRest"] = True
-                        days[ds.day_idx]["exercises"] = []
-    except Exception:
-        pass
-
-    # FINAL day-title reconciliation — last word after template + schedule
-    # overlays (both carry labels that go stale when the coach redesigns the
-    # day). Replaces a title only when it names the wrong region or omits the
-    # day's dominant muscle; accurate curated labels are kept.
-    for _d in days:
-        if not _d.get("isRest") and _d.get("exercises"):
-            _d["liftName"] = _reconcile_lift_name(
-                _d.get("liftName"), [e.get("name") for e in _d["exercises"]],
-                is_deload=_deload.is_deload_week(current_user.id, week))
-
-    # FAIL LOUD: strip leftover template content for unplanned domains (run +
-    # lifts + meals). Mirrors /api/workouts.
-    from plan_overlay import finalize_day_plan
-    for _di, _day in enumerate(days):
-        finalize_day_plan(
-            _day,
-            has_prescriptions=(_di in presc_day_set),
-            has_runplan=(_di in runplan_day_set),
-            has_mealplan=(_di in mealplan_day_set),
-        )
-
-    days = _filter_meals_by_food_selections(days, user_food_ids)
-    return jsonify({
-        "week": week, "phase": phase,
-        "phaseInfo": PHASES[phase],
-        "deload": _deload.is_deload_week(current_user.id, week),
-        "deload_reason": _deload.deload_reason(current_user.id, week),
-        "days": days,
-    })
-
+    all_weeks = _build_all_weeks_payload()
+    wk = all_weeks.get(str(week))
+    if wk is None:
+        return jsonify({"error": "week not available"}), 404
+    response = jsonify(wk)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 def _get_state():
     s = AppState.query.filter_by(user_id=current_user.id).first()
@@ -7522,7 +7373,7 @@ def api_exercise_swap():
                 db.session.commit()
             except Exception as e:
                 db.session.rollback()
-                return jsonify({"error": str(e)}), 500
+                return _client_error(e)
         return jsonify({"ok": True, "reverted": True})
 
     # Validate that the swap target is in the original exercise's alternatives.
@@ -7553,7 +7404,7 @@ def api_exercise_swap():
         return jsonify({"ok": True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        return _client_error(e)
 
 
 @app.route("/api/completions/day", methods=["POST"])
@@ -8877,7 +8728,7 @@ Conversation:
         # structured error instead of falling off the end (None -> Flask 500).
         return jsonify({"error": "No JSON object in extraction response"}), 502
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _client_error(e)
 
 
 # ─── PSYCHOLOGICAL INTAKE ───────────────────────────────────────────────────
@@ -9031,8 +8882,7 @@ def api_psych_intake_message():
         return jsonify({"job_id": job_id, "status": "pending"})
 
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        return _client_error(e)
 
 
 @app.route("/api/psych-intake/result/<job_id>")
@@ -10370,7 +10220,7 @@ def garmin_save_tokens():
         gc._save_tokens()
         return jsonify({"connected": True, **_post_token_save_sync(gc, current_user)})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _client_error(e)
 
 
 @app.route("/api/admin/garmin/save-tokens", methods=["POST"])

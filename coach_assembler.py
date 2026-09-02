@@ -236,36 +236,41 @@ def _build_checkins():
 
 @section_builder("chat_history")
 def _build_chat_history():
+    """S155: a CHARACTER budget, not row caps. Today's messages are never
+    dropped (the coach must know what it said this morning); earlier-week
+    and older rows are trimmed from the oldest until the total fits."""
     from models import ChatMessage
+    BUDGET = 16000
     local_today = _user_today()
     week_start = local_today - timedelta(days=local_today.weekday())
-    # Today's messages (most relevant, limit 20 to prevent bloat from planning retries)
-    today_msgs = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
+
+    def _rows(q, limit=None):
+        q = q.order_by(ChatMessage.created_at.desc())
+        if limit:
+            q = q.limit(limit)
+        return [{
+            "role": m.role, "content": m.content,
+            "date": m.log_date.isoformat() if m.log_date else None,
+            "time": m.created_at.isoformat() if m.created_at else None,
+        } for m in q.all()][::-1]
+
+    today_msgs = _rows(ChatMessage.query.filter(
+        ChatMessage.user_id == current_user.id, ChatMessage.log_date >= local_today))
+    earlier_week = _rows(ChatMessage.query.filter(
         ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(20).all()][::-1]  # reverse to chronological
-    # Earlier this week (limit 15)
-    earlier_week = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-        "time": m.created_at.isoformat() if m.created_at else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= week_start,
-        ChatMessage.log_date < local_today
-    ).order_by(ChatMessage.created_at.desc()).limit(15).all()][::-1]
-    # Older context (last week, limit 10 — memories carry the rest)
-    older = [{
-        "role": m.role, "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date < week_start
-    ).order_by(ChatMessage.created_at.desc()).limit(10).all()][::-1]
+        ChatMessage.log_date >= week_start, ChatMessage.log_date < local_today))
+    older = _rows(ChatMessage.query.filter(
+        ChatMessage.user_id == current_user.id, ChatMessage.log_date < week_start), limit=60)
+
+    size = lambda rows: sum(len(r.get("content") or "") for r in rows)
+    used = size(today_msgs)
+    dropped = 0
+    while older and used + size(older) + size(earlier_week) > BUDGET:
+        older.pop(0); dropped += 1
+    while earlier_week and used + size(earlier_week) > BUDGET:
+        earlier_week.pop(0); dropped += 1
+    if dropped:
+        log.info("chat_history: dropped %s oldest rows to fit %s chars", dropped, BUDGET)
     return {"chat_history": older + earlier_week + today_msgs}
 
 
@@ -1770,13 +1775,15 @@ def _build_completed_days():
         resolved = _resolve_workout_for_day(w, d) or {}
         if workout_state_from_rows(resolved.get("exercises") or [], rows) == "complete":
             completed.append(d)
-    # Enrich with names
-    workouts = get_workouts(week)
+    # Enrich with the COACH-designed day title via the resolver (S161) —
+    # the static template's liftName described a program the athlete isn't on.
     enriched = []
     for di in completed:
         entry = {"day_idx": di, "day": DAY_NAMES[di] if di < 7 else "?"}
-        if di < len(workouts):
-            entry["liftName"] = workouts[di].get("liftName", "")
+        try:
+            entry["liftName"] = (_resolve_workout_for_day(week, di) or {}).get("liftName") or ""
+        except Exception:
+            entry["liftName"] = ""
         enriched.append(entry)
     return {"completed_days_this_week": enriched}
 

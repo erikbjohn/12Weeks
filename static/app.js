@@ -1688,8 +1688,7 @@ function renderMealInner(dayData) {
 
   return `<h3>Meal Plan &middot; ${activePlan.label || ''}</h3>
     ${calHeader ? '<div style="margin:-4px 0 8px 0">' + calHeader + '</div>' : ''}
-    ${isSundayFast ? '<div class="meal-plan-note" style="color:var(--accent)">Fast day. Water, black coffee, electrolytes only.</div>' : ''}
-    ${!isSundayFast && activePlan.note ? '<div class="meal-plan-note">' + activePlan.note + '</div>' : ''}
+    ${activePlan.note ? '<div class="meal-plan-note' + (isSundayFast ? '" style="color:var(--accent)' : '') + '">' + escapeHtml(String(activePlan.note)) + '</div>' : ''}
     ${notTodayNote}
     ${totalsHtml}
     <div class="meal-compact-row">${compactChecks}</div>
