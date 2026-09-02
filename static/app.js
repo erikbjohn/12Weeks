@@ -1228,9 +1228,8 @@ async function replayOutbox() {
     } finally {
         _outboxReplaying = false;
     }
-    if (replayed > 0 && typeof showToast === 'function') {
-        showToast(replayed + ' queued save' + (replayed === 1 ? '' : 's') + ' synced.');
-    }
+    // Silent by request (2026-09-02): a replayed save is just a save. Console only.
+    if (replayed > 0) { try { console.info('outbox: ' + replayed + ' queued save(s) synced'); } catch (e) {} }
 }
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
