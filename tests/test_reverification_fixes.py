@@ -548,3 +548,129 @@ def test_prescription_marker_is_clamped_to_min_sets(app_ctx):
     rx = WeeklyPrescription.query.filter_by(user_id=u.id, week=3, day_idx=0).first()
     assert rx is not None, "marker did not persist"
     assert rx.sets >= MIN_SETS, rx.sets
+
+
+# ═════════════════════════ missing-test sweep (findings whose code shipped untested) ═════
+
+def test_generate_status_ignores_a_stale_running_job(app_ctx):
+    """S017: a hung job older than GEN_JOB_STALE_S must not read as 'running' forever."""
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s017@test.com")
+    import app as appmod, time
+    with appmod._GEN_JOBS_LOCK:
+        appmod._GEN_JOBS[(u.id, 9)] = {"status": "running", "started_at": time.time() - appmod.GEN_JOB_STALE_S - 60}
+    r = client.get("/api/weekly-program/generate-status?week=9")
+    assert r.status_code == 200
+    assert r.get_json().get("status") != "running", r.get_json()
+
+
+def test_dead_garmin_token_alerts_once_per_day(app_ctx, monkeypatch):
+    """S037: an OAuth2 expired >2h ago logs ERROR and pushes exactly once (PushSent ledger)."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s037@test.com")
+    import app as appmod, garmin_client, time
+    from models import PushSent
+    PushSent.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    monkeypatch.setattr(garmin_client, "stored_oauth2_expires_at", lambda uid: time.time() - 3 * 3600)
+    sent = []
+    monkeypatch.setattr(appmod, "push_to_user", lambda uid, title, body, **k: sent.append(body) or 1)
+    appmod._garmin_dead_token_alert(u.id)
+    appmod._garmin_dead_token_alert(u.id)
+    rows = PushSent.query.filter_by(user_id=u.id, kind="garmin_auth").all()
+    assert len(rows) == 1 and len(sent) == 1 and "Garmin auth expired" in sent[0]
+
+
+def test_today_status_render_shows_prescribed_run_beside_actual():
+    """S041: the debrief sees plan and actual side by side."""
+    from coach_assembler import _format_athlete_data
+    ts = {"workout_state": "not_started", "run_logged": True, "run_distance_today": 4.55,
+          "run_duration_today": 50, "run_avg_hr_today": 132, "run_detail": "50 min easy Z2, HR 120-140",
+          "run_label": "Easy Z2", "run_duration": "50 min"}
+    txt = _format_athlete_data({"today_status": ts}, ["today_status"])
+    assert "run: DONE" in txt and "run_prescribed: Easy Z2 50 min — 50 min easy Z2" in txt
+
+
+def test_chase_body_is_none_when_nothing_is_owed(app_ctx):
+    """S046: the 09:30 chase sends nothing when the weigh-in is logged and no morning dose is open."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s046@test.com")
+    import app as appmod
+    from models import BodyWeight, PeptideDose
+    from datetime import date
+    d = date(2026, 9, 1)
+    BodyWeight.query.filter_by(user_id=u.id).delete(); PeptideDose.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    assert appmod._chase_body(u.id, d) == "No weigh-in yet."
+    db.session.add(BodyWeight(user_id=u.id, log_date=d, weight_lbs=210.0)); db.session.commit()
+    assert appmod._chase_body(u.id, d) is None
+    db.session.add(PeptideDose(user_id=u.id, date=d, compound="Retatrutide", dose_mg=2.0, time="07:00", event_type="dose")); db.session.commit()
+    assert "1 dose unchecked: Retatrutide." in appmod._chase_body(u.id, d)
+
+
+def test_sync_activities_maps_peak_hr(app_ctx):
+    """S047: Garmin maxHR lands on GarminActivity + RunLog.max_hr."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s047@test.com")
+    from models import AppState, RunLog, GarminActivity
+    from datetime import date
+    from garmin_sync import sync_activities
+    AppState.query.filter_by(user_id=u.id).delete(); RunLog.query.filter_by(user_id=u.id).delete()
+    GarminActivity.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(AppState(user_id=u.id, start_date=date(2026, 8, 10), current_week=4)); db.session.commit()
+    class _GC:
+        def get_activities_between(self, a, b):
+            return [{"activityId": 991, "activityType": {"typeKey": "running"}, "startTimeLocal": "2026-08-31 06:10:00",
+                     "distance": 7242.0, "duration": 3000.0, "averageHR": 132, "maxHR": 172, "elevationGain": 30.0,
+                     "activityName": "Z2 50"}]
+    sync_activities(_GC(), u.id, days_back=3, today=date(2026, 9, 1))
+    act = GarminActivity.query.filter_by(user_id=u.id).first()
+    assert act and act.max_hr == 172
+    rl = RunLog.query.filter_by(user_id=u.id, log_date=date(2026, 8, 31)).first()
+    assert rl and rl.max_hr == 172 and rl.source == "garmin"
+
+
+def test_protocol_status_render_names_unchecked_doses():
+    """S059: a scheduled, past-due, unchecked dose is named once in the prompt."""
+    from coach_assembler import _format_athlete_data
+    ps = {"summary": [{"compound": "Retatrutide", "dose_mg": 2.0, "time": "07:00", "taken": False}],
+          "today_unchecked": [{"compound": "Retatrutide", "time": "07:00"}]}
+    txt = _format_athlete_data({"protocol_status": ps}, ["protocol_status"])
+    assert "Retatrutide 2.0mg @ 07:00 — UNCHECKED" in txt
+    assert "today_unchecked_past_due: 1 — Retatrutide @ 07:00" in txt
+
+
+def test_day_resolver_is_memoized_per_request(app_ctx):
+    """S103: the second resolve of the same day in one request issues zero SQL."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s103@test.com")
+    from sqlalchemy import event
+    from coach_assembler import _resolve_workout_for_day
+    counts = []
+    def _count(conn, cursor, statement, parameters, context, executemany): counts.append(statement)
+    event.listen(db.engine, "before_cursor_execute", _count)
+    try:
+        with app_.test_request_context():
+            from flask_login import login_user; login_user(u)
+            _resolve_workout_for_day(1, 0)
+            n1 = len(counts)
+            _resolve_workout_for_day(1, 0)
+            n2 = len(counts)
+    finally:
+        event.remove(db.engine, "before_cursor_execute", _count)
+    assert n1 > 0 and n2 == n1, (n1, n2)
+
+
+def test_source_pins_for_shipped_but_untested_partials():
+    """S093/S108/S141/S159/S161: the mechanism each closure claimed is still in the source."""
+    app_src = open("app.py").read()
+    reg = app_src[app_src.index("def api_regenerate_meals"):app_src.index("def api_regenerate_meals") + 6000]
+    assert "day_date(" in reg, "S093: regenerate must derive the week from AppState.start_date, not the calendar Monday"
+    ca = open("coach_assembler.py").read()
+    ts = ca[ca.index("def _build_today_status"):ca.index("def _build_today_status") + 4000]
+    assert "start_date" in ts, "S108: today_status must gate rows on block start_date"
+    cd = ca[ca.index("def _build_completed_days"):ca.index("def _build_completed_days") + 4000]
+    assert "_resolve_workout_for_day(week, di)" in cd, "S161: completed_days title from the resolver, not the template"
+    js = open("static/app.js").read()
+    assert "_weightsCache && _weightsCache[exName] && _weightsCache[exName].current > 0" in js, "S141: typo guard reads the live cache"
+    assert "window._weightsCache[exName]" not in js
+    assert "Fast day. Water, black coffee, electrolytes only." not in js, "S159: no hardcoded fast-day literal"
+    assert "escapeHtml(String(activePlan.note))" in js
