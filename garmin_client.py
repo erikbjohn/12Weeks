@@ -419,10 +419,26 @@ class GarminClient:
                 drained = max((d.get("drained", 0) for d in data), default=0)
                 current = None
                 for d in data:
+                    # Real shape (verified 2026-09-02): entries are [timestamp,
+                    # level] with the column meaning given by
+                    # bodyBatteryValueDescriptorDTOList. The S038 parser assumed
+                    # a 3-column row and never matched → body battery NULL
+                    # every day since Aug 30.
+                    idx = None
+                    for desc in (d.get("bodyBatteryValueDescriptorDTOList") or []):
+                        if desc.get("bodyBatteryValueDescriptorKey") == "bodyBatteryLevel":
+                            idx = int(desc.get("bodyBatteryValueDescriptorIndex", 1))
                     for entry in (d.get("bodyBatteryValuesArray") or []):
-                        if isinstance(entry, (list, tuple)) and len(entry) >= 3 \
-                                and isinstance(entry[2], (int, float)):
-                            current = int(entry[2])
+                        if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                            continue
+                        if idx is not None:
+                            v = entry[idx] if len(entry) > idx else None
+                        else:
+                            # No descriptor: the level is the first numeric column after
+                            # the timestamp (older 4-column rows carry a status string at [1]).
+                            v = next((x for x in entry[1:] if isinstance(x, (int, float)) and not isinstance(x, bool)), None)
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            current = int(v)
                 return {
                     "current": current,
                     "charged": charged,
@@ -436,6 +452,15 @@ class GarminClient:
             data = self.api.get_training_readiness(day)
             if not data:
                 return None
+            # Real shape (verified 2026-09-02): a LIST of readings for the day;
+            # the newest carries the score. Parsing it as a dict raised
+            # "'list' object has no attribute 'get'" every 30 min and readiness
+            # was NULL on every row ever stored.
+            if isinstance(data, list):
+                data = max((x for x in data if isinstance(x, dict)),
+                           key=lambda x: str(x.get("timestamp") or ""), default=None)
+                if not data:
+                    return None
             return {
                 "score": data.get("score", None),
                 "level": data.get("level", None),
@@ -462,7 +487,9 @@ class GarminClient:
             data = self.api.get_stress_data(day)
             if not data:
                 return None
-            overall = data.get("overallStressLevel", None)
+            # Real key (verified 2026-09-02) is avgStressLevel; overallStressLevel
+            # never existed in this payload, so stress was NULL on every row.
+            overall = data.get("avgStressLevel", data.get("overallStressLevel", None))
             rest = data.get("restStressDuration", 0)
             high = data.get("highStressDuration", 0)
             return {

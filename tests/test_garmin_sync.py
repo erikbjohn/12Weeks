@@ -1111,3 +1111,43 @@ def test_morning_briefing_unknown_readiness_never_fabricated(app_ctx, monkeypatc
     assert "GREEN (70/100)" not in seen_msgs[0]
     assert "UNKNOWN" in seen_msgs[0]
 
+
+
+# ── 2026-09-02: parsers against the REAL Garmin payload shapes ───────────────
+
+def _client_with(api):
+    from garmin_client import GarminClient
+    gc = GarminClient.__new__(GarminClient)
+    gc.api = api; gc._connected = True; gc._cache = {}; gc._user_id = 1
+    gc._rate_limited_until = 0
+    return gc
+
+
+def test_body_battery_level_parsed_from_two_column_rows():
+    class _Api:
+        def get_body_battery(self, d):
+            return [{"date": d, "charged": 23, "drained": 15,
+                     "bodyBatteryValuesArray": [[1788332400000, 19], [1788351840000, 39], [1788360480000, 27]],
+                     "bodyBatteryValueDescriptorDTOList": [{"bodyBatteryValueDescriptorIndex": 0, "bodyBatteryValueDescriptorKey": "timestamp"},
+                                                            {"bodyBatteryValueDescriptorIndex": 1, "bodyBatteryValueDescriptorKey": "bodyBatteryLevel"}]}]
+    gc = _client_with(_Api())
+    out = gc._get_body_battery("2026-09-02")
+    assert out["current"] == 27 and out["charged"] == 23 and out["drained"] == 15
+
+
+def test_training_readiness_parsed_from_list_of_readings():
+    class _Api:
+        def get_training_readiness(self, d):
+            return [{"timestamp": "2026-09-02T05:00:00.0", "score": 31, "level": "LOW"},
+                    {"timestamp": "2026-09-02T15:02:09.0", "score": 28, "level": "LOW", "sleepScore": 66}]
+    gc = _client_with(_Api())
+    out = gc._get_training_readiness("2026-09-02")
+    assert out["score"] == 28 and out["level"] == "LOW" and out["sleepComponent"] == 66
+
+
+def test_stress_overall_uses_avg_stress_level():
+    class _Api:
+        def get_stress_data(self, d):
+            return {"maxStressLevel": 93, "avgStressLevel": 34, "restStressDuration": 5640, "highStressDuration": 660}
+    gc = _client_with(_Api())
+    assert gc._get_stress("2026-09-02")["overall"] == 34
