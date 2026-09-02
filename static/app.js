@@ -5273,7 +5273,7 @@ async function showGroceryList() {
 
     let html = '';
     for (const cat of (data.categories || [])) {
-      html += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
+      html += `<div class="shop-category"><div class="shop-cat-label">${escapeHtml(cat.category)}</div>`;
       for (const item of cat.items) {
         const safeId = item.item.replace(/[^a-zA-Z0-9]/g, '_');
         html += `<div class="shop-item" onclick="this.classList.toggle('shop-done')">

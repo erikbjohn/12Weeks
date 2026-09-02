@@ -6,7 +6,7 @@ Trigger: S021 had been 'closed' by rewording an LLM prompt while the mechanism k
 
 ## Tally
 
-_Later 2026-09-01: 50 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
+_Later 2026-09-01: 56 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
 
 | verdict | count | meaning |
 |---|---|---|
@@ -56,7 +56,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S008 | high | UPDATED | FIXED — briefing runs on build_filtered_context/assemble_prompt/coach_chat; legacy _build_coach_context + get_coach_response DELETED; briefing no longer defaults missing check-in scores to 5 (hidden fake data); tests. |
 | S009 | high | UPDATED | FIXED — apiPost has a 12 s abort timeout on both attempts; test. |
 | S015 | high | UPDATED | FIXED — /logout is POST-only; all callers updated; test. |
-| S016 | high | PARTIAL | No rendered-prompt test; no rule 21a clause. |
+| S016 | high | UPDATED | FIXED — rendered-prompt test: on_curve present, linear projections suppressed. |
 | S017 | high | PARTIAL | Zero tests for timeouts/stale-job restart. |
 | S019 | high | PARTIAL | Test covers empty case only, sets wrong cache var. |
 | S020 | high | PARTIAL | Split-line test doesn't exercise app.js readers; no trailing-buffer flush. |
@@ -64,7 +64,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S023 | high | UPDATED | FIXED — coach_rules uses program_calendar.program_week; grep test. |
 | S028 | high | PARTIAL | Only runs healed; WeeklyDaySchedule gap persists forever; meals/warmups untracked. |
 | S031 | high | UPDATED | FIXED — rest day with a run is not dimmed; 'Monday planning' copy gone; test. |
-| S035 | high | PARTIAL | Rendered prompt untested. |
+| S035 | high | UPDATED | FIXED — same test as S016. |
 | S037 | high | PARTIAL | No test for dead-token alert; laptop notify path unexercised. |
 | S041 | high | PARTIAL | No prompt test for run_detail. |
 | S045 | medium | PARTIAL | No render-sequence guard; rest timer still orphaned on re-render (app.js:2046-2079). |
@@ -72,7 +72,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S047 | medium | PARTIAL | Zero tests for max_hr path; per-lap splits (step 2) not started. |
 | S049 | medium | UPDATED | FIXED — 'through YYYY-MM-DD' exceptions/commitments expire out of CRITICAL; test. |
 | S052 | medium | UPDATED | FIXED — 16:8 read filter honours the rail note's cutoff; test. |
-| S054 | medium | PARTIAL | Clamp real; no test; heal-prescriptions not clamped. |
+| S054 | medium | UPDATED | FIXED — endpoint-level test: a 2-set [PRESCRIPTION] marker lands as MIN_SETS. |
 | S056 | medium | PARTIAL | Tripwire test not added. |
 | S058 | medium | UPDATED | FIXED — strength planner prompt carries RECOVERY CONTEXT + rule; test. |
 | S059 | medium | PARTIAL | No test; adherence_7d still excludes today. |
@@ -94,7 +94,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S094 | medium | UPDATED | FIXED — all-None fetch does not stamp pulled_at; counted as wellness_empty. |
 | S096 | medium | UPDATED | PARTIAL — unchanged (temperature test still missing). |
 | S098 | medium | PARTIAL | No prompt test; SUNDAY_REVIEW trigger text still dictates narrative. |
-| S099 | medium | PARTIAL | No intake_profile table test. |
+| S099 | medium | UPDATED | FIXED — table test for sex/age parser (bare word, stray number, coach turn ignored). |
 | S100 | medium | UPDATED | FIXED — lifting_agent uses lift_history.e1rm; grep test. |
 | S101 | medium | UPDATED | FIXED — canonicalization one-shot behind SystemFlag name_aliases_v1; dead exercise_log UPDATE removed. |
 | S103 | medium | PARTIAL | Memo unpinned by any test. |
@@ -115,7 +115,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S128 | medium | PARTIAL | Local week-formula copy; no test for the schedule-row-no-prescription case. |
 | S129 | medium | UPDATED | FIXED — POST /api/chat/note persists the confirmation; test. |
 | S130 | medium | UPDATED | PARTIAL — GET /api/sets deleted; the two 410 stubs are the deliberate retirement contract (tests pin 410) and stay. |
-| S131 | medium | PARTIAL | No test; _swapped_from key still unread. |
+| S131 | medium | UPDATED | FIXED — test: every catalog name resolves to itself/canonical or None; cat.category escaped. |
 | S132 | medium | UPDATED | FIXED — move-sets-day has dry_run + admin audit row; realign keeps every DayCompletion field; test. |
 | S134 | low | UPDATED | FIXED — photo prompt no longer asks for body-fat % or an aesthetic score; test. |
 | S135 | low | UPDATED | FIXED — same as S134 (dead render chain still present). |
@@ -211,4 +211,4 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S159 | low | REAL | No test. |
 | S161 | low | REAL | No test. |
 | S162 | low | REAL | Two spellings of the BW sentinel in one prompt; no test. |
-| S164 | low | REAL | No test. |
+| S164 | low | UPDATED | FIXED — test: unauthenticated health body is {ok, commit} only. |

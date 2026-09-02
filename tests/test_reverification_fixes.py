@@ -486,3 +486,65 @@ def test_move_sets_day_dry_run_writes_nothing(app_ctx, monkeypatch):
 def test_overlay_errors_are_surfaced_client_side():
     src = open("static/app.js").read()
     assert "workoutData._overlay_errors" in src and "Some card data failed to load" in src
+
+
+# ═════════════════════════ test sweep for PARTIALs that shipped code without a behavior test ═════
+
+def test_on_curve_renders_and_suppresses_linear_projection():
+    """S016/S035: the rendered prompt carries on_curve and never the straight-line numbers."""
+    from coach_assembler import _format_athlete_data
+    cs = {"goal_type": "cut", "current_weight": 212.0, "target_weight": 185.0, "on_curve": "behind",
+          "curve_target_today": 210.4, "weeks_to_target": 9, "projected_week_12_weight": 199.0}
+    txt = _format_athlete_data({"cut_status": cs}, ["cut_status"])
+    assert "on_curve: behind" in txt and "curve_target_today: 210.4" in txt
+    assert "weeks_to_target_at_pace" not in txt and "projected_week_12_weight" not in txt
+
+
+def test_every_catalog_exercise_resolves_to_itself_or_nothing():
+    """S131: the substring swap scan can never re-map a real catalog name."""
+    from workout_data import EXERCISES, resolve_name
+    from equipment_swaps import _lookup_swap
+    bad = []
+    for name in EXERCISES:
+        hit = _lookup_swap(name)[0]
+        if hit not in (name, resolve_name(name), None):   # an alias resolving to its canonical is exact, not fuzzy
+            bad.append((name, hit))
+    assert not bad, bad[:10]
+
+
+def test_health_probe_unauthenticated_has_no_table_counts(app_ctx):
+    app_, db = app_ctx
+    client = app_.test_client()
+    body = client.get("/api/debug/health").get_json()
+    assert set(body.keys()) == {"ok", "commit"}, body
+
+
+def test_sex_and_age_parser_table():
+    """S099: bare 'm', a stray number, and a word containing 'f' must not change the answer."""
+    from intake_profile import sex_and_age_from_intake
+    convo = [{"role": "user", "content": "I'm 44 and male"},
+             {"role": "user", "content": "I did 30 minutes of foam rolling"},   # stray number + 'f' word
+             {"role": "assistant", "content": "female friend of mine is 22"}]   # coach turn, ignored
+    sex, age = sex_and_age_from_intake(convo, default_sex="unknown", default_age=0)
+    assert (sex, age) == ("male", 44), (sex, age)
+
+
+def test_grocery_list_sinks_are_escaped():
+    src = open("static/app.js").read()
+    assert "${item.item}" not in src and "${item.total}" not in src and "${cat.category}" not in src
+
+
+def test_prescription_marker_is_clamped_to_min_sets(app_ctx):
+    """S054: a chat [PRESCRIPTION] with 2 sets lands as MIN_SETS, same rail as the planner."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s054@test.com")
+    from models import WeeklyPrescription
+    from coach_planning_program import MIN_SETS
+    import app as appmod
+    WeeklyPrescription.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        appmod._parse_coach_markers("[PRESCRIPTION: day=0, exercise=Barbell Bench Press, sets=2, reps=8, weight=135, reason=test]", u.id, 3)
+    rx = WeeklyPrescription.query.filter_by(user_id=u.id, week=3, day_idx=0).first()
+    assert rx is not None, "marker did not persist"
+    assert rx.sets >= MIN_SETS, rx.sets
