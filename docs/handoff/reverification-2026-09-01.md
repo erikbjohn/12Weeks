@@ -6,7 +6,7 @@ Trigger: S021 had been 'closed' by rewording an LLM prompt while the mechanism k
 
 ## Tally
 
-_Later 2026-09-01: 79 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
+_Later 2026-09-01: 81 of the 92 non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
 
 | verdict | count | meaning |
 |---|---|---|
@@ -52,14 +52,14 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S053 | medium | UPDATED | FIXED — set-save and boot backfill use `is not None`; allowlist entries removed; test stores target 0. |
 | S139 | low | UPDATED | FIXED — GarminClient.usable(); all three request-path fetches gate on it; test. |
 | S004 | critical | UPDATED | FIXED — single-use invites expire after 14 days; test. |
-| S007 | high | PARTIAL | Endpoint test is a source grep; no SWAP/SORENESS persistence tests. |
+| S007 | high | UPDATED | FIXED — tests/test_markers_every_chat_path.py: RUN + SWAP markers persist through BOTH /api/chat and /api/chat/stream. |
 | S008 | high | UPDATED | FIXED — briefing runs on build_filtered_context/assemble_prompt/coach_chat; legacy _build_coach_context + get_coach_response DELETED; briefing no longer defaults missing check-in scores to 5 (hidden fake data); tests. |
 | S009 | high | UPDATED | FIXED — apiPost has a 12 s abort timeout on both attempts; test. |
 | S015 | high | UPDATED | FIXED — /logout is POST-only; all callers updated; test. |
 | S016 | high | UPDATED | FIXED — rendered-prompt test: on_curve present, linear projections suppressed. |
 | S017 | high | UPDATED | FIXED — test: stale running job no longer reads 'running'. |
 | S019 | high | PARTIAL | Test covers empty case only, sets wrong cache var. |
-| S020 | high | PARTIAL | Split-line test doesn't exercise app.js readers; no trailing-buffer flush. |
+| S020 | high | UPDATED | FIXED — tests/js/sse_split_real_reader.test.mjs drives the real sendChatMessage loop with a frame split mid-word. |
 | S021 | high | PARTIAL | Real mechanism landed 072f5f0; still LLM extractor not [CHECKIN] marker. |
 | S023 | high | UPDATED | FIXED — coach_rules uses program_calendar.program_week; grep test. |
 | S028 | high | UPDATED | FIXED — _fill_missing_week_schedule heals the schedule domain on recovery; idempotent; test. |
@@ -96,7 +96,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S098 | medium | PARTIAL | No prompt test; SUNDAY_REVIEW trigger text still dictates narrative. |
 | S099 | medium | UPDATED | FIXED — table test for sex/age parser (bare word, stray number, coach turn ignored). |
 | S100 | medium | UPDATED | FIXED — lifting_agent uses lift_history.e1rm; grep test. |
-| S101 | medium | UPDATED | FIXED — canonicalization one-shot behind SystemFlag name_aliases_v1; dead exercise_log UPDATE removed. |
+| S101 | medium | UPDATED | FIXED — (boot SystemFlag import bug found by the S122 test run) one-shot canonicalization now actually runs. |
 | S103 | medium | UPDATED | FIXED — test: second resolve in a request issues zero SQL. |
 | S104 | medium | UPDATED | FIXED — LlmUsage table; llm_client.record_usage at every messages.create site (test enforces); GET /api/admin/debug/llm-usage. |
 | S106 | medium | UPDATED | FIXED — exercise history is a 180-day window with no row cap. |
@@ -108,7 +108,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S117 | medium | UPDATED | FIXED — readiness line carries the codified rule (run → Z2 via [RUN]; lifting never cut); test. |
 | S119 | medium | UPDATED | FIXED — client shows a toast naming the failed overlay domains (incl. swap). |
 | S121 | medium | UPDATED | FIXED — today_status carries run_followed_pushed_plan + per-activity followed_plan; test. |
-| S122 | medium | UPDATED | PARTIAL — mechanism verified by reading; a generation-impl test still missing. |
+| S122 | medium | UPDATED | FIXED — test drives _weekly_generation_impl with a 5-day coach reply; days 5-6 kept, 0-4 replaced. |
 | S123 | medium | UPDATED | FIXED — temperature passed at both multi-agent create sites; test. |
 | S124 | medium | UPDATED | FIXED — claims block only when MULTIAGENT_ENABLED=1; test. |
 | S127 | medium | UPDATED | FIXED — judge_batch(): Message Batches API, chunks of 100 submitted up front then polled together, cache_control on the system prompt, results keyed by case id. |
@@ -128,7 +128,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S144 | low | UPDATED | FIXED — login page clears the data cache. |
 | S145 | low | UPDATED | FIXED — check-in gate keys and every weigh-in/check-in POST date use the server-tz day (appTodayISO); test. |
 | S146 | low | UPDATED | FIXED — all 18 div-onclick controls get role=button tabindex=0 + Enter/Space handler + focus ring; test. |
-| S147 | low | UPDATED | FIXED — index.html no longer nukes caches each load; push honours data.url. |
+| S147 | low | UPDATED | FIXED — SW marks cache-served /api/workouts with X-From-Cache; page shows an offline banner; push honours data.url. |
 | S152 | low | PARTIAL | lift_trend still calls lift_session_history per KEY_LIFT (~10 queries); no from_rows helper. |
 | S153 | low | UPDATED | FIXED — /api/garmin/login 404s on Render without the admin key; test. |
 | S154 | low | UPDATED | FIXED — grocery list, coach note, meal-override note escaped. |

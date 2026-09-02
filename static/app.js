@@ -5681,11 +5681,23 @@ async function swapExercise(week, day, exIdx, newName) {
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
+function showOfflineBanner() {
+  if (document.getElementById('offline-banner')) return;
+  var b = document.createElement('div');
+  b.id = 'offline-banner';
+  b.setAttribute('role', 'status');
+  b.style.cssText = 'position:sticky;top:0;z-index:999;background:var(--amber,#b45309);color:#fff;padding:10px 14px;font-size:15px;text-align:center';
+  b.textContent = 'Offline — showing the last saved plan. Logged sets will sync when you reconnect.';
+  document.body.insertBefore(b, document.body.firstChild);
+  window.addEventListener('online', function () { var el = document.getElementById('offline-banner'); if (el) el.remove(); });
+}
+
 async function safeFetch(url, fallback) {
     try {
         const res = await fetch(url);
         if (!res.ok) return { _status: res.status, data: fallback };
-        return { _status: res.status, data: await res.json() };
+        const _fromCache = !!(res.headers && res.headers.get && res.headers.get('X-From-Cache'));
+        return { _status: res.status, data: await res.json(), _fromCache: _fromCache };
     } catch(e) {
         console.error('Failed to load:', url, e);
         return { _status: 0, data: fallback };
@@ -5730,6 +5742,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _supplementsCache = suppW.data;
     _bodyweightCache = bwW.data;
     workoutData = workoutW.data;
+    if (workoutW._fromCache) showOfflineBanner();   // S147: never let a cached plan pass as live
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
     if (workoutData._overlay_errors && workoutData._overlay_errors.length) {

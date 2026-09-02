@@ -858,3 +858,36 @@ def test_form_checkin_never_defaults_blank_scores():
     assert "|| 5," not in src.split("function submitMorningCheckin")[1][:1500]
     assert "|| 3," not in src.split("function submitMorningCheckin")[1][:1500]
     assert "function _mcVal" in src and ".filter(r => r.val != null)" in src
+
+
+def test_regen_replaces_only_days_the_coach_returned(app_ctx, monkeypatch):
+    """S122/S024: a coach reply covering days 0-4 must leave days 5-6 untouched."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s122@test.com")
+    from models import AppState, WeeklyPrescription, UserEquipment, PhysicalAssessment, TrainingGoal
+    from datetime import date
+    import coach_planning_program, coach_planning_runs, coach_planning_meals
+    import app as appmod
+    AppState.query.filter_by(user_id=u.id).delete(); WeeklyPrescription.query.filter_by(user_id=u.id).delete()
+    UserEquipment.query.filter_by(user_id=u.id).delete(); PhysicalAssessment.query.filter_by(user_id=u.id).delete()
+    TrainingGoal.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(AppState(user_id=u.id, start_date=date(2026, 8, 10), current_week=4))
+    db.session.add(UserEquipment(user_id=u.id, available_equipment=["barbell", "dumbbells", "cable_machine"], completed=True))
+    db.session.add(PhysicalAssessment(user_id=u.id, has_gym=True, completed=True))
+    db.session.add(TrainingGoal(user_id=u.id, goal_type="cut", daily_calories=2000, protein_grams=200, target_weight=185))
+    for d in range(7):
+        db.session.add(WeeklyPrescription(user_id=u.id, week=5, day_idx=d, exercise_order=0,
+                                          exercise_name=["Barbell Bench Press", "Barbell Back Squat", "Lat Pulldown",
+                                                         "Barbell OHP", "Romanian Deadlift", "Landmine Press", "Face Pull"][d],
+                                          sets=4, reps="8", target_weight=100, source="coach"))
+    db.session.commit()
+    prog = {d: [{"exercise": "Incline DB Press", "sets": 3, "reps": "10", "weight": 40, "rest": "90s", "why": "t"}] for d in range(5)}
+    monkeypatch.setattr(coach_planning_program, "generate_week_program", lambda **kw: (prog, [], {"deload": False}))
+    monkeypatch.setattr(coach_planning_runs, "generate_week_runs", lambda **kw: {})
+    monkeypatch.setattr(coach_planning_meals, "generate_week_meals", lambda **kw: {})
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        out = appmod._weekly_generation_impl(5, True, None, {}, inline_llm=False)
+    names = {r.day_idx: r.exercise_name for r in WeeklyPrescription.query.filter_by(user_id=u.id, week=5, source="coach").all()}
+    assert names.get(5) == "Landmine Press" and names.get(6) == "Face Pull", names
+    assert all(names.get(d) == "Incline DB Press" for d in range(5)), (names, (out or {}).get("coach_failures"))

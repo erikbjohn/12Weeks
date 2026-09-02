@@ -504,6 +504,7 @@ with app.app_context():
     # be created again. One-shot; Postgres only; a table that still has NULLs
     # is logged and skipped (never guessed).
     try:
+        from models import SystemFlag
         if (db.engine.dialect.name == "postgresql"
                 and not SystemFlag.query.filter_by(key="user_id_not_null_v1").first()):
             _insp = sa_inspect(db.engine)
@@ -650,6 +651,7 @@ with app.app_context():
     # SystemFlag so it no longer runs an UPDATE sweep on every deploy (and the
     # dead exercise_log statement is gone).
     try:
+        from models import SystemFlag
         if not SystemFlag.query.filter_by(key="name_aliases_v1").first():
             from workout_data import NAME_ALIASES
             _n = 0

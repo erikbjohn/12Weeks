@@ -56,7 +56,12 @@ self.addEventListener('fetch', (e) => {
         fetch(e.request).then(res => {
           if (res.ok) cache.put(e.request, res.clone());
           return res;
-        }).catch(() => cache.match(e.request))
+        }).catch(() => cache.match(e.request).then(hit => {
+          if (!hit) return hit;
+          // S147: mark a cache-served plan so the page can say so (offline banner).
+          const h = new Headers(hit.headers); h.set('X-From-Cache', '1');
+          return hit.arrayBuffer().then(buf => new Response(buf, { status: 200, headers: h }));
+        }))
       )
     );
     return;
