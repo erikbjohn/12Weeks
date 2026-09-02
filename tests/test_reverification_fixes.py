@@ -436,8 +436,8 @@ def test_rest_day_with_a_run_is_not_dimmed_and_planning_copy_not_monday():
 def test_api_post_has_a_timeout():
     src = open("static/app.js").read()
     assert "function _fetchWithTimeout" in src and "ctrl.abort()" in src
-    body = src[src.index("function apiPost("):src.index("function apiPost(") + 400]
-    assert "_fetchWithTimeout(url" in body
+    body = src[src.index("function apiPost("):src.index("function apiPost(") + 600]
+    assert "_fetchWithTimeout(url" in body and "20000" in body
 
 
 def test_logout_is_post_only(app_ctx):

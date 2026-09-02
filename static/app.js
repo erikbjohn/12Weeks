@@ -1106,11 +1106,13 @@ function _fetchWithTimeout(url, opts, ms) {
     .finally(function(){ if (t) clearTimeout(t); });
 }
 function apiPost(url, body) {
+  // 20 s: gym cellular can hold a live request past 12 s; the server answers
+  // set saves in ~100 ms, so anything slower is the phone's link, not a hang.
   return _fetchWithTimeout(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }, 12000).then(res => {
+  }, 20000).then(res => {
     if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) {
       console.error('API error:', res.status, url);
@@ -1139,8 +1141,9 @@ function apiPost(url, body) {
       })
     ).catch(e2 => {
       console.error('POST failed (attempt 2):', url, e2);
-      showToast('Save failed — queued. Will retry when back online.', 'error');
+      showToast('Connection dropped — set queued, retrying in 15 s. Nothing is lost.', 'error');
       queueForSync(url, body);
+      setTimeout(function () { try { replayOutbox(); } catch (e) {} }, 15000);   // retry before the next 'online' event
     });
   });
 }
