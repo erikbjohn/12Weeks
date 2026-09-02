@@ -1088,14 +1088,16 @@ def test_morning_briefing_unknown_readiness_never_fabricated(app_ctx, monkeypatc
     from models import GarminTokens
     GarminTokens.query.filter_by(user_id=u.id).delete()
     db.session.commit()
-    monkeypatch.setattr(appmod, "_build_coach_context", lambda: "ctx")
+    import coach_assembler, coach_with_tools
+    monkeypatch.setattr(coach_assembler, "build_filtered_context", lambda name: {})
+    monkeypatch.setattr(coach_assembler, "assemble_prompt", lambda name, ctx: "SYS")
     seen_msgs = []
 
-    def fake_coach(msg, ctx):
-        seen_msgs.append(msg)
+    def fake_coach(uid, system, messages, **kw):
+        seen_msgs.append(messages[0]["content"])
         return "Briefing text."
 
-    monkeypatch.setattr(appmod, "get_coach_response", fake_coach)
+    monkeypatch.setattr(coach_with_tools, "coach_chat", fake_coach)
     client = app_.test_client()
     with client.session_transaction() as sess:
         sess["_user_id"] = str(u.id)

@@ -705,8 +705,8 @@ def _current_week_for_user(user_id: int, today_local) -> int:
     if state is None:
         return 1
     if state.start_date:
-        diff_days = (today_local - state.start_date).days
-        return max(1, min(12, (diff_days // 7) + 1))
+        from program_calendar import program_week   # S023: single source
+        return program_week(state.start_date, today_local)
     return state.current_week or 1
 
 

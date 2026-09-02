@@ -402,53 +402,6 @@ milestone: Achievement or PR""",
         return []
 
 
-def get_coach_response(user_message, context):
-    """
-    Send a message to Claude with full training context.
-    Returns the assistant's response text.
-
-    context dict should contain:
-        - checkins: list of recent MorningCheckIn dicts
-        - chat_history: list of recent ChatMessage dicts
-        - garmin: today's garmin summary (or None)
-        - readiness: overtraining assessment (or None)
-        - bodyweight: recent body weight entries
-        - workout_today: today's planned workout
-        - week: current week number
-        - phase: current phase info
-        - weights: exercise weight history (key lifts)
-        - completions: recent completion data
-        - meals_today: today's meal log
-        - supplements_today: today's supplement status
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return "System error. We'll be back."
-
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0)
-    except Exception as e:
-        log.error("Failed to init Anthropic client: %s", e)
-        return "Technical issue. Try again in 60 seconds."
-
-    from coach_assembler import assemble_prompt
-    system_prompt = assemble_prompt("conversation", context)
-    messages = _build_messages(user_message, context.get("chat_history", []))
-
-    try:
-        response = client.messages.create(
-            model=CLAUDE_OPUS,
-            max_tokens=800,
-            system=system_prompt,
-            messages=messages,
-        )
-        return response.content[0].text
-    except Exception as e:
-        log.error("Claude API error: %s", e)
-        return "Erik stepped away. He'll be back in a moment."
-
-
 def _format_today(ctx):
     """Format today's date and time in user's local timezone."""
     user_tz = ctx.get('user_timezone', 'UTC')
@@ -590,7 +543,7 @@ def _build_messages(user_message, chat_history, user_timezone=None):
             continue
         filtered.append(msg)
 
-    last_40 = filtered[-40:]
+    last_40 = filtered[-80:]   # S155: today's rows are never dropped upstream; keep them here too
 
     # Dedup: only suppress if the last entry is the just-committed user message
     # from THIS active turn. We require:

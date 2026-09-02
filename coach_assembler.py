@@ -1734,9 +1734,24 @@ def _build_coach_memories():
     recent = [m for m in CoachMemory.query.filter_by(user_id=current_user.id)
               .order_by(CoachMemory.created_at.desc()).limit(80).all() if m.id not in seen][:30]
     rows = sorted(pivotal + recent, key=lambda m: m.created_at or datetime.min, reverse=True)
-    return {"coach_memories": [{"type": m.memory_type, "content": m.content, "week": m.week,
-                                "date": m.created_at.date().isoformat() if m.created_at else None}
-                               for m in rows]}
+    out = [{"type": m.memory_type, "content": m.content, "week": m.week,
+            "date": m.created_at.date().isoformat() if m.created_at else None}
+           for m in rows]
+    # S083: the athlete's thumbs-down flags were stored and never read. The
+    # last 10 ride along as 'flagged' memories so the coach can stop repeating
+    # what was flagged.
+    try:
+        from models import CoachFeedback
+        for cf in (CoachFeedback.query.filter_by(user_id=current_user.id)
+                   .order_by(CoachFeedback.created_at.desc()).limit(10).all()):
+            snippet = (cf.coach_text or "")[:160].replace("\n", " ")
+            note = f" — athlete: {cf.note}" if cf.note else ""
+            out.append({"type": "flagged", "week": None,
+                        "date": cf.created_at.date().isoformat() if cf.created_at else None,
+                        "content": f"ATHLETE FLAGGED this reply as '{cf.category}'{note}: \"{snippet}\" — do not repeat that pattern."})
+    except Exception:
+        log.warning("coach_memories: CoachFeedback unavailable", exc_info=True)
+    return {"coach_memories": out}
 
 
 @section_builder("user_rules")

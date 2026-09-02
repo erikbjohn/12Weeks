@@ -91,7 +91,8 @@ def prescribe_starting_weight(
     for s in e1rm_rows:
         if not s.weight:
             continue
-        est = round(float(s.weight) * (1 + (s.reps or 0) / 30.0), 1)
+        from lift_history import e1rm as _e1rm   # S100: the ONE capped formula
+        est = _e1rm(float(s.weight), s.reps or 0)
         if s.exercise_name not in one_rms or est > one_rms[s.exercise_name]:
             one_rms[s.exercise_name] = est
 

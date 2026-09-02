@@ -26,7 +26,7 @@ from workout_data import (
 )
 from garmin_client import GarminClient, stored_oauth2_expires_at
 from overtraining import assess_readiness
-from coach import get_coach_response, extract_memories
+from coach import extract_memories
 from psych_intake import get_intake_response, generate_intake_report, generate_full_profile
 try:
     from training_engine import compute_next_targets, compute_muscle_strength, generate_session_analysis
@@ -609,19 +609,23 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # ONE-TIME: Canonicalize exercise names in set_log and exercise_log
+    # ONE-TIME canonicalization of exercise names in set_log — S101: gated on a
+    # SystemFlag so it no longer runs an UPDATE sweep on every deploy (and the
+    # dead exercise_log statement is gone).
     try:
-        from workout_data import NAME_ALIASES
-        for old_name, canonical in NAME_ALIASES.items():
-            if old_name != canonical:
-                db.session.execute(text(
-                    'UPDATE set_log SET exercise_name = :new WHERE exercise_name = :old'
-                ), {"new": canonical, "old": old_name})
-                db.session.execute(text(
-                    'UPDATE exercise_log SET exercise_name = :new WHERE exercise_name = :old'
-                ), {"new": canonical, "old": old_name})
-        db.session.commit()
+        if not SystemFlag.query.filter_by(key="name_aliases_v1").first():
+            from workout_data import NAME_ALIASES
+            _n = 0
+            for old_name, canonical in NAME_ALIASES.items():
+                if old_name != canonical:
+                    _n += db.session.execute(text(
+                        'UPDATE set_log SET exercise_name = :new WHERE exercise_name = :old'
+                    ), {"new": canonical, "old": old_name}).rowcount
+            db.session.add(SystemFlag(key="name_aliases_v1", value=str(_n)))
+            db.session.commit()
+            logging.info("boot: canonicalized %d set_log names (one-shot)", _n)
     except Exception:
+        logging.exception("boot: name canonicalization failed")
         db.session.rollback()
 
     # NOTE: the startup week-1 template seeder is GONE (coach-or-nothing).
@@ -3775,12 +3779,20 @@ def _filter_meals_by_food_selections(days, user_food_ids):
         mp = day.get("mealPlan")
         if not mp or not mp.get("meals"):
             continue
+        # S052: ONE window end. Default 7pm; on a fasted-dose day the rail note
+        # ("… last meal ends by 8pm") carries the cutoff and the last meal is
+        # timed 30 min before it — the filter must not strip that meal.
+        window_end_h = 19.0
+        _rail = re.search(r'ends by (\d+)(?::(\d+))?\s*(am|pm)', str(mp.get("note") or ""), re.I)
+        if _rail:
+            _h = int(_rail.group(1)) % 12 + (12 if _rail.group(3).lower() == 'pm' else 0)
+            window_end_h = max(window_end_h, _h + int(_rail.group(2) or 0) / 60.0)
         filtered_meals = []
         for meal in mp["meals"]:
-            # 16:8 enforcement: remove caloric foods outside 11am-7pm window
+            # 16:8 enforcement: remove caloric foods outside the eating window
             if is_16_8:
                 meal_hour = _parse_meal_hour(meal.get("time", ""))
-                if meal_hour < 11 or meal_hour >= 19:
+                if meal_hour < 11 or meal_hour >= window_end_h:
                     # Outside eating window — only keep zero-cal items
                     fasting_foods = [f for f in meal.get("foods", []) if f["item"] in always_allowed]
                     if fasting_foods:
@@ -3916,7 +3928,12 @@ def _apply_exercise_swap_overlay(days, user_id, week, swap_rows=None):
                 elif _ex.get("tracked_metric"):
                     del _ex["tracked_metric"]
     except Exception:
-        pass
+        # S119: a failed swap overlay means sets get logged under the UN-swapped
+        # name. Loud, and reported to the payload via _overlay_errors when the
+        # caller passes one.
+        logging.exception("swap overlay failed (user %s week %s)", user_id, week)
+        if isinstance(swap_rows, list):
+            raise
 
 
 @app.route("/api/workouts")
@@ -4044,7 +4061,10 @@ def _build_all_weeks_payload():
         # manual swap overrides the equipment-driven substitution (which
         # produced 175-lb DB RDL from a Conv DL slot). Shared helper — the
         # per-week endpoint applies the identical overlay.
-        _apply_exercise_swap_overlay(days, current_user.id, week, swap_rows=_pre.get("swap", {}).get(week, []))
+        try:
+            _apply_exercise_swap_overlay(days, current_user.id, week, swap_rows=_pre.get("swap", {}).get(week, []))
+        except Exception as _oe:
+            _overlay_errors.append({"week": week, "domain": "swap", "error": type(_oe).__name__})
 
         # Check for user-specific meal plans
         try:
@@ -9439,546 +9459,6 @@ def api_coach_today_history():
     return jsonify(result)
 
 
-def _build_coach_context():
-    """Gather all relevant data for the AI coach."""
-    local_today = _user_today()
-    week = _current_week()
-
-    # Recent morning check-ins
-    since = local_today - timedelta(days=14)
-    checkins = [{
-        "date": e.log_date.isoformat(),
-        "sleep_quality": e.sleep_quality,
-        "stress_level": e.stress_level,
-        "soreness": e.soreness,
-        "mood": e.mood,
-        "motivation": e.motivation,
-        "anxiety": e.anxiety,
-        "notes": e.notes,
-    } for e in MorningCheckIn.query.filter(
-        MorningCheckIn.user_id == current_user.id,
-        MorningCheckIn.log_date >= since
-    ).order_by(MorningCheckIn.log_date).all()]
-
-    # Chat history — full current week (Mon-Sun) + older context
-    week_start = local_today - timedelta(days=local_today.weekday())  # Monday of this week
-    chat_history = [{
-        "role": m.role,
-        "content": m.content,
-        "date": m.log_date.isoformat() if m.log_date else None,
-    } for m in ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= week_start  # Full current week, not just 14 days
-    ).order_by(ChatMessage.created_at).all()]
-    # Also include older context (up to 14 days before this week) for continuity
-    older_msgs = ChatMessage.query.filter(
-        ChatMessage.user_id == current_user.id,
-        ChatMessage.log_date >= since,
-        ChatMessage.log_date < week_start
-    ).order_by(ChatMessage.created_at).limit(50).all()
-    older_history = [{"role": m.role, "content": m.content, "date": m.log_date.isoformat() if m.log_date else None} for m in older_msgs]
-    chat_history = older_history + chat_history
-
-    # Body weight — all entries (user weighs weekly, not daily)
-    bw_entries = BodyWeight.query.filter_by(user_id=current_user.id).order_by(BodyWeight.log_date).all()
-    bodyweight = [{
-        "date": e.log_date.isoformat(),
-        "weight": e.weight_lbs,
-    } for e in bw_entries]
-
-    # Garmin data
-    garmin_data = None
-    readiness_data = None
-    gc = _get_garmin()
-    if not gc.connected:
-        gc.try_restore_tokens(current_user.id)
-    if gc.usable():  # S139: never fire the OAuth2 exchange from a request
-        garmin_data = gc.get_today_summary(today=local_today)
-        readiness_data = assess_readiness(garmin_data)
-
-    # Current state
-    s = _get_state()
-    phase = get_phase(week)
-    phase_info = PHASES[phase]
-
-    # Today's workout — use user's local day of week
-    workouts = get_workouts(week)
-    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    today_idx = local_today.weekday()  # 0=Mon
-    workout_today = workouts[today_idx] if today_idx < len(workouts) else None
-
-    # Overlay ALL DB data onto workout_today (templates are stale defaults)
-    try:
-        # Exercises from WeeklyPrescription
-        _db_rx = WeeklyPrescription.query.filter_by(
-            user_id=current_user.id, week=week, day_idx=today_idx
-        ).order_by(WeeklyPrescription.exercise_order).all()
-        if _db_rx and workout_today:
-            workout_today["exercises"] = [
-                {"name": rx.exercise_name, "sets": f"{rx.sets}x{rx.reps}",
-                 "rest": (rx.rest if rx.source == "coach" else None), "note": rx.note or "",
-                 "target_weight": getattr(rx, 'target_weight', None)}
-                for rx in _db_rx
-            ]
-    except Exception:
-        pass
-    try:
-        # Meal plan from WeeklyMealPlan
-        _db_meal = WeeklyMealPlan.query.filter_by(
-            user_id=current_user.id, week=week, day_idx=today_idx
-        ).order_by(WeeklyMealPlan.id.desc()).first()
-        if _db_meal and _db_meal.meal_data and workout_today:
-            workout_today["mealPlan"] = _db_meal.meal_data
-    except Exception:
-        pass
-    try:
-        # Run plan from WeeklyRunPlan
-        _db_run = WeeklyRunPlan.query.filter_by(
-            user_id=current_user.id, week=week, day_idx=today_idx
-        ).first()
-        if _db_run and workout_today:
-            workout_today["run"] = {"type": _db_run.run_type, "label": _db_run.label,
-                                     "time": _db_run.duration, "detail": _db_run.detail or ""}
-    except Exception:
-        pass
-    try:
-        # Warmup from WeeklyWarmup
-        _db_warmup = WeeklyWarmup.query.filter_by(
-            user_id=current_user.id, week=week, day_idx=today_idx
-        ).first()
-        if _db_warmup and _db_warmup.warmup_data and workout_today:
-            workout_today["warmup"] = _db_warmup.warmup_data
-    except Exception:
-        pass
-
-    # Full week schedule from DB (not templates)
-    week_schedule = []
-    try:
-        _db_schedules = WeeklyDaySchedule.query.filter_by(
-            user_id=current_user.id, week=week
-        ).order_by(WeeklyDaySchedule.day_idx).all()
-        if _db_schedules:
-            for ds in _db_schedules:
-                week_schedule.append({
-                    "day_idx": ds.day_idx,
-                    "day": day_names[ds.day_idx] if ds.day_idx < 7 else "?",
-                    "liftName": ds.lift_name or "Rest",
-                    "isRest": ds.is_rest or False,
-                })
-    except Exception:
-        pass
-    if not week_schedule:
-        # Fallback to templates if no DB schedule exists
-        for i, w in enumerate(workouts):
-            week_schedule.append({
-                "day_idx": i,
-                "day": day_names[i],
-                "liftName": w.get("liftName", "Rest"),
-                "isRest": w.get("isRest", False),
-            })
-
-    # Supplements today
-    supps = SupplementLog.query.filter_by(user_id=current_user.id, log_date=local_today).all()
-    supps_taken = {s.supplement_name: s.taken for s in supps}
-
-    # Psych intake report (contains aspirational body type, goals, etc.)
-    intake = PsychIntake.query.filter_by(user_id=current_user.id).first()
-    intake_report = intake.report if intake and intake.report else None
-
-    # Food restrictions and allergies (SAFETY CRITICAL)
-    constraints = UserConstraints.query.filter_by(user_id=current_user.id).first()
-    food_restrictions = constraints.food_restrictions if constraints else []
-    custom_allergies = constraints.custom_allergies if constraints else None
-
-    # User's selected foods
-    fs = UserFoodSelections.query.filter_by(user_id=current_user.id).first()
-    selected_foods_summary = None
-    if fs and fs.selected_foods:
-        selected_foods_summary = fs.selected_foods
-
-    # Training goal (full record)
-    goal = TrainingGoal.query.filter_by(user_id=current_user.id).first()
-    fasting_protocol = goal.fasting_protocol if goal else None
-    goal_data = None
-    if goal:
-        goal_data = {
-            "goal_type": goal.goal_type,
-            "target_weight": goal.target_weight,
-            "target_bf_pct": goal.target_bf_pct,
-            "daily_calories": goal.daily_calories,
-            "protein_grams": goal.protein_grams,
-            "carb_grams": goal.carb_grams,
-            "fat_grams": goal.fat_grams,
-            "fasting_protocol": goal.fasting_protocol,
-            "calorie_by_day_type": goal.calorie_by_day_type,
-        }
-
-    # Exercise history — last 3 SESSIONS per exercise from SetLog (live table),
-    # top set each. ExerciseLog is dead (unwritten since April), which left the
-    # morning-briefing coach with empty/stale lift history.
-    from workout_data import resolve_name
-    _hist_rows = (SetLog.query
-                  .filter(SetLog.user_id == current_user.id, SetLog.weight.isnot(None))
-                  .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
-                  .limit(500).all())
-    _sess, _ord = {}, {}
-    for s in _hist_rows:
-        canonical = resolve_name(s.exercise_name)
-        skey = (s.week, s.day_idx, s.logged_date)
-        d = _sess.setdefault(canonical, {})
-        if skey not in d:
-            if len(_ord.setdefault(canonical, [])) >= 3:
-                continue
-            _ord[canonical].append(skey)
-            d[skey] = {"weight": s.weight, "rpe": None, "reps_completed": s.reps,
-                       "week": s.week,
-                       "date": s.logged_date.isoformat() if s.logged_date else None,
-                       "estimated_1rm": _e1rm(s.weight, s.reps)}
-        else:
-            e = d[skey]
-            if s.weight is not None and s.weight > e["weight"]:
-                e["weight"], e["reps_completed"] = s.weight, s.reps
-                e["estimated_1rm"] = _e1rm(s.weight, s.reps)
-    exercise_history = {c: [_sess[c][k] for k in keys] for c, keys in _ord.items()}
-
-    # Per-set data for today — use date-based query, not week number
-    today_idx = local_today.weekday()
-    today_sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.logged_date == local_today,
-        SetLog.done == True
-    ).order_by(SetLog.exercise_name, SetLog.set_number).all()
-    set_data = {}
-    for s in today_sets:
-        canonical = resolve_name(s.exercise_name)
-        if canonical not in set_data:
-            set_data[canonical] = []
-        set_data[canonical].append({
-            "set": s.set_number + 1, "weight": s.weight,
-            "reps": s.reps, "done": s.done,
-            "target_weight": getattr(s, 'target_weight', None),
-            "target_reps": getattr(s, 'target_reps', None),
-            "modification_direction": getattr(s, 'modification_direction', None),
-        })
-
-    # Run logs (last 14 days)
-    run_logs = RunLog.query.filter_by(user_id=current_user.id).order_by(
-        RunLog.log_date.desc()
-    ).limit(14).all()
-    runs = [{
-        "date": r.log_date.isoformat() if r.log_date else None,
-        "distance_miles": r.distance_miles, "avg_hr": r.avg_hr,
-        "elevation_ft": r.elevation_ft, "week": r.week,
-    } for r in run_logs]
-
-    # Physical assessment (baseline)
-    pa = PhysicalAssessment.query.filter_by(user_id=current_user.id).first()
-    physical = None
-    if pa:
-        physical = {
-            "height_inches": pa.height_inches,
-            "bodyweight_lbs": pa.bodyweight_lbs,
-            "waist": pa.waist_inches, "chest": pa.chest_inches,
-            "bicep": pa.bicep_inches, "thigh": pa.thigh_inches,
-            "neck": pa.neck_inches, "hips": pa.hips_inches,
-            "pushups": pa.pushup_count, "plank_sec": pa.plank_seconds,
-            "squats": pa.squat_count, "pullups": pa.pullup_count,
-        }
-
-    # Body measurements (last 4 for trend visibility)
-    recent_measures = BodyMeasurement.query.filter_by(
-        user_id=current_user.id
-    ).order_by(BodyMeasurement.log_date.desc()).limit(4).all()
-    measurements = [{"date": m.log_date.isoformat(), "waist": m.waist_inches} for m in recent_measures] if recent_measures else []
-
-    # Equipment
-    eq = UserEquipment.query.filter_by(user_id=current_user.id).first()
-    equipment = eq.available_equipment if eq else []
-
-    # Meal adherence today + today's meal plan (use local_today, not server UTC)
-    ml = MealLog.query.filter_by(user_id=current_user.id, log_date=local_today).first()
-    meals_today = None
-    if ml:
-        meals_today = {
-            "eaten": ml.eaten or [],
-            "fasting": ml.fasting,
-            "scheduled_time": ml.scheduled_time if hasattr(ml, 'scheduled_time') else None,
-            "actual_time": ml.actual_time if hasattr(ml, 'actual_time') else None,
-        }
-
-    # Weekly meal logs (so coach knows which days had meals tracked)
-    week_monday = local_today - timedelta(days=local_today.weekday())
-    week_meals = MealLog.query.filter(
-        MealLog.user_id == current_user.id,
-        MealLog.log_date >= week_monday,
-        MealLog.log_date <= local_today
-    ).all()
-    weekly_meals_summary = []
-    for ml_entry in week_meals:
-        eaten_count = len(ml_entry.eaten) if isinstance(ml_entry.eaten, list) else 0
-        weekly_meals_summary.append({
-            "date": ml_entry.log_date.isoformat(),
-            "day": day_names[ml_entry.log_date.weekday()] if ml_entry.log_date.weekday() < 7 else "?",
-            "meals_logged": eaten_count,
-        })
-
-    # Today's meal plan (what they're supposed to eat)
-    todays_meal_plan = None
-    if workout_today and workout_today.get("mealPlan"):
-        mp = workout_today["mealPlan"]
-        todays_meal_plan = {
-            "type": mp.get("label", ""),
-            "target_cal": mp.get("targetCal"),
-            "target_protein": mp.get("targetProtein"),
-            "meals": [{"time": m.get("time", ""), "name": m.get("name", ""),
-                       "foods": [f["item"] for f in m.get("foods", [])]}
-                      for m in mp.get("meals", [])],
-        }
-
-    # Fasting state — compute hours since last meal for coach context
-    fasting_state = None
-    try:
-        _fasting_protocol = goal.fasting_protocol if goal else "16_8"
-        from meal_generator import _FASTING_PROTOCOLS
-        _proto = _FASTING_PROTOCOLS.get(_fasting_protocol, _FASTING_PROTOCOLS["16_8"])
-        _eating_end = _proto["end"]  # e.g., "6:30pm"
-        # Parse end time
-        _end_parts = _eating_end.replace("am", "").replace("pm", "")
-        _end_h = int(_end_parts.split(":")[0])
-        _end_m = int(_end_parts.split(":")[1]) if ":" in _end_parts else 0
-        if "pm" in _eating_end and _end_h != 12:
-            _end_h += 12
-        # Look back: find the last day that had meals (not a fast day)
-        _last_eating_day = None
-        for _lookback in range(7):
-            _check_date = local_today - timedelta(days=_lookback)
-            _check_day_idx = _check_date.weekday()
-            _day_meal_type = _get_day_meal_type(current_user.id, week, _check_day_idx)
-            if _day_meal_type != 'fast_day':
-                if _lookback == 0:
-                    # Today is an eating day — not in an extended fast from a fast day
-                    break
-                _last_eating_day = _check_date
-                break
-        if _last_eating_day:
-            from datetime import datetime as _dt
-            _last_meal_time = _dt(_last_eating_day.year, _last_eating_day.month, _last_eating_day.day, _end_h, _end_m)
-            _now = _dt.now()
-            try:
-                from utils_time import user_local_now
-                _now = user_local_now(getattr(current_user, 'timezone', None) or 'UTC')
-            except Exception:
-                pass
-            _hours_fasted = (_now - _last_meal_time).total_seconds() / 3600
-            _eating_start = _proto["start"]  # e.g., "11:00am"
-            fasting_state = {
-                "hours_fasted": round(_hours_fasted, 1),
-                "last_meal_day": _last_eating_day.strftime("%A"),
-                "last_meal_time": _eating_end,
-                "eating_window_opens": _eating_start,
-                "is_expected": True,  # This IS the planned fast
-            }
-    except Exception:
-        pass
-
-    # Day completion status (this week) — use DATE-BASED query, not week number
-    # The week number in SetLog may not match _current_week() due to frontend/backend mismatch
-    week_monday = local_today - timedelta(days=local_today.weekday())
-    completed_days = []
-
-    # Check DayCompletion by both week number AND date range
-    day_completions = DayCompletion.query.filter_by(
-        user_id=current_user.id, week=week
-    ).all()
-    for dc in day_completions:
-        if dc.done and dc.day_idx not in completed_days:
-            completed_days.append(dc.day_idx)
-
-    # Check SetLog by date range AND by any week number (catches ALL mismatches).
-    # 3-STATE, name-aware: a single done set used to mark the whole day as
-    # completed here, so the morning-briefing coach saw a 1-set aborted session
-    # as a banked day ("partial must never read DONE"). A day is completed only
-    # when the canonical check passes for a slot the athlete logged this week:
-    # every prescribed exercise has its prescribed sets performed.
-    from coach_assembler import _resolve_workout_for_day as _resolve_day_for_status
-    from workout_status import workout_state_from_rows as _ws_state
-    _week_sets = SetLog.query.filter(
-        SetLog.user_id == current_user.id,
-        SetLog.logged_date >= week_monday,
-        SetLog.logged_date <= local_today,
-    ).all()
-    _slot_rows = {}
-    for s in _week_sets:
-        _slot_rows.setdefault((s.week, s.day_idx), []).append(s)
-    for (_w, _d), _rows in _slot_rows.items():
-        if _d in completed_days:
-            continue
-        _resolved = _resolve_day_for_status(_w, _d) or {}
-        if _ws_state(_resolved.get("exercises") or [], _rows) == "complete":
-            completed_days.append(_d)
-
-    # Enrich completed_days with day name and workout name
-    completed_days_enriched = []
-    for di in completed_days:
-        entry = {"day_idx": di, "day": day_names[di] if di < 7 else "?"}
-        if di < len(workouts):
-            entry["liftName"] = workouts[di].get("liftName", "")
-        completed_days_enriched.append(entry)
-
-    # Schedule notes
-    schedule_notes = constraints.schedule_notes if constraints else None
-
-    # Coach memory — persistent observations across conversations
-    memories = CoachMemory.query.filter_by(user_id=current_user.id).order_by(
-        CoachMemory.created_at.desc()
-    ).limit(20).all()
-    coach_memories = [{"type": m.memory_type, "content": m.content, "week": m.week} for m in memories]
-
-    # Compliance grade removed — tone is now fixed in coach.py
-
-    # Check if missed morning checkin today
-    missed_today = False
-    mc_today = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=local_today).first()
-    if mc_today and mc_today.notes and '[MISSED]' in (mc_today.notes or ''):
-        missed_today = True
-
-    # Latest session analysis
-    latest_analysis = SessionAnalysis.query.filter_by(
-        user_id=current_user.id
-    ).order_by(SessionAnalysis.log_date.desc()).first()
-    session_analysis = None
-    if latest_analysis:
-        session_analysis = {
-            "date": latest_analysis.log_date.isoformat() if latest_analysis.log_date else None,
-            "compliance": latest_analysis.overall_compliance,
-            "muscles": latest_analysis.muscle_groups_trained,
-            "deviations": latest_analysis.deviations,
-            "summary": latest_analysis.summary_text,
-        }
-
-    # Weekly summary (for coach weekly check-in)
-    weekly_summary = None
-    try:
-        from training_engine import generate_weekly_summary
-        weekly_summary = generate_weekly_summary(current_user.id, week)
-    except Exception:
-        pass
-
-    result = {
-        "user_id": current_user.id,
-        "checkins": checkins,
-        "chat_history": chat_history,
-        "garmin": garmin_data,
-        "readiness": readiness_data,
-        "bodyweight": bodyweight[-14:],
-        "workout_today": workout_today,
-        "week": week,
-        "phase": phase_info,
-        "supplements_today": {"taken": supps_taken},
-        "intake_report": intake_report,
-        "athlete_name": current_user.name or "Athlete",
-        "user_timezone": current_user.timezone if hasattr(current_user, 'timezone') else 'UTC',
-        "scheduled_activities": _get_scheduled_activities(),
-        "food_restrictions": food_restrictions,
-        "custom_allergies": custom_allergies,
-        "selected_foods": selected_foods_summary,
-        "fasting_protocol": fasting_protocol,
-        "fasting_state": fasting_state,
-        # NEW — full athlete profile
-        "goal": goal_data,
-        "exercise_history": exercise_history,
-        "today_sets": set_data,
-        "run_history": runs,
-        "physical_assessment": physical,
-        "body_measurements": measurements,
-        "equipment": equipment,
-        "meals_today": meals_today,
-        "weekly_meals_summary": weekly_meals_summary,
-        "meal_plan_today": todays_meal_plan,
-        "completed_days_this_week": completed_days_enriched,
-        "week_schedule": week_schedule,
-        "schedule_notes": schedule_notes,
-        "coach_memories": coach_memories,
-        "missed_checkin_today": missed_today,
-        "session_analysis": session_analysis,
-        "weekly_summary": weekly_summary,
-        "today_meal_type": _get_day_meal_type(current_user.id, week, today_idx),
-        # Skipped sets today
-        "skipped_sets_today": [{"exercise": s.exercise_name, "set": s.set_number}
-                               for s in today_sets if not s.done],
-    }
-
-    # Active overrides for this week (wrapped in try-except — tables may not exist yet)
-    try:
-        result["schedule_overrides"] = [{"day_idx": o.day_idx, "workout_time": o.workout_time, "skip_day": o.skip_day, "notes": o.notes}
-                                        for o in WeeklyScheduleOverride.query.filter_by(user_id=current_user.id, week=week).all()]
-    except Exception:
-        result["schedule_overrides"] = []
-    try:
-        result["meal_overrides"] = [{"day_idx": o.day_idx, "meal_type": o.meal_type, "reason": o.reason}
-                                    for o in MealPlanOverride.query.filter_by(user_id=current_user.id, week=week).all()]
-    except Exception:
-        result["meal_overrides"] = []
-    try:
-        result["run_overrides"] = [{"day_idx": o.day_idx, "duration": o.duration, "run_type": o.run_type, "reason": o.reason}
-                                   for o in RunOverride.query.filter_by(user_id=current_user.id, week=week).all()]
-    except Exception:
-        result["run_overrides"] = []
-    try:
-        result["active_swaps"] = [{"day_idx": o.day_idx, "exercise_idx": o.exercise_idx, "swapped_to": o.swapped_to}
-                                  for o in ExerciseSwap.query.filter_by(user_id=current_user.id, week=week).all()]
-    except Exception:
-        result["active_swaps"] = []
-
-    # Next week's prescriptions (for Monday planning)
-    try:
-        next_week = week + 1
-        if next_week <= 12:
-            next_rx = WeeklyPrescription.query.filter_by(
-                user_id=current_user.id, week=next_week
-            ).order_by(WeeklyPrescription.day_idx, WeeklyPrescription.exercise_order).all()
-            result["next_week_prescriptions"] = [
-                {
-                    "day_idx": rx.day_idx,
-                    "exercise": rx.exercise_name,
-                    "sets": rx.sets,
-                    "reps": rx.reps,
-                    "rest": rx.rest,
-                    "target_weight": getattr(rx, 'target_weight', None),
-                    "adjustment_reason": getattr(rx, 'adjustment_reason', None),
-                    "progression_indicator": getattr(rx, 'progression_indicator', None),
-                }
-                for rx in next_rx
-            ]
-        else:
-            result["next_week_prescriptions"] = []
-    except Exception:
-        result["next_week_prescriptions"] = []
-
-    # Pre-computed engine analysis per exercise — authoritative progression decisions
-    exercise_analysis = {}
-    try:
-        from training_engine import compute_next_targets
-        for ex_name in list(exercise_history.keys()):
-            try:
-                analysis = compute_next_targets(current_user.id, ex_name, week, today_idx)
-                exercise_analysis[ex_name] = {
-                    "target_weight": analysis.get("target_weight"),
-                    "target_reps": analysis.get("target_reps"),
-                    "target_sets": analysis.get("target_sets"),
-                    "adjustment_reason": analysis.get("adjustment_reason", ""),
-                    "progression_indicator": analysis.get("progression_indicator", "hold"),
-                    "coach_alert": analysis.get("coach_alert"),
-                }
-            except Exception:
-                pass
-    except Exception:
-        pass
-    result["exercise_analysis"] = exercise_analysis
-
-    return result
-
-
 def _get_scheduled_activities():
     """Get user's scheduled activities for coach context."""
     constraints = UserConstraints.query.filter_by(user_id=current_user.id).first()
@@ -10173,6 +9653,12 @@ def garmin_login():
     if not data or not data.get("email") or not data.get("password"):
         return jsonify({"error": "Email and password required"}), 400
 
+    # S153: Garmin blocks the OAuth exchange from Render's IP; a credential
+    # login here only burns a 429 and poisons the daemon cooldown. Only the
+    # laptop token upload path may authenticate in prod (admin key required).
+    if os.environ.get("RENDER") and not _header_key_ok(request.headers.get("X-Admin-Key"),
+                                                        os.environ.get("ADMIN_API_KEY") or ""):
+        return jsonify({"error": "Garmin login is disabled on the server — link from the laptop"}), 404
     success, error, needs_mfa = gc.login(data["email"], data["password"], user_id=current_user.id)
     if success:
         return jsonify({"connected": True})
@@ -12152,8 +11638,17 @@ def api_morning_briefing():
         workout_name = workout_today.get("liftName") or "Workout"
         today_line = f"Today is {workout_name}"
 
-    # Build checkin summary
-    checkin_summary = f"Morning check-in: Sleep {data.get('sleep_quality', 5)}/10, Stress {data.get('stress_level', 5)}/10, Soreness {data.get('soreness', 5)}/10, Mood {data.get('mood', 5)}/10, Motivation {data.get('motivation', 5)}/10, Anxiety {data.get('anxiety', 3)}/10."
+    # Build checkin summary — ONLY fields the athlete actually sent. This used
+    # to default every missing score to 5 (anxiety 3): fabricated self-report
+    # in the coach's trigger and in the saved ChatMessage.
+    _stated = []
+    for _k, _label in (("sleep_quality", "Sleep"), ("stress_level", "Stress"), ("soreness", "Soreness"),
+                       ("mood", "Mood"), ("motivation", "Motivation"), ("anxiety", "Anxiety")):
+        _v = data.get(_k)
+        if isinstance(_v, (int, float)) and not isinstance(_v, bool) and 1 <= _v <= 10:
+            _stated.append(f"{_label} {int(_v)}/10")
+    checkin_summary = ("Morning check-in: " + ", ".join(_stated) + ".") if _stated \
+        else "Morning check-in done — no numeric self-report given."
     if data.get('notes'):
         checkin_summary += f" Notes: {data['notes']}"
 
@@ -12166,8 +11661,15 @@ def api_morning_briefing():
         status_part = f"Status: {status} ({score}/100)."
     briefing_msg = f"[MORNING_BRIEFING] {status_part} {today_line} — Week {_current_week()}. {checkin_summary} Give me a 1-2 sentence morning briefing. If GREEN, get me out the door. If YELLOW, name the adjustment. If RED, tell me to stand down."
 
-    context = _build_coach_context()
-    response_text = get_coach_response(briefing_msg, context)
+    # S008: the briefing runs on the same ALL_SECTIONS assembler path as every
+    # other agent (the legacy _build_coach_context/get_coach_response pair
+    # bypassed it with a context that lacked today_status/cut_status/…).
+    from coach_assembler import build_filtered_context, assemble_prompt
+    from coach_with_tools import coach_chat as _coach_chat
+    _ctx = build_filtered_context("morning_briefing")
+    _system = assemble_prompt("morning_briefing", _ctx)
+    response_text = _coach_chat(current_user.id, _system, [{"role": "user", "content": briefing_msg}],
+                                agent_name="morning_briefing")
 
     # Save as chat messages
     user_chat = ChatMessage(role="user", content=checkin_summary, log_date=_user_today(), user_id=current_user.id)

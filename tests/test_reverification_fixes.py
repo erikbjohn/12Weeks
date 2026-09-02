@@ -143,3 +143,127 @@ def test_traceback_debug_endpoints_are_admin_only(app_ctx):
 def test_specialist_smoke_is_live_llm_marked():
     src = open("tests/coach_audit/test_specialist_audit.py").read()
     assert "@pytest.mark.live_llm" in src
+
+
+# ═════════════════════════ batch 2 ═════════════════════════
+
+# ── S052: the 16:8 filter keeps the meal the fasted-dose rail placed ─────────
+
+def test_16_8_filter_honours_rail_cutoff(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s052@test.com")
+    from models import TrainingGoal
+    import app as appmod
+    TrainingGoal.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(TrainingGoal(user_id=u.id, goal_type="cut", fasting_protocol="16:8")); db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user
+        login_user(u)
+        days = [{"mealPlan": {"note": "Retatrutide at 10pm requires 2h fasted — last meal ends by 8pm",
+                              "meals": [{"time": "7:30pm", "name": "Dinner", "foods": [{"item": "Chicken breast"}]}]}},
+                {"mealPlan": {"meals": [{"time": "7:30pm", "name": "Dinner", "foods": [{"item": "Chicken breast"}]}]}}]
+        monkeypatch.setattr(appmod, "_FOOD_NAME_TO_ID", {}, raising=False)
+        out = appmod._filter_meals_by_food_selections(days, set())
+    rail_meals = out[0]["mealPlan"]["meals"]
+    assert rail_meals and rail_meals[0]["foods"][0]["item"] == "Chicken breast"   # rail day: 7:30pm meal kept
+    assert out[1]["mealPlan"]["meals"] == []                                        # plain 16:8 day: 7:30pm stripped
+
+
+# ── S153: no credential login from the server ───────────────────────────────
+
+def test_garmin_login_disabled_on_render(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s153@test.com")
+    monkeypatch.setenv("RENDER", "1")
+    r = client.post("/api/garmin/login", json={"email": "x@y.z", "password": "p"})
+    assert r.status_code == 404
+
+
+# ── S083: flags reach the coach's memories ──────────────────────────────────
+
+def test_thumbs_down_flag_is_in_coach_memories(app_ctx):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s083@test.com")
+    r = client.post("/api/coach/flag", json={"coach_text": "You're done lifting for today.",
+                                             "category": "wrong_state", "note": "I had logged one set"})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    with app_.test_request_context():
+        from flask_login import login_user
+        login_user(u)
+        from coach_assembler import _build_coach_memories
+        mems = _build_coach_memories()["coach_memories"]
+    flagged = [m for m in mems if m["type"] == "flagged"]
+    assert flagged and "wrong_state" in flagged[0]["content"] and "I had logged one set" in flagged[0]["content"]
+
+
+# ── S023: one week formula ──────────────────────────────────────────────────
+
+def test_no_inline_week_formula_outside_program_calendar():
+    import re, glob
+    pat = re.compile(r"//\s*7\s*\)\s*\+\s*1|// 7 \+ 1")
+    for f in glob.glob("*.py"):
+        if f in ("program_calendar.py", "goal_engine.py"):   # goal_engine: curve-day → rate-week, not the program week
+            continue
+        for i, line in enumerate(open(f), 1):
+            if "rate-week" in line:      # block-3 curve day → rate bucket, explicitly not the program week
+                continue
+            assert not pat.search(line), (f, i, line.strip())
+
+
+# ── S100: one e1RM formula ──────────────────────────────────────────────────
+
+def test_no_inline_epley_outside_lift_history():
+    import glob
+    for f in glob.glob("*.py"):
+        if f == "lift_history.py":
+            continue
+        assert "/ 30.0" not in open(f).read() and "/30.0" not in open(f).read(), f
+
+
+# ── S121: the run planner block cites the real columns ──────────────────────
+
+def test_run_history_block_uses_activity_columns(app_ctx):
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s121@test.com")
+    from models import RunLog
+    from datetime import date
+    from coach_planning_runs import _build_run_history_block
+    RunLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(RunLog(user_id=u.id, week=1, day_idx=0, log_date=date(2026, 8, 30), distance_miles=4.5,
+                          duration_min=50, avg_hr=132, elevation_ft=100, source="garmin",
+                          activity_type="running", activity_name="Z2 50 min"))
+    db.session.commit()
+    txt = _build_run_history_block(u.id, 1, today=date(2026, 9, 1))
+    assert "type=running" in txt and "watch_workout=Z2 50 min" in txt
+
+
+# ── S008: the briefing runs on the assembler path; no legacy context ────────
+
+def test_legacy_briefing_context_is_gone():
+    src = open("app.py").read()
+    assert "def _build_coach_context" not in src
+    assert "get_coach_response(" not in src
+    assert "def get_coach_response" not in open("coach.py").read()
+
+
+def test_briefing_never_defaults_checkin_scores(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s008@test.com")
+    import coach_assembler, coach_with_tools
+    monkeypatch.setattr(coach_assembler, "build_filtered_context", lambda name: {})
+    monkeypatch.setattr(coach_assembler, "assemble_prompt", lambda name, ctx: "SYS")
+    seen = []
+    monkeypatch.setattr(coach_with_tools, "coach_chat",
+                        lambda uid, system, messages, **kw: (seen.append(messages[0]["content"]) or "ok"))
+    r = client.post("/api/morning-briefing", json={"notes": "tired"})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert "5/10" not in seen[0] and "3/10" not in seen[0]
+    assert "no numeric self-report" in seen[0]
+
+
+# ── readiness chip: the word next to the score is the RISK level, say so ────
+
+def test_readiness_chip_labels_risk_not_readiness():
+    src = open("static/app.js").read()
+    assert "overtraining risk" in src
+    assert "Readiness ${escapeHtml(String(readinessData.risk_level" not in src

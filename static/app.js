@@ -4846,6 +4846,10 @@ async function fetchIntakeWithPoll(url, options) {
         await new Promise(r => setTimeout(r, 500));
         try {
             const pollRes = await fetch('/api/psych-intake/result/' + jobId);
+            if (pollRes.status === 404) {
+                // S156: the job vanished (worker restart). Say so — never drop the reply silently.
+                return { error: 'The coach lost that reply (server restarted). Send your message again.' };
+            }
             const pollData = await pollRes.json();
             if (pollData.status === 'pending') continue;
             return pollData; // done or error
@@ -4995,6 +4999,11 @@ async function sendPsychMessage() {
     hidePsychTyping();
     if (data.locked) {
       showPsychLockedState(data.locked_until);
+      return;
+    }
+    if (data.error && !data.response) {
+      _psychMessages.push({ role: 'coach', content: '⚠ ' + data.error });
+      renderPsychMessages();
       return;
     }
     if (data.response) {
@@ -5260,9 +5269,9 @@ async function showGroceryList() {
       for (const item of cat.items) {
         const safeId = item.item.replace(/[^a-zA-Z0-9]/g, '_');
         html += `<div class="shop-item" onclick="this.classList.toggle('shop-done')">
-          <button class="shop-check" aria-label="Check off ${item.item}"></button>
-          <span class="shop-item-name">${item.item}</span>
-          <span class="shop-item-qty">${item.total}</span>
+          <button class="shop-check" aria-label="Check off ${escapeHtml(item.item)}"></button>
+          <span class="shop-item-name">${escapeHtml(item.item)}</span>
+          <span class="shop-item-qty">${escapeHtml(String(item.total))}</span>
         </div>`;
       }
       html += `</div>`;
@@ -7037,9 +7046,9 @@ async function showSundayFlow() {
       if (shopEl && shopData.categories && shopData.categories.length > 0) {
         let shopHtml = '';
         for (const cat of shopData.categories) {
-          shopHtml += `<div class="shop-category"><div class="shop-cat-label">${cat.category}</div>`;
+          shopHtml += `<div class="shop-category"><div class="shop-cat-label">${escapeHtml(cat.category)}</div>`;
           for (const item of cat.items) {
-            shopHtml += `<div class="shop-item"><span class="shop-item-name">${item.item}</span><span class="shop-item-qty">${item.total}</span></div>`;
+            shopHtml += `<div class="shop-item"><span class="shop-item-name">${escapeHtml(item.item)}</span><span class="shop-item-qty">${escapeHtml(String(item.total))}</span></div>`;
           }
           shopHtml += `</div>`;
         }
@@ -10354,8 +10363,8 @@ function renderReadiness() {
   // Data-only chips (S117): the score and the flags. The decision is the
   // coach's, spoken in chat — never a static line in the coach's voice here.
   el.innerHTML = `<div class="readiness-inner">
-    <span class="readiness-score">${readinessData.score}/100</span>
-    Readiness ${escapeHtml(String(readinessData.risk_level || ''))}
+    <span class="readiness-score">Readiness ${readinessData.score}/100</span>
+    ${escapeHtml(String(readinessData.risk_level || '').toUpperCase())} overtraining risk
     ${flagsHtml}
   </div>`;
 }
@@ -10583,7 +10592,7 @@ let _lastCoachMsgTime = 0;
 
 function buildCoachContent(d) {
     var html = '';
-    if (d.notes) html += '<div class="notes-box"><strong>Coach note:</strong> ' + d.notes + '</div>';
+    if (d.notes) html += '<div class="notes-box"><strong>Coach note:</strong> ' + escapeHtml(d.notes) + '</div>';
     // Show last coach message only (compact), not full history
     var lastCoachMsg = '';
     var lastCoachTime = 0;
@@ -11553,7 +11562,7 @@ function buildFoodContent(d) {
     } else
     if (mealOverride && mealOverride.note) {
         return '<div style="color:var(--coach);font-size:12px;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:8px">' +
-            '&#127860; Meal adjusted: ' + mealOverride.note +
+            '&#127860; Meal adjusted: ' + escapeHtml(mealOverride.note) +
         '</div>' + renderMealInner(d);
     }
     return renderMealInner(d);
