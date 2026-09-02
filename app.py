@@ -369,6 +369,7 @@ with app.app_context():
         ("run_log", "max_hr", "INTEGER"),
         ("run_log", "activity_type", "VARCHAR(40)"),
         ("run_log", "activity_name", "TEXT"),
+        ("weekly_report", "verdict", "VARCHAR(12)"),
         ("garmin_activity", "max_hr", "INTEGER"),
         ("weekly_day_schedule", "deload", "BOOLEAN DEFAULT FALSE"),
         ("weekly_day_schedule", "deload_reason", "TEXT"),
@@ -11975,6 +11976,7 @@ def api_weekly_report_generate():
     report.key_lifts_summary = metrics["key_lifts"]
     report.checkin_avg = metrics["checkin_avg"]
     report.adherence_pct = metrics["adherence_pct"]
+    report.verdict = metrics.get("verdict")
     db.session.commit()
 
     # Generate narrative in background
@@ -12054,6 +12056,19 @@ def api_weekly_report_result(job_id):
     # Ownership + kind check — jobs are private to the user who started them.
     if (not job or job.get("user_id") != current_user.id
             or job.get("kind") != "report"):
+        # S156: the in-process job store dies with the worker (a deploy
+        # mid-job). The narrative is PERSISTED — fall back to it, like
+        # generate-status does for the program.
+        try:
+            wk = _current_week()
+            rep = (WeeklyReport.query.filter_by(user_id=current_user.id, week=wk)
+                   .order_by(WeeklyReport.id.desc()).first())
+            if rep and rep.narrative:
+                return jsonify({"status": "done", "narrative": rep.narrative, "recovered": True})
+            if rep and rep.report_date and (_user_today() - rep.report_date).days <= 0:
+                return jsonify({"status": "pending", "recovered": True})
+        except Exception:
+            pass
         return jsonify({"error": "Job not found"}), 404
     if job["status"] == "pending":
         return jsonify({"status": "pending"})

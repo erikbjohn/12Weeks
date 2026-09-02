@@ -270,6 +270,9 @@ def compute_weekly_metrics(week_num, user_id=None):
         "weight_change": weight_change,
         "weight_trend": weight_trend,
         "weight_vs_projected": weight_vs_projected,
+        "verdict": week_verdict(weight_vs_projected,
+                                (lift_trend_result or {}).get("lift_decline_suspected") if isinstance(lift_trend_result, dict) else None,
+                                adherence),
         "weight_projection_target": weight_projection_target,
         "key_lifts": lifts_summary,
         "checkin_avg": checkin_avg,
@@ -448,6 +451,8 @@ def _build_narrative_data_lines(metrics):
 
     if metrics.get("adherence_pct") is not None:
         data_lines.append(f"Adherence: {metrics['adherence_pct']}%")
+    if metrics.get("verdict"):
+        data_lines.append(f"VERDICT (codified — use THIS as the grade, do not invent one): {metrics['verdict']}")
 
     # Wellness (RHR/HRV/sleep) — same shared formatter the coach prompt
     # uses (coach_assembler.format_wellness_line): dark_line verbatim when
@@ -491,3 +496,24 @@ def generate_report_narrative(metrics):
     except Exception as e:
         log.error("Report narrative error: %s", e)
         return None
+
+
+def week_verdict(weight_vs_projected, lift_decline_suspected, adherence_pct, weigh_in_days=None):
+    """S137: ONE codified weekly verdict, persisted on WeeklyReport and shown
+    to the review agent instead of letting it invent a GRADE word.
+      ON_TRACK   — scale on/ahead of curve AND lifts holding
+      SCALE_ONLY — scale fine but lifts sliding: the spec's 'bad week'
+      LIFTS_ONLY — lifts holding but scale behind
+      OFF        — behind on both (or adherence < 50%)
+    """
+    scale_ok = weight_vs_projected in ("on_track", "ahead")
+    lifts_ok = not bool(lift_decline_suspected)
+    if adherence_pct is not None and adherence_pct < 50:
+        return "OFF"
+    if scale_ok and lifts_ok:
+        return "ON_TRACK"
+    if scale_ok and not lifts_ok:
+        return "SCALE_ONLY"
+    if lifts_ok and not scale_ok:
+        return "LIFTS_ONLY"
+    return "OFF"

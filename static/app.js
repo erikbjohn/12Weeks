@@ -1079,6 +1079,24 @@ function sseReader(res) {
   };
 }
 
+// S146: <div onclick> controls become keyboard-operable — role=button,
+// tabindex, and Enter/Space dispatch a click. One delegated pass after render.
+function a11yUpgradeClickables(root) {
+  var scope = root || document;
+  scope.querySelectorAll('div[onclick], span[onclick]').forEach(function(el) {
+    if (el.getAttribute('role') === 'button') return;
+    el.setAttribute('role', 'button');
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+  });
+}
+document.addEventListener('keydown', function(ev) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  var t = ev.target;
+  if (t && t.getAttribute && t.getAttribute('role') === 'button' && t.tagName !== 'BUTTON') {
+    ev.preventDefault(); t.click();
+  }
+});
+
 function apiPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -1210,6 +1228,9 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 function todayStr() {
+  // S145: prefer the server's user-tz date once state has loaded; the
+  // device clock is only the pre-state fallback.
+  if (typeof _stateCache !== 'undefined' && _stateCache && _stateCache.user_date) return _stateCache.user_date;
   const d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -5988,7 +6009,7 @@ function renderTravelBanner() {
 // ─── MORNING PSYCHOLOGICAL CHECK-IN ────────────────────────────────────────
 async function checkMorningCheckin() {
   if (_morningCheckinDone) return;
-  var dow = new Date().getDay();
+  var dow = appTodayJsDay();
   // Sunday uses a separate key — measurements are mandatory even if check-in was dismissed
   var dismissKey = dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
   if (localStorage.getItem(dismissKey)) {
@@ -6099,7 +6120,7 @@ async function showMorningCheckinOverlay() {
   const el = document.getElementById('morning-checkin-overlay');
   if (!el) return;
   _mcExchangeCount = 0;
-  var dayOfWeek = new Date().getDay();
+  var dayOfWeek = appTodayJsDay();
   var _planningDay = (dayOfWeek === 1) || (dayOfWeek === 0 && new Date().getHours() >= 12);
   var buttonText = _planningDay ? "Let's Start This Week" : "Start Today's Workout";
 
@@ -6407,7 +6428,7 @@ async function _startSundayReviewStream(trigger) {
 }
 
 async function _startMcChat() {
-  var dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
+  var dayOfWeek = appTodayJsDay(); // 0=Sun, 1=Mon
   var trigger;
 
   // Weekly planning is NEVER auto-triggered from morning check-in.
@@ -6710,7 +6731,7 @@ async function finishMorningCheckin() {
   }
 
   // Mark as done in localStorage so it survives reload even if DB save failed
-  var _dow = new Date().getDay();
+  var _dow = appTodayJsDay();
   var _dismissKey = _dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
   localStorage.setItem(_dismissKey, '1');
   closeMorningCheckin();
@@ -6883,7 +6904,7 @@ async function sendMorningCoachReply() {
 function closeMorningCheckin() {
   _morningCheckinDone = true;
   // Persist dismiss key BEFORE re-rendering so lock screen can't reappear
-  var _dow = new Date().getDay();
+  var _dow = appTodayJsDay();
   var _dk = _dow === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
   localStorage.setItem(_dk, '1');
   document.getElementById('morning-checkin-overlay').innerHTML = '';
@@ -7120,7 +7141,7 @@ function updateChatFabPulse() {
 function _getChatOpener() {
   try {
     const weekData = workoutData[String(currentWeek)];
-    const todayJsDay = new Date().getDay();
+    const todayJsDay = appTodayJsDay();
     const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
     const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
     if (dayData) {
@@ -7784,9 +7805,19 @@ function getActualProgramWeek() {
 
 // The user's "today" weekday (Mon=0..Sun=6) from the SERVER's user-timezone
 // date, not device-local time — so day-nav/streak don't drift at midnight.
+// S145: ONE "today" for the whole card — the server's user-tz date when the
+// state carries it, never the device clock (a phone left on a hotel time
+// zone, or UTC rollover at 4-5 PM PT, split the check-in gate, the protocol
+// viewed-date and 70 todayStr() call sites across two different days).
+function appTodayISO() {
+  return (_stateCache && _stateCache.user_date) || todayStr();
+}
+function appTodayJsDay() {  // 0=Sun … 6=Sat, same convention as Date.getDay()
+  return new Date(appTodayISO() + 'T00:00:00').getDay();
+}
+
 function _userTodayMonIdx() {
-  var ud = _stateCache && _stateCache.user_date;
-  var jsDay = ud ? new Date(ud + 'T00:00:00').getDay() : new Date().getDay();
+  var jsDay = appTodayJsDay();
   return jsDay === 0 ? 6 : jsDay - 1;
 }
 
@@ -7976,7 +8007,7 @@ function renderWeighInBar() {
 
   const bwData = Array.isArray(_bodyweightCache) ? _bodyweightCache : [];
   const today = todayStr();
-  const isSunday = new Date().getDay() === 0;
+  const isSunday = appTodayJsDay() === 0;
 
   if (!isSunday) {
     // Only weigh in on Sundays
@@ -7984,7 +8015,7 @@ function renderWeighInBar() {
     el.innerHTML = `<div class="weighin-row">
       <div class="weighin-label">Weight</div>
       <div class="weighin-controls"><span class="weighin-today-val">${lastEntry ? lastEntry.weight + ' lb' : '--'}</span></div>
-      <div class="weighin-stats"><span style="font-size:12px;color:var(--muted)">Next weigh-in: ${(7 - new Date().getDay()) % 7 || 7} day${(7 - new Date().getDay()) % 7 === 1 ? '' : 's'}</span></div>
+      <div class="weighin-stats"><span style="font-size:12px;color:var(--muted)">Next weigh-in: ${(7 - appTodayJsDay()) % 7 || 7} day${(7 - appTodayJsDay()) % 7 === 1 ? '' : 's'}</span></div>
     </div>`;
     return;
   }
@@ -8461,7 +8492,7 @@ function renderCheckinInner(dayData, dayIdx) {
   // Sunday-only — gate by ACTUAL today (not the day the user is viewing).
   // JS getDay(): Sun=0. The entry form should only appear on real Sundays;
   // history/deltas live in renderMeasurementsSection (always visible).
-  if (new Date().getDay() !== 0) return '';
+  if (appTodayJsDay() !== 0) return '';
   // Also require that the user is viewing Sunday in the grid (Mon=0, Sun=6)
   if (dayIdx !== 6) return '';
   // Check if measurements already saved today (from Sunday morning flow)
@@ -10049,11 +10080,12 @@ function renderAll() {
 
   // Auto-select today if no day is currently selected
   if (currentDay === null) {
-    const todayIdx = new Date().getDay();
+    const todayIdx = appTodayJsDay();
     // JS getDay: 0=Sun, convert to Mon=0 format
     const mappedIdx = todayIdx === 0 ? 6 : todayIdx - 1;
     setDay(mappedIdx);
   }
+  try { a11yUpgradeClickables(); } catch (e) {}
 }
 
 // renderCoachTop — replaced by popup system
@@ -10092,7 +10124,7 @@ async function triggerMorningPopup() {
     if (todayCoachMsgs.length > 0) return; // Coach already spoke today
 
     const weekData = workoutData[String(currentWeek)];
-    const todayJsDay = new Date().getDay();
+    const todayJsDay = appTodayJsDay();
     const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
     const dayData = weekData && weekData.days ? weekData.days[todayMon] : null;
     const workoutName = dayData ? (dayData.liftName || 'not planned yet') : 'Rest';
@@ -10133,7 +10165,7 @@ async function triggerEndOfDayPopup() {
     if (hasPopupFired('eod')) return;
 
     // Check if workout was done today
-    const todayJsDay = new Date().getDay();
+    const todayJsDay = appTodayJsDay();
     const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
     const dayKey = `${currentWeek}_${todayMon}`;
     const dayDone = _completionsCache && _completionsCache.days && _completionsCache.days[dayKey];
@@ -10297,7 +10329,7 @@ function renderTodayNav() {
   if (!weekData || !weekData.days) return;
   const days = weekData.days;
 
-  const todayJsDay = new Date().getDay(); // 0=Sun
+  const todayJsDay = appTodayJsDay(); // 0=Sun
   const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1; // convert to Mon=0
 
   const dayBtns = days.map((d, i) => {
@@ -10343,7 +10375,7 @@ function renderTodayHero() {
   const d = weekData.days[currentDay];
   if (!d) { el.innerHTML = ''; return; }
 
-  const todayJsDay = new Date().getDay();
+  const todayJsDay = appTodayJsDay();
   const todayMon = todayJsDay === 0 ? 6 : todayJsDay - 1;
   const isToday = currentDay === todayMon;
   const dayLabel = isToday ? 'Today' : d.day;
@@ -10532,7 +10564,7 @@ function buildCoachContent(d) {
     // Monday-through-the-week put a "Plan Week N+1" banner at the top of a
     // freshly planned week (Erik, 2026-08-10). A week that somehow starts
     // unplanned still gets the day card's own "Plan this week" button.
-    var _cDow = new Date().getDay(); // 0=Sun
+    var _cDow = appTodayJsDay(); // 0=Sun
     var _isSunOrMon = _cDow === 0;
     // Key off the ACTUAL program week (from start_date), never the week being
     // browsed — browsing week 11 on Sunday must not offer "Plan Week 12".
@@ -11254,7 +11286,7 @@ async function sendInlineCoachMsg() {
 async function _refreshCoachAccordionMsg() {
     var el = document.getElementById('coach-accordion-refresh');
     if (!el) return;
-    var _todayMonIdx = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+    var _todayMonIdx = appTodayJsDay() === 0 ? 6 : appTodayJsDay() - 1;
     var _todayDayData = workoutData && workoutData[String(currentWeek)] && workoutData[String(currentWeek)].days
         ? workoutData[String(currentWeek)].days[_todayMonIdx] : null;
     var _isFastDay = _todayDayData && _todayDayData.mealType && _todayDayData.mealType.toLowerCase().includes('fast');
@@ -12316,7 +12348,7 @@ async function renderDetail() {
   try {
 
   // Morning check-in gate — lock until done
-  const todayJsDay = new Date().getDay();
+  const todayJsDay = appTodayJsDay();
   const todayMonIdx = todayJsDay === 0 ? 6 : todayJsDay - 1;
   // Sync from localStorage — fastest check (same device)
   var _checkinDismissKey = todayJsDay === 0 ? 'sunday_measurements_' + todayStr() : 'checkin_done_' + todayStr();
@@ -12340,6 +12372,7 @@ async function renderDetail() {
           <button class="btn btn-primary" onclick="startMorningCheckin()">Talk to Erik</button>
       </div>`;
       panel.classList.add('visible');
+  try { a11yUpgradeClickables(panel); } catch (e) {}
       return;
   }
 
@@ -12442,7 +12475,7 @@ async function renderDetail() {
   try {
     const _wkDelta = (_protoActualWeek == null) ? 0 : (currentWeek - _protoActualWeek);
     const _dayDelta = currentDay - _protoTodayIdx;
-    const _vd = new Date();
+    const _vd = new Date(appTodayISO() + 'T00:00:00');  // S145
     _vd.setDate(_vd.getDate() + _wkDelta * 7 + _dayDelta);
     const _iso = _vd.getFullYear() + '-' + String(_vd.getMonth() + 1).padStart(2, '0') + '-' + String(_vd.getDate()).padStart(2, '0');
     // S051: cached per date — renderDetail used to await this on EVERY

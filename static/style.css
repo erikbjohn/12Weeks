@@ -746,7 +746,7 @@ header .subtitle {
   font-size: 15px;
   font-family: 'Inter', sans-serif;
   margin-bottom: 10px;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .modal input:focus { border-color: var(--accent); }
@@ -1069,7 +1069,7 @@ footer {
   border-radius: 8px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   transition: border-color .15s;
 }
 
@@ -1219,7 +1219,7 @@ footer {
   font-size: 16px;
   font-family: 'DM Mono', monospace;
   text-align: center;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .baseline-card .baseline-inputs input:focus {
@@ -1306,7 +1306,7 @@ footer {
   font-size: 14px;
   font-family: 'DM Mono', monospace;
   text-align: center;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   -moz-appearance: textfield;
 }
 
@@ -1345,7 +1345,7 @@ footer {
   font-size: 14px;
   font-family: 'DM Mono', monospace;
   text-align: center;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   -moz-appearance: textfield;
 }
 .reps-input::-webkit-outer-spin-button,
@@ -1874,7 +1874,7 @@ footer {
   font-size: 13px;
   font-family: 'DM Mono', monospace;
   text-align: center;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   -moz-appearance: textfield;
 }
 
@@ -2112,7 +2112,7 @@ footer {
   height: 6px;
   background: var(--border2);
   border-radius: 3px;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .checkin-slider::-webkit-slider-thumb {
@@ -2152,7 +2152,7 @@ footer {
   font-size: 14px;
   font-family: 'DM Mono', monospace;
   text-align: center;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .checkin-waist-input:focus { border-color: var(--accent); }
@@ -2166,7 +2166,7 @@ footer {
   border-radius: 6px;
   font-size: 14px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   resize: vertical;
   min-height: 40px;
 }
@@ -2758,7 +2758,7 @@ footer {
   height: 6px;
   background: var(--border);
   border-radius: 3px;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 .sp-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -3114,7 +3114,7 @@ footer {
   height: 6px;
   background: var(--border2);
   border-radius: 3px;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   accent-color: var(--accent);
 }
 
@@ -3158,7 +3158,7 @@ footer {
   border-radius: 8px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   resize: vertical;
   min-height: 60px;
   margin-top: 4px;
@@ -3197,7 +3197,7 @@ footer {
   border-radius: 8px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .mc-followup-input:focus {
@@ -3309,7 +3309,7 @@ footer {
   border-radius: 8px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
 }
 
 .mc-coach-input-bar input:focus { border-color: var(--accent); }
@@ -3541,7 +3541,7 @@ footer {
   border-radius: 24px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   transition: border-color .15s;
 }
 
@@ -3654,7 +3654,7 @@ footer {
 }
 
 .measurement-form input[type="number"]:focus {
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   border-color: var(--accent);
 }
 
@@ -3928,7 +3928,7 @@ footer {
   border-radius: 8px;
   font-size: 16px;
   font-family: 'DM Mono', monospace;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   -moz-appearance: textfield;
 }
 
@@ -3957,7 +3957,7 @@ footer {
   border-radius: 8px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   resize: vertical;
   line-height: 1.5;
 }
@@ -4131,7 +4131,7 @@ footer {
   border-radius: 24px;
   font-size: 15px;
   font-family: 'Inter', sans-serif;
-  outline: none;
+  /* outline handled by :focus-visible (S146) */
   transition: border-color .15s;
 }
 
@@ -4806,3 +4806,9 @@ footer {
 
 /* S029: a coach change that failed to persist — never let it read as a normal reply */
 .chat-bubble.chat-flag { border: 1px solid #e0a020; background: #2a2210; color: #f2c94c; }
+
+/* S146: keyboard/assistive focus is visible everywhere — the per-class
+   outline:none rules substituted a 1px border colour that a switch/keyboard
+   user cannot see. Mouse/touch focus stays quiet via :focus-visible. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button, [role="button"] { touch-action: manipulation; }

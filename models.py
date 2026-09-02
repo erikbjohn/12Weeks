@@ -589,6 +589,7 @@ class WeeklyReport(db.Model):
     key_lifts_summary = db.Column(db.JSON, nullable=True)
     checkin_avg = db.Column(db.JSON, nullable=True)
     adherence_pct = db.Column(db.Float, nullable=True)
+    verdict = db.Column(db.String(12), nullable=True)  # S137: ON_TRACK|SCALE_ONLY|LIFTS_ONLY|OFF
     narrative = db.Column(db.Text, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
