@@ -1151,3 +1151,32 @@ def test_stress_overall_uses_avg_stress_level():
             return {"maxStressLevel": 93, "avgStressLevel": 34, "restStressDuration": 5640, "highStressDuration": 660}
     gc = _client_with(_Api())
     assert gc._get_stress("2026-09-02")["overall"] == 34
+
+
+def test_recent_row_missing_battery_or_readiness_is_refetched(app_ctx, monkeypatch):
+    """A row with sleep/HRV but NULL body_battery/readiness (parser-bug rows) is re-synced."""
+    app_, db = app_ctx
+    import garmin_sync
+    monkeypatch.setattr(garmin_sync, "WELLNESS_BACKFILL_DAYS", 1)   # isolate from the never-stored-first burst cap
+    from models import GarminWellness, User
+    from datetime import date, timedelta
+    from garmin_sync import sync_wellness
+    u = User.query.filter_by(email="gw-refetch@test.com").first() or User(email="gw-refetch@test.com")
+    db.session.add(u); db.session.commit()
+    GarminWellness.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    today = date(2026, 9, 2)
+    db.session.add(GarminWellness(user_id=u.id, date=today - timedelta(days=1), sleep_score=67, hrv_last_night=30,
+                                  resting_hr=47, body_battery=None, training_readiness=None))
+    db.session.commit()
+    asked = []
+    class _GC:
+        connected = True
+        def get_wellness_for_day(self, d):
+            asked.append(d)
+            return {"sleep": {"score": 66, "durationSeconds": 22740}, "hrv": {"lastNight": 38, "weeklyAvg": 43, "status": "LOW"},
+                    "bodyBattery": {"current": 27, "charged": 23, "drained": 15}, "trainingReadiness": {"score": 28, "level": "LOW"},
+                    "trainingStatus": {}, "stress": {"overall": 34}, "restingHr": 47}
+    sync_wellness(_GC(), u.id, today=today)
+    assert (today - timedelta(days=1)).isoformat() in asked
+    row = GarminWellness.query.filter_by(user_id=u.id, date=today - timedelta(days=1)).first()
+    assert row.body_battery == 27 and row.training_readiness == 28 and row.stress_overall == 34

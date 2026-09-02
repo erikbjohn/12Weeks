@@ -636,8 +636,12 @@ def sync_wellness(gc, user_id, today=None):
         GarminWellness.date >= today - timedelta(days=WELLNESS_BACKFILL_DAYS),
     ).all()
     stored = {r.date for r in rows}
+    # A recent row missing body battery or readiness is ALSO refresh-eligible:
+    # the 2026-09-02 parser bugs stored NULLs for those two columns on every
+    # otherwise-complete row, and "row exists" used to mean "never look again".
     retry_eligible = {r.date for r in rows
-                      if _is_all_null(r) and r.date >= retry_cutoff}
+                      if r.date >= retry_cutoff
+                      and (_is_all_null(r) or r.body_battery is None or r.training_readiness is None)}
     window = [today - timedelta(days=i) for i in range(1, WELLNESS_BACKFILL_DAYS + 1)]
     # Never-stored days come BEFORE retry-eligible refreshes: under the burst
     # cap, retriable recent days would otherwise crowd out the backfill and
