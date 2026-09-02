@@ -1201,10 +1201,14 @@ async function replayOutbox() {
                 continue;
             }
             try {
+                let _body = item.body;
+                try {   // tell the server WHEN this was queued so it never overwrites a newer edit
+                    const _o = JSON.parse(item.body); if (_o && typeof _o === 'object' && item.timestamp) { _o.queued_at = item.timestamp; _body = JSON.stringify(_o); }
+                } catch (e) {}
                 const res = await fetch(item.url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: item.body,
+                    body: _body,
                     credentials: 'same-origin',
                 });
                 if (res.ok) {

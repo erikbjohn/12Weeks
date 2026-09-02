@@ -410,6 +410,7 @@ with app.app_context():
         ("morning_checkin", "completed_at_time", "VARCHAR(30)"),
         ("morning_checkin", "missed", "BOOLEAN"),
         ("set_log", "target_weight", "FLOAT"),
+        ("set_log", "updated_at", "TIMESTAMP"),
         ("set_log", "target_reps", "INTEGER"),
         ("set_log", "target_rpe", "INTEGER"),
         ("set_log", "user_modified", "BOOLEAN"),
@@ -4521,6 +4522,19 @@ def api_set_log():
     ).first()
 
     if existing:
+        # Outbox replay guard: a save queued on the phone at `queued_at` must
+        # not overwrite a row the athlete edited AFTER that moment (2026-09-02:
+        # a face-pull set failed at the gym, was re-entered at home, and the
+        # queued copy could have replayed over it within 48 h).
+        _qa = data.get("queued_at")
+        if _qa and getattr(existing, "updated_at", None):
+            try:
+                _qdt = datetime.fromtimestamp(float(_qa) / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+                if existing.updated_at > _qdt:
+                    return jsonify({"ok": True, "id": existing.id, "skipped": "newer edit exists"})
+            except (TypeError, ValueError, OverflowError):
+                pass
+        existing.updated_at = datetime.utcnow()
         prev_done = bool(existing.done)
         existing.weight = weight
         existing.reps = reps
@@ -4535,7 +4549,7 @@ def api_set_log():
         if existing.logged_date is None or newly_completed:
             existing.logged_date = _user_today()
     else:
-        existing = SetLog(
+        existing = SetLog(updated_at=datetime.utcnow(), 
             user_id=current_user.id, exercise_name=exercise,
             week=week, day_idx=day_idx, set_number=set_number,
             weight=weight, reps=reps,

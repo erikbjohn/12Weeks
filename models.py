@@ -151,6 +151,10 @@ class SetLog(db.Model):
     """Per-set weight/reps tracking — one row per set per exercise per day."""
     __tablename__ = "set_log"
     id = db.Column(db.Integer, primary_key=True)
+    # 2026-09-02: stamped on every save so a replayed OUTBOX copy (queued at
+    # the gym, replayed later) can never overwrite a set the athlete re-entered
+    # after it was queued.
+    updated_at = db.Column(db.DateTime, nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     exercise_name = db.Column(db.String(100), nullable=False, index=True)
     week = db.Column(db.Integer, nullable=False)

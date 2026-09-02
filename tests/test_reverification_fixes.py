@@ -951,3 +951,25 @@ def test_coach_day_resolver_recomputes_swapped_target_like_the_card(app_ctx):
     ex = day["exercises"][0]
     assert ex["name"] == "Barbell OHP" and ex.get("swapped_from") == "DB Overhead Press"
     assert ex.get("target_weight") is not None and ex["target_weight"] >= 65, ex
+
+
+def test_outbox_replay_never_overwrites_a_newer_edit(app_ctx):
+    """2026-09-02: face-pull set 0 failed at the gym, was re-entered at home; the queued
+    copy must not replay over the re-entry."""
+    app_, db = app_ctx
+    u, client = _login(app_, db, "outbox@test.com")
+    from models import SetLog
+    import time
+    SetLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    queued_at_ms = int(time.time() * 1000) - 60_000          # queued a minute ago
+    base = {"exercise": "Face Pull", "week": 4, "day_idx": 2, "set_number": 0, "done": True}
+    r = client.post("/api/sets", json={**base, "weight": 65, "reps": 12})   # the re-entry (now)
+    assert r.status_code == 200
+    r2 = client.post("/api/sets", json={**base, "weight": 60, "reps": 10, "queued_at": queued_at_ms})  # stale replay
+    assert r2.status_code == 200 and r2.get_json().get("skipped") == "newer edit exists"
+    row = SetLog.query.filter_by(user_id=u.id, exercise_name="Face Pull", week=4, day_idx=2, set_number=0).first()
+    assert (row.weight, row.reps) == (65, 12)
+    # A replay queued AFTER the last edit still applies.
+    r3 = client.post("/api/sets", json={**base, "weight": 70, "reps": 12, "queued_at": int(time.time() * 1000) + 5_000})
+    assert r3.status_code == 200 and not r3.get_json().get("skipped")
+    assert SetLog.query.get(row.id).weight == 70
