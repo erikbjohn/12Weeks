@@ -680,6 +680,11 @@ def sync_wellness(gc, user_id, today=None):
             _new_raw = {k: data.get(k) for k in _WELLNESS_KEYS}
             row.raw_json = json.dumps({k: (_new_raw[k] if _new_raw.get(k) is not None else _prev_raw.get(k))
                                        for k in _WELLNESS_KEYS})
+        if not _any_metric:
+            # S094: nothing landed — do not stamp pulled_at (it would read as a
+            # fresh, successful sync) and count it so the caller can see it.
+            result["wellness_empty"] = result.get("wellness_empty", 0) + 1
+            continue
         row.pulled_at = datetime.now(timezone.utc)
         result["wellness_upserted"] += 1
         if d != today:

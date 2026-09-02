@@ -53,7 +53,7 @@ def _format_exercise_history(history):
 
 
 def _format_exercise_analysis(analysis):
-    """Format the training engine's pre-computed analysis for each exercise."""
+    """Format the coach prescription's per-exercise indicator."""
     if not analysis:
         return ""
     lines = ["COACH PRESCRIPTION (this week vs last — direction derived from the two prescriptions; the reason after the dash is the coach's own):"]
@@ -234,7 +234,7 @@ def _format_measurements(m):
 def _format_next_week_prescriptions(prescriptions):
     if not prescriptions:
         return ""
-    lines = ["NEXT WEEK'S PLAN (engine-computed targets — announce these, do not re-derive):"]
+    lines = ["NEXT WEEK'S PLAN (coach-prescribed targets — announce these, do not re-derive):"]
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     current_day = -1
     for rx in prescriptions:
@@ -332,12 +332,30 @@ def _format_memories(memories):
         w = f"wk{m.get('week', '?')}" if m.get('week') else ""
         return f"[{d}{' ' + w if w else ''}]" if d else (f"[{w}]" if w else "")
     # Show exceptions and victories first (most important for consistency)
-    priority = [m for m in memories if m.get('type') in ('exception', 'victory', 'commitment')]
+    # S049: an exception/commitment with a 'through YYYY-MM-DD' date expires —
+    # after that date it is history, not a standing CRITICAL rule.
+    import re as _re
+    from datetime import date as _date
+    _today = _date.today()
+    def _expired(m):
+        mm = _re.search(r"through[ =:]*(\d{4}-\d{2}-\d{2})", m.get('content') or "")
+        if not mm:
+            return False
+        try:
+            return _date.fromisoformat(mm.group(1)) < _today
+        except ValueError:
+            return False
+    priority = [m for m in memories if m.get('type') in ('exception', 'victory', 'commitment') and not _expired(m)]
     others = [m for m in memories if m.get('type') not in ('exception', 'victory', 'commitment')]
+    expired = [m for m in memories if m.get('type') in ('exception', 'commitment') and _expired(m)]
     if priority:
         lines.append("  CRITICAL — CHECK THESE BEFORE ANY COMPLIANCE JUDGMENT:")
         for m in priority:
-            lines.append(f"  {_prefix(m)} [{m.get('type', 'note').upper()}] {m['content']}")
+            mm = _re.search(r"through[ =:]*(\d{4}-\d{2}-\d{2})", m.get('content') or "")
+            exp = f" (expires {mm.group(1)})" if mm else ""
+            lines.append(f"  {_prefix(m)} [{m.get('type', 'note').upper()}] {m['content']}{exp}")
+    for m in expired:
+        lines.append(f"  {_prefix(m)} [{m.get('type', 'note')} — EXPIRED, history only] {m['content']}")
     for m in others:
         lines.append(f"  {_prefix(m)} [{m.get('type', 'note')}] {m['content']}")
     return '\n'.join(lines)

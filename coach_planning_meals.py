@@ -9,6 +9,7 @@ The downstream meal_generator still builds actual food items to fit
 these targets — this agent only sets the numbers and the day pattern.
 """
 from __future__ import annotations
+from llm_client import SONNET as _SONNET  # S071
 import os
 import json
 import logging
@@ -168,7 +169,7 @@ def generate_week_meals(
     try:
         client = _anthropic_client()
         resp = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=_SONNET,
             max_tokens=2500,
             system=system,
             messages=[{"role": "user", "content": user_prompt}],

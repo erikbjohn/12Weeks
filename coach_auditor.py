@@ -12,6 +12,7 @@ perceived latency).
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from llm_client import SONNET as _SONNET  # S071
 import os
 
 
@@ -55,7 +56,7 @@ def audit_claim(claim_text: str, source_rows: list[str]) -> AuditResult:
     rows_block = "\n".join(f"  - {r}" for r in source_rows) if source_rows else "  (none)"
     user_msg = _AUDIT_PROMPT.format(claim=claim_text, rows=rows_block)
     resp = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=_SONNET,
         max_tokens=120,
         system="You are a precise fact-check auditor.",
         messages=[{"role": "user", "content": user_msg}],
@@ -107,7 +108,7 @@ def audit_posture(user_message: str, response_text: str) -> PostureResult:
     client = _anthropic_client()
     msg = _POSTURE_PROMPT.format(user_msg=user_message, response=response_text)
     resp = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=_SONNET,
         max_tokens=80,
         system="You audit conversational posture, not facts.",
         messages=[{"role": "user", "content": msg}],

@@ -97,7 +97,7 @@ def _csrf_origin_guard():
 
 # ─── MODEL CONSTANTS ──────────────────────────────────────────────────────
 from llm_client import OPUS as CLAUDE_OPUS  # S071
-CLAUDE_SONNET = "claude-sonnet-4-6"
+from llm_client import SONNET as CLAUDE_SONNET, HAIKU as CLAUDE_HAIKU  # S071: ids live in llm_client
 
 
 # CSRF token helper
@@ -148,6 +148,18 @@ def _admin_key_is_strong(key: str) -> bool:
     """A header key must be long and not one of the literals that were
     committed to git / pasted into transcripts before the 2026-09-01 rotation."""
     return bool(key) and len(key) >= 24 and key not in _LEAKED_ADMIN_KEYS
+
+
+def _public_app_url():
+    """S165: the ONE origin used in invite/verification/login links. APP_URL in
+    prod (boot asserts it on Render); the request host only in local dev, so a
+    spoofed Host header can never mint a link to an attacker's origin."""
+    url = os.environ.get("APP_URL")
+    if url:
+        return url.rstrip("/")
+    if os.environ.get("RENDER"):
+        raise RuntimeError("APP_URL must be set in production")
+    return request.host_url.rstrip("/")
 
 
 def _header_key_ok(api_key, expected_key):
@@ -485,6 +497,31 @@ with app.app_context():
             db.session.add(SystemFlag(key="orphan_reassign_v1", value="done"))
             db.session.commit()
     except Exception:
+        db.session.rollback()
+
+    # S160: after the one-shot adoption, make user_id NOT NULL on every
+    # per-user table that has no NULL rows left, so an ownerless row can never
+    # be created again. One-shot; Postgres only; a table that still has NULLs
+    # is logged and skipped (never guessed).
+    try:
+        if (db.engine.dialect.name == "postgresql"
+                and not SystemFlag.query.filter_by(key="user_id_not_null_v1").first()):
+            _insp = sa_inspect(db.engine)
+            _done, _skipped = [], []
+            for tbl in _insp.get_table_names():
+                cols = {c["name"]: c for c in _insp.get_columns(tbl)}
+                if "user_id" not in cols or tbl == "user" or not cols["user_id"].get("nullable", True):
+                    continue
+                n_null = db.session.execute(text(f'SELECT count(*) FROM "{tbl}" WHERE user_id IS NULL')).scalar()
+                if n_null:
+                    _skipped.append((tbl, n_null)); continue
+                db.session.execute(text(f'ALTER TABLE "{tbl}" ALTER COLUMN user_id SET NOT NULL'))
+                _done.append(tbl)
+            db.session.add(SystemFlag(key="user_id_not_null_v1", value=f"done={len(_done)} skipped={_skipped}"))
+            db.session.commit()
+            logging.info("boot: user_id NOT NULL on %s; skipped (NULL rows) %s", _done, _skipped)
+    except Exception:
+        logging.exception("boot: user_id NOT NULL pass failed")
         db.session.rollback()
 
     # Backfill TDEE for existing goals that don't have it
@@ -3399,7 +3436,7 @@ def api_create_invite():
     db.session.add(invite)
     db.session.commit()
 
-    app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+    app_url = _public_app_url()
     invite_url = f"{app_url}/invite/{code}"
 
     email_sent = False
@@ -3471,7 +3508,7 @@ def google_login():
     if not _google_enabled:
         flash("Google login not configured.", "error")
         return redirect(url_for("login"))
-    app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+    app_url = _public_app_url()
     redirect_uri = f"{app_url}/auth/google/callback"
     return oauth.google.authorize_redirect(redirect_uri)
 
@@ -3555,7 +3592,7 @@ def _send_verification_email(user):
 
         s = URLSafeTimedSerializer(app.secret_key)
         token = s.dumps({"user_id": user.id, "email": user.email}, salt="email-verify")
-        app_url = os.environ.get("APP_URL", request.host_url.rstrip("/"))
+        app_url = _public_app_url()
         verify_url = f"{app_url}/verify/{token}"
 
         from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@12weeks.app")
@@ -8734,6 +8771,22 @@ def _quote_in_text(quote, text):
     return bool(q) and len(q) >= 3 and q in re.sub(r"\s+", " ", text.lower())
 
 
+@app.route("/api/chat/note", methods=["POST"])
+@login_required
+def api_chat_note():
+    """S129: persist a user turn the client answered deterministically (a bare
+    'yes'/'next' in the plan walkthrough) so chat history is complete without
+    paying for an LLM turn."""
+    data = request.get_json() or {}
+    msg = (data.get("message") or "").strip()[:500]
+    if not msg:
+        return jsonify({"error": "message required"}), 400
+    db.session.add(ChatMessage(role="user", content=msg, log_date=_user_today(),
+                               user_id=current_user.id, message_type=(data.get("mode") or "chat")[:30]))
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/morning-checkin/extract", methods=["POST"])
 @login_required
 def api_extract_checkin_values():
@@ -8754,7 +8807,7 @@ def api_extract_checkin_values():
         import json
         client = anthropic.Anthropic()
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=CLAUDE_HAIKU,
             max_tokens=800,
             messages=[{"role": "user", "content": f"""Below are ONLY the athlete's own messages from this morning's check-in. The coach's side is deliberately omitted.
 
@@ -9156,7 +9209,11 @@ def api_chat():
 
     # Build context for the AI coach
     from coach_assembler import build_filtered_context
-    context = build_filtered_context(_route_info["agent_name"])
+    try:
+        context = build_filtered_context(_route_info["agent_name"])
+    except Exception:
+        app.logger.exception("Coach context build failed")   # S062: loud, never a stub
+        return jsonify({"error": "Coach context unavailable — try again in a moment"}), 503
     # Get AI response
     from coach_assembler import assemble_prompt
     from coach import _build_messages
@@ -9306,10 +9363,11 @@ def api_chat_stream():
     try:
         from coach_assembler import build_filtered_context
         context = build_filtered_context(_route_info["agent_name"])
-    except Exception as ctx_err:
-        import logging
-        logging.error("Coach context build failed: %s", ctx_err)
-        context = {"athlete_name": current_user.name or "Athlete", "user_timezone": getattr(current_user, 'timezone', 'UTC'), "chat_history": [], "week": 1}
+    except Exception:
+        # S062: NEVER hand the coach a stub context ({"week": 1}, no data) —
+        # that is how "absence becomes a confident lie". Fail loud instead.
+        logging.exception("Coach context build failed")
+        return jsonify({"error": "Coach context unavailable — try again in a moment"}), 503
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -11496,7 +11554,8 @@ def api_weekly_report_generate():
                 if r and narrative:
                     r.narrative = narrative
                     db.session.commit()
-        except Exception as e:
+        except Exception:
+            logging.exception("weekly report narrative failed (week %s user %s)", week, _current_user_id)
             _intake_jobs[job_id] = {"status": "error", "narrative": None,
                                     "kind": "report", "user_id": _current_user_id}
 
@@ -11936,7 +11995,7 @@ def api_admin_reset_password():
     # Optional explicit password (admin sets a known value at the user's
     # request); otherwise generate a random temp one.
     _explicit = (data.get("password") or "").strip()
-    if _explicit and len(_explicit) < 6:
+    if _explicit and len(_explicit) < 12:
         return jsonify({"error": "password too short (min 6)"}), 400
     temp_password = _explicit or secrets.token_urlsafe(10)
     user.password_hash = generate_password_hash(temp_password)

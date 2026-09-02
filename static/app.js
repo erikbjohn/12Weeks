@@ -11204,6 +11204,12 @@ async function sendInlineCoachMsg() {
         var _preConfirm = _planning && !_isChange && (_isReady || _isDone)
             && window._planDayBlocks && !window._planChangesPending
             && ((window._planDayIdx || 0) < ((window._planDayOrder || []).length));
+        if (_preConfirm) {
+            // S129: the turn is answered by the app, but the athlete's words are
+            // still part of the record — persist them without an LLM call.
+            fetch('/api/chat/note', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                      body: JSON.stringify({ message: text, mode: 'planning' }) }).catch(function(){});
+        }
         if (!_preConfirm) {
         var res = await fetch('/api/chat/stream', {
             method: 'POST',

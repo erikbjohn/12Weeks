@@ -13,6 +13,7 @@ Output is stored as a regular WeeklyPrescription row so the user can override.
 """
 from __future__ import annotations
 
+from llm_client import SONNET as _SONNET  # S071
 import json
 import logging
 import os
@@ -125,7 +126,7 @@ def prescribe_starting_weight(
         import anthropic
         client = anthropic.Anthropic(api_key=api_key, timeout=20.0)
         response = client.messages.create(
-            model=os.environ.get("LIFTING_AGENT_MODEL", "claude-sonnet-4-6"),
+            model=os.environ.get("LIFTING_AGENT_MODEL", _SONNET),
             max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],

@@ -7,6 +7,7 @@ load_agent_md(name) and get a dict back.
 """
 from __future__ import annotations
 from pathlib import Path
+from llm_client import SONNET as _SONNET  # S071
 import re
 import yaml
 
@@ -32,7 +33,7 @@ def load_agent_md(name: str) -> dict:
     body = m.group(2).strip()
     return {
         "name": fm.get("name", name),
-        "model": fm.get("model", "claude-sonnet-4-6"),
+        "model": fm.get("model", _SONNET),
         "tools": list(fm.get("tools") or []),
         "system_prompt": body,
     }

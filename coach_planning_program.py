@@ -12,6 +12,7 @@ Returns {day_idx: [{exercise, sets, reps, weight, why}]}. Empty dict on failure
 static template).
 """
 from __future__ import annotations
+from llm_client import SONNET as _SONNET  # S071
 import os
 import re
 import json
@@ -709,6 +710,11 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
         + (f"STANDING COMMITMENTS (plan around them, never over them):\n"
            f"{user_context.get('scheduled_activities')}\n\n"
            if user_context.get("scheduled_activities") else "")
+        + (f"RECOVERY CONTEXT (S058): {user_context['wellness_line']}\n"
+           f"RULE: recovery trends may change RUN intensity (that is the running planner's lever); "
+           f"they never cut lifting sets or load — lifting is protected. If you hold a load because of "
+           f"recovery, say so in that lift's reason.\n\n"
+           if user_context.get("wellness_line") else "")
         + f"LAST WEEK'S PRESCRIBED PROGRAM (anchor progression here — match or "
         f"nudge up incrementally, NEVER leap a load):\n{prev_program}\n\n"
         "Design the week. JSON only."
@@ -717,7 +723,7 @@ def generate_week_program(user_id: int, week: int, user_context: dict):
     try:
         client = _anthropic_client()
         resp = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=4000,
+            model=_SONNET, max_tokens=4000,
             system=system, messages=[{"role": "user", "content": user_prompt}],
         )
         text = "".join(b.text for b in resp.content

@@ -2008,7 +2008,7 @@ Intensity level: {anger_level_label}
    move.
 7. FOOD SAFETY — Never suggest a food not in the approved list. Never ignore an allergy. Violations are a system failure.
 8. FASTING — Never suggest calories outside the eating window. Before the window opens: black coffee, water, zero-cal only.
-9. VOLUME — Use the training engine's prescription for sets/reps/weight. Do not re-derive from raw logs.
+9. VOLUME — Use the coach prescription (WeeklyPrescription) for sets/reps/weight. Do not re-derive from raw logs.
 10. MARKERS — Emit structured markers when the athlete confirms a change (see <markers>).
 11. NO UI — You cannot display images, charts, links, or interactive elements. Text only.
 12. ANGER LEVEL — Your tone is governed by the current anger level. Do not soften below it. Do not escalate above it without data.
@@ -2641,7 +2641,8 @@ def _format_athlete_data(ctx, requires):
         if r.get("risk_level") == "high":
             # S117: a red morning must become a DECISION, in the athlete's data,
             # not a silent cut and not a canned 'stand down'.
-            readiness_line += (" HIGH RISK: lead with it. State the numbers, then decide out loud — "
+            readiness_line += (" RULE: on a HIGH-risk morning you MAY convert today's hard run to Z2 (emit a [RUN] marker and say why); you may NOT cut lifting sets or load — lifting is protected, running is the lever (see reduce_running)."
+                               " HIGH RISK: lead with it. State the numbers, then decide out loud — "
                                "trim RUNNING first (lifting is protected in the cut), name the exact change, "
                                "and codify it with a marker. Never silently reduce lifting; never ignore it.")
         parts.append(readiness_line)

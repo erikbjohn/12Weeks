@@ -132,7 +132,7 @@ class GarminClient:
                 self.last_restore_error = ("TokenExpired: stored OAuth2 expired; "
                                            "waiting for laptop token refresh")
                 return False
-        log.info("DEBUG: Garmin token restore for user_id=%s", uid)  # DEBUG: remove after fix confirmed
+        log.debug("Garmin token restore for user_id=%s", uid)
         try:
             from models import GarminTokens
             from garminconnect import Garmin
@@ -140,7 +140,7 @@ class GarminClient:
             if uid:
                 query = query.filter_by(user_id=uid)
             tokens = query.first()
-            log.info("DEBUG: Garmin token restore for user_id=%s, found=%s", uid, bool(tokens))  # DEBUG: remove after fix confirmed
+            log.debug("Garmin token restore for user_id=%s, found=%s", uid, bool(tokens))
             if not tokens:
                 self.last_restore_error = "NoTokens: no stored Garmin tokens for user"
                 return False
@@ -239,7 +239,7 @@ class GarminClient:
         """Authenticate with Garmin Connect. Returns (success, error_msg, needs_mfa)."""
         if user_id:
             self._user_id = user_id
-        log.info("DEBUG: Garmin login attempt for user_id=%s", self._user_id)  # DEBUG: remove after fix confirmed
+        log.debug("Garmin login attempt for user_id=%s", self._user_id)
         now = time.time()
         if now < self._rate_limited_until:
             wait = int(self._rate_limited_until - now)
@@ -295,7 +295,7 @@ class GarminClient:
         request is fired — stale cache (if any) or None is returned, so a
         rate-limited account isn't hammered by every page load / coach
         message until the block escalates into a lockout."""
-        log.info("DEBUG: Garmin fetch %s (user_id=%s)", key, self._user_id)  # DEBUG: remove after fix confirmed
+        log.debug("Garmin fetch %s (user_id=%s)", key, self._user_id)
         now = time.time()
         if key in self._cache:
             val, ts = self._cache[key]

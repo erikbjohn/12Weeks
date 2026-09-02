@@ -7,6 +7,7 @@ and the athlete's training goal. Returns per-day run plans.
 Engine remains as fallback when LLM fails.
 """
 from __future__ import annotations
+from llm_client import SONNET as _SONNET  # S071
 import os
 import re
 import json
@@ -574,7 +575,7 @@ def generate_week_runs(
     try:
         client = _anthropic_client()
         resp = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=_SONNET,
             max_tokens=2000,
             system=system,
             messages=[{"role": "user", "content": user_prompt}],

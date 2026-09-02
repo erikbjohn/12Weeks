@@ -267,3 +267,87 @@ def test_readiness_chip_labels_risk_not_readiness():
     src = open("static/app.js").read()
     assert "overtraining risk" in src
     assert "Readiness ${escapeHtml(String(readinessData.risk_level" not in src
+
+
+# ═════════════════════════ batch 3 ═════════════════════════
+
+def test_context_build_failure_is_loud_not_a_stub(app_ctx, monkeypatch):
+    """S062: the coach must never run on a {"week": 1} stub."""
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s062@test.com")
+    import coach_assembler
+    def boom(name): raise RuntimeError("db down")
+    monkeypatch.setattr(coach_assembler, "build_filtered_context", boom)
+    import time; import app as appmod
+    appmod._chat_rate_limit[u.id] = 0
+    r = client.post("/api/chat", json={"message": "how am I doing"})
+    assert r.status_code == 503, (r.status_code, r.get_data(as_text=True)[:200])
+    assert "week\": 1" not in r.get_data(as_text=True)
+
+
+def test_expired_exception_leaves_critical():
+    from coach import _format_memories
+    mems = [{"type": "exception", "content": "Exception granted: skip Saturday run through 2020-01-05 — travel", "date": "2020-01-02"},
+            {"type": "exception", "content": "Exception granted: late weigh-in through 2999-01-01 — lab", "date": "2026-09-01"}]
+    txt = _format_memories(mems)
+    crit = txt.split("CRITICAL")[1].split("EXPIRED")[0]
+    assert "late weigh-in" in crit and "(expires 2999-01-01)" in crit
+    assert "skip Saturday run" not in crit
+    assert "EXPIRED, history only" in txt and "skip Saturday run" in txt
+
+
+def test_strength_planner_prompt_carries_recovery_rule():
+    src = open("coach_planning_program.py").read()
+    assert "RECOVERY CONTEXT (S058)" in src and "never cut lifting sets or load" in src
+
+
+def test_readiness_line_carries_decision_rule():
+    from coach_assembler import _format_athlete_data
+    txt = _format_athlete_data({"readiness": {"score": 30, "risk_level": "high", "flags": ["HRV 30 vs 45"]}}, ["garmin"])
+    assert "may NOT cut lifting sets" in txt and "[RUN]" in txt
+
+
+def test_no_engine_language_in_coach_prompts():
+    for f in ("coach.py", "coach_assembler.py"):
+        src = open(f).read()
+        assert "engine-computed" not in src
+        assert "training engine's prescription" not in src
+
+
+def test_all_none_wellness_fetch_is_not_a_sync(app_ctx):
+    from garmin_sync import wellness_fields
+    src = open("garmin_sync.py").read()
+    assert 'result["wellness_empty"]' in src and "if not _any_metric:" in src
+
+
+def test_model_ids_live_only_in_llm_client():
+    import glob, re
+    pat = re.compile(r'"claude-(opus|sonnet|haiku)-[0-9][^"]*"')
+    for f in glob.glob("*.py") + glob.glob("coach_specialists/*.py"):
+        if f == "llm_client.py":
+            continue
+        for i, line in enumerate(open(f), 1):
+            assert not pat.search(line), (f, i, line.strip())
+
+
+def test_chat_note_persists_confirmation(app_ctx):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s129@test.com")
+    from models import ChatMessage
+    r = client.post("/api/chat/note", json={"message": "yes", "mode": "planning"})
+    assert r.status_code == 200
+    row = ChatMessage.query.filter_by(user_id=u.id, content="yes").first()
+    assert row and row.role == "user" and row.message_type == "planning"
+
+
+def test_public_app_url_never_trusts_host_on_render(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    import app as appmod
+    monkeypatch.delenv("APP_URL", raising=False); monkeypatch.setenv("RENDER", "1")
+    with app_.test_request_context(headers={"Host": "evil.example"}):
+        with pytest.raises(RuntimeError):
+            appmod._public_app_url()
+    monkeypatch.setenv("APP_URL", "https://one2weeks-9ewf.onrender.com/")
+    with app_.test_request_context(headers={"Host": "evil.example"}):
+        assert appmod._public_app_url() == "https://one2weeks-9ewf.onrender.com"
+    assert "request.host_url" not in open("app.py").read().split("def _public_app_url")[1].split("def _header_key_ok")[1]

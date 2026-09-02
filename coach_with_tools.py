@@ -15,6 +15,7 @@ Two entry points:
 """
 from __future__ import annotations
 
+from llm_client import OPUS as _OPUS  # S071
 import logging
 import os
 from typing import Any
@@ -252,7 +253,7 @@ def coach_chat(
         user_id=user_id,
         system_prompt=system_prompt,
         messages=messages,
-        model=model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"),
+        model=model or _OPUS,
         max_tokens=max_tokens,
         temperature=temperature,
     )
@@ -276,7 +277,7 @@ def coach_chat_stream(
     client = _client()
     convo = list(messages)
     full_system = system_prompt + _tool_addendum()
-    chosen_model = model or os.environ.get("CLAUDE_MODEL", "claude-opus-4-8")
+    chosen_model = model or _OPUS
 
     # Tool loop — non-streaming until we know there are no more tool calls.
     for turn in range(MAX_TOOL_TURNS):

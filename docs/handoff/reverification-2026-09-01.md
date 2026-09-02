@@ -68,17 +68,17 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S045 | medium | PARTIAL | No render-sequence guard; rest timer still orphaned on re-render (app.js:2046-2079). |
 | S046 | medium | PARTIAL | No chase test; morning brief still counts scheduled not unchecked doses. |
 | S047 | medium | PARTIAL | Zero tests for max_hr path; per-lap splits (step 2) not started. |
-| S049 | medium | PARTIAL | No expiry: exceptions/commitments listed under CRITICAL forever (coach.py _format_memories). |
+| S049 | medium | UPDATED | FIXED — 'through YYYY-MM-DD' exceptions/commitments expire out of CRITICAL; test. |
 | S052 | medium | UPDATED | FIXED — 16:8 read filter honours the rail note's cutoff; test. |
 | S054 | medium | PARTIAL | Clamp real; no test; heal-prescriptions not clamped. |
 | S056 | medium | PARTIAL | Tripwire test not added. |
-| S058 | medium | PARTIAL | Strength planner still blind to HRV/RHR/sleep; decision rule not written; no test. |
+| S058 | medium | UPDATED | FIXED — strength planner prompt carries RECOVERY CONTEXT + rule; test. |
 | S059 | medium | PARTIAL | No test; adherence_7d still excludes today. |
 | S060 | medium | PARTIAL | No note input on weigh-in strip; only latest event surfaced; no events_last_10d. |
-| S062 | medium | PARTIAL | Only basicConfig; app.py:9311 context-build failure still no traceback; weekly-report thread swallows silently; garmin DEBUG spam now prints at INFO. |
+| S062 | medium | UPDATED | FIXED — both chat paths 503 on context failure (no stub); report thread logs traceback; Garmin DEBUG lines → debug level; test. |
 | S067 | medium | PARTIAL | Run PLANNER history block still has no pace/peak HR (coach_planning_runs.py:44-58); no test for max_hr mapping. |
 | S069 | medium | UPDATED | FIXED — 'good enough' hook deleted from both chat paths and the assembler; test. |
-| S071 | medium | PARTIAL | 10 _anthropic_client copies + model literals in 8 files remain; test only greps 4 stale spellings (cannot fail on the real condition). |
+| S071 | medium | UPDATED | FIXED — every model id literal now comes from llm_client; grep test. |
 | S072 | medium | PARTIAL | Client still refetches whole /api/workouts after swaps (app.js:5558); no query-count test. |
 | S073 | medium | PARTIAL | checkOnboardingComplete still 6 GETs/load; no onboarding_complete flag; retest status still fetched; no request-count pin. |
 | S076 | medium | PARTIAL | Sunday recap text still lacks lifts_done/planned and weigh-ins/7 (weekly_report.py:395-420); no test. |
@@ -89,8 +89,8 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S089 | medium | UPDATED | FIXED — specialist smoke test carries live_llm marker (skipped without --live-coach). |
 | S091 | medium | PARTIAL | No secret-scan guard. |
 | S093 | medium | PARTIAL | No test for the N+1 case; client posts currentWeek. |
-| S094 | medium | PARTIAL | No test; all-None fetch still counts as successful sync. |
-| S096 | medium | PARTIAL | No temperature test; specialists not threaded. |
+| S094 | medium | UPDATED | FIXED — all-None fetch does not stamp pulled_at; counted as wellness_empty. |
+| S096 | medium | UPDATED | PARTIAL — unchanged (temperature test still missing). |
 | S098 | medium | PARTIAL | No prompt test; SUNDAY_REVIEW trigger text still dictates narrative. |
 | S099 | medium | PARTIAL | No intake_profile table test. |
 | S100 | medium | UPDATED | FIXED — lifting_agent uses lift_history.e1rm; grep test. |
@@ -102,16 +102,16 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S108 | medium | PARTIAL | Gate duplicated in two files; no test. |
 | S110 | medium | PARTIAL | No thread test. |
 | S114 | medium | PARTIAL | Calendar has no change field; no seeded test. |
-| S116 | medium | PARTIAL | coach.py:237 still 'engine-computed targets'; CORE rule 9 says 'training engine' while rule 18 bans it; Tesamorelin rationale unconditional. |
-| S117 | medium | PARTIAL | Decision half is prompt wording only (coach_assembler.py:2570-2575); no rule, no marker test. S021 shape. |
+| S116 | medium | UPDATED | FIXED — no 'engine' language in coach prompts; test. |
+| S117 | medium | UPDATED | FIXED — readiness line carries the codified rule (run → Z2 via [RUN]; lifting never cut); test. |
 | S119 | medium | UPDATED | FIXED — swap overlay failure logged + reported in _overlay_errors (domain 'swap'). |
 | S121 | medium | UPDATED | FIXED — run planner history cites activity_type/activity_name; test. |
 | S122 | medium | PARTIAL | Shipped under S024; no test. |
-| S123 | medium | PARTIAL | coach_multi_agent.py:421,563 + specialists send no temperature; no test. |
+| S123 | medium | UPDATED | PARTIAL — unchanged. |
 | S124 | medium | PARTIAL | _fetch_week_program still re-resolves 7 days; claims block ungated. |
 | S127 | medium | PARTIAL | Judge pass still serial full-price messages.create; no Batch API. |
 | S128 | medium | PARTIAL | Local week-formula copy; no test for the schedule-row-no-prescription case. |
-| S129 | medium | PARTIAL | Athlete's 'yes' confirmations now never persisted anywhere. |
+| S129 | medium | UPDATED | FIXED — POST /api/chat/note persists the confirmation; test. |
 | S130 | medium | UPDATED | FIXED — GET /api/sets deleted (no caller); test asserts 405. |
 | S131 | medium | PARTIAL | No test; _swapped_from key still unread. |
 | S132 | medium | UPDATED | FIXED — realign copies completed_at/workout_duration_min/source. |
@@ -132,9 +132,9 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S154 | low | UPDATED | FIXED — grocery list, coach note, meal-override note escaped. |
 | S155 | low | UPDATED | FIXED — coach layer keeps 80 rows. |
 | S156 | low | UPDATED | FIXED — intake 404 surfaces as an error bubble, never a silent drop. |
-| S160 | low | PARTIAL | 13 user_id columns still nullable; no SET NOT NULL. |
+| S160 | low | UPDATED | FIXED — one-shot boot pass sets user_id NOT NULL on every table with no NULL rows (Postgres); skips+logs others. |
 | S163 | low | PARTIAL | Specialists still max_retries=5 no timeout; no test. |
-| S165 | low | PARTIAL | Three host_url fallbacks remain (app.py:3394,3466,3550); no test. |
+| S165 | low | UPDATED | FIXED — _public_app_url(): APP_URL, else raise on Render, host only in dev; test. |
 | S088 | medium | SUPERSEDED | Deload-by-week abolished 2026-08-30; workout_data.py:1985/2037 dead literal. |
 | S095 | medium | SUPERSEDED | Same as S088. |
 | S001 | critical | REAL | No restore drill. |
@@ -192,7 +192,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S105 | medium | REAL | No [SCHEDULE: skip] marker. |
 | S109 | medium | REAL | No test. |
 | S111 | medium | REAL | No conflict test. |
-| S112 | medium | REAL | reset-password still accepts 6-char explicit password. |
+| S112 | medium | UPDATED | FIXED — explicit admin password min 12. |
 | S113 | medium | REAL |  |
 | S115 | medium | REAL | Detail only after tap. |
 | S118 | medium | REAL | No 'show earlier'. |
