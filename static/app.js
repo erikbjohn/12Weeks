@@ -6801,6 +6801,12 @@ async function finishMorningCheckin() {
   closeMorningCheckin();
 }
 
+function _mcVal(id) {
+  var el = document.getElementById(id);
+  var v = el ? parseInt(el.value, 10) : NaN;
+  return (Number.isFinite(v) && v >= 1 && v <= 10) ? v : null;
+}
+
 function submitMorningCheckin() {
   // Build notes from follow-ups + free text
   const parts = [];
@@ -6815,12 +6821,13 @@ function submitMorningCheckin() {
 
   const data = {
     date: appTodayISO(),   // S145
-    sleep_quality: parseInt(document.getElementById('mc-sleep').value) || 5,
-    stress_level: parseInt(document.getElementById('mc-stress').value) || 5,
-    soreness: parseInt(document.getElementById('mc-soreness').value) || 5,
-    mood: parseInt(document.getElementById('mc-mood').value) || 5,
-    motivation: parseInt(document.getElementById('mc-motivation').value) || 5,
-    anxiety: parseInt(document.getElementById('mc-anxiety').value) || 3,
+    // A blank field is NULL. It used to default to 5 (anxiety 3): fabricated self-report.
+    sleep_quality: _mcVal('mc-sleep'),
+    stress_level: _mcVal('mc-stress'),
+    soreness: _mcVal('mc-soreness'),
+    mood: _mcVal('mc-mood'),
+    motivation: _mcVal('mc-motivation'),
+    anxiety: _mcVal('mc-anxiety'),
     notes: parts.join(' | '),
   };
 
@@ -6837,7 +6844,10 @@ function submitMorningCheckin() {
   const card = el.querySelector('.morning-checkin-card');
   if (card) {
     // Build a summary of what they entered
-    const summary = `Morning check-in: Sleep ${data.sleep_quality}/10, Stress ${data.stress_level}/10, Soreness ${data.soreness}/10, Mood ${data.mood}/10, Motivation ${data.motivation}/10, Anxiety ${data.anxiety}/10.${data.notes ? ' Notes: ' + data.notes : ''}`;
+    const _stated = [['Sleep', data.sleep_quality], ['Stress', data.stress_level], ['Soreness', data.soreness],
+                     ['Mood', data.mood], ['Motivation', data.motivation], ['Anxiety', data.anxiety]]
+                    .filter(p => p[1] != null).map(p => p[0] + ' ' + p[1] + '/10');
+    const summary = 'Morning check-in: ' + (_stated.length ? _stated.join(', ') + '.' : 'no numeric self-report.') + (data.notes ? ' Notes: ' + data.notes : '');
 
     card.innerHTML = `
       <h2>Check-In Received</h2>
@@ -7164,7 +7174,8 @@ function renderCheckinSummaryBar() {
     { label: 'Motivation', val: c.motivation, rev: false },
     { label: 'Soreness', val: c.soreness, rev: true },
     { label: 'Anxiety', val: c.anxiety, rev: true },
-  ];
+  ]
+  .filter(r => r.val != null)   // a null score is 'not stated', never rendered as good/bad;
 
   const badges = items.map(i =>
     `<span class="checkin-score ${scoreClass(i.val, i.rev)}">${i.label}: ${i.val}</span>`

@@ -851,3 +851,10 @@ def test_today_sets_target_comes_from_prescription_not_setlog_column(app_ctx):
     assert out["KB Swing"][0]["target_weight"] == 40
     txt = coach_assembler._format_athlete_data({"today_sets": out}, ["today_sets"])
     assert "145" not in txt and "target: 40" in txt
+
+
+def test_form_checkin_never_defaults_blank_scores():
+    src = open("static/app.js").read()
+    assert "|| 5," not in src.split("function submitMorningCheckin")[1][:1500]
+    assert "|| 3," not in src.split("function submitMorningCheckin")[1][:1500]
+    assert "function _mcVal" in src and ".filter(r => r.val != null)" in src
