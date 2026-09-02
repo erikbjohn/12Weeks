@@ -856,16 +856,25 @@ def _build_today_sets():
         SetLog.day_idx == today_idx,
         SetLog.logged_date == local_today,
     ).order_by(SetLog.exercise_name, SetLog.set_number).all()
+    # The target shown beside a set is the PRESCRIPTION's (WeeklyPrescription
+    # for this slot), never SetLog.target_weight — that column is the engine's
+    # computed *next* target and was poisoned by swap-sibling history (a KB
+    # Swing read "target: 145lb" while the athlete swung 35; 2026-09-01).
+    from models import WeeklyPrescription
+    rx = {}
+    for r in WeeklyPrescription.query.filter_by(user_id=current_user.id, week=week, day_idx=today_idx).all():
+        rx.setdefault(resolve_name(r.exercise_name), (r.target_weight, r.reps))
     set_data = {}
     for s in rows:
         canonical = resolve_name(s.exercise_name)
         if canonical not in set_data:
             set_data[canonical] = []
+        tw, tr = rx.get(canonical, (None, None))
         set_data[canonical].append({
             "set": s.set_number + 1, "weight": s.weight,
             "reps": s.reps, "done": s.done,
-            "target_weight": getattr(s, 'target_weight', None),
-            "target_reps": getattr(s, 'target_reps', None),
+            "target_weight": tw,
+            "target_reps": tr,
             "modification_direction": getattr(s, 'modification_direction', None),
         })
     return {"today_sets": set_data}

@@ -825,3 +825,29 @@ def test_next_targets_fall_back_to_scaled_sibling_history_when_none_of_its_own(a
     db.session.commit()
     t = compute_next_targets(u.id, "Romanian Deadlift", 4, 1, allow_llm=False)
     assert t["target_weight"] is not None and t["target_weight"] >= 50, t
+
+
+def test_today_sets_target_comes_from_prescription_not_setlog_column(app_ctx):
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "todaysets@test.com")
+    from models import SetLog, WeeklyPrescription, AppState
+    import coach_assembler
+    from datetime import date
+    today = date(2026, 9, 1)
+    AppState.query.filter_by(user_id=u.id).delete(); SetLog.query.filter_by(user_id=u.id).delete()
+    WeeklyPrescription.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(AppState(user_id=u.id, start_date=date(2026, 8, 10), current_week=4))
+    db.session.add(WeeklyPrescription(user_id=u.id, week=4, day_idx=1, exercise_order=0, exercise_name="KB Swing",
+                                      sets=4, reps="10", target_weight=40, source="coach"))
+    db.session.add(SetLog(user_id=u.id, exercise_name="KB Swing", week=4, day_idx=1, set_number=0, weight=35, reps=10,
+                          done=True, logged_date=today, target_weight=145, target_reps=10))
+    db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        import unittest.mock as um
+        with um.patch.object(coach_assembler, "_user_today", lambda: today), \
+             um.patch.object(coach_assembler, "_current_week", lambda: 4):
+            out = coach_assembler._build_today_sets()["today_sets"]
+    assert out["KB Swing"][0]["target_weight"] == 40
+    txt = coach_assembler._format_athlete_data({"today_sets": out}, ["today_sets"])
+    assert "145" not in txt and "target: 40" in txt
