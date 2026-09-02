@@ -88,6 +88,39 @@ def _log_usage(response, *, agent: str, model: str, turn: int = 0):
         pass
 
 
+def _execute_tools_parallel(tool_use_blocks, user_id):
+    """S163: Opus may emit several tool_use blocks in one turn (three of the
+    eleven tools are Sonnet calls); running them serially added their
+    latencies. Each worker gets its own app + request context and login.
+    Order of results matches the blocks (the API pairs by tool_use_id)."""
+    from coach_tools import execute_tool
+    if len(tool_use_blocks) <= 1:
+        return [execute_tool(b.name, dict(b.input or {}), user_id) for b in tool_use_blocks]
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        from flask import current_app
+        flask_app = current_app._get_current_object()
+    except Exception:
+        flask_app = None
+
+    def _run(b):
+        if flask_app is None:
+            return execute_tool(b.name, dict(b.input or {}), user_id)
+        with flask_app.app_context(), flask_app.test_request_context():
+            try:
+                from flask_login import login_user
+                from models import User, db
+                u = db.session.get(User, user_id)
+                if u:
+                    login_user(u, force=True)
+            except Exception:
+                pass
+            return execute_tool(b.name, dict(b.input or {}), user_id)
+
+    with ThreadPoolExecutor(max_workers=min(4, len(tool_use_blocks))) as ex:
+        return list(ex.map(_run, tool_use_blocks))
+
+
 def _forced_final_text(client, *, model, max_tokens, system, messages, tools, temperature=None) -> str:
     """One text-only turn (tool_choice=none) after the tool loop exhausted
     MAX_TOOL_TURNS. The last response was a tool_use — streaming/returning it
@@ -152,8 +185,8 @@ def _run_loop(
             # Execute every tool_use block, build tool_result message
             tool_use_blocks = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             tool_results = []
-            for b in tool_use_blocks:
-                result_str = execute_tool(b.name, dict(b.input or {}), user_id)
+            _results = _execute_tools_parallel(tool_use_blocks, user_id)  # S163
+            for b, result_str in zip(tool_use_blocks, _results):
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": b.id,
@@ -266,8 +299,8 @@ def coach_chat_stream(
             })
             tool_use_blocks = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             tool_results = []
-            for b in tool_use_blocks:
-                result_str = execute_tool(b.name, dict(b.input or {}), user_id)
+            _results = _execute_tools_parallel(tool_use_blocks, user_id)  # S163
+            for b, result_str in zip(tool_use_blocks, _results):
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": b.id,

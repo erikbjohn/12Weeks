@@ -6202,6 +6202,22 @@ async function showMorningCheckinOverlay() {
             <input type="number" inputmode="decimal" id="sun-thigh-r" class="weight-input" style="width:80px" placeholder="inches">
           </div>
         </div>
+        <!-- S134/S135: weekly progress photos. The server compares each pose
+             against the previous same-pose photo; no capture UI existed. -->
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="color:var(--muted);font-size:13px;margin-bottom:6px">Progress photos (optional) — same spot, same light</div>
+          <div style="display:flex;gap:8px">
+            <label class="btn btn-secondary" style="flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font-size:14px">
+              <span id="sun-photo-front-label">Front</span>
+              <input type="file" accept="image/*" capture="environment" style="display:none" onchange="sundayPhotoPicked(this, 'front')">
+            </label>
+            <label class="btn btn-secondary" style="flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;font-size:14px">
+              <span id="sun-photo-side-label">Side</span>
+              <input type="file" accept="image/*" capture="environment" style="display:none" onchange="sundayPhotoPicked(this, 'side')">
+            </label>
+          </div>
+          <div id="sun-photo-status" style="font-size:13px;color:var(--muted);margin-top:6px"></div>
+        </div>
         <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="submitSundayMeasurements()">Submit & Start Review</button>
       </div>
     </div>`;
@@ -6252,6 +6268,27 @@ async function showMorningCheckinOverlay() {
 
   // Send trigger to coach to start the check-in conversation
   _startMcChat();
+}
+
+var _sundayPhotoAnalyses = {};
+async function sundayPhotoPicked(input, pose) {
+  var f = input.files && input.files[0];
+  if (!f) return;
+  var label = document.getElementById('sun-photo-' + pose + '-label');
+  var status = document.getElementById('sun-photo-status');
+  if (label) label.textContent = pose === 'front' ? 'Front — uploading…' : 'Side — uploading…';
+  try {
+    var dataUrl = await compressImage(f, 1024, 0.8);
+    var r = await fetch('/api/photos', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ photo_data: dataUrl, pose: pose }) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var j = await r.json();
+    _sundayPhotoAnalyses[pose] = j.analysis || null;
+    if (label) label.textContent = (pose === 'front' ? 'Front' : 'Side') + ' ✓';
+    if (status && j.analysis) status.textContent = String(j.analysis).slice(0, 220);
+  } catch (e) {
+    if (label) label.textContent = (pose === 'front' ? 'Front' : 'Side') + ' — failed, tap to retry';
+  }
 }
 
 async function submitSundayMeasurements() {
@@ -6362,7 +6399,13 @@ function _showSundayReviewChat(measurements) {
   if (measurements.thigh_right) measStr += ', Thigh R: ' + measurements.thigh_right + '"';
 
   // Send Sunday review trigger with measurements — same streaming pattern as _startMcChat
-  var trigger = '[SUNDAY_REVIEW] ' + localTimeContext() + ' Measurements just submitted: ' + measStr + '. This is the weekly review session. Cover ALL of the following IN ORDER: 1) MEASUREMENTS — analyze each body part vs last week and baseline, explain hypertrophy vs fat loss indicators. 2) WEIGHT PROGRESS — on pace for target? If not, how far off? 3) WEEK IN REVIEW — each day completed, weights lifted, PRs, missed days. 4) NUTRITION COMPLIANCE — ask directly. 5) What went well. 6) What needs work. One topic at a time. Let me respond before moving on.';
+  var photoStr = '';
+  try {
+    var pa = Object.keys(_sundayPhotoAnalyses || {}).filter(function(k) { return _sundayPhotoAnalyses[k]; })
+      .map(function(k) { return k + ': ' + String(_sundayPhotoAnalyses[k]).slice(0, 400); });
+    if (pa.length) photoStr = ' Progress photo analysis (same-pose comparison vs last week): ' + pa.join(' | ') + '.';
+  } catch (e) {}
+  var trigger = '[SUNDAY_REVIEW] ' + localTimeContext() + ' Measurements just submitted: ' + measStr + '.' + photoStr + ' This is the weekly review session. Cover ALL of the following IN ORDER: 1) MEASUREMENTS — analyze each body part vs last week and baseline, explain hypertrophy vs fat loss indicators. 2) WEIGHT PROGRESS — on pace for target? If not, how far off? 3) WEEK IN REVIEW — each day completed, weights lifted, PRs, missed days. 4) NUTRITION COMPLIANCE — ask directly. 5) What went well. 6) What needs work. One topic at a time. Let me respond before moving on.';
 
   _startSundayReviewStream(trigger);
 }
