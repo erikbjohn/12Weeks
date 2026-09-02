@@ -1831,7 +1831,7 @@ function _confirmSetIfSuspicious(exName, weight, reps, repsTyped) {
     warnings.push('You logged ' + weight + ' lb on ' + exName + '. Typo?');
   }
   // Weight typo: relative to this exercise's history.
-  if (window._weightsCache && _weightsCache[exName] && _weightsCache[exName].current > 0) {
+  if (_weightsCache && _weightsCache[exName] && _weightsCache[exName].current > 0) {  // S141: top-level let, never on window
     var prev = _weightsCache[exName].current;
     if (weight >= prev * 2.5 && weight - prev >= 30) {
       warnings.push('Last recorded weight for ' + exName + ' was ' + prev + ' lb. You entered ' + weight + ' lb. Typo?');
@@ -4739,6 +4739,7 @@ function finishOnboarding() {
 // ─── SIMPLE MARKDOWN RENDERER ──────────────────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return '';
+  text = escapeHtml(text);  // S154: LLM/server text is never raw HTML
   const lines = text.split('\n');
   let html = '';
   let inUl = false;
@@ -11948,7 +11949,7 @@ function buildRunSubsection(d, runClass) {
         '<div class="run-detail-box">' +
             '<div class="rdl">Type</div>' +
             '<div class="rdt"><span class="run-pill ' + runPillClass(d.run) + '">' + d.run.label + ' &middot; ' + d.run.time + '</span></div>' +
-            '<div class="rdd" style="margin-top:8px">' + d.run.detail + '</div>' +
+            '<div class="rdd" style="margin-top:8px">' + escapeHtml(d.run.detail) + '</div>' +
         '</div>' +
         hiitBtn +
         '<div id="hiit-timer-container"></div>' +

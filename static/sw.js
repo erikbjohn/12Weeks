@@ -3,18 +3,12 @@ const CACHE_NAME = '12weeks-v142';
 // shell. Caching it (and falling back to that cache offline) risked
 // serving a previous user's page to a different user on a shared device
 // once this worker went live. See the 'fetch' handler below.
-const STATIC_ASSETS = [
-  '/static/style.css?v=297',
-  '/static/app.js?v=297',
-  '/static/manifest.json',
-];
+// S147: no precache list — asset_url() hashes + a no-store index.html
+// guarantee freshness; the old list pointed at three dead ?v=297 URLs.
 const DATA_CACHE = '12weeks-data-v7';
 
 // Install: cache static assets
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
-  );
   self.skipWaiting();
 });
 
@@ -53,28 +47,22 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Static workout data — cache with long TTL
-  if (url.pathname === '/api/workouts' || url.pathname === '/api/warmups') {
+  // S144/S147: ONLY /api/workouts is worth an offline read. Every other
+  // authenticated GET (doses, weigh-ins, chat history, export) used to be
+  // persisted in CacheStorage on the device — and stale/error bodies too.
+  if (url.pathname === '/api/workouts') {
     e.respondWith(
       caches.open(DATA_CACHE).then(cache =>
         fetch(e.request).then(res => {
-          cache.put(e.request, res.clone());
+          if (res.ok) cache.put(e.request, res.clone());
           return res;
         }).catch(() => cache.match(e.request))
       )
     );
     return;
   }
-
-  // Other API calls — network first, cache fallback
   if (url.pathname.startsWith('/api/')) {
-    e.respondWith(
-      fetch(e.request).then(res => {
-        const clone = res.clone();
-        caches.open(DATA_CACHE).then(cache => cache.put(e.request, clone));
-        return res;
-      }).catch(() => caches.match(e.request))
-    );
+    e.respondWith(fetch(e.request));
     return;
   }
 

@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import hmac
+import html
 from program_calendar import program_week, day_date, week_day_for_date
 from lift_history import e1rm as _e1rm
 import deload as _deload
@@ -60,6 +61,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
     force=True,
 )
+
+if os.environ.get("RENDER") and not os.environ.get("APP_URL"):
+    # S165: verification, invite and OAuth-redirect URLs fell back to the
+    # Host header when APP_URL was unset — a spoofable base for auth links.
+    raise RuntimeError("APP_URL must be set in production")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
@@ -448,11 +454,15 @@ with app.app_context():
     except Exception:
         db.session.rollback()
 
-    # Fix orphaned records with NULL user_id — assign to the first user
+    # Fix orphaned records with NULL user_id — assign to the first user.
+    # S160: ONE-SHOT (SystemFlag orphan_reassign_v1) with per-table counts
+    # logged; it used to run on every deploy and silently hand any NULL row
+    # in every table to User.query.first().
     try:
         _orphan_inspector = sa_inspect(db.engine)
         first_user = User.query.first()
-        if first_user:
+        _orphan_done = SystemFlag.query.filter_by(key="orphan_reassign_v1").first()
+        if first_user and not _orphan_done:
             _tables_with_user_id = []
             for tbl in _orphan_inspector.get_table_names():
                 try:
@@ -463,12 +473,16 @@ with app.app_context():
                     pass
             for tbl in _tables_with_user_id:
                 try:
-                    db.session.execute(text(
+                    _res = db.session.execute(text(
                         f'UPDATE "{tbl}" SET user_id = :uid WHERE user_id IS NULL'
                     ), {"uid": first_user.id})
                     db.session.commit()
+                    if getattr(_res, "rowcount", 0):
+                        logging.warning("[schema] orphan reassign: %s rows in %s -> user %s", _res.rowcount, tbl, first_user.id)
                 except Exception:
                     db.session.rollback()
+            db.session.add(SystemFlag(key="orphan_reassign_v1", value="done"))
+            db.session.commit()
     except Exception:
         db.session.rollback()
 
@@ -2040,10 +2054,16 @@ def _generate_warmup(day_exercises, muscle_groups, soreness_data=None):
 def debug_health():
     """Quick health check — returns status of key tables + deployed commit."""
     import os as _os
-    results = {"commit": (_os.environ.get("RENDER_GIT_COMMIT") or "local")[:12]}
+    results = {"ok": True, "commit": (_os.environ.get("RENDER_GIT_COMMIT") or "local")[:12]}
+    # S164: table sizes only for an admin key — the unauthenticated probe
+    # published the user-table row count and six other sizes to the world.
+    _hk = request.headers.get("X-Admin-Key")
+    if not (_header_key_ok(_hk, _os.environ.get("ADMIN_API_KEY") or "")
+            or _header_key_ok(_hk, _os.environ.get("ADMIN_READ_KEY") or "")):
+        return jsonify(results)
     try:
         from sqlalchemy import text as _t
-        for tbl in ['user', 'psych_intake', 'physical_assessment', 'training_goal', 'app_state', 'weekly_prescription', 'exercise_log']:
+        for tbl in ['user', 'psych_intake', 'physical_assessment', 'training_goal', 'app_state', 'weekly_prescription', 'set_log']:
             try:
                 row = db.session.execute(_t(f'SELECT COUNT(*) FROM "{tbl}"')).scalar()
                 results[tbl] = row
@@ -3254,7 +3274,8 @@ def verify_email(token):
     return redirect(url_for("login"))
 
 
-_invite_attempts = {}  # IP -> (count, timestamp)
+_invite_attempts = {}
+_invite_request_attempts = {}  # S143: ip -> (count, window_start)  # IP -> (count, timestamp)
 
 
 @app.route("/invite/<code>", methods=["GET", "POST"])
@@ -3389,9 +3410,19 @@ def api_create_invite():
 
 @app.route("/api/request-invite", methods=["POST"])
 def api_request_invite():
-    data = request.get_json()
-    name = data.get("name", "")
-    email = data.get("email", "")
+    data = request.get_json(silent=True) or {}  # S143: non-JSON used to 500
+    name = str(data.get("name", "") or "")[:120]
+    email = str(data.get("email", "") or "").strip().lower()[:120]
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify({"error": "valid email required"}), 400
+    _ip = request.remote_addr or "?"
+    _now = time.time()
+    _a = _invite_request_attempts.get(_ip, (0, _now))
+    if _now - _a[1] > 3600:
+        _a = (0, _now)
+    if _a[0] >= 3:
+        return jsonify({"error": "too many requests — try again later"}), 429
+    _invite_request_attempts[_ip] = (_a[0] + 1, _a[1])
     if not email:
         return jsonify({"error": "Email required"}), 400
     # Email admin about the request
@@ -3579,7 +3610,7 @@ def _send_invite_request_email(name, email):
             from_email=from_email,
             to_emails=admin_email,
             subject="New 12 Weeks Invite Request",
-            html_content=f"<p><strong>Name:</strong> {name}</p><p><strong>Email:</strong> {email}</p>",
+            html_content=f"<p><strong>Name:</strong> {html.escape(name)}</p><p><strong>Email:</strong> {html.escape(email)}</p>",
         )
         sg = SendGridAPIClient(api_key)
         sg.send(msg)
@@ -4335,14 +4366,6 @@ def api_week(week):
         "days": days,
     })
 
-
-@app.route("/api/warmups")
-@login_required
-def api_warmups():
-    return jsonify(WARMUPS)
-
-
-# ─── APP STATE ──────────────────────────────────────────────────────────────
 
 def _get_state():
     s = AppState.query.filter_by(user_id=current_user.id).first()
