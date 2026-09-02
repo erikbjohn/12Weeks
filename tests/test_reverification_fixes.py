@@ -919,3 +919,32 @@ def test_every_temperature_create_goes_through_llm_create():
         src = open(f).read()
         if "temperature" in src and "messages.create(" in src:
             assert "client.messages.create(" not in src, f
+
+
+def test_coach_day_resolver_recomputes_swapped_target_like_the_card(app_ctx):
+    """2026-09-02: prescription 'DB Overhead Press @ 20', athlete swapped to Barbell OHP (history 65).
+    The card showed 65; the coach said 20. Both must say the swap target's number."""
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "swapres@test.com")
+    from models import WeeklyPrescription, ExerciseSwap, SetLog, AppState, UserEquipment, PhysicalAssessment
+    from datetime import date
+    for M in (WeeklyPrescription, ExerciseSwap, SetLog, AppState, UserEquipment, PhysicalAssessment):
+        M.query.filter_by(user_id=u.id).delete()
+    db.session.commit()
+    db.session.add(AppState(user_id=u.id, start_date=date(2026, 8, 10), current_week=4))
+    db.session.add(UserEquipment(user_id=u.id, available_equipment=["barbell", "dumbbells"], completed=True))
+    db.session.add(PhysicalAssessment(user_id=u.id, has_gym=True, completed=True))
+    db.session.add(WeeklyPrescription(user_id=u.id, week=4, day_idx=2, exercise_order=0, exercise_name="DB Overhead Press",
+                                      sets=3, reps="10", target_weight=20, source="coach"))
+    db.session.add(ExerciseSwap(user_id=u.id, week=4, day_idx=2, exercise_idx=0, original_name="DB Overhead Press", swapped_to="Barbell OHP"))
+    for i in range(3):
+        db.session.add(SetLog(user_id=u.id, exercise_name="Barbell OHP", week=3, day_idx=2, set_number=i, weight=65, reps=10,
+                              done=True, logged_date=date(2026, 8, 26)))
+    db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        from coach_assembler import _resolve_workout_for_day_uncached
+        day = _resolve_workout_for_day_uncached(4, 2)
+    ex = day["exercises"][0]
+    assert ex["name"] == "Barbell OHP" and ex.get("swapped_from") == "DB Overhead Press"
+    assert ex.get("target_weight") is not None and ex["target_weight"] >= 65, ex

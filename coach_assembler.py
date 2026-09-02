@@ -530,9 +530,26 @@ def _resolve_workout_for_day_uncached(week, day_idx):
                 current_original = day["exercises"][sw.exercise_idx].get("name")
                 if not is_valid_swap(current_original, sw.swapped_to):
                     continue
-                day["exercises"][sw.exercise_idx]["name"] = sw.swapped_to
+                _slot = day["exercises"][sw.exercise_idx]
+                _slot["swapped_from"] = current_original
+                _slot["name"] = sw.swapped_to
+                # The card (_apply_exercise_swap_overlay) recomputes the target
+                # from the SWAP TARGET's own history; the coach must see the
+                # same number. Renaming alone told the coach "Barbell OHP @ 20"
+                # (the DB press's load) while the card said 65 (2026-09-02).
+                try:
+                    from training_engine import compute_next_targets
+                    _t = compute_next_targets(current_user.id, sw.swapped_to, week, day_idx,
+                                              exercise_order=sw.exercise_idx, allow_llm=False)
+                    if _t and _t.get("target_weight") is not None:
+                        _slot["target_weight"] = _t["target_weight"]
+                    else:
+                        _slot.pop("target_weight", None)
+                except Exception:
+                    log.warning("swap target recompute failed", exc_info=True)
+                    _slot.pop("target_weight", None)
     except Exception:
-        pass
+        log.warning("manual swap resolve failed", exc_info=True)
 
     # COACH-OR-NOTHING: a lift day with NO prescription is UNPLANNED. Strip the
     # raw template exercises and flag it, exactly like the dashboard EXERCISE card
