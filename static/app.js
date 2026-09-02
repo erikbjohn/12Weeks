@@ -11059,7 +11059,7 @@ function openInlineCoachChat() {
     if (!container) return;
     container.innerHTML =
       '<div id="coach-inline-messages" style="max-height:50vh;overflow-y:auto;padding:8px 0">' +
-        '<div class="chat-bubble coach" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
+        '<div class="chat-bubble coach" id="coach-inline-opener" style="background:var(--coach-bg);border:1px solid var(--coach-border);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text);margin-bottom:8px"><div class="chat-typing"><span></span><span></span><span></span></div></div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-top:8px">' +
         '<input type="text" id="coach-inline-input" placeholder="Message Erik..." enterkeyhint="send" ' +
@@ -11093,7 +11093,7 @@ async function _renderTodayHistoryInline() {
             }
         }
         if (!html) return;
-        var typing = messagesEl.querySelector('.chat-bubble.coach');
+        var typing = document.getElementById('coach-inline-opener')   /* the opener's OWN bubble — never the first history bubble */;
         var wrap = document.createElement('div');
         wrap.innerHTML = '<div style="font-size:11px;color:var(--dim);margin:0 0 6px">Earlier today</div>' + html
             + '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
@@ -11112,7 +11112,7 @@ async function _fetchInlineCoachOpener() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: trigger }),
         });
-        var bubble = messagesEl.querySelector('.chat-bubble.coach');
+        var bubble = document.getElementById('coach-inline-opener')   /* the opener's OWN bubble — never the first history bubble */;
         if (bubble) bubble.innerHTML = '';
         var fullText = '';
         var reader = sseReader(res);
@@ -11147,7 +11147,7 @@ async function _fetchInlineCoachOpener() {
             _chatHistory.push({ role: 'assistant', content: fullText, date: todayStr(), time: new Date().toISOString() });
         }
     } catch(e) {
-        var bubble = messagesEl.querySelector('.chat-bubble.coach');
+        var bubble = document.getElementById('coach-inline-opener')   /* the opener's OWN bubble — never the first history bubble */;
         if (bubble) bubble.textContent = 'What\'s on your mind?';
     }
     var input = document.getElementById('coach-inline-input');
