@@ -183,3 +183,29 @@ def evidence_done_slots(user_id, block_start, slots, resolve_day):
         except Exception:
             prescribed[slot] = []
     return completed_day_keys(slots, toggled, prescribed, set_rows, run_days)
+
+
+def aerobic_efficiency_weeks(runs, hr_lo=118, hr_hi=140):
+    """S136: calendar-week (Monday-start) easy-pace-at-HR series from RunLog-
+    like rows (log_date, distance_miles, duration_min, avg_hr). Distance-
+    weighted pace, duration-weighted HR; weeks with no qualifying run are
+    omitted. Shared by the Progress chart and the run planner's prompt."""
+    from datetime import timedelta
+    buckets = {}
+    for r in runs:
+        d = getattr(r, "log_date", None); mi = getattr(r, "distance_miles", None)
+        mn = getattr(r, "duration_min", None); hr = getattr(r, "avg_hr", None)
+        if not d or not mi or not mn or hr is None or mi <= 0 or mn <= 0 or not (hr_lo <= hr <= hr_hi):
+            continue
+        ws = d - timedelta(days=d.weekday())
+        b = buckets.setdefault(ws, {"sec": 0.0, "miles": 0.0, "hr_sec": 0.0, "n": 0})
+        sec = mn * 60.0
+        b["sec"] += sec; b["miles"] += mi; b["hr_sec"] += hr * sec; b["n"] += 1
+    out = []
+    for ws in sorted(buckets):
+        b = buckets[ws]
+        if b["miles"] <= 0 or b["sec"] <= 0:
+            continue
+        out.append({"week_start": ws.isoformat(), "pace_sec_per_mi": round(b["sec"] / b["miles"]),
+                    "avg_hr": round(b["hr_sec"] / b["sec"], 1), "n_runs": b["n"], "miles": round(b["miles"], 2)})
+    return out

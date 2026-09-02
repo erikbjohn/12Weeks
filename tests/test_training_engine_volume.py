@@ -183,7 +183,7 @@ class TestTimedExerciseRepsPreserved:
                 f"{t['target_weight']}"
             )
 
-    def test_configured_reps_int_returns_none_for_timed(self, app_ctx):
+    def test_configured_reps_int_returns_none_for_timed(self, app_ctx, monkeypatch):
         # The narrowed _get_configured_reps must return None for non-numeric
         # so callers doing math (rep-drop compensation) don't TypeError on
         # str < float comparisons.
@@ -192,31 +192,15 @@ class TestTimedExerciseRepsPreserved:
         # Create an in-memory template-like result and check the parsing.
         # Use a known time-suffixed reps via a direct helper call mock —
         # simplest: hit a real template slot if any has timed reps.
+        # S158: the templates carry no timed exercise any more (the program
+        # is coach-designed), so the test skipped forever. Monkeypatch the
+        # template source with a timed slot and exercise the real parser.
+        import workout_data
+        def _fake_get_workouts(week):
+            return [{"liftName": "Core", "exercises": [{"name": "Plank", "sets": "3x45s"}]}]
+        monkeypatch.setattr(workout_data, "get_workouts", _fake_get_workouts)
         with app.test_request_context():
-            # Iterate weeks/days to find a timed exercise in templates.
-            from workout_data import get_workouts
-            found_timed = None
-            for w in range(1, 13):
-                for di in range(7):
-                    days = get_workouts(w)
-                    if di >= len(days):
-                        continue
-                    for ex in days[di].get("exercises", []) or []:
-                        sets = ex.get("sets", "")
-                        if "s" in sets and "x" in sets:
-                            # Check if reps token has 's' (timed)
-                            import re
-                            m = re.match(r"\d+x(.+)", sets)
-                            if m and not m.group(1).strip().isdigit():
-                                found_timed = (ex.get("name"), w, di)
-                                break
-                    if found_timed:
-                        break
-                if found_timed:
-                    break
-            if found_timed is None:
-                pytest.skip("no timed exercise in templates to test against")
-            name, w, di = found_timed
+            name, w, di = "Plank", 1, 0
             int_reps = _get_configured_reps(name, w, di)
             str_reps = _get_configured_reps_str(name, w, di)
             assert int_reps is None, (

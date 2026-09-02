@@ -544,6 +544,10 @@ def generate_week_runs(
         _rc_bits.append(f"- check-ins (7d): {user_context['checkins_7d']}")
     if user_context.get("scheduled_activities"):
         _rc_bits.append("- " + user_context["scheduled_activities"].replace("\n", "\n  "))
+    if user_context.get("z2_pace_trend"):
+        # S136: the ONE aerobic-fitness signal that exists — Z2 pace at HR by
+        # week (distance-weighted). Allowed data; still no per-interval claims.
+        _rc_bits.append("- Z2 PACE@HR TREND (easy runs, HR 118-140, weekly): " + "; ".join(user_context["z2_pace_trend"]))
     _recovery_ctx = (
         "RECOVERY CONTEXT (Garmin + check-ins, real data — use it for LOAD "
         "decisions; it says nothing about any single run's execution):\n"

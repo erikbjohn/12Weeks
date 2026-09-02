@@ -145,10 +145,17 @@ def audit_response_async(
         return await loop.run_in_executor(None, audit_posture, user_message, response_text)
 
     async def run_all():
-        claim_tasks = [run_one_claim(t, r) for t, r in cited_claims]
-        posture_task = run_posture()
-        claim_results = await asyncio.gather(*claim_tasks)
-        posture_result = await posture_task
+        # S157: schedule everything as tasks and gather ONCE. A bare
+        # `posture_task = run_posture()` coroutine was never awaited whenever
+        # a claim audit raised inside gather (RuntimeWarning buried under
+        # ~3,100 other warnings) — the posture audit silently never ran.
+        claim_tasks = [asyncio.ensure_future(run_one_claim(t, r)) for t, r in cited_claims]
+        posture_task = asyncio.ensure_future(run_posture())
+        results = await asyncio.gather(*claim_tasks, posture_task, return_exceptions=True)
+        *claim_results, posture_result = results
+        claim_results = [r for r in claim_results if not isinstance(r, BaseException)]
+        if isinstance(posture_result, BaseException):
+            raise posture_result
         return claim_results, posture_result
 
     try:

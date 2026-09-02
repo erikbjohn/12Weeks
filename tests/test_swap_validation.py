@@ -295,17 +295,23 @@ class TestCarryForwardAcrossPhase:
         from equipment_swaps import is_valid_swap
 
         u = user_factory()
+        # S158: the program is coach-designed, so seed COACH prescriptions
+        # with a different exercise at the slot across the two weeks — the
+        # static template never changed there and the test skipped forever.
+        from models import WeeklyPrescription
+        with app.app_context():
+            for wk, name in ((4, "Barbell Bent-Over Row"), (5, "Single-Arm DB Row")):
+                for order in range(4):
+                    db.session.add(WeeklyPrescription(
+                        user_id=u.id, week=wk, day_idx=4, exercise_order=order,
+                        exercise_name=(name if order == 3 else "Push-Ups"),
+                        sets=3, reps="8", rest="90s", source="coach"))
+            db.session.commit()
         with app.test_request_context():
             prev_original = _exercise_at_slot(u.id, 4, 4, 3)
             new_original = _exercise_at_slot(u.id, 5, 4, 3)
-
-        # Pre-conditions: this only tests something real if the slot actually
-        # changes between weeks. If the program ever stabilises the slot, this
-        # test will start passing trivially — fail loud rather than silently.
-        if prev_original is None or new_original is None:
-            pytest.skip("slot lookup unavailable for this week range")
-        if prev_original == new_original:
-            pytest.skip("week 4→5 keeps slot stable; nothing to test here")
+        assert prev_original == "Barbell Bent-Over Row", prev_original
+        assert new_original == "Single-Arm DB Row", new_original
 
         # Pick a swap target that's valid for prev but not for new.
         swap_target = None
@@ -315,10 +321,7 @@ class TestCarryForwardAcrossPhase:
             if not is_valid_swap(new_original, alt["name"]):
                 swap_target = alt["name"]
                 break
-        if swap_target is None:
-            pytest.skip(
-                f"no swap target distinguishes {prev_original} from {new_original}"
-            )
+        assert swap_target is not None, f"no swap target distinguishes {prev_original} from {new_original}"
 
         with app.app_context():
             db.session.add(ExerciseSwap(

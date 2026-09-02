@@ -56,13 +56,9 @@ def lift_session_history(user_id, exercise_name, limit_sessions=None,
     # done=False) but never completed is NOT a performed set — counting it
     # invented top sets / e1RMs the athlete never earned (dashboard charts,
     # coach get_e1rm, weekly report all read this function).
-    rows = (SetLog.query
-            .filter(SetLog.user_id == user_id,
-                    SetLog.weight.isnot(None),
-                    SetLog.done.is_(True),
-                    SetLog.set_skipped.isnot(True))
-            .all())
-
+    # S152: filter by candidate NAMES in SQL. This used to load every
+    # performed SetLog row for the user and match in Python — and
+    # lift_decline called it once per key lift per prompt.
     if by_movement and _movement_key is not None:
         target = _movement_key(exercise_name)
 
@@ -73,6 +69,18 @@ def lift_session_history(user_id, exercise_name, limit_sessions=None,
 
         def _match(n):
             return resolve_name(n) == target
+    distinct_names = [n for (n,) in SetLog.query.with_entities(SetLog.exercise_name)
+                      .filter(SetLog.user_id == user_id).distinct().all()]
+    candidates = [n for n in distinct_names if n and _match(n)]
+    if not candidates:
+        return []
+    rows = (SetLog.query
+            .filter(SetLog.user_id == user_id,
+                    SetLog.exercise_name.in_(candidates),
+                    SetLog.weight.isnot(None),
+                    SetLog.done.is_(True),
+                    SetLog.set_skipped.isnot(True))
+            .all())
 
     sessions = {}
     for s in rows:
