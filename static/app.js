@@ -1097,22 +1097,19 @@ document.addEventListener('keydown', function(ev) {
   }
 });
 
-function _fetchWithTimeout(url, opts, ms) {
-  // S009: a stalled socket used to hold _setSaving[key] until the browser
-  // gave up (minutes), silently dropping every blur-edit in between.
-  var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  var t = ctrl ? setTimeout(function(){ ctrl.abort(); }, ms || 12000) : null;
-  return fetch(url, ctrl ? Object.assign({ signal: ctrl.signal }, opts) : opts)
-    .finally(function(){ if (t) clearTimeout(t); });
-}
+// NO abort on saves. The 12 s abort added 2026-09-01 (S009) turned the first
+// request after iOS wakes the app — which can stall well past 12 s before it
+// leaves the phone — into a failure; its 1 s retry hit the same stall, and
+// the set went to the outbox (2026-09-02: deadlift set 1, OHP set 1, face
+// pull set 0 all replayed minutes late). A slow save that lands is a save.
+// The stuck-lock problem S009 described is solved in toggleSet instead: the
+// per-set lock is a timestamp and expires after 15 s.
 function apiPost(url, body) {
-  // 20 s: gym cellular can hold a live request past 12 s; the server answers
-  // set saves in ~100 ms, so anything slower is the phone's link, not a hang.
-  return _fetchWithTimeout(url, {
+  return fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }, 20000).then(res => {
+  }).then(res => {
     if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) {
       console.error('API error:', res.status, url);
@@ -1134,7 +1131,7 @@ function apiPost(url, body) {
   }).catch(e => {
     console.warn('POST failed (attempt 1), retrying:', url, e);
     return new Promise(resolve => setTimeout(resolve, 1000)).then(() =>
-      _fetchWithTimeout(url, {
+      fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
@@ -1902,7 +1899,7 @@ function resolvePrefillWeight(setData, fallback) {
 function saveSetField(week, dayIdx, exIdx, setIdx, exName) {
   const key = `${week}_${dayIdx}_${exIdx}_${setIdx}`;
   // If toggleSet is mid-flight, let it own the save — don't double-write
-  if (_setSaving[key]) return;
+  if (_setSaving[key] && (Date.now() - _setSaving[key]) < 15000) return;   // a stalled save never blocks the next tap for long
   const wtInput = document.getElementById(`wt-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const repsInput = document.getElementById(`reps-${week}-${dayIdx}-${exIdx}-${setIdx}`);
   const weight = wtInput ? parseFloat(wtInput.value) || 0 : 0;
@@ -1950,7 +1947,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     btn.innerHTML = '';
     btn.closest('.set-row').classList.remove('set-done');
     // Save un-done state to DB — mark in-flight so blur-triggered saveSetField doesn't double-write
-    _setSaving[key] = true;
+    _setSaving[key] = Date.now();
     const _p1 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: false });
     if (_p1 && typeof _p1.finally === 'function') {
       _p1.then(_revertIfRejected).finally(() => { delete _setSaving[key]; });
@@ -1968,7 +1965,7 @@ function toggleSet(week, dayIdx, exIdx, setIdx, restSec, exName, btn) {
     // Save set to DB (every set, every rep, every weight)
     const swaps = JSON.parse(sessionStorage.getItem('exercise_swaps') || '{}');
     const isSwapped = !!swaps[`${week}_${dayIdx}_${exIdx}`];
-    _setSaving[key] = true;
+    _setSaving[key] = Date.now();
     const _p2 = apiPost('/api/sets', { exercise: exName, week, day_idx: dayIdx, set_number: setIdx, weight, reps, done: true, exercise_swapped: isSwapped });
     if (_p2 && typeof _p2.finally === 'function') {
       _p2.then(_revertIfRejected).finally(() => { delete _setSaving[key]; });

@@ -433,11 +433,14 @@ def test_rest_day_with_a_run_is_not_dimmed_and_planning_copy_not_monday():
     assert "Monday weekly planning session" not in src
 
 
-def test_api_post_has_a_timeout():
+def test_api_post_never_aborts_a_save_and_lock_expires():
+    """2026-09-02: an abort on saves failed the first request after iOS wake; the lock expires instead."""
     src = open("static/app.js").read()
-    assert "function _fetchWithTimeout" in src and "ctrl.abort()" in src
+    assert "_fetchWithTimeout" not in src
     body = src[src.index("function apiPost("):src.index("function apiPost(") + 600]
-    assert "_fetchWithTimeout(url" in body and "20000" in body
+    assert "abort" not in body.lower()
+    assert "_setSaving[key] = Date.now();" in src
+    assert "(Date.now() - _setSaving[key]) < 15000" in src
 
 
 def test_logout_is_post_only(app_ctx):
