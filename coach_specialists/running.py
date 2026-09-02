@@ -11,7 +11,7 @@ def _anthropic_client():
     import anthropic
     return anthropic.Anthropic(
         api_key=os.environ["ANTHROPIC_API_KEY"],
-        max_retries=5,
+        max_retries=1, timeout=75.0,   # S163
     )
 
 

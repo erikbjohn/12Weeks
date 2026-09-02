@@ -94,19 +94,20 @@ self.addEventListener('push', (e) => {
       icon: '/static/icon-192.png',
       badge: '/static/icon-192.png',
       tag: data.tag || 'general',
-      data: { url: '/' },
+      data: { url: data.url || '/' },
     })
   );
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
   e.waitUntil(
     clients.matchAll({ type: 'window' }).then(clientList => {
       for (const client of clientList) {
-        if (client.url.includes('/') && 'focus' in client) return client.focus();
+        if ('focus' in client) { if ('navigate' in client && target !== '/') client.navigate(target); return client.focus(); }
       }
-      return clients.openWindow('/');
+      return clients.openWindow(target);
     })
   );
 });

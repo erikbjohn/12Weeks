@@ -351,3 +351,75 @@ def test_public_app_url_never_trusts_host_on_render(app_ctx, monkeypatch):
     with app_.test_request_context(headers={"Host": "evil.example"}):
         assert appmod._public_app_url() == "https://one2weeks-9ewf.onrender.com"
     assert "request.host_url" not in open("app.py").read().split("def _public_app_url")[1].split("def _header_key_ok")[1]
+
+
+# ═════════════════════════ batch 4 ═════════════════════════
+
+def test_one_clock_for_checkin_gate_and_weigh_in_dates():
+    src = open("static/app.js").read()
+    assert "'popup_' + key + '_' + todayStr()" not in src
+    assert "date: todayStr(), weight:" not in src
+    assert "date: todayStr(), sleep_quality:" not in src
+
+
+def test_index_no_longer_nukes_caches_and_login_clears_data_cache():
+    assert "caches.delete(n)" not in open("templates/index.html").read()
+    assert "caches.delete" in open("templates/login.html").read()
+    sw = open("static/sw.js").read()
+    assert "data: { url: data.url || '/' }" in sw and "clients.openWindow(target)" in sw
+
+
+def test_athlete_routes_never_echo_exception_text(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s138b@test.com")
+    import app as appmod
+    def boom(*a, **k): raise RuntimeError("psycopg2 secret detail")
+    monkeypatch.setattr(appmod, "compute_body_comp", boom, raising=False)
+    for path in ("/api/stats/body-comp", "/api/stats/projection-inputs", "/api/stats/aerobic-efficiency"):
+        r = client.get(path)
+        assert "psycopg2" not in r.get_data(as_text=True) and "Traceback" not in r.get_data(as_text=True), path
+
+
+def test_chat_coach_context_carries_z2_trend(app_ctx):
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s136@test.com")
+    from models import RunLog
+    from datetime import date, timedelta
+    RunLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    for i in range(3):
+        db.session.add(RunLog(user_id=u.id, week=1, day_idx=i, log_date=date(2026, 8, 24) + timedelta(days=i),
+                              distance_miles=4.0, duration_min=40, avg_hr=130, source="garmin"))
+    db.session.commit()
+    with app_.test_request_context():
+        from flask_login import login_user; login_user(u)
+        from coach_assembler import _build_runs, _format_athlete_data
+        ctx = _build_runs()
+        assert ctx["z2_pace_trend"], ctx
+        txt = _format_athlete_data(ctx, ["runs"])
+    assert "<z2_pace_trend>" in txt
+
+
+def test_run_planner_block_cites_pace_and_peak_hr(app_ctx):
+    app_, db = app_ctx
+    u, _ = _login(app_, db, "s067@test.com")
+    from models import RunLog
+    from datetime import date
+    from coach_planning_runs import _build_run_history_block
+    RunLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(RunLog(user_id=u.id, week=1, day_idx=0, log_date=date(2026, 8, 30), distance_miles=4.0,
+                          duration_min=40, avg_hr=132, max_hr=168, source="garmin"))
+    db.session.commit()
+    txt = _build_run_history_block(u.id, 1, today=date(2026, 9, 1))
+    assert "pace=10:00/mi" in txt and "peakHR=168" in txt
+
+
+def test_sunday_recap_states_lifts_and_weigh_ins():
+    src = open("weekly_report.py").read()
+    assert '"lifts_done": metrics.get("workouts_completed")' in src and 'f"weigh-ins {data[\'weigh_in_days\']}/7"' in src
+
+
+def test_specialists_have_timeouts():
+    import glob
+    for f in glob.glob("coach_specialists/*.py"):
+        src = open(f).read()
+        assert "max_retries=5" not in src, f

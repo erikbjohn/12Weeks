@@ -264,7 +264,7 @@ def test_build_sunday_recap_exact_text_seeded_week(app_ctx, monkeypatch):
 
     assert recap is not None
     assert recap["text"] == (
-        "Wk 6: 212→209.9 (curve 209.5) · lifts -10% · 15 mi · doses 5/6 · sleep 7.9h avg"
+        "Wk 6: 212→209.9 (curve 209.5) · lifts -10% · weigh-ins 2/7 · 15 mi · doses 5/6 · sleep 7.9h avg"
     ), recap["text"]
     assert recap["data"] == {
         "week": 6,
@@ -276,6 +276,9 @@ def test_build_sunday_recap_exact_text_seeded_week(app_ctx, monkeypatch):
         "doses_taken": 5,
         "doses_scheduled": 6,
         "sleep_avg_h": 7.9,
+        # S076: sessions done/planned + weigh-in days (planned is None here:
+        # the seeded week has no prescription rows)
+        "lifts_done": 3, "lifts_planned": None, "weigh_in_days": 2,
     }
 
 

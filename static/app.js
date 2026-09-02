@@ -918,10 +918,10 @@ function dismissCoachPopup() {
 
 // Dedup: prevent duplicate popups per day
 function hasPopupFired(key) {
-  return localStorage.getItem('popup_' + key + '_' + todayStr()) === '1';
+  return localStorage.getItem('popup_' + key + '_' + appTodayISO()) === '1';   // S145: server-tz day
 }
 function markPopupFired(key) {
-  localStorage.setItem('popup_' + key + '_' + todayStr(), '1');
+  localStorage.setItem('popup_' + key + '_' + appTodayISO(), '1');
 }
 
 async function showPreStartLockout(startDateStr) {
@@ -1789,7 +1789,7 @@ function recordWeight(exName, weight, setsLabel, rpe, week, dayIdx, rpeScore, re
     rpe: rpe,
     rpe_score: rpeScore,
     reps_completed: repsCompleted,
-    date: todayStr(),
+    date: appTodayISO(),   // S145
     week: week,
     day: dayIdx,
   });
@@ -2904,7 +2904,7 @@ async function saveBaseline() {
         weight: working,
         reps: `baseline: ${lift.suggested}lb x ${reps}`,
         rpe: 'just_right',
-        date: todayStr(),
+        date: appTodayISO(),   // S145
         week: 0,
         day: 0,
         testWeight: lift.suggested,
@@ -3521,13 +3521,13 @@ async function paNextFromBasics() {
   const payload = { bodyweight: _paData.weight, height: _paData.height };
   await apiPost('/api/physical-assessment', payload);
 
-  const bwRes = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: todayStr(), weight: _paData.weight }) });
+  const bwRes = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ date: appTodayISO(), weight: _paData.weight }) });
   if (!bwRes.ok) {
     alert('Failed to save body weight. Please try again.');
     return;
   }
   if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
-  _bodyweightCache.push({ date: todayStr(), weight: _paData.weight });
+  _bodyweightCache.push({ date: appTodayISO(), weight: _paData.weight });
 
   _paStep = 2;
   renderPhysicalAssessment();
@@ -6146,7 +6146,7 @@ async function showMorningCheckinOverlay() {
         localStorage.setItem(_dk, '1');
         // Backfill MorningCheckIn if missing
         fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ date: todayStr(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements auto-backfill]' })
+          body: JSON.stringify({ date: appTodayISO(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements auto-backfill]' })
         }).catch(function(){});
         el.innerHTML = '';
         renderAll();
@@ -6304,7 +6304,7 @@ async function submitSundayMeasurements() {
   var submitBtn = document.querySelector('.morning-checkin-card .btn-primary');
   if (submitBtn) submitBtn.disabled = true;
   var data = {
-    date: todayStr(),
+    date: appTodayISO(),   // S145
     weight: parseFloat(document.getElementById('sun-weight')?.value) || null,
     waist: parseFloat(document.getElementById('sun-waist')?.value) || null,
     chest: parseFloat(document.getElementById('sun-chest')?.value) || null,
@@ -6354,14 +6354,14 @@ async function submitSundayMeasurements() {
 
   // Also save weight to bodyweight tracker
   if (data.weight) {
-    await apiPost('/api/bodyweight', { date: todayStr(), weight: data.weight });
+    await apiPost('/api/bodyweight', { date: appTodayISO(), weight: data.weight });
   }
 
   // Create MorningCheckIn record NOW — don't wait for coach conversation to finish.
   // This way even if the user closes the app mid-conversation, the gate is cleared
   // on all devices.
   await fetch('/api/morning-checkin', { method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ date: todayStr(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements submitted]' })
+    body: JSON.stringify({ date: appTodayISO(), sleep_quality: null, stress_level: null, soreness: null, mood: null, motivation: null, anxiety: null, notes: '[Sunday measurements submitted]' })
   }).catch(function(){});
   var _sunDk = 'sunday_measurements_' + todayStr();
   localStorage.setItem(_sunDk, '1');
@@ -6646,12 +6646,12 @@ async function logMorningWeight() {
   var row = document.getElementById('mc-weigh-row');
   var evRow = document.getElementById('mc-event-row');
   try {
-    var body = { date: todayStr(), weight: v };
+    var body = { date: appTodayISO(), weight: v };
     if (_mcScaleEvent) body.event = _mcScaleEvent;
     var res = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body) });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    if (Array.isArray(_bodyweightCache)) _bodyweightCache.push({ date: todayStr(), weight: v, event: _mcScaleEvent });
+    if (Array.isArray(_bodyweightCache)) _bodyweightCache.push({ date: appTodayISO(), weight: v, event: _mcScaleEvent });
     if (row) row.innerHTML = '<div style="color:var(--accent);font-size:15px;padding:2px 0">&#10003; ' + v + ' lb logged'
       + (_mcScaleEvent ? ' &middot; ' + _mcScaleEvent + ' event recorded (judged as water)' : '') + '</div>';
     if (evRow) evRow.style.display = 'none';
@@ -6746,7 +6746,7 @@ async function finishMorningCheckin() {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        date: todayStr(),
+        date: appTodayISO(),   // S145
         sleep_quality: null, stress_level: null, soreness: null,
         mood: null, motivation: null, anxiety: null,
         notes: '[Coach conversation check-in]',
@@ -6760,7 +6760,7 @@ async function finishMorningCheckin() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          date: todayStr(),
+          date: appTodayISO(),   // S145
           sleep_quality: null, stress_level: null, soreness: null,
           mood: null, motivation: null, anxiety: null,
           notes: '[Coach conversation check-in]',
@@ -6798,7 +6798,7 @@ function submitMorningCheckin() {
   if (freeText) parts.push(freeText);
 
   const data = {
-    date: todayStr(),
+    date: appTodayISO(),   // S145
     sleep_quality: parseInt(document.getElementById('mc-sleep').value) || 5,
     stress_level: parseInt(document.getElementById('mc-stress').value) || 5,
     soreness: parseInt(document.getElementById('mc-soreness').value) || 5,
@@ -8614,7 +8614,7 @@ async function submitWeeklyMeasurements() {
   var submitBtn = document.querySelector('#checkin-form .btn-primary');
   if (submitBtn) submitBtn.disabled = true;
   var data = {
-    date: todayStr(),
+    date: appTodayISO(),   // S145
     weight: parseFloat(document.getElementById('checkin-weight')?.value) || null,
     waist: parseFloat(document.getElementById('checkin-waist')?.value) || null,
     chest: parseFloat(document.getElementById('checkin-chest')?.value) || null,
@@ -8659,7 +8659,7 @@ async function submitWeeklyMeasurements() {
     await fetch('/api/bodyweight', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ date: todayStr(), weight: data.weight }),
+      body: JSON.stringify({ date: appTodayISO(), weight: data.weight }),
     }).catch(function(){});
   }
 
@@ -10008,7 +10008,10 @@ function checkMilestones() {
   for (const exName in weights) {
     const data = weights[exName];
     if (!data || !data.history || data.history.length < 2) continue;
-    const hist = data.history;
+    // S086: this block only — an all-time max from a prior block is not a PR here.
+    const _start = _stateCache && _stateCache.start_date;
+    const hist = data.history.filter(h => !_start || !h.date || h.date >= _start);
+    if (hist.length < 2) continue;
     const latest = hist[hist.length - 1].weight;
     const previousMax = Math.max(...hist.slice(0, -1).map(h => h.weight));
     if (latest > previousMax) {
@@ -10149,7 +10152,7 @@ async function triggerMorningPopup() {
         // event in the same POST (a client call to /api/compliance/refresh
         // used to live here — that route never existed and 404'd silently).
         apiPost('/api/morning-checkin', {
-            date: todayStr(),
+            date: appTodayISO(),   // S145
             sleep_quality: null, stress_level: null, soreness: null,
             mood: null, motivation: null, anxiety: null,
             notes: '[MISSED] Morning check-in not completed before noon',
@@ -10483,11 +10486,11 @@ async function logHeroWeight() {
   var row = document.getElementById('th-weigh-row');
   try {
     var res = await fetch('/api/bodyweight', { method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ date: todayStr(), weight: v }) });
+      body: JSON.stringify({ date: appTodayISO(), weight: v }) });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     if (!Array.isArray(_bodyweightCache)) _bodyweightCache = [];
     _bodyweightCache = _bodyweightCache.filter(function(e) { return e.date !== todayStr(); });
-    _bodyweightCache.push({ date: todayStr(), weight: v });
+    _bodyweightCache.push({ date: appTodayISO(), weight: v });
     if (row) row.innerHTML = '<span style="color:var(--accent);font-size:15px">&#10003; ' + v + ' lb logged</span>';
     try { renderDetail(); } catch (e) {}  // Stats row reads _bodyweightCache
   } catch(e) {
@@ -13111,7 +13114,7 @@ async function saveMeasurements() {
   const btn = document.getElementById('btn-save-measurements');
 
   const body = {
-    date: todayStr(),
+    date: appTodayISO(),   // S145
     weight: weightEl ? parseFloat(weightEl.value) || null : null,
     waist: waistEl ? parseFloat(waistEl.value) || null : null,
     notes: notesEl ? notesEl.value : ''

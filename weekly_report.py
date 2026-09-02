@@ -378,8 +378,23 @@ def _build_sunday_recap_inner(uid, local_date):
 
     lift_trend_pct = (metrics.get("lift_trend") or {}).get("tonnage_delta_pct")
 
+    # S076: lifts done/planned (same evidence rule as the dashboard streak)
+    # and weigh-in days out of 7 — the two numbers the spec's verdict rests on.
+    from models import BodyWeight
+    # None (omitted) only when the athlete has never weighed in at all (no
+    # data); a block week with zero weigh-ins is a real 0/7 and is shown.
+    weigh_in_days = None
+    if BodyWeight.query.filter(BodyWeight.user_id == uid).first() is not None:
+        weigh_in_days = (BodyWeight.query
+                         .filter(BodyWeight.user_id == uid, BodyWeight.log_date >= week_monday,
+                                 BodyWeight.log_date <= week_sunday)
+                         .with_entities(BodyWeight.log_date).distinct().count())
+
     data = {
         "week": week_num,
+        "lifts_done": metrics.get("workouts_completed"),
+        "lifts_planned": metrics.get("workouts_total"),
+        "weigh_in_days": weigh_in_days,
         "weight_start": metrics.get("weight_start"),
         "weight_end": metrics.get("weight_end"),
         "curve_target": metrics.get("weight_projection_target"),
@@ -401,8 +416,12 @@ def _build_sunday_recap_inner(uid, local_date):
             seg += f" (curve {_fmt_num(data['curve_target'])})"
         segments.append(seg)
 
+    if data.get("lifts_planned"):
+        segments.append(f"sessions {data['lifts_done']}/{data['lifts_planned']}")
     if data["lift_trend"] is not None:
         segments.append(f"lifts {data['lift_trend']:+g}%")
+    if data.get("weigh_in_days") is not None:
+        segments.append(f"weigh-ins {data['weigh_in_days']}/7")
 
     if data["miles"] is not None:
         segments.append(f"{_fmt_num(data['miles'])} mi")

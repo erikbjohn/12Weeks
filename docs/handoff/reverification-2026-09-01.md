@@ -76,17 +76,17 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S059 | medium | PARTIAL | No test; adherence_7d still excludes today. |
 | S060 | medium | PARTIAL | No note input on weigh-in strip; only latest event surfaced; no events_last_10d. |
 | S062 | medium | UPDATED | FIXED — both chat paths 503 on context failure (no stub); report thread logs traceback; Garmin DEBUG lines → debug level; test. |
-| S067 | medium | PARTIAL | Run PLANNER history block still has no pace/peak HR (coach_planning_runs.py:44-58); no test for max_hr mapping. |
+| S067 | medium | UPDATED | FIXED — run planner history cites pace and peakHR; test. |
 | S069 | medium | UPDATED | FIXED — 'good enough' hook deleted from both chat paths and the assembler; test. |
 | S071 | medium | UPDATED | FIXED — every model id literal now comes from llm_client; grep test. |
 | S072 | medium | PARTIAL | Client still refetches whole /api/workouts after swaps (app.js:5558); no query-count test. |
 | S073 | medium | PARTIAL | checkOnboardingComplete still 6 GETs/load; no onboarding_complete flag; retest status still fetched; no request-count pin. |
-| S076 | medium | PARTIAL | Sunday recap text still lacks lifts_done/planned and weigh-ins/7 (weekly_report.py:395-420); no test. |
+| S076 | medium | UPDATED | FIXED — recap states sessions done/planned and weigh-ins/7; tests updated. |
 | S079 | medium | PARTIAL | schedule rows still written for all 7 days source='engine'; [DAY_SCHEDULE] not taught in markers; no S079 test. |
 | S083 | medium | UPDATED | FIXED — last 10 CoachFeedback flags rendered as 'flagged' memories; test. |
-| S086 | medium | PARTIAL | PR detection still all-time; no test. |
+| S086 | medium | UPDATED | FIXED — PR milestone is block-scoped. |
 | S087 | medium | PARTIAL | Two copies of field list; scoreboard Tape delta unlabeled. |
-| S089 | medium | UPDATED | FIXED — specialist smoke test carries live_llm marker (skipped without --live-coach). |
+| S089 | medium | UPDATED | FIXED — users.py default prod host corrected. |
 | S091 | medium | PARTIAL | No secret-scan guard. |
 | S093 | medium | PARTIAL | No test for the N+1 case; client posts currentWeek. |
 | S094 | medium | UPDATED | FIXED — all-None fetch does not stamp pulled_at; counted as wellness_empty. |
@@ -97,7 +97,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S101 | medium | UPDATED | FIXED — canonicalization one-shot behind SystemFlag name_aliases_v1; dead exercise_log UPDATE removed. |
 | S103 | medium | PARTIAL | Memo unpinned by any test. |
 | S104 | medium | PARTIAL | 3 of 28 LLM sites instrumented; no LlmUsage table/endpoint. |
-| S106 | medium | PARTIAL | 500-row scan remains; no test. |
+| S106 | medium | UPDATED | FIXED — exercise history is a 180-day window with no row cap. |
 | S107 | medium | PARTIAL | No test; NULL logged_date fallback. |
 | S108 | medium | PARTIAL | Gate duplicated in two files; no test. |
 | S110 | medium | PARTIAL | No thread test. |
@@ -112,28 +112,28 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S127 | medium | PARTIAL | Judge pass still serial full-price messages.create; no Batch API. |
 | S128 | medium | PARTIAL | Local week-formula copy; no test for the schedule-row-no-prescription case. |
 | S129 | medium | UPDATED | FIXED — POST /api/chat/note persists the confirmation; test. |
-| S130 | medium | UPDATED | FIXED — GET /api/sets deleted (no caller); test asserts 405. |
+| S130 | medium | UPDATED | PARTIAL — GET /api/sets deleted; the two 410 stubs are the deliberate retirement contract (tests pin 410) and stay. |
 | S131 | medium | PARTIAL | No test; _swapped_from key still unread. |
 | S132 | medium | UPDATED | FIXED — realign copies completed_at/workout_duration_min/source. |
 | S134 | low | UPDATED | FIXED — photo prompt no longer asks for body-fat % or an aesthetic score; test. |
 | S135 | low | UPDATED | FIXED — same as S134 (dead render chain still present). |
-| S136 | low | PARTIAL | Chat coach never sees the Z2 trend (coach_assembler has no aerobic hit). |
+| S136 | low | UPDATED | FIXED — chat coach gets <z2_pace_trend> (same series as Stats); test. |
 | S137 | low | UPDATED | FIXED — <week_verdict> rendered from the codified verdict; weekly_review GRADE must repeat it, never invent; test. |
-| S138 | low | UPDATED | PARTIAL→ traceback endpoints now admin_required; ~20 str(e) sites remain. |
+| S138 | low | UPDATED | FIXED — athlete-facing routes return a reference id via _client_error; admin routes keep detail; test. |
 | S141 | low | PARTIAL | No test. |
 | S142 | low | PARTIAL | Count-only assertion, magic +20 window. |
 | S143 | low | PARTIAL | In-process throttle (per worker, resets on deploy); no test. |
-| S144 | low | PARTIAL | Logout never clears CacheStorage on login.html. |
-| S145 | low | PARTIAL | todayStr() 76 sites incl. popup keys + bodyweight POST dates — two clocks still disagree on travel days. |
+| S144 | low | UPDATED | FIXED — login page clears the data cache. |
+| S145 | low | UPDATED | FIXED — check-in gate keys and every weigh-in/check-in POST date use the server-tz day (appTodayISO); test. |
 | S146 | low | PARTIAL | CSS only; 18 div-onclick controls, ~no aria, 4/50 labels. |
-| S147 | low | PARTIAL | index.html:103 still nukes all caches every load; offline launch impossible; push url ignored. |
+| S147 | low | UPDATED | FIXED — index.html no longer nukes caches each load; push honours data.url. |
 | S152 | low | PARTIAL | lift_trend still calls lift_session_history per KEY_LIFT (~10 queries); no from_rows helper. |
 | S153 | low | UPDATED | FIXED — /api/garmin/login 404s on Render without the admin key; test. |
 | S154 | low | UPDATED | FIXED — grocery list, coach note, meal-override note escaped. |
 | S155 | low | UPDATED | FIXED — coach layer keeps 80 rows. |
 | S156 | low | UPDATED | FIXED — intake 404 surfaces as an error bubble, never a silent drop. |
 | S160 | low | UPDATED | FIXED — one-shot boot pass sets user_id NOT NULL on every table with no NULL rows (Postgres); skips+logs others. |
-| S163 | low | PARTIAL | Specialists still max_retries=5 no timeout; no test. |
+| S163 | low | UPDATED | FIXED — specialists: one retry + 75 s timeout. |
 | S165 | low | UPDATED | FIXED — _public_app_url(): APP_URL, else raise on Render, host only in dev; test. |
 | S088 | medium | SUPERSEDED | Deload-by-week abolished 2026-08-30; workout_data.py:1985/2037 dead literal. |
 | S095 | medium | SUPERSEDED | Same as S088. |

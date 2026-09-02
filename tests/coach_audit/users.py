@@ -241,7 +241,7 @@ def make_real_erik():
     api_key = os.environ.get("ADMIN_API_KEY")
     if not api_key:
         raise RuntimeError("ADMIN_API_KEY not set — cannot mirror real Erik state.")
-    base = os.environ.get("PLACEMETRY_PROD_URL", "https://12weeks-app.onrender.com")
+    base = os.environ.get("PLACEMETRY_PROD_URL", "https://one2weeks-9ewf.onrender.com")
 
     def q(sql: str) -> list[dict]:
         r = requests.post(

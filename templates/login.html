@@ -383,5 +383,10 @@
         // Clear any cached app data on login page
         try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}
     </script>
+<script>
+// S144: the login page is the logged-out state — drop any per-user data the
+// service worker cached for the previous account on this device.
+if ('caches' in window) { caches.keys().then(function(n){ n.forEach(function(k){ if (k.indexOf('data') !== -1) caches.delete(k); }); }); }
+</script>
 </body>
 </html>

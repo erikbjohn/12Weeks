@@ -53,6 +53,10 @@ def _build_run_history_block(user_id: int, current_week: int,
         if r.distance_miles: bits.append(f"{r.distance_miles}mi")
         if getattr(r, 'duration_min', None): bits.append(f"{r.duration_min}min")
         if r.avg_hr: bits.append(f"wholeRunAvgHR={r.avg_hr}")
+        if getattr(r, 'max_hr', None): bits.append(f"peakHR={r.max_hr}")            # S067
+        if r.distance_miles and getattr(r, 'duration_min', None):
+            _p = r.duration_min / r.distance_miles
+            bits.append(f"pace={int(_p)}:{int(round((_p % 1) * 60)):02d}/mi")
         if getattr(r, 'activity_type', None): bits.append(f"type={r.activity_type}")   # S121
         if getattr(r, 'activity_name', None): bits.append(f"watch_workout={r.activity_name}")
         if getattr(r, 'elevation_ft', None): bits.append(f"{r.elevation_ft}ft")

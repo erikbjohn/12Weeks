@@ -3106,7 +3106,7 @@ def api_coach_flag():
         return jsonify({"ok": True, "id": cf.id})
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)[:200]}), 500
+        return _client_error(e)   # S138: reference id, no internals
 
 
 @app.route("/api/debug/coach-feedback")
@@ -8555,7 +8555,7 @@ def api_stats_projection_inputs():
         })
     except Exception as e:
         logging.exception("stats/projection-inputs failed")
-        return jsonify({"error": str(e)[:200]}), 500
+        return _client_error(e)   # S138: reference id, no internals
 
 
 @app.route("/api/stats/body-comp")
@@ -8603,7 +8603,7 @@ def api_stats_body_comp():
         })
     except Exception as e:
         logging.exception("stats/body-comp failed")
-        return jsonify({"error": str(e)[:200]}), 500
+        return _client_error(e)   # S138: reference id, no internals
 
 
 @app.route("/api/stats/aerobic-efficiency")
@@ -8628,7 +8628,7 @@ def api_stats_aerobic_efficiency():
         return jsonify({"weeks": aerobic_efficiency_weeks(runs)})
     except Exception as e:
         logging.exception("stats/aerobic-efficiency failed")
-        return jsonify({"error": str(e)[:200]}), 500
+        return _client_error(e)   # S138: reference id, no internals
 
 
 # ─── TRAVEL MODE ────────────────────────────────────────────────────────────
@@ -11640,6 +11640,8 @@ def api_weekly_report_result(job_id):
 
 # ─── GOAL RECALIBRATION ───────────────────────────────────────────────────
 
+
+
 @app.route("/api/goal/recalibrate", methods=["POST"])
 @login_required
 def api_goal_recalibrate():
@@ -13143,6 +13145,8 @@ def api_session_summary(week, day_idx):
 
 
 # ─── DEFICIT CALCULATION & BMR RECALCULATION ─────────────────────────────
+
+
 
 @app.route("/api/deficit-plan", methods=["POST"])
 @login_required

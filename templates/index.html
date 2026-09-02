@@ -100,9 +100,9 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js', { scope: '/', updateViaCache: 'none' })
     .catch(err => console.warn('SW registration failed:', err));
 }
-if ('caches' in window) {
-  caches.keys().then(names => names.forEach(n => caches.delete(n)));
-}
+// S147: the service worker's allowlist (only /api/workouts, only res.ok)
+// owns what is cached; nuking every cache on every load made the offline
+// launch impossible while still leaving the stale copy risk inside a session.
 </script>
 <script src="{{ asset_url('app.js') }}"></script>
 </body>

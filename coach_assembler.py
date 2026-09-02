@@ -703,8 +703,9 @@ def _build_exercise_history():
                     SetLog.weight.isnot(None),
                     SetLog.done.is_(True),
                     SetLog.set_skipped.isnot(True))
+            .filter(SetLog.logged_date >= _user_today() - timedelta(days=180))   # S106: date window, no row cap
             .order_by(SetLog.logged_date.desc(), SetLog.id.desc())
-            .limit(500).all())
+            .all())
     sessions = {}   # canonical -> {session_key -> entry}
     order = {}      # canonical -> [session_key] in recency order (most recent first)
     for s in rows:
@@ -876,7 +877,14 @@ def _build_runs():
     rows = RunLog.query.filter_by(user_id=current_user.id).order_by(
         RunLog.log_date.desc()
     ).limit(14).all()
-    return {"run_history": [{
+    z2_trend = None
+    try:
+        from workout_status import aerobic_efficiency_weeks
+        all_runs = RunLog.query.filter(RunLog.user_id == current_user.id, RunLog.log_date.isnot(None)).all()
+        z2_trend = aerobic_efficiency_weeks(all_runs)[-6:] or None   # S136: same series as /api/stats
+    except Exception:
+        log.warning("runs: aerobic efficiency unavailable", exc_info=True)
+    return {"z2_pace_trend": z2_trend, "run_history": [{
         "date": r.log_date.isoformat() if r.log_date else None,
         "distance_miles": r.distance_miles, "avg_hr": r.avg_hr, "max_hr": getattr(r, "max_hr", None),
         "activity_type": getattr(r, "activity_type", None),
@@ -2703,6 +2711,12 @@ def _format_athlete_data(ctx, requires):
     # Runs
     if ctx.get("run_history"):
         parts.append(_format_runs(ctx["run_history"]))
+    if ctx.get("z2_pace_trend"):
+        _zl = ["<z2_pace_trend> (easy runs, HR 118-140, distance-weighted pace per calendar week — the aerobic-efficiency series the Stats chart shows; cite it, never eyeball a trend)"]
+        for w in ctx["z2_pace_trend"]:
+            _zl.append(f"  {w.get('week_start') or w.get('week')}: pace {w.get('pace_min_per_mile') or w.get('pace')} min/mi @ HR {w.get('avg_hr')} ({w.get('runs') or w.get('n')} runs)")
+        _zl.append("</z2_pace_trend>")
+        parts.append("\n".join(_zl))
 
     # Physical
     if ctx.get("physical_assessment"):
