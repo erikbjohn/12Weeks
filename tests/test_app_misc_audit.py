@@ -191,8 +191,12 @@ def test_extract_checkin_no_json_returns_structured_error(app_ctx, monkeypatch):
                 lambda **kw: _Msg())})()
 
     monkeypatch.setattr(anthropic, "Anthropic", _Fake)
-    r = client.post("/api/morning-checkin/extract",
-                    json={"conversation": "coach: how did you sleep?"})
+    # The server reads the athlete's own turns (S021); seed one so the model is called.
+    from models import ChatMessage
+    from app import _user_today
+    db.session.add(ChatMessage(role="user", content="slept ok", log_date=_user_today(), user_id=u.id))
+    db.session.commit()
+    r = client.post("/api/morning-checkin/extract", json={})
     # Old code fell off the end of the view (None) -> TypeError/500 crash page.
     assert r.status_code == 502, (r.status_code, r.get_data(as_text=True))
     assert "error" in (r.get_json() or {})

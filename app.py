@@ -8647,6 +8647,15 @@ def api_morning_checkin_save():
     data = request.get_json()
     d = date.fromisoformat(data.get("date", _user_today().isoformat()))
     is_missed_marker = bool(data.get("missed"))
+    # Hard rail: a check-in score is 1-10 or it is nothing. A missed marker
+    # used to write 0s; the coach and weekly report averaged them as data.
+    for _k in ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety"):
+        v = data.get(_k)
+        if v is not None and not (isinstance(v, (int, float)) and not isinstance(v, bool) and 1 <= v <= 10):
+            data[_k] = None
+    if is_missed_marker:
+        for _k in ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety"):
+            data[_k] = None
     ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
     if ci and is_missed_marker:
         # An auto "missed" marker must NEVER overwrite an existing check-in —
@@ -8692,14 +8701,46 @@ def api_morning_checkin_save():
     return jsonify({"ok": True})
 
 
+_CHECKIN_FIELDS = ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety")
+
+
+def _athlete_checkin_turns(user_id, d):
+    """The athlete's OWN words from today's chat — user-role rows only, system
+    triggers ([MORNING_CHECKIN] …) dropped. The coach's text is never included:
+    a number the coach spoke (or a Garmin readiness it narrated) must not become
+    the athlete's self-report (S021 — the Sep 1 loop: coach narrates HRV 30 →
+    extractor stores anxiety 6 → coach reads it back as a pattern)."""
+    rows = (ChatMessage.query
+            .filter_by(user_id=user_id, log_date=d, role="user")
+            .order_by(ChatMessage.created_at).all())
+    out = []
+    for m in rows:
+        c = (m.content or "").strip()
+        if not c or (c.startswith("[") and "] " in c[:50]):
+            continue
+        out.append(c)
+    return out
+
+
+def _quote_in_text(quote, text):
+    q = re.sub(r"\s+", " ", (quote or "").strip().lower())
+    return bool(q) and len(q) >= 3 and q in re.sub(r"\s+", " ", text.lower())
+
+
 @app.route("/api/morning-checkin/extract", methods=["POST"])
 @login_required
 def api_extract_checkin_values():
-    """Extract numeric check-in values from the morning conversation using AI."""
-    data = request.get_json()
-    conversation = data.get('conversation', '')
-    if not conversation:
-        return jsonify({"error": "No conversation"}), 400
+    """Fill today's MorningCheckIn numerics from what the ATHLETE said — nothing
+    else. The client sends no text (it used to post the chat DOM's textContent,
+    coach bubbles included); the server reads the athlete's user-role turns.
+    Each value must carry a verbatim quote from those turns or it is dropped, so
+    a number can only land if the athlete's own words support it."""
+    d = _user_today()
+    turns = _athlete_checkin_turns(current_user.id, d)
+    empty = {k: None for k in _CHECKIN_FIELDS}
+    athlete_text = "\n".join("ATHLETE: " + t for t in turns)
+    if len(athlete_text) < 8:
+        return jsonify(dict(empty, skipped="no athlete turns today"))
 
     try:
         import anthropic
@@ -8707,41 +8748,47 @@ def api_extract_checkin_values():
         client = anthropic.Anthropic()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            messages=[{"role": "user", "content": f"""Extract numeric check-in values from this coach conversation. Return ONLY a JSON object with these fields (each 1-10 scale):
-- sleep_quality (how well they slept)
-- stress_level (stress level)
-- soreness (physical soreness)
-- mood (emotional state)
-- motivation (drive to train)
-- anxiety (anxiety level)
+            max_tokens=800,
+            messages=[{"role": "user", "content": f"""Below are ONLY the athlete's own messages from this morning's check-in. The coach's side is deliberately omitted.
 
-Return null for any value the athlete did not EXPLICITLY state or clearly describe. Never infer, never default — a null is correct data, a guessed number is fabricated data.
+For each field, return a 1-10 number ONLY if the athlete explicitly stated or clearly described it in their own words, together with the exact verbatim quote (copied character-for-character from an ATHLETE line) that supports it. If the athlete did not address a field, return null for it. Never infer, never default, never fill a field from silence — null is correct data, a guessed number is fabricated data.
 
-Conversation:
-{conversation}"""}],
+Fields: sleep_quality, stress_level, soreness, mood, motivation, anxiety.
+
+Return ONLY a JSON object of the form:
+{{"sleep_quality": {{"value": 3, "quote": "slept like garbage, maybe 4 hours"}}, "stress_level": null, ...}}
+
+{athlete_text}"""}],
         )
-        text = response.content[0].text.strip()
-        # Find JSON in the response
-        if '{' in text:
-            json_str = text[text.index('{'):text.rindex('}') + 1]
-            values = json.loads(json_str)
-            # Update the morning check-in record
-            d = _user_today()
-            ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
-            if ci:
-                assigned = False
-                for _k in ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety"):
-                    v = values.get(_k)
-                    if isinstance(v, (int, float)) and 1 <= v <= 10:
-                        setattr(ci, _k, int(v)); assigned = True
-                if assigned:
-                    ci.notes = (ci.notes or '') + ' [AI-extracted values]'
-                db.session.commit()
-            return jsonify(values)
-        # Model replied with no JSON object (refusal / plain text). Return a
-        # structured error instead of falling off the end (None -> Flask 500).
-        return jsonify({"error": "No JSON object in extraction response"}), 502
+        text_out = response.content[0].text.strip()
+        if '{' not in text_out:
+            # Model replied with no JSON object (refusal / plain text).
+            return jsonify({"error": "No JSON object in extraction response"}), 502
+        raw = json.loads(text_out[text_out.index('{'):text_out.rindex('}') + 1])
+        values = dict(empty)
+        rejected = []
+        for k in _CHECKIN_FIELDS:
+            item = raw.get(k)
+            if not isinstance(item, dict):
+                continue
+            v = item.get("value")
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or not 1 <= v <= 10:
+                continue
+            if not _quote_in_text(item.get("quote"), athlete_text):
+                rejected.append(k)      # quote not in the athlete's words → not self-report
+                continue
+            values[k] = int(v)
+        ci = MorningCheckIn.query.filter_by(user_id=current_user.id, log_date=d).first()
+        if ci:
+            assigned = [k for k in _CHECKIN_FIELDS if values[k] is not None]
+            for k in assigned:
+                setattr(ci, k, values[k])
+            if assigned:
+                ci.notes = (ci.notes or '') + ' [self-report extracted: ' + ','.join(assigned) + ']'
+            db.session.commit()
+        if rejected:
+            logging.warning("checkin extract: rejected unquoted fields %s for user %s", rejected, current_user.id)
+        return jsonify(dict(values, rejected=rejected))
     except Exception as e:
         return _client_error(e)
 

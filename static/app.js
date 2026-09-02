@@ -6760,18 +6760,14 @@ async function finishMorningCheckin() {
     } catch(e2) { console.error('Morning checkin retry also failed', e2); }
   }
 
-  // Extract real values from the coach conversation (best-effort, async)
-  var messagesEl = document.getElementById('mc-chat-messages');
-  if (messagesEl) {
-      var convo = messagesEl.textContent || '';
-      if (convo.length > 20) {
-          fetch('/api/morning-checkin/extract', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ conversation: convo }),
-          }).catch(function() {}); // Best-effort extraction
-      }
-  }
+  // Fill numeric self-report from the ATHLETE's own turns. The server reads
+  // today's user-role chat rows itself — never the chat DOM, which mixes in
+  // the coach's bubbles (S021: coach-spoken numbers became "self-report").
+  fetch('/api/morning-checkin/extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
+  }).catch(function() {}); // Best-effort extraction
 
   // Mark as done in localStorage so it survives reload even if DB save failed
   var _dow = appTodayJsDay();
@@ -10145,8 +10141,8 @@ async function triggerMorningPopup() {
         // used to live here — that route never existed and 404'd silently).
         apiPost('/api/morning-checkin', {
             date: todayStr(),
-            sleep_quality: 0, stress_level: 0, soreness: 0,
-            mood: 0, motivation: 0, anxiety: 0,
+            sleep_quality: null, stress_level: null, soreness: null,
+            mood: null, motivation: null, anxiety: null,
             notes: '[MISSED] Morning check-in not completed before noon',
             missed: true,
         });
