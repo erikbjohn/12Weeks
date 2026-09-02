@@ -200,7 +200,7 @@ def test_missed_dose_rule_is_confirm_with_doctor(app_ctx, monkeypatch):
     ps = _protocol_status_as(app_, uid, today, monkeypatch)
 
     assert len(ps["missed"]) == 1
-    assert ps["missed"][0]["rule"] == "confirm with your doctor"
+    assert ps["missed"][0]["rule"] == "take it when you notice and log it"
 
 
 # ── (f) watch_fors_active only within +/-3 days ──────────────────────────────
@@ -370,7 +370,7 @@ def test_rule22_covers_escalation_confirm_and_causation_language():
     rule22 = CORE_PROMPT[start:end]
 
     assert "escalation" in rule22.lower()
-    assert "confirm with your doctor" in rule22
+    assert "taken when noticed" in rule22  # Erik 2026-09-01: no doctor gate
     assert "never assert" in rule22.lower()
     assert "<lift_trend>" in rule22
     assert "lift_decline_suspected" in rule22
@@ -422,7 +422,7 @@ def test_prompt_contains_protocol_status_tag_and_missed_rule_text(app_ctx, monke
     # tag only ever appears when the injected block itself is present, so
     # it's the unambiguous signal.
     assert "</protocol_status>" in prompt
-    assert "confirm with your doctor" in prompt
+    assert "take it when you notice and log it" in prompt
 
 
 def test_prompt_omits_protocol_status_tag_with_zero_rows(app_ctx, monkeypatch):

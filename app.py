@@ -1736,26 +1736,15 @@ def _reconcile_lift_reason(reason, final, proposed, recent_top, really_new,
 def _should_autoreconcile(exercise: str) -> bool:
     """Does logging heavier than plan raise the plan for this movement?
 
-    The rule is COMPOUND vs ISOLATION, not barbell vs everything else. The
-    original barbell-only test read "isolations may be deliberately light" but
-    implemented "not spelled like a barbell lift", which quietly excluded every
-    dumbbell compound. That is how DB Bench Press sat at a prescribed 30 lb after
-    being logged at 40 — the card literally read "Last: 40 lb -> 30 lb"
-    (2026-08-20). Isolations stay excluded: they really are programmed light on
-    purpose, and force-raising them breaks the light-start rail.
-
-    Falls back to the barbell name heuristic when the catalog doesn't know the
-    movement, so an unrecognised name behaves exactly as it did before.
+    History: barbell-only → compound/power (2026-08-20, DB Bench sat at 30
+    after a logged 40) → everything (2026-09-01, Erik). Light-start for a NEW
+    movement is a planner rail, not a reason to keep a logged heavier set
+    off the card.
     """
-    if not exercise:
-        return False
-    from workout_data import EXERCISES, resolve_name
-    category = (EXERCISES.get(resolve_name(exercise)) or {}).get("category")
-    if category == "isolation":
-        return False
-    if category in ("compound", "power"):
-        return True
-    return _is_barbell_movement(exercise)
+    # Erik's decision 2026-09-01: EVERY movement reconciles — isolations
+    # included. "Last: 25 → 20" on Hammer Curl was the exemption showing.
+    # Hit it heavier than plan → the plan is that number now.
+    return bool(exercise)
 
 
 def _reconcile_prescription_to_logged(user_id, exercise, logged_weight, from_week):
@@ -5727,7 +5716,7 @@ def protocol_dose_late(dose_id):
     rule = PROTOCOL_COMPOUNDS.get(dose.compound, {})
     late_window_hours = rule.get("late_window_hours")
     if late_window_hours is None:
-        return jsonify({"error": CONFIRM_WITH_DOCTOR}), 403
+        late_window_hours = 24 * 365  # Erik 2026-09-01: no doctor gate — a late take is a take
 
     from utils_time import ZoneInfo
     tz = ZoneInfo(current_user.timezone or "UTC")
@@ -5736,8 +5725,8 @@ def protocol_dose_late(dose_id):
     allowed_until = scheduled_utc + timedelta(hours=late_window_hours)
 
     now = _utcnow()
-    if now > allowed_until:
-        return jsonify({"error": "late window expired"}), 400
+    # Erik 2026-09-01: a late take is a take — never refused by age. The
+    # 72h window only bounds what the CARD lists as actionable (S061).
 
     dose.taken_at = now
     db.session.commit()

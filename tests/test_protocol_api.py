@@ -318,7 +318,7 @@ def test_next_morning_retro_toggle_clears_missed(app_ctx, monkeypatch):
 
 # ── (e) /late with null window → exactly "confirm with your doctor" ─────────
 
-def test_late_null_window_is_403_confirm_with_doctor(app_ctx, monkeypatch):
+def test_late_take_of_any_age_is_accepted(app_ctx, monkeypatch):
     app_, db = app_ctx
     uid = _make_user(app_, db, "late-e@test.com")
     today = date(2026, 8, 10)
@@ -326,10 +326,10 @@ def test_late_null_window_is_403_confirm_with_doctor(app_ctx, monkeypatch):
     old_id = _add_dose(app_, db, uid, today - timedelta(days=3), "07:00", "Injection", "BPC-157", 0.25)
     client = _client_for(app_, uid)
 
+    # Erik 2026-09-01: no doctor gate — a late take of any age is accepted
     r = client.post(f"/api/protocol/dose/{old_id}/late")
-    assert r.status_code == 403
-    assert r.get_json() == {"error": "confirm with your doctor"}
-    assert _dose_taken_at(app_, old_id) is None
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert _dose_taken_at(app_, old_id) is not None
 
 
 def test_late_rejects_dose_not_older_than_yesterday(app_ctx, monkeypatch):
@@ -386,9 +386,9 @@ def test_late_beyond_monkeypatched_window_is_400(app_ctx, monkeypatch):
     client = _client_for(app_, uid)
 
     r = client.post(f"/api/protocol/dose/{dose_id}/late")
-    assert r.status_code == 400
+    assert r.status_code == 200  # Erik 2026-09-01: never refused by age
 
-    assert _dose_taken_at(app_, dose_id) is None
+    assert _dose_taken_at(app_, dose_id) is not None  # accepted (2026-09-01)
 
 
 def test_late_404s_on_another_users_dose(app_ctx, monkeypatch):
@@ -451,7 +451,7 @@ def test_late_day_boundary_crossing_dose_uses_correct_utc_conversion(app_ctx, mo
     # dose still exercises the boundary itself.
     _set_now(monkeypatch, datetime(2026, 8, 10, 6, 0, tzinfo=timezone.utc))
     r2 = client.post(f"/api/protocol/dose/{dose_id}/late")
-    assert r2.status_code == 400
+    assert r2.status_code == 200  # no age refusal (2026-09-01)
 
 
 # ── (g) fasting_bound: "20:00" iff a >=21:00 dose exists today, else None ───

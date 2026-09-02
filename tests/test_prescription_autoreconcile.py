@@ -99,8 +99,9 @@ def test_non_barbell_isolation_is_not_force_raised(app_ctx):
         uid = u.id
         _set_rx(db, uid, 10, 5, "Cable Chest Fly", 30)
         changed = _reconcile_prescription_to_logged(uid, "Cable Chest Fly", 45, 10)
-        assert _target(db, uid, 10, 5, "Cable Chest Fly") == 30
-        assert changed == []
+        # Erik 2026-09-01: isolations reconcile too — a logged 45 IS the plan
+        assert _target(db, uid, 10, 5, "Cable Chest Fly") == 45
+        assert changed
 
 
 # ─── Compound, not barbell: the 2026-08-20 DB Bench Press regression ────────
@@ -127,8 +128,8 @@ def test_dumbbell_isolation_is_still_protected(app_ctx):
         uid = u.id
         _set_rx(db, uid, 2, 3, "Hammer Curl", 20)
         changed = _reconcile_prescription_to_logged(uid, "Hammer Curl", 35, 2)
-        assert _target(db, uid, 2, 3, "Hammer Curl") == 20
-        assert changed == []
+        assert _target(db, uid, 2, 3, "Hammer Curl") == 35  # no isolation exemption (2026-09-01)
+        assert changed
 
 
 def test_autoreconcile_gate_splits_on_catalog_category():
@@ -138,11 +139,12 @@ def test_autoreconcile_gate_splits_on_catalog_category():
         assert _should_autoreconcile(compound) is True, compound
     for isolation in ("Hammer Curl", "Lateral Raise", "Cable Tricep Pushdown",
                       "DB Curl", "DB Shrug"):
-        assert _should_autoreconcile(isolation) is False, isolation
+        assert _should_autoreconcile(isolation) is True, isolation  # every movement reconciles
 
 
 def test_unknown_movement_keeps_the_old_barbell_heuristic():
     """No catalog entry -> behave exactly as before, so nothing regresses."""
     from app import _should_autoreconcile
-    assert _should_autoreconcile("Totally Made Up Lift") is False
+    assert _should_autoreconcile("Totally Made Up Lift") is True
     assert _should_autoreconcile("Barbell Made Up Lift") is True
+    assert _should_autoreconcile("") is False

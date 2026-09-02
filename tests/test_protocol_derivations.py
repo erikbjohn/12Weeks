@@ -35,7 +35,7 @@ def test_protocol_compounds_has_all_seven_with_required_keys():
         assert isinstance(c["effects"], list) and c["effects"]
         assert isinstance(c["watch_fors"], list) and c["watch_fors"]
         assert c["missed_dose_rule"] == CONFIRM_WITH_DOCTOR
-        assert c["late_window_hours"] is None
+        assert c["late_window_hours"] == 72
 
 
 def test_protocol_compounds_carries_no_schedule_text():
@@ -439,7 +439,7 @@ def test_missed_line_yesterday_is_retro_mark_regardless_of_window():
     rows = [Row(date=date(2026, 9, 9), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
     out = missed_line(rows, today)
     assert out == [{"date": date(2026, 9, 9), "compound": "BPC-157",
-                     "rule": "confirm with your doctor", "action": "retro_mark"}]
+                     "rule": "take it when you notice and log it", "action": "retro_mark"}]
 
 
 def test_missed_line_older_with_default_null_window_is_omitted():
@@ -447,7 +447,8 @@ def test_missed_line_older_with_default_null_window_is_omitted():
     accumulate as an unbounded 'confirm with your doctor' nag)."""
     from protocol import missed_line
     today = date(2026, 9, 10)
-    rows = [Row(date=date(2026, 9, 7), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
+    # 72h window (2026-09-01): a 3-day-old miss is still listed; older is not
+    rows = [Row(date=date(2026, 9, 1), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
     out = missed_line(rows, today)
     assert out == []
 

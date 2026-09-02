@@ -11793,7 +11793,7 @@ async function markDoseLate(id) {
       let msg = 'Could not mark as taken.';
       try {
         const body = await res.json();
-        if (body && body.error) msg = body.error === 'confirm with your doctor' ? 'Confirm with your doctor first.' : body.error;
+        if (body && body.error) msg = body.error;
       } catch(e) {}
       showToast(msg, 'error');
     }
