@@ -1,6 +1,7 @@
 """Running Coach specialist runtime. Loads .claude/agents/running-coach.md
 on import, exposes consult(brief, user_id) -> str."""
 from __future__ import annotations
+from llm_client import create as _llm_create
 import os
 from .loader import load_agent_md
 
@@ -32,7 +33,7 @@ def consult(brief: str, user_id: int) -> str:
     user_msg = f"DOCTOR BRIEF:\n{brief}"
 
     client = _anthropic_client()
-    resp = client.messages.create(
+    resp = _llm_create(client, 
         model=_PERSONA["model"],
         **({"temperature": _PERSONA["temperature"]} if _PERSONA.get("temperature") is not None else {}),
         max_tokens=600,

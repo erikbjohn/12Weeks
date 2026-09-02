@@ -891,3 +891,31 @@ def test_regen_replaces_only_days_the_coach_returned(app_ctx, monkeypatch):
     names = {r.day_idx: r.exercise_name for r in WeeklyPrescription.query.filter_by(user_id=u.id, week=5, source="coach").all()}
     assert names.get(5) == "Landmine Press" and names.get(6) == "Face Pull", names
     assert all(names.get(d) == "Incline DB Press" for d in range(5)), (names, (out or {}).get("coach_failures"))
+
+
+def test_llm_create_survives_sdk_without_temperature():
+    """2026-09-02 outage: anthropic 1.3.0 rejects `temperature`; the coach must still answer."""
+    import llm_client
+    llm_client._TEMP_UNSUPPORTED = False
+    calls = []
+    class _M:
+        def create(self, **kw):
+            calls.append(dict(kw))
+            if "temperature" in kw:
+                raise TypeError("Messages.create() got an unexpected keyword argument 'temperature'")
+            return {"ok": True, **kw}
+    class _C: messages = _M()
+    out = llm_client.create(_C(), model="m", max_tokens=5, messages=[], temperature=0.6)
+    assert out["ok"] and "temperature" not in out
+    assert len(calls) == 2 and "temperature" not in calls[1]
+    llm_client.create(_C(), model="m", max_tokens=5, messages=[], temperature=0.6)
+    assert len(calls) == 3    # remembered: no second failing attempt
+    llm_client._TEMP_UNSUPPORTED = False
+
+
+def test_every_temperature_create_goes_through_llm_create():
+    import glob
+    for f in ["coach_with_tools.py", "coach_multi_agent.py"] + glob.glob("coach_specialists/*.py"):
+        src = open(f).read()
+        if "temperature" in src and "messages.create(" in src:
+            assert "client.messages.create(" not in src, f

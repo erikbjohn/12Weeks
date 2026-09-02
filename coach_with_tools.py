@@ -16,6 +16,7 @@ Two entry points:
 from __future__ import annotations
 
 from llm_client import OPUS as _OPUS  # S071
+from llm_client import create as _llm_create
 import logging
 import os
 from typing import Any
@@ -134,7 +135,7 @@ def _forced_final_text(client, *, model, max_tokens, system, messages, tools, te
     the coach's final answer. Returns '' if the forced turn fails, so callers
     can substitute an athlete-safe fallback."""
     try:
-        resp = client.messages.create(
+        resp = _llm_create(client, 
             model=model,
             max_tokens=max_tokens,
             system=system,
@@ -169,7 +170,7 @@ def _run_loop(
     full_system = system_prompt + _tool_addendum()
 
     for turn in range(MAX_TOOL_TURNS):
-        response = client.messages.create(
+        response = _llm_create(client, 
             model=model,
             max_tokens=max_tokens,
             system=full_system,
@@ -286,7 +287,7 @@ def coach_chat_stream(
 
     # Tool loop — non-streaming until we know there are no more tool calls.
     for turn in range(MAX_TOOL_TURNS):
-        response = client.messages.create(
+        response = _llm_create(client, 
             model=chosen_model,
             max_tokens=max_tokens,
             system=full_system,

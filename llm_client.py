@@ -18,6 +18,29 @@ SONNET = "claude-sonnet-4-6"
 HAIKU = "claude-haiku-4-5-20251001"
 
 
+_TEMP_UNSUPPORTED = False
+
+
+def create(client, **kw):
+    """THE messages.create call. anthropic 1.3.0 (installed on Render 2026-09-02
+    from an unpinned '>=0.42') removed the `temperature` kwarg; every chat
+    agent passed one and the coach died before speaking ('Erik is
+    unavailable'). Drop it when the SDK refuses it — once, then remember."""
+    global _TEMP_UNSUPPORTED
+    if _TEMP_UNSUPPORTED:
+        kw.pop("temperature", None)
+    try:
+        return client.messages.create(**kw)
+    except TypeError as e:
+        if "temperature" in kw and "temperature" in str(e):
+            _TEMP_UNSUPPORTED = True
+            import logging
+            logging.warning("anthropic SDK rejects `temperature` — sending without it from now on")
+            kw.pop("temperature", None)
+            return client.messages.create(**kw)
+        raise
+
+
 def record_usage(response, agent: str, model: str | None = None):
     """S104: persist response.usage (best effort, never raises). Safe outside
     an app context (returns silently)."""

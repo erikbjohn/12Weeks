@@ -7,6 +7,7 @@ chat_opened, weekly_review). Other 7 trigger modes stay on the
 single-prompt path in coach_with_tools.py.
 """
 from __future__ import annotations
+from llm_client import create as _llm_create
 import os
 import re
 from coach_specialists.loader import load_agent_md
@@ -418,7 +419,7 @@ def coach_chat_multiagent(
         convo.append({"role": "user", "content": synthetic_tool_results})
 
     for turn in range(MAX_TOOL_TURNS):
-        resp = client.messages.create(
+        resp = _llm_create(client, 
             model=persona["model"],
             max_tokens=max_tokens,
             **({"temperature": persona["temperature"]} if persona.get("temperature") is not None else {}),   # S123
@@ -562,7 +563,7 @@ def coach_chat_multiagent(
     # (tool_choice=none) so the Doctor synthesizes from the data it already
     # gathered; only if that also fails, ship an athlete-safe line.
     try:
-        resp = client.messages.create(
+        resp = _llm_create(client, 
             model=persona["model"],
             max_tokens=max_tokens,
             **({"temperature": persona["temperature"]} if persona.get("temperature") is not None else {}),   # S123
