@@ -6,6 +6,8 @@ Trigger: S021 had been 'closed' by rewording an LLM prompt while the mechanism k
 
 ## Tally
 
+_Later 2026-09-01: 50 of the non-REAL rows were then fixed with behavior tests (rows marked UPDATED below; commits bc08d2c…HEAD)._
+
 | verdict | count | meaning |
 |---|---|---|
 | REAL | 73 | proposed mechanism present and pinned by a behavior test or equivalent proof |
@@ -49,11 +51,11 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S036 | high | UPDATED | FIXED — run edit merges fields, Garmin row keeps source, edit tagged in notes; test. |
 | S053 | medium | UPDATED | FIXED — set-save and boot backfill use `is not None`; allowlist entries removed; test stores target 0. |
 | S139 | low | UPDATED | FIXED — GarminClient.usable(); all three request-path fetches gate on it; test. |
-| S004 | critical | PARTIAL | No invite expiry; core vector closed. |
+| S004 | critical | UPDATED | FIXED — single-use invites expire after 14 days; test. |
 | S007 | high | PARTIAL | Endpoint test is a source grep; no SWAP/SORENESS persistence tests. |
 | S008 | high | UPDATED | FIXED — briefing runs on build_filtered_context/assemble_prompt/coach_chat; legacy _build_coach_context + get_coach_response DELETED; briefing no longer defaults missing check-in scores to 5 (hidden fake data); tests. |
-| S009 | high | PARTIAL | apiPost has no timeout; stalled socket holds _setSaving. |
-| S015 | high | PARTIAL | /logout still GET; no cookie-flag test. |
+| S009 | high | UPDATED | FIXED — apiPost has a 12 s abort timeout on both attempts; test. |
+| S015 | high | UPDATED | FIXED — /logout is POST-only; all callers updated; test. |
 | S016 | high | PARTIAL | No rendered-prompt test; no rule 21a clause. |
 | S017 | high | PARTIAL | Zero tests for timeouts/stale-job restart. |
 | S019 | high | PARTIAL | Test covers empty case only, sets wrong cache var. |
@@ -61,7 +63,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S021 | high | PARTIAL | Real mechanism landed 072f5f0; still LLM extractor not [CHECKIN] marker. |
 | S023 | high | UPDATED | FIXED — coach_rules uses program_calendar.program_week; grep test. |
 | S028 | high | PARTIAL | Only runs healed; WeeklyDaySchedule gap persists forever; meals/warmups untracked. |
-| S031 | high | PARTIAL | Sunday still dimmed (app.js:10378, style.css:4344); 'Monday check-in' copy at app.js:12426; grep-only test. |
+| S031 | high | UPDATED | FIXED — rest day with a run is not dimmed; 'Monday planning' copy gone; test. |
 | S035 | high | PARTIAL | Rendered prompt untested. |
 | S037 | high | PARTIAL | No test for dead-token alert; laptop notify path unexercised. |
 | S041 | high | PARTIAL | No prompt test for run_detail. |
@@ -104,7 +106,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S114 | medium | PARTIAL | Calendar has no change field; no seeded test. |
 | S116 | medium | UPDATED | FIXED — no 'engine' language in coach prompts; test. |
 | S117 | medium | UPDATED | FIXED — readiness line carries the codified rule (run → Z2 via [RUN]; lifting never cut); test. |
-| S119 | medium | UPDATED | FIXED — swap overlay failure logged + reported in _overlay_errors (domain 'swap'). |
+| S119 | medium | UPDATED | FIXED — client shows a toast naming the failed overlay domains (incl. swap). |
 | S121 | medium | UPDATED | FIXED — run planner history cites activity_type/activity_name; test. |
 | S122 | medium | PARTIAL | Shipped under S024; no test. |
 | S123 | medium | UPDATED | PARTIAL — unchanged. |
@@ -114,7 +116,7 @@ _Update, later 2026-09-01 (commit after 64880e6): the first eleven below are fix
 | S129 | medium | UPDATED | FIXED — POST /api/chat/note persists the confirmation; test. |
 | S130 | medium | UPDATED | PARTIAL — GET /api/sets deleted; the two 410 stubs are the deliberate retirement contract (tests pin 410) and stay. |
 | S131 | medium | PARTIAL | No test; _swapped_from key still unread. |
-| S132 | medium | UPDATED | FIXED — realign copies completed_at/workout_duration_min/source. |
+| S132 | medium | UPDATED | FIXED — move-sets-day has dry_run + admin audit row; realign keeps every DayCompletion field; test. |
 | S134 | low | UPDATED | FIXED — photo prompt no longer asks for body-fat % or an aesthetic score; test. |
 | S135 | low | UPDATED | FIXED — same as S134 (dead render chain still present). |
 | S136 | low | UPDATED | FIXED — chat coach gets <z2_pace_trend> (same series as Stats); test. |

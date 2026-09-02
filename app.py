@@ -2911,9 +2911,15 @@ def debug_move_sets_day():
             "id": r.id, "exercise_name": r.exercise_name,
             "set_number": r.set_number, "weight": r.weight, "reps": r.reps,
         } for r in rows]
+        _dry = request.args.get("dry_run", "").lower() in ("1", "true", "yes")
         for r in rows:
             r.day_idx = to_day
-        db.session.commit()
+        if _dry:
+            db.session.rollback()   # S132: preview, nothing written
+        else:
+            db.session.commit()
+            _admin_audit("move-sets-day", u.id, {"date": date_str, "from": from_day, "to": to_day,
+                                                 "moved": moved_summary})
         return jsonify({
             "email": email,
             "date": date_str,
@@ -2921,6 +2927,7 @@ def debug_move_sets_day():
             "to_day_idx": to_day,
             "moved_count": len(rows),
             "moved": moved_summary,
+            "dry_run": _dry,
         })
     except Exception as e:
         import traceback
@@ -3295,7 +3302,7 @@ def signup():
     return redirect(url_for("login"))
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
@@ -3338,6 +3345,13 @@ def accept_invite(code):
     if invite.used_by and not invite.multi_use:
         flash("This invite has already been used.", "error")
         return redirect(url_for("login"))
+    # S004: a single-use invite is a credential; it does not live forever.
+    if not invite.multi_use and invite.created_at:
+        _age = datetime.now(timezone.utc) - (invite.created_at if invite.created_at.tzinfo
+                                             else invite.created_at.replace(tzinfo=timezone.utc))
+        if _age.days >= 14:
+            flash("This invite link has expired — ask for a new one.", "error")
+            return redirect(url_for("login"))
 
     # Multi-use invites (no email attached) still go through the old signup form
     recipient_email = (invite.email_sent_to or "").strip().lower()

@@ -423,3 +423,66 @@ def test_specialists_have_timeouts():
     for f in glob.glob("coach_specialists/*.py"):
         src = open(f).read()
         assert "max_retries=5" not in src, f
+
+
+# ═════════════════════════ batch 5 ═════════════════════════
+
+def test_rest_day_with_a_run_is_not_dimmed_and_planning_copy_not_monday():
+    src = open("static/app.js").read()
+    assert "d.isRest && !d.run ? ' rest'" in src
+    assert "Monday weekly planning session" not in src
+
+
+def test_api_post_has_a_timeout():
+    src = open("static/app.js").read()
+    assert "function _fetchWithTimeout" in src and "ctrl.abort()" in src
+    body = src[src.index("function apiPost("):src.index("function apiPost(") + 400]
+    assert "_fetchWithTimeout(url" in body
+
+
+def test_logout_is_post_only(app_ctx):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s015@test.com")
+    assert client.get("/logout").status_code == 405
+    r = client.post("/logout")
+    assert r.status_code in (302, 303)
+    assert "window.location='/logout'" not in open("static/app.js").read()
+    assert 'href="/logout"' not in open("templates/admin.html").read()
+
+
+def test_single_use_invite_expires(app_ctx):
+    app_, db = app_ctx
+    from models import Invite
+    from datetime import datetime, timezone, timedelta
+    Invite.query.filter_by(code="old-code-xyz").delete(); db.session.commit()
+    db.session.add(Invite(code="old-code-xyz", email_sent_to="new@test.com",
+                          created_at=datetime.now(timezone.utc) - timedelta(days=30)))
+    db.session.commit()
+    client = app_.test_client()
+    r = client.get("/invite/old-code-xyz", follow_redirects=False)
+    assert r.status_code in (302, 303)
+    with client.session_transaction() as s:
+        flashes = s.get("_flashes") or []
+    assert any("expired" in str(f).lower() for f in flashes), flashes
+
+
+def test_move_sets_day_dry_run_writes_nothing(app_ctx, monkeypatch):
+    app_, db = app_ctx
+    u, client = _login(app_, db, "s132@test.com")
+    from models import SetLog
+    from datetime import date
+    monkeypatch.setenv("ADMIN_API_KEY", "x" * 32)
+    SetLog.query.filter_by(user_id=u.id).delete(); db.session.commit()
+    db.session.add(SetLog(user_id=u.id, exercise_name="Barbell Bench Press", week=2, day_idx=4, set_number=1,
+                          weight=100, reps=5, done=True, logged_date=date(2026, 8, 27)))
+    db.session.commit()
+    r = client.get("/api/debug/move-sets-day?email=s132@test.com&date=2026-08-27&from=4&to=3&dry_run=1",
+                   headers={"X-Admin-Key": "x" * 32})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["dry_run"] is True and r.get_json()["moved_count"] == 1
+    assert SetLog.query.filter_by(user_id=u.id).first().day_idx == 4
+
+
+def test_overlay_errors_are_surfaced_client_side():
+    src = open("static/app.js").read()
+    assert "workoutData._overlay_errors" in src and "Some card data failed to load" in src

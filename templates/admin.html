@@ -419,7 +419,7 @@
             <div class="header-links">
                 <span class="refresh-note" id="refresh-note"></span>
                 <a href="/">Home</a>
-                <a href="/logout" onclick="localStorage.clear();sessionStorage.clear();">Log Out</a>
+                <a href="#" onclick="localStorage.clear();sessionStorage.clear();fetch('/logout',{method:'POST'}).finally(function(){window.location='/login'});return false;">Log Out</a>
             </div>
         </div>
 

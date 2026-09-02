@@ -975,7 +975,7 @@ async function showPreStartLockout(startDateStr) {
           Rest up. Eat clean. Hydrate. When that clock hits zero, we go. No warm-up period. No easing in. Day 1 is full speed. Be ready.
         </div>
         ${previewHtml}
-        <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'" style="margin-top:1.5rem;background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
+        <button onclick="localStorage.clear();sessionStorage.clear();fetch('/logout',{method:'POST'}).finally(function(){window.location='/login'})" style="margin-top:1.5rem;background:none;border:1px solid #3a3f3c;color:#6b7280;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer">Logout</button>
       </div>
     </div>`;
 }
@@ -1097,12 +1097,20 @@ document.addEventListener('keydown', function(ev) {
   }
 });
 
+function _fetchWithTimeout(url, opts, ms) {
+  // S009: a stalled socket used to hold _setSaving[key] until the browser
+  // gave up (minutes), silently dropping every blur-edit in between.
+  var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var t = ctrl ? setTimeout(function(){ ctrl.abort(); }, ms || 12000) : null;
+  return fetch(url, ctrl ? Object.assign({ signal: ctrl.signal }, opts) : opts)
+    .finally(function(){ if (t) clearTimeout(t); });
+}
 function apiPost(url, body) {
-  return fetch(url, {
+  return _fetchWithTimeout(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
-  }).then(res => {
+  }, 12000).then(res => {
     if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) {
       console.error('API error:', res.status, url);
@@ -1124,7 +1132,7 @@ function apiPost(url, body) {
   }).catch(e => {
     console.warn('POST failed (attempt 1), retrying:', url, e);
     return new Promise(resolve => setTimeout(resolve, 1000)).then(() =>
-      fetch(url, {
+      _fetchWithTimeout(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
@@ -5199,7 +5207,7 @@ function showSettingsMenu() {
     </div>
     <button onclick="${_c}exportData()">Export Data</button>
     <button onclick="${_c}importData()">Import Data</button>
-    <button onclick="localStorage.clear();sessionStorage.clear();window.location='/logout'">Logout</button>
+    <button onclick="localStorage.clear();sessionStorage.clear();fetch('/logout',{method:'POST'}).finally(function(){window.location='/login'})">Logout</button>
     <button onclick="closeSettingsMenu()">Cancel</button>
   `;
   header.parentNode.appendChild(dd);
@@ -5721,6 +5729,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     workoutData = workoutW.data;
     window._exerciseNames = workoutData._exerciseNames || [];
     delete workoutData._exerciseNames;
+    if (workoutData._overlay_errors && workoutData._overlay_errors.length) {
+      // S119: a failed overlay (meal/run/swap/warmup) must never look like 'unplanned'.
+      try { showToast('Some card data failed to load (' + workoutData._overlay_errors.map(function(e){ return e.domain; }).join(', ') + ') — reload', 'error'); } catch (e) {}
+    }
+    delete workoutData._overlay_errors;
     window._paCache = paW.data || {};
 
     if (mealsW.data && Object.keys(mealsW.data).length > 0) {
@@ -6556,7 +6569,7 @@ async function _startMcChat() {
     }
 
     trigger = '[MORNING_CHECKIN] [WEEKLY_PLANNING] ' + localTimeContext() +
-        '\nThis is the Monday weekly planning session.' +
+        '\nThis is the weekly planning session.' +
         '\n\nPROPOSED PROGRAM FOR WEEK ' + nextWeek + ':' + programSummary +
         deficitStr +
         mealSummaryStr +
@@ -10387,7 +10400,7 @@ function renderTodayNav() {
     const isToday = i === todayMon;
     const isActive = i === currentDay;
     const done = isDayDone(currentWeek, i);
-    return `<button class="tn-day${isActive ? ' active' : ''}${isToday ? ' today' : ''}${done ? ' done' : ''}${d.isRest ? ' rest' : ''}" onclick="setDay(${i})">
+    return `<button class="tn-day${isActive ? ' active' : ''}${isToday ? ' today' : ''}${done ? ' done' : ''}${d.isRest && !d.run ? ' rest' : ''}" onclick="setDay(${i})">   
       <span class="tn-day-abbr">${d.day}</span>
       ${done ? '<span class="tn-check">&#10003;</span>' : ''}
     </button>`;
