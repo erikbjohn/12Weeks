@@ -23,6 +23,7 @@ import os
 import pathlib
 import subprocess
 import sys
+from pathlib import Path
 import urllib.request
 
 HOME = pathlib.Path.home()
@@ -106,12 +107,30 @@ def main() -> int:
         return 2
     ok = dump_postgres(url, BACKUP_DIR / f"{today}.dump")
     key = _read_secret(".12weeks_admin_key")
+    audit_rc = 0
     if key:
         export_json(key, BACKUP_DIR / f"{today}.json")
+        # Lightweight DATA audit on the fresh export (2026-09-01): values that
+        # cannot be real — constant self-report scores, phantom per-set
+        # targets, manual run rows blocking Garmin… A HIGH finding makes this
+        # job exit 1 so the launchd log shows red the same morning.
+        try:
+            import io, contextlib
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from data_audit import main as _audit_main
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                audit_rc = _audit_main([str(BACKUP_DIR / f"{today}.json")])
+            for line in buf.getvalue().rstrip().split("\n"):
+                log(line)
+        except Exception as e:
+            log(f"data audit failed: {e!r}")
     else:
         log("no ~/.12weeks_admin_key — skipping JSON sidecar")
     prune()
-    return 0 if ok else 1
+    if not ok:
+        return 1
+    return 1 if audit_rc == 1 else 0
 
 
 if __name__ == "__main__":
