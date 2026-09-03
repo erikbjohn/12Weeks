@@ -208,7 +208,7 @@ class TestCSVIntegrityGuard:
         - Enclomiphene always 6.25 mg
         - Retatrutide doses only in {2.0, 3.0, 4.0} mg
         """
-        csv_path = Path(__file__).parent.parent / "peptide_protocol.csv"
+        csv_path = Path(__file__).parent / "fixtures" / "peptide_protocol_snapshot.csv"  # snapshot 2026-09-03; the DB is the source of truth
         assert csv_path.exists(), f"peptide_protocol.csv not found at {csv_path}"
 
         rows = []

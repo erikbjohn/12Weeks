@@ -11696,6 +11696,33 @@ function buildProtocolContent(p) {
       '</div></details>';
   }
 
+  // Schedule editor (2026-09-03): the DATABASE is the source of truth. Pick
+  // a compound and a date range, set dose/units/time/site/note with a reason;
+  // Preview is a dry run, Apply writes the rows and the change log.
+  if (p.is_today !== false) {
+    var eopts = Object.keys(_PROTOCOL_ABBR).map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
+    var inp = 'font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)';
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">Edit schedule</summary>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+        '<select id="sched-mode" style="' + inp + '"><option value="update">Change existing doses</option><option value="add">Add doses</option><option value="remove">Remove doses</option></select>' +
+        '<select id="sched-compound" style="flex:1 1 140px;' + inp + '">' + eopts + '</select>' +
+        '<label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px">from <input id="sched-from" type="date" style="' + inp + '"></label>' +
+        '<label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px">to <input id="sched-to" type="date" style="' + inp + '"></label>' +
+        '<input id="sched-time" type="time" style="' + inp + '" title="time">' +
+        '<input id="sched-mg" type="number" inputmode="decimal" placeholder="dose mg" style="width:100px;' + inp + '">' +
+        '<input id="sched-units" placeholder="units (e.g. 20u)" style="width:120px;' + inp + '">' +
+        '<input id="sched-site" placeholder="site" style="width:120px;' + inp + '">' +
+        '<input id="sched-note" placeholder="note" style="flex:1 1 160px;' + inp + '">' +
+        '<input id="sched-reason" placeholder="reason (required)" style="flex:1 1 100%;' + inp + '">' +
+        '<label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;min-height:44px"><input type="checkbox" id="sched-past"> include past dates</label>' +
+        '<button class="btn btn-secondary" style="min-height:44px" onclick="scheduleEdit(true)">Preview</button>' +
+        '<button class="btn btn-primary" style="min-height:44px" onclick="scheduleEdit(false)">Apply</button>' +
+      '</div>' +
+      '<div id="sched-result" style="margin-top:6px;font-size:13px;color:var(--muted);white-space:pre-line"></div>' +
+      '<div style="margin-top:8px"><a href="/api/protocol/export.csv" style="color:var(--muted);font-size:13px">Download the schedule (CSV)</a></div>' +
+    '</details>';
+  }
+
   // Vials (S140): every vial as a compact line, reorder-flagged ones in the
   // warning style; plus an add form so a new vial never needs a curl.
   var vials = p.vials || [];
@@ -11748,6 +11775,29 @@ async function completeLab(id) {  // S149
   invalidateProtocolCache(); _refreshProtocolSection();
 }
 
+async function scheduleEdit(dryRun) {  // 2026-09-03
+  function v(id) { var el = document.getElementById(id); return el ? (el.type === 'checkbox' ? el.checked : el.value) : ''; }
+  var body = { mode: v('sched-mode'), compound: v('sched-compound'), from_date: v('sched-from'), to_date: v('sched-to'),
+               time: v('sched-time') || null, dose_mg: v('sched-mg') || null, syringe_units: v('sched-units') || null,
+               site: v('sched-site') || null, notes: v('sched-note') || null, reason: v('sched-reason'),
+               include_past: !!v('sched-past'), dry_run: !!dryRun };
+  var out = document.getElementById('sched-result');
+  if (!body.from_date || !body.to_date) { showToast('Pick a from and to date', 'error'); return; }
+  if (!body.reason) { showToast('A reason is required', 'error'); return; }
+  try {
+    var res = await fetch('/api/protocol/schedule/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var r = await res.json();
+    if (!res.ok) { if (out) out.textContent = r.error || 'Could not edit'; showToast(r.error || 'Could not edit the schedule', 'error'); return; }
+    var lines = [(dryRun ? 'Preview: ' : 'Applied: ') + r.changed + ' changed, ' + r.created + ' added, ' + r.deleted + ' removed' + (r.skipped.length ? ', ' + r.skipped.length + ' skipped' : '')];
+    (r.plan || []).slice(0, 6).forEach(function(pl) {
+      lines.push('  ' + pl.date + ' ' + pl.op + (pl.fields ? ': ' + Object.keys(pl.fields).map(function(f) { return f + ' ' + pl.fields[f].from + ' → ' + pl.fields[f].to; }).join(', ') : (pl.dose_mg != null ? ' ' + pl.dose_mg + ' mg' : '')));
+    });
+    if ((r.plan || []).length > 6) lines.push('  … ' + ((r.plan || []).length - 6) + ' more');
+    (r.skipped || []).slice(0, 3).forEach(function(sk) { lines.push('  skipped ' + sk.date + ': ' + sk.reason); });
+    if (out) out.textContent = lines.join('\n');
+    if (!dryRun) { showToast('Schedule updated', 'success'); invalidateProtocolCache(); _refreshProtocolSection(); }
+  } catch (e) { showToast('Could not edit the schedule', 'error'); }
+}
 function _fmtMg(v) { v = Number(v) || 0; return v >= 10 ? Math.round(v) : Math.round(v * 10) / 10; }
 async function addStock() {  // 2026-09-03
   var compound = (document.getElementById('stock-compound') || {}).value || '';

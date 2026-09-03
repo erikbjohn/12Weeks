@@ -5329,7 +5329,10 @@ def admin_import_protocol():
         return jsonify({"error": f"user {email!r} not found"}), 404
 
     data = request.get_json(silent=True) or {}
-    csv_path = data.get("csv_path") or "peptide_protocol.csv"
+    # 2026-09-03: the DATABASE is the source of truth; this route is an admin
+    # RESTORE path (a CSV from /api/protocol/export.csv or a backup). There is
+    # no default file any more — pass csv_text or an explicit csv_path.
+    csv_path = data.get("csv_path")
     force_past = bool(data.get("force_past", False))
     # S012: `csv_text` lets the locally edited CSV be POSTed straight to
     # prod — DB and repo updated from the same bytes, no deploy, no
@@ -5338,9 +5341,11 @@ def admin_import_protocol():
     # "does the CSV match prod?" is one call.
     csv_text = data.get("csv_text")
     dry_run = bool(data.get("dry_run", False))
-    _ph.set_source("csv_import", (data.get("reason") or "").strip()[:300] or "import-protocol")
+    _ph.set_source("admin_restore", (data.get("reason") or "").strip()[:300] or "import-protocol (restore)")
 
     if csv_text is None:
+        if not csv_path:
+            return jsonify({"error": "csv_text or csv_path required — the database is the source of truth; this is a restore path"}), 400
         if not os.path.isabs(csv_path):
             csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), csv_path)
         if not os.path.exists(csv_path):
@@ -5984,6 +5989,159 @@ def api_protocol_vials():
                     notes=(data.get("notes") or "")[:200] or None)
     db.session.add(v); db.session.commit()
     return jsonify({"ok": True, "id": v.id})
+
+
+_EDIT_FIELDS = ("time", "event_type", "dose_mg", "syringe_units", "site", "notes")
+
+
+@app.route("/api/protocol/schedule/edit", methods=["POST"])
+@login_required
+def api_protocol_schedule_edit():
+    """The in-app schedule editor (2026-09-03) — the DATABASE is the source of
+    truth; this replaces editing a CSV. Body:
+      mode: "update" | "add" | "remove"
+      compound, from_date, to_date (inclusive, YYYY-MM-DD)
+      weekdays: optional [0-6] (Mon=0) to restrict the dates
+      time, dose_mg, syringe_units, site, event_type, notes: the values to set
+        (update: only the ones given; add: time + dose_mg required)
+      reason: REQUIRED — lands in the change log with every row
+      include_past: default false — rows dated before today are left alone
+      dry_run: default false — same logic, rolled back, returns the plan
+    Rules (same as the restore path): a TAKEN row never changes dose_mg /
+    syringe_units and is never removed; metadata may still change."""
+    data = request.get_json(silent=True) or {}
+    mode = (data.get("mode") or "update").strip()
+    compound = (data.get("compound") or "").strip()
+    reason = (data.get("reason") or "").strip()
+    if mode not in ("update", "add", "remove"):
+        return jsonify({"error": "mode must be update, add or remove"}), 400
+    if compound not in PROTOCOL_COMPOUNDS:
+        return jsonify({"error": f"compound must be one of {sorted(PROTOCOL_COMPOUNDS)}"}), 400
+    if not reason:
+        return jsonify({"error": "reason is required"}), 400
+    try:
+        d_from = date.fromisoformat(data["from_date"]); d_to = date.fromisoformat(data["to_date"])
+        assert d_from <= d_to and (d_to - d_from).days <= 400
+    except Exception:
+        return jsonify({"error": "from_date/to_date must be YYYY-MM-DD, from <= to, at most 400 days"}), 400
+    weekdays = data.get("weekdays")
+    if weekdays is not None:
+        try:
+            weekdays = {int(w) for w in weekdays}; assert all(0 <= w <= 6 for w in weekdays)
+        except Exception:
+            return jsonify({"error": "weekdays must be integers 0-6 (Mon=0)"}), 400
+    values = {}
+    for f in _EDIT_FIELDS:
+        if f in data and data[f] is not None and str(data[f]).strip() != "":
+            values[f] = data[f]
+    has_dose = values.get("dose_mg") is not None   # membership, not truthiness (0 is never a valid dose here)
+    if has_dose:
+        try:
+            values["dose_mg"] = float(values["dose_mg"]); assert values["dose_mg"] > 0
+        except Exception:
+            return jsonify({"error": "dose_mg must be a positive number"}), 400
+    if "time" in values:
+        try:
+            datetime.strptime(str(values["time"]), "%H:%M"); values["time"] = str(values["time"])
+        except ValueError:
+            return jsonify({"error": "time must be HH:MM"}), 400
+    if "event_type" in values and values["event_type"] not in ("Oral", "Injection"):
+        return jsonify({"error": "event_type must be Oral or Injection"}), 400
+    for f in ("syringe_units", "site", "notes"):
+        if f in values:
+            values[f] = str(values[f])[: (300 if f == "notes" else 40)]
+    if mode == "add" and not (values.get("time") is not None and has_dose):
+        return jsonify({"error": "add needs time and dose_mg"}), 400
+    if mode == "update" and not values:
+        return jsonify({"error": "update needs at least one field to set"}), 400
+    include_past = bool(data.get("include_past"))
+    dry_run = bool(data.get("dry_run"))
+    today = _user_today()
+
+    dates = []
+    d = d_from
+    while d <= d_to:
+        if weekdays is None or d.weekday() in weekdays:
+            dates.append(d)
+        d += timedelta(days=1)
+    existing = {r.date: r for r in PeptideDose.query.filter(
+        PeptideDose.user_id == current_user.id, PeptideDose.compound == compound,
+        PeptideDose.date >= d_from, PeptideDose.date <= d_to).all()}
+
+    _ph.set_source("schedule_edit", reason[:300])
+    changed = created = deleted = 0
+    skipped, plan, touched_dates = [], [], set()
+    for d in dates:
+        row = existing.get(d)
+        if d < today and not include_past:
+            if (mode == "add" and row is None) or (mode != "add" and row is not None):
+                skipped.append({"date": d.isoformat(), "reason": "past date (include_past not set)"})
+            continue
+        if mode == "add":
+            if row is not None:
+                skipped.append({"date": d.isoformat(), "reason": "row already exists"}); continue
+            row = PeptideDose(user_id=current_user.id, date=d, compound=compound, time=values["time"],
+                              event_type=values.get("event_type", "Injection"), dose_mg=values["dose_mg"],
+                              syringe_units=values.get("syringe_units"), site=values.get("site"), notes=values.get("notes"))
+            db.session.add(row); created += 1; touched_dates.add(d)
+            plan.append({"date": d.isoformat(), "op": "add", "time": row.time, "dose_mg": row.dose_mg})
+        elif mode == "remove":
+            if row is None:
+                continue
+            if row.taken_at is not None:
+                skipped.append({"date": d.isoformat(), "reason": "taken — never removed"}); continue
+            db.session.delete(row); deleted += 1; touched_dates.add(d)
+            plan.append({"date": d.isoformat(), "op": "remove", "dose_mg": row.dose_mg})
+        else:
+            if row is None:
+                continue
+            diffs = {}
+            for f, v in values.items():
+                if f in ("dose_mg", "syringe_units") and row.taken_at is not None:
+                    if getattr(row, f) != v:
+                        skipped.append({"date": d.isoformat(), "reason": f"taken — {f} is immutable"})
+                    continue
+                cur = getattr(row, f)
+                if (cur if cur is not None else "") != (v if v is not None else ""):
+                    diffs[f] = {"from": cur, "to": v}
+                    setattr(row, f, v)
+            if diffs:
+                changed += 1; touched_dates.add(d)
+                plan.append({"date": d.isoformat(), "op": "update", "fields": diffs})
+    meal_days = []
+    if dry_run:
+        db.session.rollback()
+    else:
+        db.session.commit()
+        try:
+            if any(f in values for f in ("time",)) or mode in ("add", "remove"):
+                meal_days = _reconcile_meal_rail(current_user, sorted(touched_dates))
+        except Exception:
+            logging.exception("schedule edit: meal rail reconcile failed")
+    return jsonify({"ok": True, "dry_run": dry_run, "mode": mode, "compound": compound,
+                    "changed": changed, "created": created, "deleted": deleted,
+                    "skipped": skipped, "plan": plan[:400], "meal_days_regenerated": meal_days})
+
+
+@app.route("/api/protocol/export.csv", methods=["GET"])
+@login_required
+def api_protocol_export_csv():
+    """The athlete's full dose schedule from the DATABASE, in the classic
+    CSV shape (plus a Taken_At column). For reading and backup; nothing
+    imports from it except the admin restore path."""
+    import csv as _csv, io as _io
+    rows = PeptideDose.query.filter_by(user_id=current_user.id).order_by(PeptideDose.date, PeptideDose.time, PeptideDose.compound).all()
+    buf = _io.StringIO()
+    w = _csv.writer(buf, lineterminator="\r\n")
+    w.writerow(["Date", "Time", "Event_Type", "Compound", "Dose_mg", "Syringe_Units", "Site", "Notes", "Taken_At"])
+    for r in rows:
+        mg = r.dose_mg
+        mg = str(int(mg)) if mg is not None and float(mg) == int(mg) else ("" if mg is None else str(mg))
+        w.writerow([r.date.isoformat(), r.time, r.event_type, r.compound, mg, r.syringe_units or "", r.site or "",
+                    r.notes or "", r.taken_at.isoformat(timespec="seconds") if r.taken_at else ""])
+    fname = f"peptide_protocol_{_user_today().isoformat()}.csv"
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
 
 
 @app.route("/api/protocol/stock", methods=["GET", "POST"])

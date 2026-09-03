@@ -54,21 +54,3 @@ def test_clean_data_is_quiet():
     F = audit({"morning_checkin": ci, "set_log": sl}, 1, date(2026, 9, 1))
     assert not [f for f in F if f["sev"] == "HIGH"], F
 
-
-def test_csv_db_divergence_is_high(tmp_path, monkeypatch):
-    """2026-09-03: prod GHK-Cu 2 mg vs CSV 1 mg went unnoticed for a week."""
-    import csv
-    import data_audit as da
-    csv_path = tmp_path / "peptide_protocol.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["Date", "Time", "Event_Type", "Compound", "Dose_mg", "Syringe_Units", "Site", "Notes"])
-        w.writerow(["2026-09-10", "07:00", "Injection", "GHK-Cu", "1", "5u", "Abdomen", ""])
-        w.writerow(["2026-09-11", "07:00", "Injection", "GHK-Cu", "2", "10u", "Abdomen", ""])
-    monkeypatch.setattr(da, "CSV_PATH", str(csv_path))
-    tables = {"peptide_dose": [
-        {"user_id": 1, "date": "2026-09-10", "compound": "GHK-Cu", "time": "07:00", "dose_mg": 2.0, "syringe_units": "10u", "taken_at": None},
-        {"user_id": 1, "date": "2026-09-11", "compound": "GHK-Cu", "time": "07:00", "dose_mg": 2.0, "syringe_units": "10u", "taken_at": None},
-    ]}
-    F = da.audit(tables, 1, date(2026, 9, 3))
-    hits = [f for f in F if f["check"] == "csv_db_divergence"]
-    assert len(hits) == 1 and hits[0]["sev"] == "HIGH" and "2026-09-10 GHK-Cu" in hits[0]["detail"]

@@ -12,7 +12,7 @@ from types import SimpleNamespace as Row
 
 def _csv_rows():
     out = []
-    with open("peptide_protocol.csv") as f:
+    with open("tests/fixtures/peptide_protocol_snapshot.csv") as f:
         for r in csv.DictReader(f):
             y, m, d = map(int, r["Date"].split("-"))
             out.append(Row(date=date(y, m, d), time=r["Time"], compound=r["Compound"],

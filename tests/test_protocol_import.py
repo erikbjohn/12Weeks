@@ -21,7 +21,7 @@ from datetime import date, datetime
 
 import pytest
 
-REAL_CSV_PATH = "peptide_protocol.csv"  # resolved relative to app.py's directory
+REAL_CSV_PATH = "tests/fixtures/peptide_protocol_snapshot.csv"  # resolved relative to app.py's directory (snapshot 2026-09-03)
 CSV_FIELDS = ["Date", "Time", "Event_Type", "Compound", "Dose_mg", "Syringe_Units", "Site", "Notes"]
 
 
