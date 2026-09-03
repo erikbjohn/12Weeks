@@ -13,6 +13,7 @@ from collections import defaultdict, Counter
 from datetime import date, datetime, timedelta
 
 CHECKIN_FIELDS = ("sleep_quality", "stress_level", "soreness", "mood", "motivation", "anxiety")
+CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "peptide_protocol.csv")
 
 
 def _d(s):
@@ -56,6 +57,44 @@ def audit(tables: dict, user_id: int | None = None, today: date | None = None) -
                 f"{r.get('log_date')}: six numeric scores on a chat/auto row — self-report cannot be that complete")
         if "[MISSED]" in notes and filled:
             hit("HIGH", "morning_checkin", "missed_row_has_scores", f"{r.get('log_date')}: {filled}")
+
+    # ── peptide_dose vs peptide_protocol.csv: two sources of truth must agree ──
+    # 2026-09-03: prod had GHK-Cu at 2 mg since 08-27 (debug/exec) while the
+    # CSV still said 1 mg; a blind import would have reverted 59 rows.
+    try:
+        csv_path = CSV_PATH
+        if os.path.exists(csv_path) and rows("peptide_dose"):
+            import csv as _csv
+            with open(csv_path, newline="", encoding="utf-8") as fh:
+                csv_rows = {(r["Date"], r["Compound"]): r for r in _csv.DictReader(fh)}
+            db_rows = {(str(r.get("date"))[:10], r.get("compound")): r for r in rows("peptide_dose")}
+            diverged = []
+            for k, cr in csv_rows.items():
+                dr = db_rows.get(k)
+                if dr is None:
+                    if k[0] >= today.isoformat():
+                        diverged.append(f"{k[0]} {k[1]}: in CSV, not in DB")
+                    continue
+                diffs = []
+                if (cr.get("Time") or "") != (dr.get("time") or ""):
+                    diffs.append(f"time {dr.get('time')}!={cr.get('Time')}")
+                try:
+                    if abs(float(cr.get("Dose_mg") or 0) - float(dr.get("dose_mg") or 0)) > 1e-6 and not dr.get("taken_at"):
+                        diffs.append(f"dose {dr.get('dose_mg')}!={cr.get('Dose_mg')}")
+                except ValueError:
+                    pass
+                if (cr.get("Syringe_Units") or "") != (dr.get("syringe_units") or ""):
+                    diffs.append(f"units {dr.get('syringe_units')}!={cr.get('Syringe_Units')}")
+                if diffs:
+                    diverged.append(f"{k[0]} {k[1]}: " + ", ".join(diffs))
+            for k, dr in db_rows.items():
+                if k not in csv_rows and not dr.get("taken_at") and k[0] >= today.isoformat():
+                    diverged.append(f"{k[0]} {k[1]}: in DB, not in CSV")
+            if diverged:
+                hit("HIGH", "peptide_dose", "csv_db_divergence",
+                    f"{len(diverged)} rows differ between peptide_protocol.csv and prod (first: {diverged[0]})")
+    except Exception as e:  # the audit must never crash on this check
+        hit("LOW", "peptide_dose", "csv_check_error", str(e)[:200])
 
     # ── set_log: phantom targets, typos, impossible loads ──
     sl = rows("set_log")

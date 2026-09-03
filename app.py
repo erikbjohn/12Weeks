@@ -48,6 +48,9 @@ from models import (
     PeptideDose, PeptideVial, LabReminder,
     PushSubscription, PushSent,
 )
+import protocol_history as _ph
+_ph.install()  # peptide_dose change log — every ORM write, every path (2026-09-03)
+
 from protocol import (
     missed_line, vial_status, fasted_dose_time, fasted_meal_cutoff, dose_change_for, PROTOCOL_COMPOUNDS,
     CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
@@ -5326,6 +5329,7 @@ def admin_import_protocol():
     # "does the CSV match prod?" is one call.
     csv_text = data.get("csv_text")
     dry_run = bool(data.get("dry_run", False))
+    _ph.set_source("csv_import", (data.get("reason") or "").strip()[:300] or "import-protocol")
 
     if csv_text is None:
         if not os.path.isabs(csv_path):
@@ -5717,6 +5721,7 @@ def protocol_dose_toggle(dose_id):
     if dose.date not in (today, yesterday):
         return jsonify({"error": "dose must be dated today or yesterday; use /late for older doses"}), 400
 
+    _ph.set_source("athlete_toggle", "taken" if taken else "untaken")
     dose.taken_at = _utcnow() if taken else None
     db.session.commit()
     return jsonify({"taken": dose.taken_at is not None})
@@ -5758,6 +5763,7 @@ def protocol_dose_late(dose_id):
     # Erik 2026-09-01: a late take is a take — never refused by age. The
     # 72h window only bounds what the CARD lists as actionable (S061).
 
+    _ph.set_source("athlete_late", "taken late")
     dose.taken_at = now
     db.session.commit()
     return jsonify({"taken": True, "late": True})
@@ -5855,6 +5861,61 @@ def admin_add_vial():
     db.session.add(vial)
     db.session.commit()
     return jsonify({"id": vial.id})
+
+
+@app.route("/api/protocol/history", methods=["GET"])
+@login_required
+def protocol_history_get():
+    """The athlete's protocol change log, grouped into readable lines
+    (same minute + source + reason + compound + field + old/new across a
+    date range = one line with a row count). Newest first."""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 200)), 1000))
+    except Exception:
+        limit = 200
+    return jsonify({"changes": _ph.grouped_history(current_user.id, limit=limit)})
+
+
+@app.route("/api/admin/protocol-history/backfill", methods=["POST"])
+@admin_required
+def admin_protocol_history_backfill():
+    """Insert reconstructed history rows (scripts/protocol_history_backfill.py).
+    Body: {email, rows: [{date, compound, field, old_value, new_value,
+    changed_at, source, reason}]}. Idempotent: a row whose
+    (date, compound, field, changed_at, source, old, new) already exists is
+    skipped. Backfill sources are tagged so they are never mistaken for a
+    live capture."""
+    data = request.get_json(silent=True) or {}
+    u = User.query.filter_by(email=data.get("email")).first()
+    if not u:
+        return jsonify({"error": "user not found"}), 404
+    rows = data.get("rows") or []
+    inserted = skipped = 0
+    from models import PeptideDoseHistory
+    for r in rows:
+        try:
+            d = date.fromisoformat(str(r["date"])[:10])
+            ca = datetime.fromisoformat(str(r["changed_at"]).replace("Z", ""))
+            src = str(r.get("source") or "backfill")[:24]
+            if not src.startswith("backfill"):
+                src = ("backfill:" + src)[:24]
+        except Exception as e:
+            return jsonify({"error": f"bad row {r!r}: {e}"}), 400
+        dup = PeptideDoseHistory.query.filter_by(
+            user_id=u.id, date=d, compound=r["compound"], field=r["field"], changed_at=ca, source=src,
+            old_value=r.get("old_value"), new_value=r.get("new_value")).first()
+        if dup:
+            skipped += 1
+            continue
+        db.session.add(PeptideDoseHistory(user_id=u.id, dose_id=r.get("dose_id"), date=d, compound=r["compound"],
+                                          field=r["field"], old_value=r.get("old_value"), new_value=r.get("new_value"),
+                                          changed_at=ca, source=src, reason=r.get("reason")))
+        inserted += 1
+    if data.get("dry_run"):
+        db.session.rollback()
+    else:
+        db.session.commit()
+    return jsonify({"inserted": inserted, "skipped": skipped, "dry_run": bool(data.get("dry_run"))})
 
 
 @app.route("/api/protocol/lab/<int:lab_id>/complete", methods=["POST"])
@@ -12745,10 +12806,18 @@ def api_admin_debug_exec():
     upper = sql.upper().lstrip()
     if not (upper.startswith("UPDATE") or upper.startswith("INSERT") or upper.startswith("DELETE")):
         return jsonify({"error": "Only UPDATE/INSERT/DELETE allowed"}), 403
+    touches_doses = "peptide_dose" in sql.lower() and "peptide_dose_history" not in sql.lower()
     try:
+        before = _ph.snapshot() if touches_doses else None
         result = db.session.execute(text(sql))
+        logged = 0
+        if touches_doses:
+            db.session.flush()
+            db.session.expire_all()
+            logged = _ph.diff_snapshots(before, _ph.snapshot(), "admin_exec",
+                                        ((data.get("reason") or "").strip()[:300] or sql[:300]))
         db.session.commit()
-        return jsonify({"ok": True, "rowcount": result.rowcount})
+        return jsonify({"ok": True, "rowcount": result.rowcount, "history_rows": logged})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)[:300]}), 500

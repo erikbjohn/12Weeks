@@ -11954,10 +11954,60 @@ async function openProtocolCalendar() {
     overlay.innerHTML = header +
       '<div style="padding:1rem;width:100%;max-width:640px;margin:0 auto;box-sizing:border-box">' +
       _buildProtocolCalendarHtml(data) +
+      '<div id="protocol-history-mount"></div>' +
       '</div>';
+    _loadProtocolHistory();
   } catch (e) {
     console.error('Protocol calendar load error:', e);
     overlay.innerHTML = header + '<div style="padding:1.5rem;text-align:center;color:var(--run-tempo)">Could not load the calendar.</div>';
+  }
+}
+
+// Change history (2026-09-03): every edit to the protocol — CSV import,
+// a tap, admin SQL, the backfilled git history — grouped into one line per
+// change. Read-only. Served by GET /api/protocol/history.
+function _protoFieldLabel(f) {
+  return ({time: 'time', dose_mg: 'dose (mg)', syringe_units: 'syringe', site: 'site', notes: 'note',
+           event_type: 'type', taken_at: 'taken', row: 'row'})[f] || f;
+}
+function _protoSourceLabel(src) {
+  src = String(src || '');
+  var base = src.replace(/^backfill:/, '');
+  var label = ({csv_import: 'protocol file', athlete_toggle: 'you', athlete_late: 'you (late)',
+                admin_exec: 'admin edit', orm: 'app', seed: 'seed'})[base] || base;
+  return src.indexOf('backfill') === 0 ? label + ' (reconstructed)' : label;
+}
+function _protoHistoryLine(c) {
+  var when = new Date(c.changed_at + (c.changed_at.indexOf('Z') > -1 || c.changed_at.indexOf('+') > -1 ? '' : 'Z'));
+  var whenStr = isNaN(when) ? c.changed_at : when.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ' ' + when.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  var range = c.from_date === c.to_date ? _fmtShortDate(c.from_date) : _fmtShortDate(c.from_date) + '&ndash;' + _fmtShortDate(c.to_date);
+  var what;
+  if (c.field === 'row') {
+    what = c.old == null ? 'added' : 'removed';
+  } else if (c.field === 'taken_at') {
+    what = c.new ? 'marked taken' : 'marked not taken';
+  } else {
+    what = _protoFieldLabel(c.field) + ': ' + escapeHtml(c.old == null ? '—' : String(c.old)) + ' &rarr; ' + escapeHtml(c.new == null ? '—' : String(c.new));
+  }
+  var rows = c.rows > 1 ? ' (' + c.rows + ' doses)' : '';
+  var why = c.reason && c.field !== 'taken_at' ? '<div style="color:var(--muted);font-size:12px">' + escapeHtml(String(c.reason)).slice(0, 160) + '</div>' : '';
+  return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
+    '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">' + whenStr + ' &middot; ' + _protoSourceLabel(c.source) + '</div>' +
+    '<div style="font-size:14px">' + escapeHtml(c.compound) + ' ' + range + rows + ' &mdash; ' + what + '</div>' + why + '</div>';
+}
+async function _loadProtocolHistory() {
+  var mount = document.getElementById('protocol-history-mount');
+  if (!mount) return;
+  mount.innerHTML = '<div style="margin-top:20px;font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)">Change history</div>' +
+    '<div style="padding:8px 0;color:var(--muted)">Loading&hellip;</div>';
+  try {
+    var r = await fetch('/api/protocol/history?limit=300');
+    if (!r.ok) throw new Error('history ' + r.status);
+    var changes = (await r.json()).changes || [];
+    var body = changes.length ? changes.map(_protoHistoryLine).join('') : '<div style="padding:8px 0;color:var(--muted)">No changes recorded.</div>';
+    mount.innerHTML = '<div style="margin-top:20px;font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)">Change history</div>' + body;
+  } catch (e) {
+    mount.innerHTML = '<div style="margin-top:20px;color:var(--run-tempo)">Could not load the change history.</div>';
   }
 }
 

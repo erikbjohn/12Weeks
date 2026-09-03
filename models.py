@@ -815,6 +815,28 @@ class PeptideDose(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "date", "compound"),)
 
 
+class PeptideDoseHistory(db.Model):
+    """Append-only change log for peptide_dose (2026-09-03). One row per
+    changed FIELD on one dose row (or field='row' for an insert/delete), with
+    the old and new value, when it changed, which PATH changed it (csv_import,
+    athlete_toggle, athlete_late, admin_exec, backfill) and why. Written by
+    protocol_history's flush listener for every ORM write and by a
+    snapshot diff around raw admin SQL — never by hand. Keyed by the dose's
+    (date, compound) so the log survives the dose row being deleted."""
+    __tablename__ = "peptide_dose_history"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    dose_id = db.Column(db.Integer, nullable=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    compound = db.Column(db.String(40), nullable=False)
+    field = db.Column(db.String(20), nullable=False)      # time|dose_mg|syringe_units|site|notes|event_type|taken_at|row
+    old_value = db.Column(db.Text, nullable=True)
+    new_value = db.Column(db.Text, nullable=True)
+    changed_at = db.Column(db.DateTime, nullable=False, index=True)
+    source = db.Column(db.String(24), nullable=False)
+    reason = db.Column(db.Text, nullable=True)
+
+
 class PeptideVial(db.Model):
     """Reconstituted vial inventory in MG (dose size changes mid-vial, so dose
     counts are meaningless). Attribution is window-based: a dose belongs to the
