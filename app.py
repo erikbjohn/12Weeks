@@ -1571,6 +1571,15 @@ def _extract_age_from_intake(user_id):
     return age
 
 
+def _block_end_date():
+    """Last day of week 12 for the current user (start_date + 83 days), or None."""
+    try:
+        st = AppState.query.filter_by(user_id=current_user.id).first()
+        return st.start_date + timedelta(days=83) if st and st.start_date else None
+    except Exception:
+        return None
+
+
 def _user_today():
     """Get today's date in the current user's local timezone (not server UTC)."""
     try:
@@ -5698,12 +5707,15 @@ def protocol_today():
         "missed": missed if view_date == today else [],
         "vials": vials_out,
         "stock": [
-            {**st, "open_expires": st["open_expires"].isoformat() if st["open_expires"] else None,
+            {**st, "horizon": st["horizon"].isoformat() if st["horizon"] else None,
+             "open_expires": st["open_expires"].isoformat() if st["open_expires"] else None,
              "runout_date": st["runout_date"].isoformat() if st["runout_date"] else None,
              "reorder_by": st["reorder_by"].isoformat() if st["reorder_by"] else None,
              "last_dose_date": st["last_dose_date"].isoformat() if st["last_dose_date"] else None}
-            for st in stock_status(vials, PeptideStock.query.filter_by(user_id=current_user.id).all(), all_rows, today)
+            for st in stock_status(vials, PeptideStock.query.filter_by(user_id=current_user.id).all(), all_rows, today,
+                                   horizon=_block_end_date())
         ],
+        "block_end": (_block_end_date().isoformat() if _block_end_date() else None),
         "purchases": [
             {"id": st.id, "compound": st.compound, "vial_mg": st.vial_mg, "quantity": st.quantity,
              "purchased_on": st.purchased_on.isoformat(), "vendor": st.vendor, "notes": st.notes}
@@ -5984,9 +5996,9 @@ def api_protocol_stock():
         vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
         rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
         stock = PeptideStock.query.filter_by(user_id=current_user.id).all()
-        proj = stock_status(vials, stock, rows, _user_today())
+        proj = stock_status(vials, stock, rows, _user_today(), horizon=_block_end_date())
         for st in proj:
-            for k in ("open_expires", "runout_date", "reorder_by", "last_dose_date"):
+            for k in ("open_expires", "runout_date", "reorder_by", "last_dose_date", "horizon"):
                 st[k] = st[k].isoformat() if st[k] else None
         return jsonify({"stock": proj, "purchases": [
             {"id": st.id, "compound": st.compound, "vial_mg": st.vial_mg, "quantity": st.quantity,

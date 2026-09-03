@@ -96,3 +96,18 @@ def test_stock_api_add_open_and_projection(app_ctx, monkeypatch):
         assert g["purchases"][0]["quantity"] == 1
         today = c.get("/api/protocol/today").get_json()
         assert "stock" in today and "purchases" in today
+
+
+def test_horizon_reports_enough_for_block_and_mg_left():
+    from protocol import stock_status
+    today = date(2026, 9, 3)
+    horizon = date(2026, 10, 25)   # week-12 Sunday
+    stock = [NS(compound="Tesamorelin", vial_mg=10.0, quantity=2)]
+    doses = _doses("Tesamorelin", today, 60, 1.0)   # runs past the horizon
+    st = stock_status([], stock, doses, today, horizon=horizon)[0]
+    # 53 doses fall on/before the horizon -> 20 - 53 < 0? no: 20 mg covers 20 doses -> NOT enough
+    assert st["horizon_covered"] is False and st["runout_date"] == today + timedelta(days=20)
+    stock = [NS(compound="Tesamorelin", vial_mg=10.0, quantity=6)]
+    st = stock_status([], stock, doses, today, horizon=horizon)[0]
+    assert st["horizon_covered"] is True and st["mg_left_at_horizon"] == 60.0 - 53.0
+    assert st["horizon"] == horizon

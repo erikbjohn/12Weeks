@@ -505,8 +505,30 @@ def vial_status(vials: list, dose_rows: list, today, lead_time_days: int = 7) ->
 DEFAULT_LEAD_TIME_DAYS = 14   # order-to-door for peptide vendors; Erik can shorten
 
 
+def _walk_supply(future, open_mg, open_expires, shelf_sizes):
+    """Walk scheduled doses against the open vial (mg + expiry) then sealed
+    vials. Returns (covered, runout_date, mg_left) — mg_left is what is
+    still on hand after the last covered dose."""
+    open_left = open_mg
+    shelf = sorted(shelf_sizes, reverse=True)
+    shelf_left = shelf.pop(0) if shelf else 0.0
+    runout, covered = None, 0
+    for r in future:
+        need = float(r.dose_mg)
+        if open_left >= need and (open_expires is None or r.date < open_expires):
+            open_left -= need; covered += 1; continue
+        open_left = 0.0  # the open vial is done (empty or expired) — move to the shelf
+        while shelf_left < need and shelf:
+            shelf_left = shelf.pop(0)
+        if shelf_left >= need:
+            shelf_left -= need; covered += 1; continue
+        runout = r.date
+        break
+    return covered, runout, round(open_left + shelf_left + sum(shelf), 3)
+
+
 def stock_status(vials: list, stock_rows: list, dose_rows: list, today,
-                 lead_time_days: int = DEFAULT_LEAD_TIME_DAYS) -> list[dict]:
+                 lead_time_days: int = DEFAULT_LEAD_TIME_DAYS, horizon=None) -> list[dict]:
     """One dict per compound that has future scheduled doses OR any stock:
 
       open_mg       mg left in the CURRENT open vial (vial_status of the
@@ -545,21 +567,15 @@ def stock_status(vials: list, stock_rows: list, dose_rows: list, today,
         sealed_vials = sum(int(st.quantity) for st in sealed)
         sealed_mg = sum(int(st.quantity) * float(st.vial_mg) for st in sealed)
         # walk the schedule: open vial first (mg AND expiry), then sealed vials by mg
-        open_left = open_mg
-        shelf = sorted((float(st.vial_mg) for st in sealed for _ in range(int(st.quantity))), reverse=True)
-        shelf_left = shelf.pop(0) if shelf else 0.0
-        runout, covered = None, 0
-        for r in future:
-            need = float(r.dose_mg)
-            if open_left >= need and (open_expires is None or r.date < open_expires):
-                open_left -= need; covered += 1; continue
-            open_left = 0.0  # the open vial is done (empty or expired) — move to the shelf
-            while shelf_left < need and shelf:
-                shelf_left = shelf.pop(0)
-            if shelf_left >= need:
-                shelf_left -= need; covered += 1; continue
-            runout = r.date
-            break
+        shelf_sizes = [float(st.vial_mg) for st in sealed for _ in range(int(st.quantity))]
+        covered, runout, mg_left_end = _walk_supply(future, open_mg, open_expires, shelf_sizes)
+        # horizon (the block's last day): is everything scheduled up to it
+        # covered, and how much is left on hand at that point?
+        horizon_covered, mg_left_at_horizon = None, None
+        if horizon is not None:
+            to_h = [r for r in future if r.date <= horizon]
+            c_h, r_h, mg_left_at_horizon = _walk_supply(to_h, open_mg, open_expires, shelf_sizes)
+            horizon_covered = r_h is None
         reorder_by = runout - timedelta(days=lead_time_days) if runout else None
         no_supply = open_mg <= 0 and sealed_vials == 0
         soon = [r for r in future if r.date <= today + timedelta(days=lead_time_days)]
@@ -582,6 +598,10 @@ def stock_status(vials: list, stock_rows: list, dose_rows: list, today,
             "reorder_flag": status != "ok",
             "status": status,
             "last_dose_date": future[-1].date if future else None,
+            "mg_left_after_schedule": mg_left_end if runout is None else 0.0,
+            "horizon": horizon,
+            "horizon_covered": horizon_covered,
+            "mg_left_at_horizon": mg_left_at_horizon,
         })
     return out
 

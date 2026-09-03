@@ -11663,8 +11663,9 @@ function buildProtocolContent(p) {
       var verdict;
       if (!st.future_doses) verdict = 'nothing scheduled';
       else if (st.status === 'no_supply') verdict = 'NO SUPPLY — ' + st.future_doses + ' doses scheduled, order now';
-      else if (!st.runout_date) verdict = 'covers every scheduled dose' + (st.last_dose_date ? ' through ' + _fmtShortDate(st.last_dose_date) : '');
-      else verdict = 'runs out ' + _fmtShortDate(st.runout_date) + ' (' + st.doses_covered + ' of ' + st.future_doses + ' doses) — order by ' + _fmtShortDate(st.reorder_by);
+      else if (st.horizon_covered) verdict = 'Enough for 12 weeks &middot; about ' + _fmtMg(st.mg_left_at_horizon) + ' mg left at the end of week 12';
+      else if (!st.runout_date) verdict = 'Enough for the whole schedule &middot; about ' + _fmtMg(st.mg_left_after_schedule) + ' mg left after the last dose';
+      else verdict = 'Runs out ' + _fmtShortDate(st.runout_date) + ' (' + st.doses_covered + ' of ' + st.future_doses + ' doses) &mdash; order by ' + _fmtShortDate(st.reorder_by);
       return '<div class="protocol-stock" style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:14px;line-height:1.45;' + style + '">' +
         '<div><strong>' + escapeHtml(st.compound) + '</strong> &middot; ' + parts.join(' &middot; ') + '</div>' +
         '<div>' + (warn ? '&#9888; ' : '') + verdict + '</div>' +
@@ -11747,6 +11748,7 @@ async function completeLab(id) {  // S149
   invalidateProtocolCache(); _refreshProtocolSection();
 }
 
+function _fmtMg(v) { v = Number(v) || 0; return v >= 10 ? Math.round(v) : Math.round(v * 10) / 10; }
 async function addStock() {  // 2026-09-03
   var compound = (document.getElementById('stock-compound') || {}).value || '';
   var mg = parseFloat((document.getElementById('stock-mg') || {}).value);
