@@ -58,13 +58,15 @@ def test_escalation_dates_derived_from_csv():
 
 def test_escalation_dates_union_over_titrating_compounds():
     """The FULL mixed-compound CSV yields Retatrutide's 3 steps PLUS
-    Cagrilintide's 4 (Aug 29 1×→2×/wk, Sep 2, Sep 16, Oct 14) — S011: the
+    Cagrilintide's 3 (Aug 29 1×→2×/wk, Sep 2, Sep 16) — S011: the
     detector used to be Retatrutide-only and these were invisible. Compounds
-    that never titrate (BPC, KPV, TB-500, Enclomiphene) contribute nothing."""
+    that never titrate (BPC, KPV, TB-500, Enclomiphene) contribute nothing.
+    (The Oct 14 Cagrilintide step to 2.4 mg is gone: the protocol holds
+    1.2 mg under a 2.4 mg/week cap — matches prod, CSV synced 2026-09-03.)"""
     from protocol import escalation_dates, escalation_events
     dates = escalation_dates(_csv_rows())
     assert dates == [date(2026, 8, 24), date(2026, 8, 29), date(2026, 9, 2),
-                     date(2026, 9, 10), date(2026, 9, 16), date(2026, 9, 21), date(2026, 10, 14)]
+                     date(2026, 9, 10), date(2026, 9, 16), date(2026, 9, 21)]
     by_date = {e["date"]: e for e in escalation_events(_csv_rows())}
     assert by_date[date(2026, 8, 29)]["compound"] == "Cagrilintide"
     assert by_date[date(2026, 8, 29)]["kind"] == "frequency"

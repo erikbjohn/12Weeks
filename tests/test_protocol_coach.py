@@ -261,11 +261,14 @@ def test_vial_flags_only_include_reorder_flagged(app_ctx, monkeypatch):
     app_, db = app_ctx
     uid = _make_user(app_, db, "esc-vials@test.com")
     today = date(2026, 8, 10)
-    # Reconstituted long ago with a short expiry -> already past reorder_by.
+    # 2026-09-03: flags come from the COMBINED supply (open vial + sealed
+    # stock) walked against the schedule. BPC: the open vial expires in 3
+    # days, nothing sealed, 10 more days of doses -> runs out, order now.
     _add_vial(app_, db, uid, "BPC-157", 10.0, today - timedelta(days=25), 28)
-    # Fresh vial, plenty of runway -> not flagged.
+    # KPV: fresh vial, every scheduled dose covered -> not flagged.
     _add_vial(app_, db, uid, "KPV", 10.0, today, 28)
-    _add_dose(app_, db, uid, today, "07:00", "Injection", "BPC-157", 0.25)
+    for i in range(10):
+        _add_dose(app_, db, uid, today + timedelta(days=i), "07:00", "Injection", "BPC-157", 0.25)
     _add_dose(app_, db, uid, today, "07:00", "Injection", "KPV", 1)
 
     ps = _protocol_status_as(app_, uid, today, monkeypatch)
