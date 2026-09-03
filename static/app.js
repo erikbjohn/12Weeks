@@ -10027,68 +10027,12 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
   return h;
 }
 
-// ─── MILESTONE DETECTION ────────────────────────────────────────────────────
-var _milestoneFacts = null;   // {streak, lost} — server truth, block-scoped
-var _milestoneFactsFetched = false;
-function _loadMilestoneFacts() {
-  if (_milestoneFactsFetched) return;
-  _milestoneFactsFetched = true;
-  fetch('/api/progress/dashboard').then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
-    if (!d) return;
-    var streak = d.training && d.training.current_streak;
-    var sb = d.scoreboard || {};
-    var lost = (sb.anchor_weight && sb.current_weight_despiked) ? (sb.anchor_weight - sb.current_weight_despiked) : null;
-    _milestoneFacts = { streak: streak || 0, lost: lost || 0 };
-  }).catch(function() {});
-}
-
-function checkMilestones() {
-  _loadMilestoneFacts();
-  const milestones = [];
-
-  // 1. Weight PR: latest weight > max of all previous
-  const weights = loadWeights();
-  for (const exName in weights) {
-    const data = weights[exName];
-    if (!data || !data.history || data.history.length < 2) continue;
-    // S086: this block only — an all-time max from a prior block is not a PR here.
-    const _start = _stateCache && _stateCache.start_date;
-    const hist = data.history.filter(h => !_start || !h.date || h.date >= _start);
-    if (hist.length < 2) continue;
-    const latest = hist[hist.length - 1].weight;
-    const previousMax = Math.max(...hist.slice(0, -1).map(h => h.weight));
-    if (latest > previousMax) {
-      milestones.push('PR: ' + exName + ' at ' + latest + ' lb!');
-    }
-  }
-
-  // 2-4 (S086/S109): the client used to derive 'lbs lost' from the first
-  // ALL-TIME weigh-in (March), a 'streak' from the COUNT of toggles ever, and
-  // a 'Perfect week' from 6 hardcoded days — all contradicting the server's
-  // evidence-based, block-scoped numbers. Only server-stated facts now.
-  if (_milestoneFacts) {
-    if (_milestoneFacts.streak >= 7) milestones.push(_milestoneFacts.streak + '-day training streak!');
-    if (_milestoneFacts.lost >= 2) {
-      const m2 = Math.floor(_milestoneFacts.lost / 2) * 2;
-      milestones.push(m2 + ' lbs down this block!');
-    }
-  }
-
-  // Show first unseen milestone
-  const banner = document.getElementById('milestone-banner');
-  if (!banner) return;
-  banner.innerHTML = '';
-
-  for (const m of milestones) {
-    if (!_milestonesShownThisSession.has(m)) {
-      _milestonesShownThisSession.add(m);
-      banner.innerHTML = '<div class="milestone-card"><span>' + escapeHtml(m) + '</span><button class="milestone-share-btn" onclick="shareMilestone(\'' + escapeHtml(m).replace(/'/g, "\\'") + '\')">Share</button></div>';
-      setTimeout(() => { banner.innerHTML = ''; }, 5000);
-      break;
-    }
-  }
-}
-
+// ─── MILESTONE BANNER: REMOVED (2026-09-03) ─────────────────────────────────
+// It flashed "PR: <lift> at <lb>!" on every page load, because it defined a
+// PR as "latest logged weight > previous max" — which is true after every
+// normal progression in this program, and the 'seen' set was per-session so
+// a reload re-fired it. Cheerleading on load with no event behind it is a
+// no-sycophancy violation. Nothing replaces it.
 // ─── SOCIAL SHARE ─────────────────────────────────────────────────────────
 function shareMilestone(text) {
     const shareData = {
@@ -10125,33 +10069,6 @@ function shareWeeklySummary() {
     }
 }
 
-function renderMilestonesForCoach() {
-  const milestones = [];
-  const weights = loadWeights();
-  for (const exName in weights) {
-    const data = weights[exName];
-    if (!data || !data.history || data.history.length < 2) continue;
-    const hist = data.history;
-    const latest = hist[hist.length - 1].weight;
-    const previousMax = Math.max(...hist.slice(0, -1).map(h => h.weight));
-    if (latest > previousMax) {
-      milestones.push('PR on ' + exName + ': ' + latest + ' lb');
-    }
-  }
-  if (Array.isArray(_bodyweightCache) && _bodyweightCache.length >= 2) {
-    const lost = _bodyweightCache[0].weight - _bodyweightCache[_bodyweightCache.length - 1].weight;
-    if (lost >= 2) milestones.push(Math.floor(lost / 2) * 2 + ' lbs lost');
-  }
-  if (_completionsCache && _completionsCache.days) {
-    let completedDays = 0;
-    for (let di = 0; di < 6; di++) {
-      if (_completionsCache.days[currentWeek + '_' + di]) completedDays++;
-    }
-    if (completedDays === 6) milestones.push('Perfect week ' + currentWeek);
-  }
-  return milestones.length > 0 ? 'Recent milestones: ' + milestones.join(', ') + '.' : '';
-}
-
 // ─── RENDER ─────────────────────────────────────────────────────────────────
 function renderAll() {
   renderWeighInBar();
@@ -10170,7 +10087,6 @@ function renderAll() {
   renderDetail();
   triggerMorningPopup();
   triggerEndOfDayPopup();
-  checkMilestones();
 
   // Auto-select today if no day is currently selected
   if (currentDay === null) {
@@ -10314,10 +10230,8 @@ function renderInlineCoach() {
   }
 
   const text = escapeHtml(lastMsg.text || lastMsg.content || '');
-  const milestoneStr = renderMilestonesForCoach();
   el.innerHTML = `<div class="coach-inline-card">
     <div class="coach-inline-label">Coach Erik</div>
-    ${milestoneStr ? '<div class="coach-inline-milestones" style="font-size:13px;color:var(--accent);margin-bottom:6px">' + escapeHtml(milestoneStr) + '</div>' : ''}
     <div class="coach-inline-text">"${text}"</div>
     <div class="coach-quick-replies">
       <button onclick="quickCoachReply('How should I modify today\\'s workout?')">Modify today?</button>

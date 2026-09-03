@@ -4276,8 +4276,6 @@ footer {
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 /* ─── MILESTONE BANNER ─── */
-#milestone-banner { padding: 0 1rem; }
-.milestone-card { background: var(--lift-bg); border: 1px solid var(--lift-border); border-radius: 10px; padding: 12px 16px; text-align: center; color: var(--accent); font-weight: 600; font-size: 15px; animation: slideUp 0.3s ease; }
 
 /* ─── COLLAPSIBLE MEAL SECTION ─── */
 .meal-compact-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
@@ -4365,11 +4363,8 @@ footer {
 @keyframes pulse-mic { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
 /* ─── SOCIAL SHARE ─── */
-.milestone-share-btn { background: none; border: 1px solid var(--lift-border); color: var(--accent); padding: 2px 10px; border-radius: 4px; font-size: 12px; font-family: 'DM Mono', monospace; cursor: pointer; margin-left: 8px; }
-.milestone-share-btn:hover { background: var(--accent); color: var(--bg); }
 .progress-share { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .progress-share:hover { border-color: var(--accent); color: var(--text); }
-.milestone-card { display: flex; align-items: center; justify-content: center; gap: 8px; }
 
 /* ─── CONSTRAINTS ─── */
 .constraint-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 1rem 0; }
