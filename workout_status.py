@@ -209,3 +209,22 @@ def aerobic_efficiency_weeks(runs, hr_lo=118, hr_hi=140):
         out.append({"week_start": ws.isoformat(), "pace_sec_per_mi": round(b["sec"] / b["miles"]),
                     "avg_hr": round(b["hr_sec"] / b["sec"], 1), "n_runs": b["n"], "miles": round(b["miles"], 2)})
     return out
+
+
+def aerobic_efficiency_runs(runs, hr_lo=118, hr_hi=140):
+    """One point PER RUN (Erik, 2026-09-03: "one dot per run, not per week").
+    Same qualifying rule as aerobic_efficiency_weeks (Z2 band, real distance,
+    duration and HR); ascending by log_date. pace = seconds / miles."""
+    out = []
+    for r in runs:
+        d = getattr(r, "log_date", None); mi = getattr(r, "distance_miles", None)
+        mn = getattr(r, "duration_min", None); hr = getattr(r, "avg_hr", None)
+        if not d or not mi or not mn or hr is None or mi <= 0 or mn <= 0 or not (hr_lo <= hr <= hr_hi):
+            continue
+        out.append({"date": d.isoformat(), "pace_sec_per_mi": round(mn * 60.0 / mi),
+                    "avg_hr": round(hr, 1), "miles": round(mi, 2), "duration_min": round(mn, 1),
+                    "_id": getattr(r, "id", 0) or 0})
+    out.sort(key=lambda x: (x["date"], x["_id"]))
+    for x in out:
+        x.pop("_id", None)
+    return out

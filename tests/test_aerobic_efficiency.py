@@ -272,3 +272,22 @@ def test_sunday_log_date_buckets_to_same_week_monday(app_ctx):
 
     assert len(weeks) == 1
     assert weeks[0]["week_start"] == ANCHOR_MONDAY.isoformat()  # NOT the following Monday
+
+
+# ── per-run series (2026-09-03: one dot per run, not per week) ─────────────
+
+def test_aerobic_efficiency_runs_is_one_point_per_run():
+    from types import SimpleNamespace as R
+    from workout_status import aerobic_efficiency_runs
+    rows = [
+        R(id=2, log_date=date(2026, 9, 2), distance_miles=3.0, duration_min=30.0, avg_hr=130),
+        R(id=1, log_date=date(2026, 9, 1), distance_miles=4.0, duration_min=36.0, avg_hr=128),
+        R(id=3, log_date=date(2026, 9, 2), distance_miles=2.0, duration_min=20.0, avg_hr=150),  # out of band
+        R(id=4, log_date=date(2026, 9, 3), distance_miles=0, duration_min=20.0, avg_hr=125),    # no distance
+        R(id=5, log_date=date(2026, 9, 3), distance_miles=5.0, duration_min=50.0, avg_hr=None), # no HR
+    ]
+    out = aerobic_efficiency_runs(rows)
+    assert [o["date"] for o in out] == ["2026-09-01", "2026-09-02"]
+    assert out[0]["pace_sec_per_mi"] == 540 and out[1]["pace_sec_per_mi"] == 600
+    assert out[0]["miles"] == 4.0 and out[0]["duration_min"] == 36.0 and out[0]["avg_hr"] == 128
+    assert "_id" not in out[0]

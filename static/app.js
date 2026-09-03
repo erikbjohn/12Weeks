@@ -8854,7 +8854,7 @@ function _pdLoadAerobicEfficiency() {
     .then(function(data) {
       var m = document.getElementById('pd-aerobic-mount');
       if (!m) return; // Progress closed/re-rendered before this resolved
-      m.innerHTML = _pdAerobicChart(data ? data.weeks : []);
+      m.innerHTML = _pdAerobicChart(data ? data.runs : []);
     })
     .catch(function() {
       var m = document.getElementById('pd-aerobic-mount');
@@ -9105,15 +9105,16 @@ function _pdWeightChart(bw, projections, targetWeight, startDate) {
  *      bigger raw values higher; here bigger pace (slower) must plot LOWER
  *      so "up" always reads as "faster" — so the (1 - ...) flip used there
  *      is dropped here on purpose.
- *   2. X axis is positioned by real calendar date (week_start), not by
+ *   2. X axis is positioned by real calendar date (date), not by
  *      array index, so a run of weeks with no qualifying easy runs leaves an
  *      honest visual gap instead of compressing the timeline.
- * `weeks` is the ascending-by-week_start array served by
- * GET /api/stats/aerobic-efficiency: {week_start, pace_sec_per_mi, avg_hr,
- * n_runs, miles}. The only client-side computation is formatting (M:SS,
+ * `runs` is the ascending-by-date, ONE-POINT-PER-RUN array served by
+ * GET /api/stats/aerobic-efficiency: {date, pace_sec_per_mi, avg_hr,
+ * miles, duration_min}. The only client-side computation is formatting (M:SS,
  * short dates) plus min() over the served pace values for the best-week
  * reference line — no health math happens here. */
-function _pdAerobicChart(weeks) {
+function _pdAerobicChart(runs) {
+  var weeks = runs;  // one point PER RUN (2026-09-03); the variable name is historical
   var title = 'Easy pace @ Z2 (HR 118-140)';
   if (!weeks || weeks.length === 0) {
     return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div><div class="pd-empty">No easy-zone runs logged yet</div></div>';
@@ -9135,8 +9136,8 @@ function _pdAerobicChart(weeks) {
     return padT + ((pace - yMin) / yRange) * (H - padT - padB);
   }
 
-  var xStartDate = new Date(weeks[0].week_start + 'T00:00:00');
-  var xEndDate = new Date(weeks[weeks.length - 1].week_start + 'T00:00:00');
+  var xStartDate = new Date(weeks[0].date + 'T00:00:00');
+  var xEndDate = new Date(weeks[weeks.length - 1].date + 'T00:00:00');
   var xRangeMs = xEndDate - xStartDate;
   function xPos(dateStr) {
     if (!xRangeMs) return padL + (W - padL - padR) / 2;
@@ -9157,19 +9158,25 @@ function _pdAerobicChart(weeks) {
     svg += '<line x1="' + padL + '" y1="' + ly + '" x2="' + (W - padR) + '" y2="' + ly + '" stroke="var(--border)" stroke-width="0.5"/>';
   }
 
-  // Best (fastest) week reference line — derived from the SERVED pace
+  // Best (fastest) run reference line — derived from the SERVED pace
   // values (client-side min()), not recomputed health math.
   var bestY = yPos(paceMin);
   svg += '<line x1="' + padL + '" y1="' + bestY.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + bestY.toFixed(1) + '" stroke="var(--run-z2)" stroke-width="1" stroke-dasharray="6,4" opacity="0.5"/>';
   svg += '<text x="' + (W - padR - 2) + '" y="' + (bestY - 4).toFixed(1) + '" text-anchor="end" fill="var(--run-z2)" font-size="12" font-family="DM Mono,monospace" opacity="0.9">best ' + _fmtPace(paceMin) + '/mi</text>';
 
-  // Trajectory line — positioned by real date, so gaps between non-adjacent
-  // weeks are honest rather than visually compressed.
-  var pts = [];
-  for (var i = 0; i < weeks.length; i++) {
-    pts.push(xPos(weeks[i].week_start).toFixed(1) + ',' + yPos(weeks[i].pace_sec_per_mi).toFixed(1));
+  // Trend line: a 5-run rolling mean of pace (pure smoothing of the served
+  // values). Connecting every run point-to-point read as noise once the
+  // series became one dot per run (2026-09-03); the dots stay as the data.
+  var TREND_N = 5;
+  if (weeks.length >= TREND_N) {
+    var tpts = [];
+    for (var ti = TREND_N - 1; ti < weeks.length; ti++) {
+      var sum = 0;
+      for (var tj = ti - TREND_N + 1; tj <= ti; tj++) sum += weeks[tj].pace_sec_per_mi;
+      tpts.push(xPos(weeks[ti].date).toFixed(1) + ',' + yPos(sum / TREND_N).toFixed(1));
+    }
+    svg += '<polyline points="' + tpts.join(' ') + '" fill="none" stroke="var(--run-z2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>';
   }
-  svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--run-z2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
   // Dots only. The per-point HR labels are gone (2026-09-03): eleven numbers
   // between 127 and 131 crashed into the line, the y-axis and each other and
@@ -9177,17 +9184,17 @@ function _pdAerobicChart(weeks) {
   // the best line and the latest pace. <title> stays for desktop hover.
   for (var di = 0; di < weeks.length; di++) {
     var wpt = weeks[di];
-    var cx = xPos(wpt.week_start), cy = yPos(wpt.pace_sec_per_mi);
+    var cx = xPos(wpt.date), cy = yPos(wpt.pace_sec_per_mi);
     var isLast = di === weeks.length - 1;
-    svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (isLast ? 5 : 3) + '" fill="var(--run-z2)"' + (isLast ? '' : ' opacity="0.75"') + '>' +
-      '<title>' + _fmtShortDate(wpt.week_start) + ': ' + _fmtPace(wpt.pace_sec_per_mi) + '/mi @ ' + wpt.avg_hr + ' bpm avg (' +
-      wpt.n_runs + ' run' + (wpt.n_runs === 1 ? '' : 's') + ', ' + wpt.miles + ' mi)</title>' +
+    svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (isLast ? 5 : 3) + '" fill="var(--run-z2)"' + (isLast ? '' : ' opacity="0.45"') + '>' +
+      '<title>' + _fmtShortDate(wpt.date) + ': ' + _fmtPace(wpt.pace_sec_per_mi) + '/mi @ ' + wpt.avg_hr + ' bpm avg (' +
+      wpt.miles + ' mi, ' + wpt.duration_min + ' min)</title>' +
     '</circle>';
   }
 
   // Latest-week annotation, matching _pdWeightChart's current-value label.
   var last = weeks[weeks.length - 1];
-  var lx = xPos(last.week_start), ly2 = yPos(last.pace_sec_per_mi);
+  var lx = xPos(last.date), ly2 = yPos(last.pace_sec_per_mi);
   var plotRight = W - padR;
   var annX, annAnchor;
   if (lx + 46 < plotRight) { annX = lx + 8; annAnchor = 'start'; }
@@ -9198,9 +9205,9 @@ function _pdAerobicChart(weeks) {
   svg += '<text x="' + annX.toFixed(1) + '" y="' + annY.toFixed(1) + '" text-anchor="' + annAnchor + '" fill="var(--run-z2)" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + _fmtPace(last.pace_sec_per_mi) + '</text>';
 
   // X-axis: first + last week only (irregular gaps make a fixed tick set misleading).
-  svg += '<text x="' + xPos(weeks[0].week_start).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="start" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(weeks[0].week_start) + '</text>';
+  svg += '<text x="' + xPos(weeks[0].date).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="start" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(weeks[0].date) + '</text>';
   if (weeks.length > 1) {
-    svg += '<text x="' + xPos(last.week_start).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="end" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(last.week_start) + '</text>';
+    svg += '<text x="' + xPos(last.date).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="end" fill="var(--muted)" font-size="12" font-family="DM Mono,monospace">' + _fmtShortDate(last.date) + '</text>';
   }
 
   svg += '</svg>';
@@ -9210,9 +9217,10 @@ function _pdAerobicChart(weeks) {
   var hrBand = hrs.length ? (Math.min.apply(null, hrs) === Math.max.apply(null, hrs)
     ? Math.min.apply(null, hrs) + ' bpm' : Math.min.apply(null, hrs) + '\u2013' + Math.max.apply(null, hrs) + ' bpm') : '';
   var caption = '<div class="pd-chart-caption">' +
-    'Week of ' + escapeHtml(_fmtShortDate(last.week_start)) + ': ' + _fmtPace(last.pace_sec_per_mi) + '/mi at ' + Math.round(last.avg_hr) + ' bpm, ' +
-    last.n_runs + ' run' + (last.n_runs === 1 ? '' : 's') + ', ' + last.miles + ' mi' +
-    (hrBand ? '<br>Avg HR across all weeks: ' + hrBand : '') +
+    escapeHtml(_fmtShortDate(last.date)) + ': ' + _fmtPace(last.pace_sec_per_mi) + '/mi at ' + Math.round(last.avg_hr) + ' bpm, ' +
+    last.miles + ' mi in ' + Math.round(last.duration_min) + ' min' +
+    (hrBand ? '<br>' + weeks.length + ' easy runs, avg HR ' + hrBand : '') +
+    (weeks.length >= TREND_N ? '<br>Line: 5-run average' : '') +
     '</div>';
   return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div>' + svg + caption + '</div>';
 }

@@ -8609,9 +8609,11 @@ def api_stats_aerobic_efficiency():
     (no zero-fill) so the chart never implies a data point that doesn't exist.
     """
     try:
-        from workout_status import aerobic_efficiency_weeks
+        from workout_status import aerobic_efficiency_weeks, aerobic_efficiency_runs
         runs = RunLog.query.filter(RunLog.user_id == current_user.id, RunLog.log_date.isnot(None)).all()
-        return jsonify({"weeks": aerobic_efficiency_weeks(runs)})
+        # `runs`: one point per qualifying run — what the Progress chart draws.
+        # `weeks`: the calendar-week aggregate the run planner's prompt uses.
+        return jsonify({"weeks": aerobic_efficiency_weeks(runs), "runs": aerobic_efficiency_runs(runs)})
     except Exception as e:
         logging.exception("stats/aerobic-efficiency failed")
         return _client_error(e)   # S138: reference id, no internals
