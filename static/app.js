@@ -5209,6 +5209,7 @@ function showSettingsMenu() {
     <button onclick="${_c}regenerateProfile()">Regenerate Profile</button>
     <button onclick="${_c}restartFromReveal()">Restart from Plan Review</button>
     <button onclick="${_c}showGroceryList()">Grocery List</button>
+    <button onclick="${_c}showPeptideInventory()">&#128138; Peptide Inventory</button>
     <button onclick="${_c}showGarminPanel()">&#8986; Garmin Sync</button>
     <div style="padding:10px 20px 12px;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);margin:4px 0;display:flex;flex-direction:column;gap:8px">
       <div id="push-status-text" style="font-size:16px;line-height:1.4;color:var(--muted)">Notifications: checking&hellip;</div>
@@ -11645,6 +11646,37 @@ function buildProtocolContent(p) {
     '</div>';
   }
 
+  // Inventory (stock, purchases, vials, schedule editor) lives in Settings →
+  // Peptide Inventory (Erik, 2026-09-03: too prominent on the daily card).
+  // The daily card only carries a supply WARNING when something needs ordering.
+  var _needs = (p.stock || []).filter(function(st) { return st.status === 'order_now' || st.status === 'no_supply'; });
+  if (_needs.length) {
+    html += '<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);border-radius:8px;color:var(--run-hiit);font-size:14px;line-height:1.45">' +
+      _needs.map(function(st) {
+        return '&#9888; ' + escapeHtml(st.compound) + (st.status === 'no_supply' ? ': no supply on hand' : ': runs out ' + _fmtShortDate(st.runout_date)) + ' &mdash; order now';
+      }).join('<br>') +
+      '<div style="margin-top:4px"><a href="#" onclick="showPeptideInventory();return false" style="color:inherit">Peptide inventory &rarr;</a></div>' +
+    '</div>';
+  }
+
+  // Labs due
+  if (p.labs_due && p.labs_due.length) {
+    html += p.labs_due.map(function(l) {
+      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px;display:flex;align-items:center;gap:10px">' +
+        '<span style="flex:1">🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) + '</span>' +
+        '<button class="btn btn-secondary" style="min-height:44px;padding:8px 14px" onclick="completeLab(' + l.id + ')">Done</button>' +  // S149
+      '</div>';
+    }).join('');
+  }
+
+  return html;
+}
+
+
+// ─── PEPTIDE INVENTORY (Settings → Peptide Inventory) ────────────────────────
+// Stock, purchases, open vials and the schedule editor, off the daily card.
+function buildInventoryContent(p) {
+  var html = '';
   // Stock (2026-09-03): per compound, the open vial + sealed shelf vials
   // against the schedule — when supply runs out and when to order.
   var stock = p.stock || [];
@@ -11683,7 +11715,7 @@ function buildProtocolContent(p) {
         '</div>';
       }).join('') + '</details>';
   }
-  if (p.is_today !== false) {
+  {
     var opts = Object.keys(_PROTOCOL_ABBR).map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
     html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">+ Add stock (bought new vials)</summary>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
@@ -11699,7 +11731,7 @@ function buildProtocolContent(p) {
   // Schedule editor (2026-09-03): the DATABASE is the source of truth. Pick
   // a compound and a date range, set dose/units/time/site/note with a reason;
   // Preview is a dry run, Apply writes the rows and the change log.
-  if (p.is_today !== false) {
+  {
     var eopts = Object.keys(_PROTOCOL_ABBR).map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
     var inp = 'font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)';
     html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">Edit schedule</summary>' +
@@ -11740,7 +11772,7 @@ function buildProtocolContent(p) {
       '</div>';
     }).join('');
   }
-  if (p.is_today !== false) {
+  {
     html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">+ Add a vial</summary>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
         '<select id="vial-compound" style="flex:1 1 140px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
@@ -11751,17 +11783,32 @@ function buildProtocolContent(p) {
       '</div></details>';
   }
 
-  // Labs due
-  if (p.labs_due && p.labs_due.length) {
-    html += p.labs_due.map(function(l) {
-      return '<div class="protocol-lab-due" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border2);background:var(--surface2);border-radius:8px;color:var(--text);font-size:14px;display:flex;align-items:center;gap:10px">' +
-        '<span style="flex:1">🧪 ' + escapeHtml(l.label) + ' &mdash; due ' + _fmtShortDate(l.due_date) + '</span>' +
-        '<button class="btn btn-secondary" style="min-height:44px;padding:8px 14px" onclick="completeLab(' + l.id + ')">Done</button>' +  // S149
-      '</div>';
-    }).join('');
-  }
+  return html || '<div style="padding:1rem;color:var(--muted)">Nothing here yet.</div>';
+}
 
-  return html;
+async function showPeptideInventory() {
+  var overlay = document.getElementById('inventory-overlay');
+  if (!overlay) return;
+  var header = '<div class="pd-header"><span class="pd-title">Peptide Inventory</span>' +
+    '<button class="pd-close" onclick="closePeptideInventory()">&times;</button></div>';
+  overlay.classList.add('visible');
+  overlay.innerHTML = header + '<div style="padding:1.5rem;text-align:center;color:var(--muted)">Loading&hellip;</div>';
+  try {
+    var res = await fetch('/api/protocol/today');
+    if (!res.ok) throw new Error('protocol today ' + res.status);
+    var p = await res.json();
+    overlay.innerHTML = header + '<div style="padding:1rem;width:100%;max-width:640px;margin:0 auto;box-sizing:border-box">' + buildInventoryContent(p) + '</div>';
+  } catch (e) {
+    overlay.innerHTML = header + '<div style="padding:1.5rem;text-align:center;color:var(--run-tempo)">Could not load the inventory.</div>';
+  }
+}
+function closePeptideInventory() {
+  var overlay = document.getElementById('inventory-overlay');
+  if (overlay) overlay.classList.remove('visible');
+}
+function _refreshInventoryIfOpen() {
+  var overlay = document.getElementById('inventory-overlay');
+  if (overlay && overlay.classList.contains('visible')) showPeptideInventory();
 }
 
 var _protocolCache = {};
@@ -11796,7 +11843,7 @@ async function scheduleEdit(dryRun) {  // 2026-09-03
     if ((r.plan || []).length > 6) lines.push('  … ' + ((r.plan || []).length - 6) + ' more');
     (r.skipped || []).slice(0, 3).forEach(function(sk) { lines.push('  skipped ' + sk.date + ': ' + sk.reason); });
     if (out) out.textContent = lines.join('\n');
-    if (!dryRun) { showToast('Schedule updated', 'success'); invalidateProtocolCache(); _refreshProtocolSection(); }
+    if (!dryRun) { showToast('Schedule updated', 'success'); invalidateProtocolCache(); _refreshProtocolSection(); _refreshInventoryIfOpen(); }
   } catch (e) { showToast('Could not edit the schedule', 'error'); }
 }
 function _fmtMg(v) { v = Number(v) || 0; return v >= 10 ? Math.round(v) : Math.round(v * 10) / 10; }
@@ -11812,7 +11859,7 @@ async function addStock() {  // 2026-09-03
     if (!r || !r.ok) throw new Error('save');
     showToast('Stock saved', 'success');
   } catch (e) { showToast('Could not save the stock', 'error'); }
-  invalidateProtocolCache(); _refreshProtocolSection();
+  invalidateProtocolCache(); _refreshProtocolSection(); _refreshInventoryIfOpen();
 }
 async function openStockVial(id) {
   try {
@@ -11820,7 +11867,7 @@ async function openStockVial(id) {
     if (!r || !r.ok) throw new Error('open');
     showToast('Vial opened — tracking it from today', 'success');
   } catch (e) { showToast('Could not open the vial', 'error'); }
-  invalidateProtocolCache(); _refreshProtocolSection();
+  invalidateProtocolCache(); _refreshProtocolSection(); _refreshInventoryIfOpen();
 }
 async function deleteStock(id) {
   try {
@@ -11828,7 +11875,7 @@ async function deleteStock(id) {
     if (!res.ok) throw new Error('delete');
     showToast('Purchase removed', 'success');
   } catch (e) { showToast('Could not remove the purchase', 'error'); }
-  invalidateProtocolCache(); _refreshProtocolSection();
+  invalidateProtocolCache(); _refreshProtocolSection(); _refreshInventoryIfOpen();
 }
 
 async function addVial() {  // S140
@@ -11841,7 +11888,7 @@ async function addVial() {  // S140
     if (!r || !r.ok) throw new Error('save');
     showToast('Vial saved', 'success');
   } catch (e) { showToast('Could not save the vial', 'error'); }
-  invalidateProtocolCache(); _refreshProtocolSection();
+  invalidateProtocolCache(); _refreshProtocolSection(); _refreshInventoryIfOpen();
 }
 
 async function toggleDose(id, currentlyTaken) {
