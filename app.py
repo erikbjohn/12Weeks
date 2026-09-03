@@ -45,14 +45,14 @@ from models import (
     DailyCoachState, WeeklyScheduleOverride, MealPlanOverride, RunOverride,
     Exercise, WeeklyPrescription, WeeklyMealPlan,
     WeeklyRunPlan, WeeklyWarmup, WeeklyDaySchedule,
-    PeptideDose, PeptideVial, LabReminder,
+    PeptideDose, PeptideVial, PeptideStock, LabReminder,
     PushSubscription, PushSent,
 )
 import protocol_history as _ph
 _ph.install()  # peptide_dose change log — every ORM write, every path (2026-09-03)
 
 from protocol import (
-    missed_line, vial_status, fasted_dose_time, fasted_meal_cutoff, dose_change_for, PROTOCOL_COMPOUNDS,
+    missed_line, vial_status, stock_status, fasted_dose_time, fasted_meal_cutoff, dose_change_for, PROTOCOL_COMPOUNDS,
     CONFIRM_WITH_DOCTOR, escalation_events, next_escalation,
 )
 
@@ -5697,6 +5697,18 @@ def protocol_today():
         # only meaningful on the today card.
         "missed": missed if view_date == today else [],
         "vials": vials_out,
+        "stock": [
+            {**st, "open_expires": st["open_expires"].isoformat() if st["open_expires"] else None,
+             "runout_date": st["runout_date"].isoformat() if st["runout_date"] else None,
+             "reorder_by": st["reorder_by"].isoformat() if st["reorder_by"] else None,
+             "last_dose_date": st["last_dose_date"].isoformat() if st["last_dose_date"] else None}
+            for st in stock_status(vials, PeptideStock.query.filter_by(user_id=current_user.id).all(), all_rows, today)
+        ],
+        "purchases": [
+            {"id": st.id, "compound": st.compound, "vial_mg": st.vial_mg, "quantity": st.quantity,
+             "purchased_on": st.purchased_on.isoformat(), "vendor": st.vendor, "notes": st.notes}
+            for st in PeptideStock.query.filter_by(user_id=current_user.id).order_by(PeptideStock.purchased_on.desc()).all()
+        ],
         "fasting_bound": (fasted_meal_cutoff(fasted_dose_time(all_rows, view_date))
                           if fasted_dose_time(all_rows, view_date) else None),
         "labs_due": labs_due if view_date == today else [],
@@ -5960,6 +5972,77 @@ def api_protocol_vials():
                     notes=(data.get("notes") or "")[:200] or None)
     db.session.add(v); db.session.commit()
     return jsonify({"ok": True, "id": v.id})
+
+
+@app.route("/api/protocol/stock", methods=["GET", "POST"])
+@login_required
+def api_protocol_stock():
+    """Sealed-vial stock (2026-09-03). GET: per-compound supply projection +
+    purchases. POST: record a purchase {compound, vial_mg, quantity,
+    purchased_on?, vendor?, notes?}."""
+    if request.method == "GET":
+        vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
+        rows = PeptideDose.query.filter_by(user_id=current_user.id).all()
+        stock = PeptideStock.query.filter_by(user_id=current_user.id).all()
+        proj = stock_status(vials, stock, rows, _user_today())
+        for st in proj:
+            for k in ("open_expires", "runout_date", "reorder_by", "last_dose_date"):
+                st[k] = st[k].isoformat() if st[k] else None
+        return jsonify({"stock": proj, "purchases": [
+            {"id": st.id, "compound": st.compound, "vial_mg": st.vial_mg, "quantity": st.quantity,
+             "purchased_on": st.purchased_on.isoformat(), "vendor": st.vendor, "notes": st.notes}
+            for st in sorted(stock, key=lambda x: x.purchased_on, reverse=True)]})
+    data = request.get_json(silent=True) or {}
+    compound = (data.get("compound") or "").strip()
+    if compound not in PROTOCOL_COMPOUNDS:
+        return jsonify({"error": f"compound must be one of {sorted(PROTOCOL_COMPOUNDS)}"}), 400
+    try:
+        vial_mg = float(data.get("vial_mg")); assert vial_mg > 0
+        quantity = int(data.get("quantity") or 1); assert quantity > 0
+    except Exception:
+        return jsonify({"error": "vial_mg must be a positive number and quantity a positive integer"}), 400
+    try:
+        purchased_on = date.fromisoformat(data["purchased_on"]) if data.get("purchased_on") else _user_today()
+    except ValueError:
+        return jsonify({"error": "bad purchased_on"}), 400
+    st = PeptideStock(user_id=current_user.id, compound=compound, vial_mg=vial_mg, quantity=quantity,
+                      purchased_on=purchased_on, vendor=(data.get("vendor") or "")[:80] or None,
+                      notes=(data.get("notes") or "")[:300] or None)
+    db.session.add(st); db.session.commit()
+    return jsonify({"ok": True, "id": st.id})
+
+
+@app.route("/api/protocol/stock/<int:stock_id>/open", methods=["POST"])
+@login_required
+def api_protocol_stock_open(stock_id):
+    """Open one sealed vial: creates the reconstituted PeptideVial (today,
+    expiry_days default 28, override in body) and decrements the stock row."""
+    st = PeptideStock.query.filter_by(id=stock_id, user_id=current_user.id).first()
+    if not st:
+        return jsonify({"error": "not found"}), 404
+    if (st.quantity or 0) <= 0:
+        return jsonify({"error": "no sealed vials left on that row"}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        recon = date.fromisoformat(data["reconstituted_on"]) if data.get("reconstituted_on") else _user_today()
+    except ValueError:
+        return jsonify({"error": "bad reconstituted_on"}), 400
+    v = PeptideVial(user_id=current_user.id, compound=st.compound, total_mg=st.vial_mg, reconstituted_on=recon,
+                    expiry_days=int(data.get("expiry_days") or 28),
+                    notes=(f"opened from stock #{st.id}" + (f" ({st.vendor})" if st.vendor else "")))
+    st.quantity -= 1
+    db.session.add(v); db.session.commit()
+    return jsonify({"ok": True, "vial_id": v.id, "sealed_left": st.quantity})
+
+
+@app.route("/api/protocol/stock/<int:stock_id>", methods=["DELETE"])
+@login_required
+def api_protocol_stock_delete(stock_id):
+    st = PeptideStock.query.filter_by(id=stock_id, user_id=current_user.id).first()
+    if not st:
+        return jsonify({"error": "not found"}), 404
+    db.session.delete(st); db.session.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/protocol/vial/<int:vial_id>", methods=["DELETE"])

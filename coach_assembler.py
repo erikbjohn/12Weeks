@@ -1177,7 +1177,7 @@ def _build_protocol_status():
     from models import PeptideDose, PeptideVial, LabReminder
     from protocol import (
         adherence_7d, escalation_window as _escalation_window,
-        next_escalation as _next_escalation, vial_status, missed_line,
+        next_escalation as _next_escalation, vial_status, stock_status, missed_line,
         current_dose_mg, PROTOCOL_COMPOUNDS,
     )
     today = _user_today()
@@ -1213,7 +1213,12 @@ def _build_protocol_status():
     esc_window_active = _escalation_window(all_rows, window_start, days=7)
 
     vials = PeptideVial.query.filter_by(user_id=current_user.id).all()
-    vial_flags = [v for v in vial_status(vials, all_rows, today) if v["reorder_flag"]]
+    from models import PeptideStock as _PStock
+    _stock_rows = _PStock.query.filter_by(user_id=current_user.id).all()
+    # Supply = open vial + sealed shelf stock vs the schedule (2026-09-03);
+    # the old vial-only flag fired for a vial running out with 3 sealed
+    # ones on the shelf.
+    vial_flags = [v for v in stock_status(vials, _stock_rows, all_rows, today) if v["reorder_flag"]]
 
     labs = LabReminder.query.filter_by(user_id=current_user.id).all()
     labs_due = [
@@ -2556,7 +2561,7 @@ def _format_athlete_data(ctx, requires):
             ps_lines.append(f"  missed: {m['compound']} on {m['date']} — rule: {m['rule']}")
         for v in ps.get("vial_flags") or []:
             ps_lines.append(
-                f"  VIAL REORDER: {v['compound']} — runout {v['runout_date']}, reorder by {v['reorder_by']}"
+                f"  REORDER {v['compound']}: {v['status'].replace('_', ' ')} — open vial {v['open_mg']} mg, {v['sealed_vials']} sealed on the shelf; supply runs out {v['runout_date']}, order by {v['reorder_by']} (tell the athlete once, plainly)"
             )
         for lab in ps.get("labs_due") or []:
             ps_lines.append(f"  lab_due: {lab['label']} — due {lab['due_date']}")

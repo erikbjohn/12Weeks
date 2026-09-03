@@ -851,6 +851,23 @@ class PeptideVial(db.Model):
     notes = db.Column(db.Text, nullable=True)
 
 
+class PeptideStock(db.Model):
+    """Sealed (unopened) vials on the shelf — a purchase (2026-09-03). One row
+    per purchase; `quantity` is how many of those vials are still sealed.
+    Opening one creates a PeptideVial (the reconstituted-vial tracker) and
+    decrements quantity. Supply projection: protocol.stock_status."""
+    __tablename__ = "peptide_stock"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    compound = db.Column(db.String(40), nullable=False)
+    vial_mg = db.Column(db.Float, nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    purchased_on = db.Column(db.Date, nullable=False)
+    vendor = db.Column(db.String(80), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class LabReminder(db.Model):
     """Lab-work reminder. Coach mentions it while completed_at IS NULL and
     due_date <= today+7; completing it stops mentions permanently."""

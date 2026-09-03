@@ -500,7 +500,93 @@ def vial_status(vials: list, dose_rows: list, today, lead_time_days: int = 7) ->
     return results
 
 
-# ── Missed-dose action classification ────────────────────────────────
+# ── Supply projection: open vial + sealed stock vs the schedule ───────
+
+DEFAULT_LEAD_TIME_DAYS = 14   # order-to-door for peptide vendors; Erik can shorten
+
+
+def stock_status(vials: list, stock_rows: list, dose_rows: list, today,
+                 lead_time_days: int = DEFAULT_LEAD_TIME_DAYS) -> list[dict]:
+    """One dict per compound that has future scheduled doses OR any stock:
+
+      open_mg       mg left in the CURRENT open vial (vial_status of the
+                    latest vial), 0 if none / expired
+      open_expires  that vial's expiry date (None if no open vial)
+      sealed_vials  count of sealed vials on the shelf; sealed_mg their mg
+      runout_date   date of the first scheduled dose that cannot be covered
+                    by open_mg (until expiry) + sealed vials (each assumed
+                    fully usable once opened); None when every scheduled
+                    dose is covered
+      doses_covered how many future doses are covered
+      reorder_by    runout_date - lead_time_days (None if no runout)
+      reorder_flag  today >= reorder_by, OR the compound has future doses in
+                    the next lead_time_days and no supply at all
+      status        'ok' | 'order_soon' | 'order_now' | 'no_supply'
+
+    Pure. Never reads dose_mg from anywhere but the schedule rows."""
+    compounds = set(v.compound for v in vials) | set(st.compound for st in stock_rows) | \
+        set(r.compound for r in dose_rows if r.taken_at is None and r.date >= today)
+    # vial_status returns one dict per vial in input order; keep the LATEST vial per compound
+    latest = {}
+    for v, st in zip(vials, vial_status(vials, dose_rows, today, lead_time_days)) if vials else []:
+        if v.compound not in latest or v.reconstituted_on >= latest[v.compound][0].reconstituted_on:
+            latest[v.compound] = (v, st)
+    out = []
+    for compound in sorted(compounds):
+        future = sorted((r for r in dose_rows if r.compound == compound and r.taken_at is None and r.date >= today),
+                        key=lambda r: (r.date, r.time))
+        open_mg, open_expires = 0.0, None
+        if compound in latest:
+            v, st = latest[compound]
+            open_expires = v.reconstituted_on + timedelta(days=v.expiry_days)
+            if open_expires > today and st["mg_remaining"] > 0:
+                open_mg = st["mg_remaining"]
+        sealed = [st for st in stock_rows if st.compound == compound and (st.quantity or 0) > 0]
+        sealed_vials = sum(int(st.quantity) for st in sealed)
+        sealed_mg = sum(int(st.quantity) * float(st.vial_mg) for st in sealed)
+        # walk the schedule: open vial first (mg AND expiry), then sealed vials by mg
+        open_left = open_mg
+        shelf = sorted((float(st.vial_mg) for st in sealed for _ in range(int(st.quantity))), reverse=True)
+        shelf_left = shelf.pop(0) if shelf else 0.0
+        runout, covered = None, 0
+        for r in future:
+            need = float(r.dose_mg)
+            if open_left >= need and (open_expires is None or r.date < open_expires):
+                open_left -= need; covered += 1; continue
+            open_left = 0.0  # the open vial is done (empty or expired) — move to the shelf
+            while shelf_left < need and shelf:
+                shelf_left = shelf.pop(0)
+            if shelf_left >= need:
+                shelf_left -= need; covered += 1; continue
+            runout = r.date
+            break
+        reorder_by = runout - timedelta(days=lead_time_days) if runout else None
+        no_supply = open_mg <= 0 and sealed_vials == 0
+        soon = [r for r in future if r.date <= today + timedelta(days=lead_time_days)]
+        if not future:
+            status = "ok"
+        elif no_supply and soon:
+            status = "no_supply"
+        elif runout and runout <= today + timedelta(days=lead_time_days):
+            status = "order_now"
+        elif reorder_by and today >= reorder_by:
+            status = "order_soon"
+        else:
+            status = "ok"
+        out.append({
+            "compound": compound,
+            "open_mg": round(open_mg, 3), "open_expires": open_expires,
+            "sealed_vials": sealed_vials, "sealed_mg": round(sealed_mg, 3),
+            "future_doses": len(future), "doses_covered": covered,
+            "runout_date": runout, "reorder_by": reorder_by,
+            "reorder_flag": status != "ok",
+            "status": status,
+            "last_dose_date": future[-1].date if future else None,
+        })
+    return out
+
+
+
 
 def missed_line(dose_rows: list, today, rules: Optional[dict] = None) -> list[dict]:
     """One entry per untaken, past-due dose row: {"date", "compound",

@@ -11645,6 +11645,56 @@ function buildProtocolContent(p) {
     '</div>';
   }
 
+  // Stock (2026-09-03): per compound, the open vial + sealed shelf vials
+  // against the schedule — when supply runs out and when to order.
+  var stock = p.stock || [];
+  if (stock.length) {
+    html += '<div style="margin-top:14px;font-family:\'DM Mono\',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted)">Stock</div>';
+    html += stock.map(function(st) {
+      var warn = st.status === 'order_now' || st.status === 'no_supply';
+      var soon = st.status === 'order_soon';
+      var style = warn
+        ? 'border:1px solid var(--run-hiit-border);background:var(--run-hiit-bg);color:var(--run-hiit)'
+        : soon ? 'border:1px solid var(--coach-border);background:var(--coach-bg);color:var(--coach)'
+               : 'border:1px solid var(--border);background:var(--surface2);color:var(--text)';
+      var parts = [];
+      parts.push(st.open_mg > 0 ? 'open vial ' + st.open_mg + ' mg' + (st.open_expires ? ' (exp ' + _fmtShortDate(st.open_expires) + ')' : '') : 'no open vial');
+      parts.push(st.sealed_vials + ' sealed' + (st.sealed_vials ? ' (' + st.sealed_mg + ' mg)' : ''));
+      var verdict;
+      if (!st.future_doses) verdict = 'nothing scheduled';
+      else if (st.status === 'no_supply') verdict = 'NO SUPPLY — ' + st.future_doses + ' doses scheduled, order now';
+      else if (!st.runout_date) verdict = 'covers every scheduled dose' + (st.last_dose_date ? ' through ' + _fmtShortDate(st.last_dose_date) : '');
+      else verdict = 'runs out ' + _fmtShortDate(st.runout_date) + ' (' + st.doses_covered + ' of ' + st.future_doses + ' doses) — order by ' + _fmtShortDate(st.reorder_by);
+      return '<div class="protocol-stock" style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:14px;line-height:1.45;' + style + '">' +
+        '<div><strong>' + escapeHtml(st.compound) + '</strong> &middot; ' + parts.join(' &middot; ') + '</div>' +
+        '<div>' + (warn ? '&#9888; ' : '') + verdict + '</div>' +
+      '</div>';
+    }).join('');
+  }
+  var purchases = p.purchases || [];
+  if (purchases.length) {
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">Purchases (' + purchases.length + ')</summary>' +
+      purchases.map(function(pu) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px">' +
+          '<span style="flex:1">' + escapeHtml(pu.compound) + ' &middot; ' + pu.quantity + ' &times; ' + pu.vial_mg + ' mg &middot; ' + _fmtShortDate(pu.purchased_on) + (pu.vendor ? ' &middot; ' + escapeHtml(pu.vendor) : '') + '</span>' +
+          (pu.quantity > 0 ? '<button class="btn btn-secondary" style="min-height:40px;padding:6px 10px" onclick="openStockVial(' + pu.id + ')">Open one</button>' : '') +
+          '<button class="btn btn-secondary" style="min-height:40px;padding:6px 10px" onclick="deleteStock(' + pu.id + ')">&times;</button>' +
+        '</div>';
+      }).join('') + '</details>';
+  }
+  if (p.is_today !== false) {
+    var opts = Object.keys(_PROTOCOL_ABBR).map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('');
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">+ Add stock (bought new vials)</summary>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+        '<select id="stock-compound" style="flex:1 1 140px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' + opts + '</select>' +
+        '<input id="stock-mg" type="number" inputmode="decimal" placeholder="mg per vial" style="width:110px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<input id="stock-qty" type="number" inputmode="numeric" placeholder="vials" value="1" style="width:70px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<input id="stock-date" type="date" style="font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<input id="stock-vendor" placeholder="vendor (optional)" style="flex:1 1 120px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<button class="btn btn-secondary" style="min-height:44px" onclick="addStock()">Save</button>' +
+      '</div></details>';
+  }
+
   // Vials (S140): every vial as a compact line, reorder-flagged ones in the
   // warning style; plus an add form so a new vial never needs a curl.
   var vials = p.vials || [];
@@ -11694,6 +11744,37 @@ async function completeLab(id) {  // S149
     if (!r || !r.ok) throw new Error('save');
     showToast('Lab marked done', 'success');
   } catch (e) { showToast('Could not mark the lab done', 'error'); }
+  invalidateProtocolCache(); _refreshProtocolSection();
+}
+
+async function addStock() {  // 2026-09-03
+  var compound = (document.getElementById('stock-compound') || {}).value || '';
+  var mg = parseFloat((document.getElementById('stock-mg') || {}).value);
+  var qty = parseInt((document.getElementById('stock-qty') || {}).value, 10) || 1;
+  var date = (document.getElementById('stock-date') || {}).value || null;
+  var vendor = (document.getElementById('stock-vendor') || {}).value || '';
+  if (!compound || !(mg > 0)) { showToast('Compound and mg per vial are required', 'error'); return; }
+  try {
+    var r = await apiPost('/api/protocol/stock', { compound: compound, vial_mg: mg, quantity: qty, purchased_on: date, vendor: vendor });
+    if (!r || !r.ok) throw new Error('save');
+    showToast('Stock saved', 'success');
+  } catch (e) { showToast('Could not save the stock', 'error'); }
+  invalidateProtocolCache(); _refreshProtocolSection();
+}
+async function openStockVial(id) {
+  try {
+    var r = await apiPost('/api/protocol/stock/' + id + '/open', {});
+    if (!r || !r.ok) throw new Error('open');
+    showToast('Vial opened — tracking it from today', 'success');
+  } catch (e) { showToast('Could not open the vial', 'error'); }
+  invalidateProtocolCache(); _refreshProtocolSection();
+}
+async function deleteStock(id) {
+  try {
+    var res = await fetch('/api/protocol/stock/' + id, { method: 'DELETE' });
+    if (!res.ok) throw new Error('delete');
+    showToast('Purchase removed', 'success');
+  } catch (e) { showToast('Could not remove the purchase', 'error'); }
   invalidateProtocolCache(); _refreshProtocolSection();
 }
 
