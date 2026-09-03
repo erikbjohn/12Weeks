@@ -486,9 +486,13 @@ def test_missed_line_excludes_taken_and_not_yet_due_rows():
 # ── fasted_dose_time ──────────────────────────────────────────────────
 
 def test_fasted_dose_time_from_real_csv():
+    """Tesamorelin was a 22:00 fasted dose through 2026-09-02; from 2026-09-03
+    it is a 07:00 morning dose (Erik, 2026-09-03), so the real protocol has NO
+    evening fasted dose after that."""
     from protocol import fasted_dose_time
     rows = _csv_rows()
-    assert fasted_dose_time(rows, date(2026, 10, 5)) == "22:00"
+    assert fasted_dose_time(rows, date(2026, 9, 1)) == "22:00"
+    assert fasted_dose_time(rows, date(2026, 10, 5)) is None
 
 
 def test_fasted_dose_time_none_when_nothing_at_or_after_21():
