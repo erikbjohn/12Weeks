@@ -551,6 +551,30 @@ def _resolve_workout_for_day_uncached(week, day_idx):
     except Exception:
         log.warning("manual swap resolve failed", exc_info=True)
 
+    # DAY TITLE = what the CARD serves, never the static template's label.
+    # api_workouts overlays WeeklyDaySchedule.lift_name and runs
+    # _reconcile_lift_name (which scrubs 'Deload' unless the week's persisted
+    # flag says so); this resolver did neither, so on 2026-09-03 the coach
+    # told the athlete "Today is Deload — Pull" (the week-4 PHASE_TEMPLATE
+    # title) on a week he had VETOED, while the card said "Pull".
+    try:
+        from models import WeeklyDaySchedule
+        import deload as _deload
+        ds = WeeklyDaySchedule.query.filter_by(
+            user_id=current_user.id, week=week, day_idx=day_idx
+        ).first()
+        if ds and ds.lift_name:
+            day["liftName"] = ds.lift_name
+            if ds.is_rest:
+                day["isRest"] = True
+        if day.get("exercises") and not day.get("isRest"):
+            from day_title import _reconcile_lift_name
+            day["liftName"] = _reconcile_lift_name(
+                day.get("liftName"), [e.get("name") for e in day["exercises"]],
+                is_deload=_deload.is_deload_week(current_user.id, week))
+    except Exception:
+        log.warning("day title overlay failed", exc_info=True)
+
     # COACH-OR-NOTHING: a lift day with NO prescription is UNPLANNED. Strip the
     # raw template exercises and flag it, exactly like the dashboard EXERCISE card
     # (plan_overlay.finalize_day_plan). Without this the coach narrated the static
