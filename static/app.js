@@ -10279,10 +10279,10 @@ function renderGarminBar() {
   } catch(e) {}
   el.innerHTML = '<div class="garmin-metrics">' +
     chip(w.sleep_hours != null
-      ? '&#128564; ' + w.sleep_hours + 'h' + (w.sleep_score != null ? ' &middot; ' + w.sleep_score : '')
-      : '&#128564; ' + dim, band(w.sleep_score, 80, 60)) +
+      ? 'Sleep ' + w.sleep_hours + 'h' + (w.sleep_score != null ? ' &middot; ' + w.sleep_score : '')
+      : 'Sleep ' + dim, band(w.sleep_score, 80, 60)) +
     chip(w.hrv != null ? 'HRV ' + w.hrv : 'HRV ' + dim, hrvColor) +
-    chip(w.body_battery != null ? '&#128267; ' + w.body_battery : '&#128267; ' + dim, band(w.body_battery, 60, 30)) +
+    chip(w.body_battery != null ? 'Body battery ' + w.body_battery : 'Body battery ' + dim, band(w.body_battery, 60, 30)) +
     chip(w.readiness != null ? 'Ready ' + w.readiness : 'Ready ' + dim, band(w.readiness, 70, 40)) +
     dateTag +
     '</div>';
