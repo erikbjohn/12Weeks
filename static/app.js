@@ -11743,7 +11743,8 @@ function buildProtocolContent(p) {
   if (p.is_today !== false) {
     html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center">+ Add a vial</summary>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
-        '<input id="vial-compound" placeholder="Compound (e.g. BPC-157)" style="flex:1 1 140px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+        '<select id="vial-compound" style="flex:1 1 140px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
+          Object.keys(_PROTOCOL_ABBR).map(function(c) { return '<option value="' + c + '">' + c + '</option>'; }).join('') + '</select>' +
         '<input id="vial-mg" type="number" inputmode="decimal" placeholder="total mg" style="width:100px;font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
         '<input id="vial-date" type="date" style="font-size:15px;padding:8px;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">' +
         '<button class="btn btn-secondary" style="min-height:44px" onclick="addVial()">Save</button>' +
@@ -11839,7 +11840,7 @@ async function addVial() {  // S140
     var r = await apiPost('/api/protocol/vials', { compound: compound.trim(), total_mg: mg, reconstituted_on: date });
     if (!r || !r.ok) throw new Error('save');
     showToast('Vial saved', 'success');
-  } catch (e) { showToast('Could not save the vial (check the compound name)', 'error'); }
+  } catch (e) { showToast('Could not save the vial', 'error'); }
   invalidateProtocolCache(); _refreshProtocolSection();
 }
 
