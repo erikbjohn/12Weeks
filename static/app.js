@@ -12802,37 +12802,10 @@ async function renderDetail() {
     }
   }
 
-  // Garmin Day Stats
+  // Garmin day stats were REMOVED from the Stats panel (2026-09-03): the
+  // readiness card at the top of the page already shows them, and this
+  // copy rendered '?' for sleep while the card had the number.
   let garminStatsHtml = '';
-  if (garminConnected && garminData) {
-    garminStatsHtml += '<div class="garmin-day-stats">';
-    const hrv = garminData.hrv;
-    if (hrv && hrv.lastNight != null) {
-      const c = getMetricColor('hrv', readinessData);
-      garminStatsHtml += `<div class="gds-card"><div class="gds-label">HRV</div><div class="gds-value" style="color:${c}">${hrv.lastNight}</div><div class="gds-sub">avg ${hrv.weeklyAvg || '?'}</div></div>`;
-    }
-    const sleep = garminData.sleep;
-    if (sleep) {
-      const c = getMetricColor('sleep', readinessData);
-      garminStatsHtml += `<div class="gds-card"><div class="gds-label">Sleep</div><div class="gds-value" style="color:${c}">${sleep.score != null ? sleep.score : '?'}</div><div class="gds-sub">${sleep.durationHours || '?'}h</div></div>`;
-    }
-    const bb = garminData.bodyBattery;
-    if (bb && bb.current != null) {
-      const c = getMetricColor('bodyBattery', readinessData);
-      garminStatsHtml += `<div class="gds-card"><div class="gds-label">Battery</div><div class="gds-value" style="color:${c}">${bb.current}</div></div>`;
-    }
-    const tr = garminData.trainingReadiness;
-    if (tr && tr.score != null) {
-      const c = getMetricColor('trainingReadiness', readinessData);
-      garminStatsHtml += `<div class="gds-card"><div class="gds-label">Ready</div><div class="gds-value" style="color:${c}">${tr.score}</div><div class="gds-sub">${tr.level || ''}</div></div>`;
-    }
-    const stress = garminData.stress;
-    if (stress && stress.overall != null) {
-      const c = getMetricColor('stress', readinessData);
-      garminStatsHtml += `<div class="gds-card"><div class="gds-label">Stress</div><div class="gds-value" style="color:${c}">${stress.overall}</div></div>`;
-    }
-    garminStatsHtml += '</div>';
-  }
 
   // Daily Goals section removed
 
