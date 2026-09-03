@@ -9171,36 +9171,18 @@ function _pdAerobicChart(weeks) {
   }
   svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--run-z2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>';
 
-  // Dots + on-chart avg-HR labels. HR must be visible at a glance, not only
-  // on hover -- the primary device here is a phone, where hover never
-  // fires. Default label position is above the dot; when a dot's nearest
-  // neighbor is close enough to collide horizontally, alternate above/below
-  // per index. The <title> tooltip is kept too (harmless extra on desktop).
-  var xs = [];
-  for (var xi = 0; xi < weeks.length; xi++) xs.push(xPos(weeks[xi].week_start));
-
+  // Dots only. The per-point HR labels are gone (2026-09-03): eleven numbers
+  // between 127 and 131 crashed into the line, the y-axis and each other and
+  // said nothing the caption below can't say once. Selective labels only:
+  // the best line and the latest pace. <title> stays for desktop hover.
   for (var di = 0; di < weeks.length; di++) {
     var wpt = weeks[di];
-    var cx = xs[di], cy = yPos(wpt.pace_sec_per_mi);
+    var cx = xPos(wpt.week_start), cy = yPos(wpt.pace_sec_per_mi);
     var isLast = di === weeks.length - 1;
     svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (isLast ? 5 : 3) + '" fill="var(--run-z2)"' + (isLast ? '' : ' opacity="0.75"') + '>' +
       '<title>' + _fmtShortDate(wpt.week_start) + ': ' + _fmtPace(wpt.pace_sec_per_mi) + '/mi @ ' + wpt.avg_hr + ' bpm avg (' +
       wpt.n_runs + ' run' + (wpt.n_runs === 1 ? '' : 's') + ', ' + wpt.miles + ' mi)</title>' +
     '</circle>';
-
-    // Nearest-neighbor pixel gap decides collision risk (pure layout math,
-    // not derived from any health value).
-    var nearestGap = Infinity;
-    if (di > 0) nearestGap = Math.min(nearestGap, cx - xs[di - 1]);
-    if (di < weeks.length - 1) nearestGap = Math.min(nearestGap, xs[di + 1] - cx);
-    var crowded = nearestGap < 40;
-    // The last dot's label always goes below -- the pace annotation drawn
-    // further down already claims the space above the last dot.
-    var above = isLast ? false : (crowded ? (di % 2 === 0) : true);
-    var hrY = above ? cy - 8 : cy + 14;
-    if (hrY < padT + 10) hrY = cy + 14;    // don't crash into the top edge
-    if (hrY > H - padB - 2) hrY = cy - 8;  // don't crash into the x-axis labels
-    svg += '<text x="' + cx.toFixed(1) + '" y="' + hrY.toFixed(1) + '" text-anchor="middle" fill="var(--muted)" font-size="11" font-family="DM Mono,monospace">' + Math.round(wpt.avg_hr) + '</text>';
   }
 
   // Latest-week annotation, matching _pdWeightChart's current-value label.
@@ -9212,6 +9194,7 @@ function _pdAerobicChart(weeks) {
   else                     { annX = lx - 8; annAnchor = 'end'; }
   var annY = ly2 - 10;
   if (annY < padT + 12) annY = ly2 + 18; // flip below the dot if it would collide with the top tick
+  if (Math.abs(annY - bestY) < 14 && annAnchor === 'end') annY = ly2 + 18; // don't sit on the 'best' label
   svg += '<text x="' + annX.toFixed(1) + '" y="' + annY.toFixed(1) + '" text-anchor="' + annAnchor + '" fill="var(--run-z2)" font-size="12" font-family="DM Mono,monospace" font-weight="600">' + _fmtPace(last.pace_sec_per_mi) + '</text>';
 
   // X-axis: first + last week only (irregular gaps make a fixed tick set misleading).
@@ -9221,7 +9204,17 @@ function _pdAerobicChart(weeks) {
   }
 
   svg += '</svg>';
-  return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div>' + svg + '</div>';
+  // One caption carries what the point labels used to shout: the latest
+  // week's pace, HR, run count and miles, plus the HR band across the series.
+  var hrs = weeks.map(function(w) { return Math.round(w.avg_hr); }).filter(function(h) { return h > 0; });
+  var hrBand = hrs.length ? (Math.min.apply(null, hrs) === Math.max.apply(null, hrs)
+    ? Math.min.apply(null, hrs) + ' bpm' : Math.min.apply(null, hrs) + '\u2013' + Math.max.apply(null, hrs) + ' bpm') : '';
+  var caption = '<div class="pd-chart-caption">' +
+    'Week of ' + escapeHtml(_fmtShortDate(last.week_start)) + ': ' + _fmtPace(last.pace_sec_per_mi) + '/mi at ' + Math.round(last.avg_hr) + ' bpm, ' +
+    last.n_runs + ' run' + (last.n_runs === 1 ? '' : 's') + ', ' + last.miles + ' mi' +
+    (hrBand ? '<br>Avg HR across all weeks: ' + hrBand : '') +
+    '</div>';
+  return '<div class="pd-section"><div class="pd-section-label" style="font-size:16px">' + title + '</div>' + svg + caption + '</div>';
 }
 
 function _fmtPace(secPerMi) {

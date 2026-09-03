@@ -2491,6 +2491,7 @@ footer {
   margin-bottom: 12px;
 }
 
+.pd-chart-caption { font-family: 'DM Mono', monospace; font-size: 14px; color: var(--muted); line-height: 1.5; padding: 6px 4px 0; }
 .pd-empty {
   font-size: 13px;
   color: var(--dim);
