@@ -2706,7 +2706,12 @@ def _format_athlete_data(ctx, requires):
             parts.append("Garmin today: " + ", ".join(garmin_parts) + ".")
     r = ctx.get("readiness")
     if r and r.get("score") is not None:
-        readiness_line = f"Readiness score: {r['score']}/100 ({r['risk_level']} risk)."
+        # No composite "Readiness N/100" — the athlete's screen shows only the
+        # Garmin numbers (sleep, HRV, body battery, Garmin training readiness),
+        # so a home-made score the card doesn't show is a contradiction waiting
+        # to be quoted (2026-09-03: coach said "Readiness 49" under a header
+        # that said 39). Risk level + flags are enough to decide from.
+        readiness_line = f"Recovery risk: {r['risk_level']}."
         if r.get("flags"):
             readiness_line += f" Flags: {', '.join(r['flags'])}."
         if r.get("risk_level") == "high":

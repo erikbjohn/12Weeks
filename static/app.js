@@ -10075,7 +10075,6 @@ function renderAll() {
   renderCheckinSummaryBar();
   renderGarminBar();
   renderSupplementBar();
-  renderReadiness();
   renderTravelBanner();
   renderTodayNav();
   renderTodayHero();
@@ -10306,29 +10305,11 @@ function getMetricColor(key, rd) {
   return 'var(--risk-high)';
 }
 
-function renderReadiness() {
-  const el = document.getElementById('readiness-alert');
-  el.className = 'readiness-alert';
-
-  if (!readinessData || readinessData.risk_level === 'unknown') {
-    return;
-  }
-
-  el.classList.add('visible', `risk-${readinessData.risk_level}`);
-  let flagsHtml = '';
-  if (readinessData.flags && readinessData.flags.length) {
-    flagsHtml = `<div class="readiness-flags">${readinessData.flags.join(' &middot; ')}</div>`;
-  }
-
-  // Data-only chips (S117): the score and the flags. The decision is the
-  // coach's, spoken in chat — never a static line in the coach's voice here.
-  el.innerHTML = `<div class="readiness-inner">
-    <span class="readiness-score">Readiness ${readinessData.score}/100</span>
-    ${escapeHtml(String(readinessData.risk_level || '').toUpperCase())} overtraining risk
-    ${flagsHtml}
-  </div>`;
-}
-
+// renderReadiness REMOVED (2026-09-03): the app-computed "Readiness 43/100 ·
+// MODERATE overtraining risk · flags" card sat directly above the Garmin chip
+// row that already shows sleep, HRV, body battery and Garmin's own training
+// readiness — two different "readiness" numbers (43 vs 35) and every metric
+// printed twice. The chip row is the single display of today's recovery data.
 // ─── UNIFIED TODAY NAV ────────────────────────────────────────────────────
 function renderTodayNav() {
   const el = document.getElementById('today-nav');

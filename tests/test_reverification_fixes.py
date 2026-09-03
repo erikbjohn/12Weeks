@@ -263,10 +263,16 @@ def test_briefing_never_defaults_checkin_scores(app_ctx, monkeypatch):
 
 # ── readiness chip: the word next to the score is the RISK level, say so ────
 
-def test_readiness_chip_labels_risk_not_readiness():
+def test_no_composite_readiness_card():
+    """2026-09-03: the app-computed 'Readiness N/100' card duplicated the Garmin
+    chip row with a second, different readiness number. Gone — and the coach
+    must not quote a composite score the athlete cannot see."""
     src = open("static/app.js").read()
-    assert "overtraining risk" in src
-    assert "Readiness ${escapeHtml(String(readinessData.risk_level" not in src
+    assert "renderReadiness(" not in src
+    assert "Readiness ${" not in src
+    from coach_assembler import _format_athlete_data
+    txt = _format_athlete_data({"readiness": {"score": 30, "risk_level": "high", "flags": ["HRV 30 vs 45"]}}, ["garmin"])
+    assert "/100" not in txt and "HRV 30 vs 45" in txt
 
 
 # ═════════════════════════ batch 3 ═════════════════════════
