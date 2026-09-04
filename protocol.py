@@ -120,7 +120,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Headache",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "BPC-157": {
         "what": "Synthetic peptide fragment derived from a gastric body-protective compound, used off-label for soft-tissue and gut recovery.",
@@ -136,7 +136,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Any new joint or tendon pain that doesn't track with training load",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "KPV": {
         "what": "Anti-inflammatory tripeptide (C-terminal fragment of alpha-MSH) used off-label for inflammation and gut support.",
@@ -150,7 +150,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Any signs of over-suppressed immune response (frequent illness)",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "Retatrutide": {
         "what": "Triple hormone-receptor agonist (GIP/GLP-1/glucagon) investigational compound used off-label for weight loss.",
@@ -166,7 +166,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Unintended lean-mass loss if protein/training aren't kept up as fat loss accelerates",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "Cagrilintide": {
         "what": "Long-acting amylin analog used off-label for weight loss, stacked here alongside retatrutide.",
@@ -182,7 +182,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Injection-site reaction",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "TB-500": {
         "what": "Synthetic fragment of thymosin beta-4, used off-label for tissue repair and recovery.",
@@ -196,7 +196,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Fatigue that doesn't track with training load",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "GHK-Cu": {
         "what": "Copper-binding tripeptide used off-label for skin, connective-tissue, and wound-healing support.",
@@ -210,7 +210,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Any unusual skin discoloration",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
     "Tesamorelin": {
         "what": "Growth-hormone-releasing hormone (GHRH) analog used off-label to raise endogenous growth hormone.",
@@ -225,7 +225,7 @@ PROTOCOL_COMPOUNDS: dict[str, dict] = {
             "Blood sugar changes — GH can transiently raise glucose",
         ],
         "missed_dose_rule": CONFIRM_WITH_DOCTOR,
-        "late_window_hours": 72,  # card keeps a miss actionable for 3 days; /late itself never refuses
+        "late_window_hours": None,  # a missed dose is SKIPPED (Erik 2026-09-04): only yesterday is listed (retro-mark); /late itself never refuses
     },
 }
 

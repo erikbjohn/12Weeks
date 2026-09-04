@@ -35,7 +35,7 @@ def test_protocol_compounds_has_all_seven_with_required_keys():
         assert isinstance(c["effects"], list) and c["effects"]
         assert isinstance(c["watch_fors"], list) and c["watch_fors"]
         assert c["missed_dose_rule"] == CONFIRM_WITH_DOCTOR
-        assert c["late_window_hours"] == 72
+        assert c["late_window_hours"] is None  # 2026-09-04: a missed dose is skipped, never nagged
 
 
 def test_protocol_compounds_carries_no_schedule_text():
@@ -449,10 +449,23 @@ def test_missed_line_older_with_default_null_window_is_omitted():
     accumulate as an unbounded 'confirm with your doctor' nag)."""
     from protocol import missed_line
     today = date(2026, 9, 10)
-    # 72h window (2026-09-01): a 3-day-old miss is still listed; older is not
     rows = [Row(date=date(2026, 9, 1), time="07:00", compound="BPC-157", dose_mg=0.25, taken_at=None)]
     out = missed_line(rows, today)
     assert out == []
+
+
+def test_missed_line_two_day_old_miss_is_skipped_not_nagged():
+    """Erik, 2026-09-04: the Wed 22:00 Tesamorelin he skipped was still on
+    the card and in every coach prompt on Fri (72h window from 9f5bc62).
+    A missed dose is skipped — only YESTERDAY is listed (retro-mark, for a
+    late-night dose logged next morning); anything older is gone."""
+    from protocol import missed_line
+    today = date(2026, 9, 4)
+    rows = [Row(date=date(2026, 9, 2), time="22:00", compound="Tesamorelin", dose_mg=1.0, taken_at=None),
+            Row(date=date(2026, 9, 3), time="22:00", compound="Tesamorelin", dose_mg=1.0, taken_at=None)]
+    out = missed_line(rows, today)
+    assert [m["date"] for m in out] == [date(2026, 9, 3)]
+    assert out[0]["action"] == "retro_mark"
 
 
 def test_missed_line_older_within_override_window_is_taken_late():
