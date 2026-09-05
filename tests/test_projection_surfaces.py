@@ -191,7 +191,7 @@ def test_on_pace_false_at_week8_stall(app_ctx, clean_block3_flags, monkeypatch):
     _seed_goal_and_state(app_, db, uid, proj)
     stall_date = date(2026, 10, 5)  # START + 56 days == exactly 8 curve weeks
     target = curve_value(ANCHOR, START, stall_date)
-    assert target == pytest.approx(204.5)
+    assert target == pytest.approx(198.3)  # 220 - (2*1.75 + 4*2.8 + 2*3.5)
     # Weight logged weeks ago and never updated since -- a stall.
     _set_weights(app_, db, uid, [(START, ANCHOR), (START + timedelta(days=41), 210.0)])
     _set_block3_flags(app_, db)
@@ -254,7 +254,7 @@ def test_cut_status_curve_fields_agree_with_dashboard_on_pace(app_ctx, clean_blo
             return ca._build_cut_status()["cut_status"]
     cs = _do(app_, _do_it)
 
-    assert cs["curve_target_today"] == pytest.approx(218.9286, abs=0.01)
+    assert cs["curve_target_today"] == pytest.approx(218.5, abs=0.01)  # 220 - 6*1.75/7
     assert cs["on_curve"] in ("behind", "ahead", "on_pace")
     assert (cs["on_curve"] != "behind") == dash_on_pace
     # Existing keys still present (fate 5: never drop existing keys).

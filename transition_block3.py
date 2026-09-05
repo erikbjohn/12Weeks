@@ -106,7 +106,7 @@ _LOG_DATE_FIELD = {
 _EXCLUDED_WEEK_MODELS = {"CoachMemory", "BodyweightRetest", "AppState"}
 
 TRANSITION_DATE = date(2026, 8, 10)
-BLOCK3_TARGET_WEIGHT = 195.0
+from goal_engine import BLOCK3_TARGET_LB as BLOCK3_TARGET_WEIGHT  # 185.0 — one authority
 LAB_BASELINE_LABEL = "Baseline labs: T/E2, IGF-1, fasting glucose/A1c, lipids"
 LAB_WEEK8_LABEL = "Week-8 labs: T/E2, IGF-1, fasting glucose/A1c, lipids"
 LAB_WEEK8_DUE = date(2026, 9, 28)
@@ -543,8 +543,8 @@ def run_rollback(user):
     _verify_rollback_restored(pre_histograms, post_histograms)
 
     # (5) Restore AppState + TrainingGoal from the prestate snapshot; clear
-    # flags. AppState alone is not enough — the 195 target + curve live in
-    # TrainingGoal, and restoring only AppState leaves a false 220->195
+    # flags. AppState alone is not enough — the block-3 target + curve live in
+    # TrainingGoal, and restoring only AppState leaves a false 220->target
     # line drawn over block-2 data.
     appstate_snap = prestate["app_state"]
     state = AppState.query.filter_by(user_id=user.id).first()

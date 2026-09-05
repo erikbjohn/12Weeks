@@ -12554,7 +12554,7 @@ def api_admin_debug_patch_set():
 @admin_required
 def api_admin_block3_reanchor():
     """S074: ONE-SHOT endpoint-preserving re-anchor. Keeps the accrued past,
-    rescales the remaining weekly rates so the curve still lands on 195.0 at
+    rescales the remaining weekly rates so the curve still lands on BLOCK3_TARGET_LB at
     start+84, writes per-user rates (SystemFlag block3_rates:<uid>) and the
     new weight_projection. Guarded by block3_reanchored:<uid> (spec: exactly
     once). Body: {email, dry_run?}. Run on a Monday morning for an exact fit."""

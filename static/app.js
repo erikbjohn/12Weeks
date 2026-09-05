@@ -9535,7 +9535,7 @@ function _spWeightProjection(data) {
   var cal = data.daily_calories || 1800;
   var tdee = data.tdee || 2500;
   var startW = data.start_weight || 220;
-  var targetW = data.target_weight || 195;
+  var targetW = data.target_weight || 185;
   var curW = data.current_weight || startW;
   var heightIn = data.height_in || 70;
   var age = data.age || 30;
@@ -9614,7 +9614,7 @@ function _spUpdateProjection() {
   var age = d.age || 30;
   var sex = d.sex || 'male';
   var curW = d.current_weight || 220;
-  var targetW = d.target_weight || 195;
+  var targetW = d.target_weight || 185;
   var curWeek = d.current_week || 1;
   var weeksLeft = 12 - curWeek + 1;
 
@@ -9901,7 +9901,7 @@ function _spScenarioPlanner(data) {
   var cal = data.daily_calories || 1800;
   var tdee = data.tdee || 2500;
   var curW = data.current_weight || 220;
-  var targetW = data.target_weight || 195;
+  var targetW = data.target_weight || 185;
   var heightIn = data.height_in || 70;
   var age = data.age || 30;
   var sex = data.sex || 'male';
@@ -9964,7 +9964,7 @@ function _spUpdateScenario() {
   var origCal = d.daily_calories || 1800;
 
   var targetSlider = document.getElementById('sp-target-slider');
-  var targetW = targetSlider ? parseInt(targetSlider.value) : (d.target_weight || 195);
+  var targetW = targetSlider ? parseInt(targetSlider.value) : (d.target_weight || 185);
   var targetValEl = document.getElementById('sp-target-val');
   if (targetValEl) targetValEl.textContent = targetW + ' lb';
 
@@ -10008,7 +10008,7 @@ function _spScenarioResults(goalType, fasting, curW, targetW, tdee, heightIn, ag
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:14px;color:var(--text)">' + origCal + ' cal/day</div>';
     var origProj = window._projectionMode === 'piecewise_block3'
       ? (_spLabData.stored_projection || []).map(function(p) { return {week: p.week, projected: p.projected}; })
-      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 195, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
+      : (typeof _projectWeightCurve === 'function' ? _projectWeightCurve(curW, _spLabData.target_weight || 185, tdee, origCal, weeksLeft, heightIn, age, sex, curWeek - 1) : []);
     var origEnd = origProj.length > 0 ? origProj[origProj.length - 1].projected.toFixed(1) : '?';
     h += '<div style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted)">W12: ' + origEnd + ' lb</div>';
     h += '</div>';

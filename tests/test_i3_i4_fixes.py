@@ -208,13 +208,13 @@ def test_block3_spike_report_agrees_with_badge_not_behind(app_ctx, clean_flags, 
     r = client.get("/api/progress/dashboard")
     assert r.status_code == 200, r.get_data(as_text=True)
     dash_on_pace = r.get_json()["projections"]["on_pace"]
-    assert dash_on_pace is True  # despiked 218.5 vs curve ~218.93 -> on-pace
+    assert dash_on_pace is True  # despiked 218.5 vs curve 218.5 -> on-pace
 
     metrics = _get_metrics(app_, 1, uid)
     assert metrics["weight_vs_projected"] == "on_track"
     assert metrics["weight_vs_projected"] != "behind"
     # Task 7's field is untouched by this fix (no removals).
-    assert metrics["weight_projection_target"] == pytest.approx(218.75, abs=0.01)
+    assert metrics["weight_projection_target"] == pytest.approx(218.25, abs=0.01)
 
 
 def test_legacy_user_no_flags_old_ratio_logic_intact(app_ctx, clean_flags):

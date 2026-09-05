@@ -182,7 +182,7 @@ def test_block3_scoreboard_hand_computed_values(app_ctx, clean_block3_flags, mon
     assert r.status_code == 200, r.get_data(as_text=True)
     sb = r.get_json()["scoreboard"]
 
-    assert sb["curve_target_today"] == pytest.approx(218.9286, abs=0.0001)
+    assert sb["curve_target_today"] == pytest.approx(218.5, abs=0.0001)  # 220 - 6*1.75/7; 218.9 is within 1.5 lb -> on_pace
     assert sb["on_curve"] == "on_pace"
     assert sb["current_weight_despiked"] == 218.9
     assert sb["waist"]["day0"] == 42.0

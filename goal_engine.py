@@ -703,15 +703,19 @@ def adjust_workout(base_workout, goal_type, constraints=None):
 
 
 # ── Block-3 piecewise curve (spec §5) — THE single authority ────────────────
-# Keyed to the retatrutide ramp. Week 12 softens to 2.0 (deload) so the sum is
-# exactly 25.0 and week 12 == target 195.0. The Sep-10 frequency doubling is
-# deliberately NOT a boundary — do not add a week-5 rate.
-BLOCK3_WEEKLY_RATES = {1: 1.25, 2: 1.25, 3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0,
-                       7: 2.5, 8: 2.5, 9: 2.5, 10: 2.5, 11: 2.5, 12: 2.0}
+# Keyed to the retatrutide ramp. Week 12 softens (deload) so the sum is
+# exactly 35.0 and week 12 == target 185.0 from the 220.0 anchor. The Sep-10
+# frequency doubling is deliberately NOT a boundary — do not add a week-5 rate.
+# 2026-09-05: target moved 195 -> 185 (Erik); the ramp SHAPE is the Aug-10
+# spec's, scaled x1.4. Erik's own curve keeps the original 25-lb table for
+# the weeks already accrued (SystemFlag block3_rates:1) and was re-anchored
+# from 198.2 on 2026-09-05 via /api/admin/block3-reanchor.
+BLOCK3_WEEKLY_RATES = {1: 1.75, 2: 1.75, 3: 2.8, 4: 2.8, 5: 2.8, 6: 2.8,
+                       7: 3.5, 8: 3.5, 9: 3.5, 10: 3.5, 11: 3.5, 12: 2.8}
 CURVE_TOLERANCE_LB = 1.5
 
 
-BLOCK3_TARGET_LB = 195.0
+BLOCK3_TARGET_LB = 185.0
 BLOCK3_DAYS = 84
 
 
@@ -774,7 +778,7 @@ def curve_value(anchor_weight, start_date, on_date, rates=None):
     """Piecewise-linear DAILY interpolation, morning-weigh-in convention:
     curve(D) is the target at the MORNING of D — loss accrued over the
     elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
-    curve(start) == anchor exactly; 195.0 is reached at start+84 days (the
+    curve(start) == anchor exactly; the target is reached at start+84 days (the
     morning after the block's final day) and clamps thereafter."""
     rates = rates or BLOCK3_WEEKLY_RATES
     elapsed = (on_date - start_date).days

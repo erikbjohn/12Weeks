@@ -93,7 +93,7 @@ def _seed_projection(app_, db, uid, anchor=ANCHOR, start_date=START):
         from goal_engine import build_block3_projection
         proj = build_block3_projection(anchor, start_date)
         db.session.add(TrainingGoal(user_id=uid, goal_type="recomp",
-                                     target_weight=195.0, weight_projection=proj))
+                                     target_weight=185.0, weight_projection=proj))
         db.session.commit()
     _do(app_, _do_it)
 
@@ -264,13 +264,13 @@ def test_build_sunday_recap_exact_text_seeded_week(app_ctx, monkeypatch):
 
     assert recap is not None
     assert recap["text"] == (
-        "Wk 6: 212→209.9 (curve 209.5) · lifts -10% · weigh-ins 2/7 · 15 mi · doses 5/6 · sleep 7.9h avg"
+        "Wk 6: 212→209.9 (curve 205.3) · lifts -10% · weigh-ins 2/7 · 15 mi · doses 5/6 · sleep 7.9h avg"
     ), recap["text"]
     assert recap["data"] == {
         "week": 6,
         "weight_start": 212.0,
         "weight_end": 209.9,
-        "curve_target": 209.5,
+        "curve_target": 205.3,
         "lift_trend": -10.0,
         "miles": 15.0,
         "doses_taken": 5,

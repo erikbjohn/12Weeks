@@ -1,5 +1,5 @@
 """S074: endpoint-preserving re-anchor — past kept, remaining rates rescaled
-so the curve still lands on 195.0 at day 84; per-user rates flow to every
+so the curve still lands on BLOCK3_TARGET_LB (185.0) at day 84; per-user rates flow to every
 pace judgment; exactly once."""
 from datetime import date, timedelta
 import pytest
@@ -14,7 +14,7 @@ def test_reanchor_lands_on_target_at_day_84():
     new_rates = reanchor_block3(behind, on, start)
     # weeks 1-3 untouched
     assert all(new_rates[w] == BLOCK3_WEEKLY_RATES[w] for w in (1, 2, 3))
-    # from `on`, the rescaled remaining schedule removes exactly (behind - 195)
+    # from `on`, the rescaled remaining schedule removes exactly (behind - target)
     remaining = sum(new_rates[min(12, d // 7 + 1)] / 7.0 for d in range(21, 84))
     assert abs(behind - remaining - BLOCK3_TARGET_LB) < 0.01
     # steeper than before
@@ -38,7 +38,7 @@ def test_admin_reanchor_is_one_shot_and_changes_verdicts(app_ctx, monkeypatch):
     u = User(email="reanchor@test.com", password_hash="x"); db.session.add(u); db.session.commit()
     start = date.today() - timedelta(days=21)
     db.session.add(AppState(user_id=u.id, start_date=start))
-    db.session.add(TrainingGoal(user_id=u.id, goal_type="cut", target_weight=195.0,
+    db.session.add(TrainingGoal(user_id=u.id, goal_type="cut", target_weight=BLOCK3_TARGET_LB,
                                 weight_projection=build_block3_projection(220.0, start)))
     db.session.add(SystemFlag(key=f"projection_mode:{u.id}", value="piecewise_block3"))
     db.session.add(SystemFlag(key=f"block3_anchor:{u.id}", value="220.0"))
@@ -51,7 +51,7 @@ def test_admin_reanchor_is_one_shot_and_changes_verdicts(app_ctx, monkeypatch):
     r = c.post("/api/admin/block3-reanchor", json={"email": "reanchor@test.com", "dry_run": True},
                headers={"X-Admin-Key": key})
     assert r.status_code == 200, r.get_data(as_text=True)
-    assert abs(r.get_json()["curve_end"] - 195.0) < 0.1
+    assert abs(r.get_json()["curve_end"] - BLOCK3_TARGET_LB) < 0.1
     r = c.post("/api/admin/block3-reanchor", json={"email": "reanchor@test.com"}, headers={"X-Admin-Key": key})
     assert r.status_code == 200
     assert user_rates(u.id) != BLOCK3_WEEKLY_RATES

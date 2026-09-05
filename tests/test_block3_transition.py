@@ -360,7 +360,7 @@ def test_transition_shifts_blocks_and_rehomes_today(app_ctx, monkeypatch, clean_
 
     result = _do(app_, _check_state)
     assert result["goal_type"] == "cut"
-    assert result["target_weight"] == 195.0
+    assert result["target_weight"] == 185.0
     assert result["start_date"] == "2026-08-10"
     assert result["current_week"] == 1
     assert result["bw"] == ANCHOR

@@ -83,24 +83,24 @@ class TestGateCreepGuard:
 class TestCurveTargetGuard:
     """Guard 3: The Block 3 projection curve must hit 195.0 lbs by week 12."""
 
-    def test_projection_curve_targets_195_week_12(self):
+    def test_projection_curve_targets_185_week_12(self):
         from goal_engine import build_block3_projection, BLOCK3_WEEKLY_RATES, CURVE_TOLERANCE_LB
 
         # Projection is built from an anchor weight (220 lbs, the start of block 3)
         anchor_weight = 220.0
         projection = build_block3_projection(anchor_weight, None)
 
-        # Week 12 (index 11) must be at 195.0
-        assert projection[11]["projected"] == 195.0, (
-            f"Week 12 projection must be 195.0 (the retatrutide block target), "
+        # Week 12 (index 11) must be at 185.0
+        assert projection[11]["projected"] == 185.0, (
+            f"Week 12 projection must be 185.0 (the block-3 target, 2026-09-05), "
             f"got {projection[11]['projected']}"
         )
 
-    def test_weekly_rates_sum_to_25(self):
+    def test_weekly_rates_sum_to_35(self):
         from goal_engine import BLOCK3_WEEKLY_RATES
         total = sum(BLOCK3_WEEKLY_RATES.values())
-        assert total == 25.0, (
-            f"BLOCK3_WEEKLY_RATES must sum to exactly 25.0 lbs (220→195), "
+        assert abs(total - 35.0) < 1e-9, (
+            f"BLOCK3_WEEKLY_RATES must sum to exactly 35.0 lbs (220→185), "
             f"got {total}"
         )
 
@@ -114,7 +114,7 @@ class TestCurveTargetGuard:
         from goal_engine import BLOCK3_WEEKLY_RATES
         # Sep-10 retatrutide frequency doubling is NOT a boundary
         # Week 4→5 should NOT show a boundary-style jump
-        assert BLOCK3_WEEKLY_RATES[5] == 2.0, (
+        assert BLOCK3_WEEKLY_RATES[5] == BLOCK3_WEEKLY_RATES[4], (
             "Week 5 must NOT have a separate rate; the retatrutide "
             "frequency doubling (Sep 10) is mid-week, not a boundary. "
             "Do not add a week-5 rate."
