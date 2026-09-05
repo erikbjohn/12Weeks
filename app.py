@@ -12591,7 +12591,12 @@ def api_admin_block3_reanchor():
     goal = TrainingGoal.query.filter_by(user_id=user.id).order_by(TrainingGoal.id.desc()).first()
     if goal:
         goal.weight_projection = projection
-    db.session.add(SystemFlag(key=f"block3_rates:{user.id}", value=json.dumps({str(k): v for k, v in new_rates.items()})))
+    _rf = SystemFlag.query.filter_by(key=f"block3_rates:{user.id}").first()
+    _rates_json = json.dumps({str(k): v for k, v in new_rates.items()})
+    if _rf:   # a pre-seeded per-user table (e.g. pinning the accrued weeks) is replaced, not duplicated
+        _rf.value = _rates_json
+    else:
+        db.session.add(SystemFlag(key=f"block3_rates:{user.id}", value=_rates_json))
     _af = SystemFlag.query.filter_by(key=f"block3_anchor:{user.id}").first()
     if _af:
         _af.value = str(new_anchor)

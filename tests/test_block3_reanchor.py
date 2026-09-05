@@ -57,3 +57,35 @@ def test_admin_reanchor_is_one_shot_and_changes_verdicts(app_ctx, monkeypatch):
     assert user_rates(u.id) != BLOCK3_WEEKLY_RATES
     r = c.post("/api/admin/block3-reanchor", json={"email": "reanchor@test.com"}, headers={"X-Admin-Key": key})
     assert r.status_code == 409  # exactly once
+
+
+def test_admin_reanchor_upserts_preseeded_rates_flag(app_ctx, monkeypatch):
+    """A per-user rates flag seeded BEFORE the re-anchor (to pin the accrued
+    weeks to an older table) must be replaced, not collide on the unique key
+    (this 500'd in prod on 2026-09-05)."""
+    app_, db = app_ctx
+    from models import User, AppState, TrainingGoal, BodyWeight, SystemFlag
+    from goal_engine import build_block3_projection, user_rates
+    import json as _json
+    key = "reanchor-key-long-enough-for-the-guard-02"
+    monkeypatch.setenv("ADMIN_API_KEY", key)
+    u = User(email="reanchor2@test.com", password_hash="x"); db.session.add(u); db.session.commit()
+    start = date.today() - timedelta(days=26)
+    old = {1: 1.25, 2: 1.25, 3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0, 7: 2.5, 8: 2.5, 9: 2.5, 10: 2.5, 11: 2.5, 12: 2.0}
+    db.session.add(AppState(user_id=u.id, start_date=start))
+    db.session.add(TrainingGoal(user_id=u.id, goal_type="cut", target_weight=BLOCK3_TARGET_LB,
+                                weight_projection=build_block3_projection(220.0, start, old)))
+    db.session.add(SystemFlag(key=f"projection_mode:{u.id}", value="piecewise_block3"))
+    db.session.add(SystemFlag(key=f"block3_anchor:{u.id}", value="220.0"))
+    db.session.add(SystemFlag(key=f"block3_rates:{u.id}", value=_json.dumps({str(k): v for k, v in old.items()})))
+    for k in range(3):
+        db.session.add(BodyWeight(user_id=u.id, log_date=date.today() - timedelta(days=k), weight_lbs=198.2))
+    db.session.commit()
+    c = app_.test_client()
+    r = c.post("/api/admin/block3-reanchor", json={"email": "reanchor2@test.com"}, headers={"X-Admin-Key": key})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert abs(r.get_json()["curve_end"] - BLOCK3_TARGET_LB) < 0.1
+    rates = user_rates(u.id)
+    assert all(rates[w] == old[w] for w in (1, 2, 3))      # accrued weeks pinned
+    assert rates[8] < old[8]                                # remaining weeks rescaled (athlete is ahead)
+    assert SystemFlag.query.filter_by(key=f"block3_rates:{u.id}").count() == 1
