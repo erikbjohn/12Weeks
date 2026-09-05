@@ -11282,8 +11282,8 @@ def _compute_goal_for_user(user, overrides=None):
         # the legacy shape on their very first goal compute.
         anchor, _b3_start = cut_guard._block3_anchor_and_start(user.id)
         if anchor is not None and _b3_start is not None:
-            from goal_engine import build_block3_projection
-            goal.weight_projection = build_block3_projection(anchor, _b3_start)
+            from goal_engine import build_block3_projection, user_rates as _b3_ur
+            goal.weight_projection = build_block3_projection(anchor, _b3_start, _b3_ur(user.id))
         else:
             goal.weight_projection = None
             logging.warning(
@@ -12556,9 +12556,11 @@ def api_admin_block3_reanchor():
     """S074: ONE-SHOT endpoint-preserving re-anchor. Keeps the accrued past,
     rescales the remaining weekly rates so the curve still lands on BLOCK3_TARGET_LB at
     start+84, writes per-user rates (SystemFlag block3_rates:<uid>) and the
-    new weight_projection. Guarded by block3_reanchored:<uid> (spec: exactly
-    once). Body: {email, dry_run?}. Run on a Monday morning for an exact fit."""
-    from goal_engine import reanchor_block3, user_rates, build_block3_projection, curve_value
+    new weight_projection + the re-anchor point (block3_reanchor:<uid>).
+    Guarded by block3_reanchored:<uid> (spec: exactly once). Body: {email,
+    dry_run?}. Exact on any day — the past is kept, the curve restarts from
+    today's despiked weight."""
+    from goal_engine import reanchor_block3, user_rates, build_block3_projection, curve_value, make_reanchored_rates
     import cut_guard as _cg
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
@@ -12574,35 +12576,36 @@ def api_admin_block3_reanchor():
     wt, spiked = _cg.despiked_weight_for_week(user.id, program_week(start, today))
     if wt is None:
         return jsonify({"error": "no weigh-in to re-anchor on"}), 400
-    old_rates = user_rates(user.id)
+    old_rates = dict(user_rates(user.id))
     new_rates = reanchor_block3(wt, today, start, old_rates)
-    # the curve is re-based so that curve(today) == today's despiked weight:
-    # anchor' = wt + (loss accrued under the NEW table over the elapsed days)
-    elapsed = max(0, min((today - start).days, 84))
-    accrued = sum(new_rates[min(12, (d // 7) + 1)] / 7.0 for d in range(elapsed))  # day→rate-week, not a program week
-    new_anchor = round(wt + accrued, 4)
-    projection = build_block3_projection(new_anchor, start, new_rates)
+    # The anchor and the accrued past are NOT touched: the curve keeps its
+    # 220-anchored history and restarts from today's despiked weight at the
+    # re-anchor point (goal_engine.curve_value). curve(today) == wt exactly.
+    bundled = make_reanchored_rates(new_rates, today, wt, old_rates)
+    projection = build_block3_projection(anchor, start, bundled)
     out = {"dry_run": bool(data.get("dry_run")), "on_date": today.isoformat(), "despiked_weight": wt,
            "spiked": spiked, "old_rates": old_rates, "new_rates": new_rates,
-           "new_anchor": new_anchor, "curve_end": projection[-1]["projected"], "projection": projection,
-           "note": "run on a Monday morning for an exact fit" if today.weekday() != 0 else None}
+           "anchor": anchor, "reanchor": {"date": today.isoformat(), "weight": wt},
+           "curve_today": curve_value(anchor, start, today, bundled),
+           "curve_end": projection[-1]["projected"], "projection": projection}
     if data.get("dry_run"):
         return jsonify(out)
     goal = TrainingGoal.query.filter_by(user_id=user.id).order_by(TrainingGoal.id.desc()).first()
     if goal:
         goal.weight_projection = projection
-    _rf = SystemFlag.query.filter_by(key=f"block3_rates:{user.id}").first()
-    _rates_json = json.dumps({str(k): v for k, v in new_rates.items()})
-    if _rf:   # a pre-seeded per-user table (e.g. pinning the accrued weeks) is replaced, not duplicated
-        _rf.value = _rates_json
-    else:
-        db.session.add(SystemFlag(key=f"block3_rates:{user.id}", value=_rates_json))
-    _af = SystemFlag.query.filter_by(key=f"block3_anchor:{user.id}").first()
-    if _af:
-        _af.value = str(new_anchor)
+    def _upsert(key, value):
+        f = SystemFlag.query.filter_by(key=key).first()
+        if f:
+            f.value = value
+        else:
+            db.session.add(SystemFlag(key=key, value=value))
+    _upsert(f"block3_rates:{user.id}", json.dumps({str(k): v for k, v in new_rates.items()}))
+    _upsert(f"block3_reanchor:{user.id}", json.dumps({
+        "date": today.isoformat(), "weight": wt,
+        "pre_rates": {str(k): v for k, v in old_rates.items()}}))
     db.session.add(SystemFlag(key=f"block3_reanchored:{user.id}", value=today.isoformat()))
     db.session.commit()
-    _admin_audit("block3-reanchor", user.id, {"weight": wt, "new_anchor": new_anchor})
+    _admin_audit("block3-reanchor", user.id, {"weight": wt, "date": today.isoformat()})
     return jsonify(out)
 
 
@@ -12639,7 +12642,8 @@ def api_admin_debug_regenerate_projection():
         anchor, block3_start = _block3_anchor_and_start(user.id)
         if anchor is None or block3_start is None:
             return jsonify({"error": "block3 mode is on but anchor/start_date is missing"}), 400
-        projection = build_block3_projection(anchor, block3_start)
+        from goal_engine import user_rates as _rg_ur
+        projection = build_block3_projection(anchor, block3_start, _rg_ur(user.id))
     else:
         pa = PhysicalAssessment.query.filter_by(user_id=user.id).first()
         height = pa.height_inches if pa and pa.height_inches else 70

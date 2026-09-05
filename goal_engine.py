@@ -719,27 +719,60 @@ BLOCK3_TARGET_LB = 185.0
 BLOCK3_DAYS = 84
 
 
+class UserRates(dict):
+    """Per-user {week: rate} table that also carries the user's re-anchor
+    point (S074, rebuilt 2026-09-05): `.reanchor` is None or
+    (date, weight, pre_rates). Every curve reader already passes the rates
+    object through, so the re-anchor rides along with zero call-site
+    changes — one authority, no drift between surfaces."""
+    reanchor = None
+
+
+def user_reanchor(user_id):
+    """(date, weight, pre_rates) from SystemFlag block3_reanchor:<uid>
+    (JSON {"date","weight","pre_rates"}), or None."""
+    try:
+        import json as _json
+        from datetime import date as _date
+        from models import SystemFlag
+        flag = SystemFlag.query.filter_by(key=f"block3_reanchor:{user_id}").first()
+        if flag and flag.value:
+            raw = _json.loads(flag.value)
+            pre = {int(k): float(v) for k, v in (raw.get("pre_rates") or {}).items()} or None
+            return (_date.fromisoformat(raw["date"]), float(raw["weight"]), pre)
+    except Exception:
+        pass
+    return None
+
+
 def user_rates(user_id):
     """Per-user weekly rates: the global table unless a one-shot re-anchor
     (S074) rescaled the REMAINING weeks for this user (SystemFlag
-    block3_rates:<uid>, JSON {week: rate}). Falls back to the global table."""
+    block3_rates:<uid>, JSON {week: rate}). Falls back to the global table.
+    The returned UserRates carries the user's re-anchor point (if any)."""
+    table = None
     try:
         import json as _json
         from models import SystemFlag
         flag = SystemFlag.query.filter_by(key=f"block3_rates:{user_id}").first()
         if flag and flag.value:
             raw = _json.loads(flag.value)
-            return {int(k): float(v) for k, v in raw.items()}
+            table = {int(k): float(v) for k, v in raw.items()}
     except Exception:
-        pass
-    return BLOCK3_WEEKLY_RATES
+        table = None
+    out = UserRates(table or BLOCK3_WEEKLY_RATES)
+    out.reanchor = user_reanchor(user_id)
+    return out
 
 
 def reanchor_block3(current_weight, on_date, start_date, rates=None):
-    """S074: endpoint-preserving re-anchor. Keeps the accrued past exactly
-    as-is and rescales the REMAINING weekly rates proportionally so the curve
-    still lands on BLOCK3_TARGET_LB at start+84 days. Returns the new
-    {week: rate} table (weeks already elapsed keep their old rates)."""
+    """S074: endpoint-preserving re-anchor. The accrued past is kept EXACTLY
+    (the curve before `on_date` is untouched — see curve_value's re-anchor
+    point); the REMAINING weekly rates are rescaled proportionally so the
+    curve, restarted from `current_weight` on `on_date`, lands on
+    BLOCK3_TARGET_LB at start+84 days. Returns the new {week: rate} table.
+    Exact on any day of the week: the rescaled rate only applies to days
+    on/after `on_date` (pre-re-anchor days keep the old table)."""
     rates = dict(rates or BLOCK3_WEEKLY_RATES)
     elapsed = max(0, min((on_date - start_date).days, BLOCK3_DAYS))
     remaining_days = BLOCK3_DAYS - elapsed
@@ -755,23 +788,34 @@ def reanchor_block3(current_weight, on_date, start_date, rates=None):
     first_partial_week = min(12, elapsed // 7 + 1)
     for week in range(first_partial_week, 13):
         new[week] = round(rates[week] * k, 4)
-    # The week in progress mixes old (elapsed) days and new days; curve_value
-    # handles that by rate-per-day, so a single per-week rate is an
-    # approximation only for that one week. Re-anchoring should happen on a
-    # Monday morning (day 0 of a week) for an exact fit — the endpoint
-    # checks this.
     return new
+
+
+def make_reanchored_rates(new_rates, on_date, weight, pre_rates):
+    """Bundle a rescaled table with its re-anchor point (what user_rates()
+    returns once the flags are written) — used by the endpoint to build the
+    projection it stores from the SAME object every reader will use."""
+    out = UserRates(new_rates)
+    out.reanchor = (on_date, float(weight), dict(pre_rates))
+    return out
 
 
 def build_block3_projection(anchor_weight, start_date, rates=None):
     """12 end-of-week targets [{"week", "projected"}] — the stored
-    TrainingGoal.weight_projection shape weekly_report/app.js already read."""
+    TrainingGoal.weight_projection shape weekly_report/app.js already read.
+    Derived from curve_value so the stored curve, the daily pace judgment
+    and a re-anchor point can never disagree."""
     rates = rates or BLOCK3_WEEKLY_RATES
-    out, w = [], anchor_weight
-    for week in range(1, 13):
-        w -= rates[week]
-        out.append({"week": week, "projected": round(w, 2)})
-    return out
+    if start_date is None or getattr(rates, "reanchor", None) is None:
+        out, w = [], anchor_weight
+        for week in range(1, 13):
+            w -= rates[week]
+            out.append({"week": week, "projected": round(w, 2)})
+        return out
+    from datetime import timedelta as _td
+    return [{"week": week,
+             "projected": round(curve_value(anchor_weight, start_date, start_date + _td(days=7 * week), rates), 2)}
+            for week in range(1, 13)]
 
 
 def curve_value(anchor_weight, start_date, on_date, rates=None):
@@ -779,14 +823,28 @@ def curve_value(anchor_weight, start_date, on_date, rates=None):
     curve(D) is the target at the MORNING of D — loss accrued over the
     elapsed days BEFORE D (a fasted weigh-in precedes that day's deficit).
     curve(start) == anchor exactly; the target is reached at start+84 days (the
-    morning after the block's final day) and clamps thereafter."""
+    morning after the block's final day) and clamps thereafter.
+
+    Re-anchor point (rates.reanchor == (rdate, rweight, pre_rates)): days
+    BEFORE rdate accrue from `anchor_weight` at `pre_rates` (the plan as it
+    was — history is never rewritten); on/after rdate the curve restarts at
+    `rweight` and accrues at `rates`. The step at rdate is the honest record
+    of the re-anchor."""
     rates = rates or BLOCK3_WEEKLY_RATES
+    ra = getattr(rates, "reanchor", None)
     elapsed = (on_date - start_date).days
     elapsed = max(0, min(elapsed, 84))
+    if ra is not None and on_date >= ra[0]:
+        r_elapsed = max(0, min((ra[0] - start_date).days, 84))
+        w = ra[1]
+        for d in range(r_elapsed, elapsed):
+            w -= rates[min(12, d // 7 + 1)] / 7.0
+        return round(w, 4)
+    pre = (ra[2] if ra is not None and ra[2] else None) or rates
     w = anchor_weight
     for d in range(elapsed):
         week = min(12, d // 7 + 1)
-        w -= rates[week] / 7.0
+        w -= pre[week] / 7.0
     return round(w, 4)
 
 

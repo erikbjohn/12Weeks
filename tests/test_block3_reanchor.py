@@ -82,10 +82,24 @@ def test_admin_reanchor_upserts_preseeded_rates_flag(app_ctx, monkeypatch):
         db.session.add(BodyWeight(user_id=u.id, log_date=date.today() - timedelta(days=k), weight_lbs=198.2))
     db.session.commit()
     c = app_.test_client()
+    before = list(TrainingGoal.query.filter_by(user_id=u.id).first().weight_projection)
     r = c.post("/api/admin/block3-reanchor", json={"email": "reanchor2@test.com"}, headers={"X-Admin-Key": key})
     assert r.status_code == 200, r.get_data(as_text=True)
-    assert abs(r.get_json()["curve_end"] - BLOCK3_TARGET_LB) < 0.1
+    body = r.get_json()
+    assert abs(body["curve_end"] - BLOCK3_TARGET_LB) < 0.1
+    assert body["curve_today"] == pytest.approx(198.2)        # the curve passes through today's weight
     rates = user_rates(u.id)
     assert all(rates[w] == old[w] for w in (1, 2, 3))      # accrued weeks pinned
     assert rates[8] < old[8]                                # remaining weeks rescaled (athlete is ahead)
     assert SystemFlag.query.filter_by(key=f"block3_rates:{u.id}").count() == 1
+    # HISTORY IS NEVER REWRITTEN (2026-09-05 regression): the anchor stays
+    # 220 and the stored plan for the weeks already lived is byte-identical.
+    assert SystemFlag.query.filter_by(key=f"block3_anchor:{u.id}").first().value == "220.0"
+    after = TrainingGoal.query.filter_by(user_id=u.id).first().weight_projection
+    assert after[:3] == before[:3] == [{"week": 1, "projected": 218.75}, {"week": 2, "projected": 217.5},
+                                       {"week": 3, "projected": 215.5}]
+    assert after[-1]["projected"] == BLOCK3_TARGET_LB
+    # every reader sees the same curve: today == 198.2, day 84 == target, pre-re-anchor day == old plan
+    assert curve_value(220.0, start, date.today(), rates) == pytest.approx(198.2)
+    assert curve_value(220.0, start, start + timedelta(days=84), rates) == pytest.approx(BLOCK3_TARGET_LB, abs=1e-3)
+    assert curve_value(220.0, start, start + timedelta(days=14), rates) == pytest.approx(217.5)

@@ -569,6 +569,7 @@ def run_rollback(user):
     # re-enable block-3-mode-for-everyone via cut_guard's legacy fallback,
     # undermining I-4 the moment this same rollback is meant to clean up.
     for key in (f"projection_mode:{user.id}", f"block3_anchor:{user.id}",
+                f"block3_rates:{user.id}", f"block3_reanchor:{user.id}", f"block3_reanchored:{user.id}",
                 "projection_mode", "block3_anchor", "block3_prestate"):
         SystemFlag.query.filter_by(key=key).delete(synchronize_session=False)
 
